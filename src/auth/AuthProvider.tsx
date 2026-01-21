@@ -18,12 +18,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let didResolveInitialSession = false;
 
     // IMPORTANT: subscribe BEFORE calling getSession
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!mounted) return;
+
+      // CRITICAL: avoid redirect loops on hard refresh.
+      // Supabase may emit INITIAL_SESSION with null before getSession() resolves.
+      // If we flip loading=false here, AuthGate can redirect to /login prematurely.
+      if (event === "INITIAL_SESSION" && !didResolveInitialSession) return;
+
       setSession(nextSession);
       setLoading(false);
     });
@@ -32,11 +39,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .getSession()
       .then(({ data }) => {
         if (!mounted) return;
+        didResolveInitialSession = true;
         setSession(data.session ?? null);
         setLoading(false);
       })
       .catch(() => {
         if (!mounted) return;
+        didResolveInitialSession = true;
         setSession(null);
         setLoading(false);
       });

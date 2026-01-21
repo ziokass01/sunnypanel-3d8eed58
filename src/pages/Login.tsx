@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,6 @@ import { Label } from "@/components/ui/label";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const next = params.get("next") || "/dashboard";
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -27,7 +24,7 @@ export function LoginPage() {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate(next, { replace: true });
+        navigate("/dashboard", { replace: true });
       } else {
         const { error } = await supabase.auth.signUp({
           email,
