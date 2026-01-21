@@ -1,22 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/auth/AuthProvider";
+import { Skeleton } from "@/components/ui/skeleton";
+import { NotAuthorizedPage } from "@/pages/NotAuthorized";
 
 type Props = {
   children: React.ReactNode;
 };
 
 export function AdminRoute({ children }: Props) {
-  const { user, loading: authLoading } = useAuth();
-  const location = useLocation();
+  const { user } = useAuth();
   const [roleLoading, setRoleLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-
-  const redirectTo = useMemo(
-    () => `/login?next=${encodeURIComponent(location.pathname + location.search)}`,
-    [location.pathname, location.search],
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -45,18 +40,34 @@ export function AdminRoute({ children }: Props) {
       setRoleLoading(false);
     }
 
-    if (!authLoading) run();
+    run();
     return () => {
       cancelled = true;
     };
-  }, [user, authLoading]);
+  }, [user]);
 
-  if (authLoading || roleLoading) {
-    return <div className="min-h-svh bg-background" />;
+  if (roleLoading) {
+    return (
+      <div className="min-h-svh bg-background">
+        <main className="mx-auto w-full max-w-5xl p-4 md:p-6">
+          <div className="grid gap-4 md:grid-cols-3">
+            <Skeleton className="h-28" />
+            <Skeleton className="h-28" />
+            <Skeleton className="h-28" />
+          </div>
+          <div className="mt-6">
+            <Skeleton className="h-80" />
+          </div>
+        </main>
+      </div>
+    );
   }
 
-  if (!user) return <Navigate to={redirectTo} replace />;
-  if (!isAdmin) return <Navigate to={redirectTo} replace />;
+  // AuthGate handles redirecting unauthenticated users to /login.
+  if (!user) return null;
+
+  // IMPORTANT: don't bounce authenticated non-admins back to /login (causes loops).
+  if (!isAdmin) return <NotAuthorizedPage />;
 
   return <>{children}</>;
 }
