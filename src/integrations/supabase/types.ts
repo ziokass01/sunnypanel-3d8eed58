@@ -73,6 +73,7 @@ export type Database = {
       licenses: {
         Row: {
           created_at: string
+          deleted_at: string | null
           expires_at: string | null
           id: string
           is_active: boolean
@@ -82,6 +83,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           expires_at?: string | null
           id?: string
           is_active?: boolean
@@ -91,6 +93,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           expires_at?: string | null
           id?: string
           is_active?: boolean
@@ -160,6 +163,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      no_admin_exists: { Args: never; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
