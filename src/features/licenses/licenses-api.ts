@@ -119,12 +119,24 @@ export async function softDeleteLicense(id: string) {
   if (fetchErr) throw fetchErr;
   if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
 
+  const ts = new Date().toISOString();
+
   const { error } = await (supabase.from(licensesTable) as any)
-    .update({ deleted_at: new Date().toISOString(), is_active: false })
+    .update({ deleted_at: ts, is_active: false })
     .eq("id", id);
   if (error) throw error;
 
-  await logAudit("DELETE", before.key, { deleted_at: true });
+  // Optional metadata for traceability
+  const { data: userData } = await supabase.auth.getUser();
+  const user_id = userData.user?.id ?? null;
+
+  await logAudit("SOFT_DELETE", before.key, {
+    license_id: id,
+    key: before.key,
+    deleted_at: true,
+    ts,
+    user_id,
+  });
 }
 
 export async function fetchDeletedLicenses(params: { q?: string } = {}) {

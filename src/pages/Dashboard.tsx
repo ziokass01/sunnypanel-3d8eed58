@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { fetchDashboardStats, fetchVerifyCountsPerDay } from "@/features/dashboard/dashboard-api";
 
 function StatCard({ title, value }: { title: string; value: number }) {
@@ -42,12 +43,27 @@ export function DashboardPage() {
       {chartQuery.error ? <div className="text-sm text-destructive">{String(chartQuery.error)}</div> : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard title="Total keys" value={statsQuery.data?.total_licenses ?? 0} />
-        <StatCard title="Active keys" value={statsQuery.data?.active_licenses ?? 0} />
-        <StatCard title="Expired keys" value={statsQuery.data?.expired_licenses ?? 0} />
-        <StatCard title="Blocked keys" value={statsQuery.data?.blocked_licenses ?? 0} />
-        <StatCard title="Deleted keys" value={statsQuery.data?.deleted_licenses ?? 0} />
-        <StatCard title="Total devices" value={statsQuery.data?.total_devices ?? 0} />
+        {statsQuery.isLoading ? (
+          Array.from({ length: 6 }).map((_, idx) => (
+            <Card key={`sk-${idx}`}>
+              <CardHeader className="pb-2">
+                <Skeleton className="h-4 w-28" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-24" />
+              </CardContent>
+            </Card>
+          ))
+        ) : (
+          <>
+            <StatCard title="Total keys" value={statsQuery.data?.total_licenses ?? 0} />
+            <StatCard title="Active keys" value={statsQuery.data?.active_licenses ?? 0} />
+            <StatCard title="Expired keys" value={statsQuery.data?.expired_licenses ?? 0} />
+            <StatCard title="Blocked keys" value={statsQuery.data?.blocked_licenses ?? 0} />
+            <StatCard title="Deleted keys" value={statsQuery.data?.deleted_licenses ?? 0} />
+            <StatCard title="Total devices" value={statsQuery.data?.total_devices ?? 0} />
+          </>
+        )}
       </div>
 
       <Card>
@@ -56,7 +72,7 @@ export function DashboardPage() {
         </CardHeader>
         <CardContent>
           {chartQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading…</div>
+            <Skeleton className="h-64 w-full" />
           ) : (chartQuery.data ?? []).length === 0 ? (
             <div className="text-sm text-muted-foreground">No data.</div>
           ) : (

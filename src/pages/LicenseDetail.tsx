@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -7,6 +7,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 import { deleteLicenseDevice, fetchLicense, fetchLicenseDevices, softDeleteLicense } from "@/features/licenses/licenses-api";
 
@@ -26,6 +37,7 @@ export function LicenseDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const licenseId = id ?? "";
+  const [removeTarget, setRemoveTarget] = useState<{ id: string; device_id: string } | null>(null);
 
   const licQuery = useQuery({
     queryKey: ["license", licenseId],
@@ -51,6 +63,10 @@ export function LicenseDetailPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] });
       toast({ title: "Removed device successfully" });
+      setRemoveTarget(null);
+    },
+    onError: (err) => {
+      toast({ title: "Failed to remove device", description: String(err), variant: "destructive" });
     },
   });
 
@@ -106,7 +122,46 @@ export function LicenseDetailPage() {
         </div>
       </header>
 
-      {licQuery.isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : null}
+      {licQuery.isLoading ? (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-1">
+            <CardHeader>
+              <CardTitle className="text-base">Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-full" />
+              <Separator />
+              <div className="grid grid-cols-2 gap-3">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+              <Separator />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-16 w-full" />
+            </CardContent>
+          </Card>
+
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">Devices</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-lg border">
+                <div className="p-4 space-y-3">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
       {licQuery.error ? <div className="text-sm text-destructive">{String(licQuery.error)}</div> : null}
       {!licQuery.isLoading && !licQuery.error && !licQuery.data ? (
         <div className="text-sm text-muted-foreground">Not found.</div>
@@ -167,7 +222,6 @@ export function LicenseDetailPage() {
               <CardTitle className="text-base">Devices</CardTitle>
             </CardHeader>
             <CardContent>
-              {devicesQuery.isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : null}
               {devicesQuery.error ? <div className="text-sm text-destructive">{String(devicesQuery.error)}</div> : null}
 
               <div className="rounded-lg border">
@@ -182,11 +236,22 @@ export function LicenseDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {devicesQuery.isLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
-                          Loading…
-                        </TableCell>
-                      </TableRow>
+                      Array.from({ length: 4 }).map((_, idx) => (
+                        <TableRow key={`sk-${idx}`}>
+                          <TableCell>
+                            <Skeleton className="h-4 w-[min(520px,100%)]" />
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <Skeleton className="h-4 w-40" />
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <Skeleton className="h-4 w-40" />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Skeleton className="ml-auto h-8 w-24" />
+                          </TableCell>
+                        </TableRow>
+                      ))
                     ) : (devicesQuery.data ?? []).length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
@@ -204,8 +269,7 @@ export function LicenseDetailPage() {
                               size="sm"
                               variant="soft"
                               onClick={() => {
-                                if (!confirm("Remove this device?")) return;
-                                removeDeviceMutation.mutate(d.id);
+                                setRemoveTarget({ id: d.id, device_id: d.device_id });
                               }}
                               disabled={removeDeviceMutation.isPending}
                             >
@@ -222,6 +286,29 @@ export function LicenseDetailPage() {
           </Card>
         </div>
       ) : null}
+
+      <AlertDialog open={Boolean(removeTarget)} onOpenChange={(open) => (!open ? setRemoveTarget(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove device?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the device from this license. Device: <span className="font-mono">{removeTarget?.device_id}</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeDeviceMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!removeTarget) return;
+                removeDeviceMutation.mutate(removeTarget.id);
+              }}
+              disabled={removeDeviceMutation.isPending}
+            >
+              {removeDeviceMutation.isPending ? "Removing…" : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
