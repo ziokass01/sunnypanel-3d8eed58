@@ -1,0 +1,121 @@
+import { supabase } from "@/integrations/supabase/client";
+import { postFunction } from "@/lib/functions";
+
+export type LicenseRow = {
+  id: string;
+  key: string;
+  created_at: string;
+  expires_at: string | null;
+  max_devices: number;
+  is_active: boolean;
+  note: string | null;
+  deleted_at?: string | null;
+};
+
+export type LicenseDeviceRow = {
+  id: string;
+  license_id: string;
+  device_id: string;
+  first_seen: string;
+  last_seen: string;
+};
+
+// Note: backend schema evolved (deleted_at). Types file may lag, so we intentionally loosen typing here.
+const licensesTable = "licenses" as any;
+
+export async function fetchLicenses(params: { q?: string; status?: "all" | "active" | "expired" | "blocked" }) {
+  const q = params.q?.trim();
+  const status = params.status ?? "all";
+
+  let query = (supabase.from(licensesTable) as any)
+    .select("id,key,created_at,expires_at,max_devices,is_active,note,deleted_at")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+
+  if (q) {
+    query = query.or(`key.ilike.%${q}%,note.ilike.%${q}%`);
+  }
+
+  const nowIso = new Date().toISOString();
+  if (status === "active") {
+    query = query.eq("is_active", true).or(`expires_at.is.null,expires_at.gte.${nowIso}`);
+  } else if (status === "expired") {
+    query = query.not("expires_at", "is", null).lt("expires_at", nowIso);
+  } else if (status === "blocked") {
+    query = query.eq("is_active", false);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as LicenseRow[];
+}
+
+export async function fetchLicense(id: string) {
+  const { data, error } = await (supabase.from(licensesTable) as any)
+    .select("id,key,created_at,expires_at,max_devices,is_active,note,deleted_at")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as LicenseRow | null;
+}
+
+export async function createLicense(input: {
+  key: string;
+  expires_at: string | null;
+  max_devices: number;
+  is_active: boolean;
+  note: string | null;
+}) {
+  const { data, error } = await (supabase.from(licensesTable) as any)
+    .insert({
+      key: input.key,
+      expires_at: input.expires_at,
+      max_devices: input.max_devices,
+      is_active: input.is_active,
+      note: input.note,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data as { id: string };
+}
+
+export async function updateLicense(id: string, patch: Partial<Omit<LicenseRow, "id" | "created_at" | "key">>) {
+  const { error } = await (supabase.from(licensesTable) as any).update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+export async function softDeleteLicense(id: string) {
+  const { error } = await (supabase.from(licensesTable) as any)
+    .update({ deleted_at: new Date().toISOString(), is_active: false })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchLicenseDevices(licenseId: string) {
+  const { data, error } = await supabase
+    .from("license_devices")
+    .select("id,license_id,device_id,first_seen,last_seen")
+    .eq("license_id", licenseId)
+    .order("last_seen", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as LicenseDeviceRow[];
+}
+
+export async function deleteLicenseDevice(deviceRowId: string) {
+  const { error } = await supabase.from("license_devices").delete().eq("id", deviceRowId);
+  if (error) throw error;
+}
+
+export async function generateLicenseKey() {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? null;
+  const res = await postFunction<{ ok: boolean; key?: string; msg?: string }>(
+    "/generate-license-key",
+    {},
+    { authToken: token },
+  );
+  if (!res.ok || !res.key) throw new Error(res.msg ?? "GEN_FAILED");
+  return res.key;
+}

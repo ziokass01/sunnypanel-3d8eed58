@@ -2,3 +2,6 @@ project_id = "dmfcltugmfgftjqzmkes"
 
 [functions.verify-key]
 verify_jwt = false
+
+[functions.generate-license-key]
+verify_jwt = false
