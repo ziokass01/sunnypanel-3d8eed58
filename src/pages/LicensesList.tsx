@@ -1,16 +1,30 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { NavLink } from "@/components/NavLink";
-import { fetchLicenses } from "@/features/licenses/licenses-api";
+import { toast } from "@/hooks/use-toast";
+import { fetchLicenses, softDeleteLicense } from "@/features/licenses/licenses-api";
 
 export function LicensesListPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "expired" | "blocked">("all");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
+  const queryClient = useQueryClient();
 
   const queryKey = useMemo(() => ["licenses", { q, status }] as const, [q, status]);
   const { data = [], isLoading, error } = useQuery({
@@ -18,13 +32,26 @@ export function LicensesListPage() {
     queryFn: () => fetchLicenses({ q, status }),
   });
 
+  const softDeleteMutation = useMutation({
+    mutationFn: async (id: string) => softDeleteLicense(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["licenses"] });
+      toast({ title: "Moved to Trash" });
+    },
+  });
+
   return (
     <section className="space-y-4">
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Licenses</h1>
-        <Button asChild>
-          <NavLink to="/licenses/new">Create license</NavLink>
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="soft" asChild>
+            <NavLink to="/licenses/trash">View Trash</NavLink>
+          </Button>
+          <Button asChild>
+            <NavLink to="/licenses/new">Create license</NavLink>
+          </Button>
+        </div>
       </header>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -84,9 +111,26 @@ export function LicensesListPage() {
                     <TableCell className="hidden md:table-cell">{row.max_devices}</TableCell>
                     <TableCell>{statusLabel}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="soft" size="sm" asChild>
-                        <NavLink to={`/licenses/${row.id}`}>Open</NavLink>
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="soft" size="sm">Actions</Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem asChild>
+                            <NavLink to={`/licenses/${row.id}`}>View</NavLink>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem asChild>
+                            <NavLink to={`/licenses/${row.id}/edit`}>Edit</NavLink>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setDeleteTarget({ id: row.id, key: row.key });
+                            }}
+                          >
+                            Soft delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );
@@ -95,6 +139,29 @@ export function LicensesListPage() {
           </TableBody>
         </Table>
       </div>
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? setDeleteTarget(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move to Trash?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will soft delete the license and hide it from the list. You can restore it later from Trash.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!deleteTarget) return;
+                softDeleteMutation.mutate(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              Soft delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
