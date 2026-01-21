@@ -8,6 +8,7 @@ import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { LoginPage } from "@/pages/Login";
 import { AdminRoute } from "@/auth/AdminRoute";
+import { AuthGate } from "@/auth/AuthGate";
 import { AdminShell } from "@/shell/AdminShell";
 import { DashboardPage } from "@/pages/Dashboard";
 import { LicensesListPage } from "@/pages/LicensesList";
@@ -32,9 +33,11 @@ const App = () => (
 
             <Route
               element={
-                <AdminRoute>
-                  <AdminShell />
-                </AdminRoute>
+                <AuthGate>
+                  <AdminRoute>
+                    <AdminShell />
+                  </AdminRoute>
+                </AuthGate>
               }
             >
               <Route path="/dashboard" element={<DashboardPage />} />
