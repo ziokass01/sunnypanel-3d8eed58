@@ -23,6 +23,16 @@ export type LicenseDeviceRow = {
 // Note: backend schema evolved (deleted_at). Types file may lag, so we intentionally loosen typing here.
 const licensesTable = "licenses" as any;
 
+async function logAudit(action: string, licenseKey: string, detail: unknown = {}) {
+  // Admin-only RPC; will throw if user isn't admin.
+  const { error } = await supabase.rpc("log_audit", {
+    p_action: action,
+    p_license_key: licenseKey,
+    p_detail: detail as any,
+  });
+  if (error) throw error;
+}
+
 export async function fetchLicenses(params: { q?: string; status?: "all" | "active" | "expired" | "blocked" }) {
   const q = params.q?.trim();
   const status = params.status ?? "all";
@@ -78,19 +88,74 @@ export async function createLicense(input: {
     .select("id")
     .single();
   if (error) throw error;
+  await logAudit("CREATE", input.key, {
+    expires_at: input.expires_at,
+    max_devices: input.max_devices,
+    is_active: input.is_active,
+    note: input.note,
+  });
   return data as { id: string };
 }
 
 export async function updateLicense(id: string, patch: Partial<Omit<LicenseRow, "id" | "created_at" | "key">>) {
+  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
+    .select("key")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
+
   const { error } = await (supabase.from(licensesTable) as any).update(patch).eq("id", id);
   if (error) throw error;
+
+  await logAudit("UPDATE", before.key, { patch });
 }
 
 export async function softDeleteLicense(id: string) {
+  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
+    .select("key")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
+
   const { error } = await (supabase.from(licensesTable) as any)
     .update({ deleted_at: new Date().toISOString(), is_active: false })
     .eq("id", id);
   if (error) throw error;
+
+  await logAudit("DELETE", before.key, { deleted_at: true });
+}
+
+export async function fetchDeletedLicenses(params: { q?: string } = {}) {
+  const q = params.q?.trim();
+
+  let query = (supabase.from(licensesTable) as any)
+    .select("id,key,created_at,expires_at,max_devices,is_active,note,deleted_at")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+
+  if (q) {
+    query = query.or(`key.ilike.%${q}%,note.ilike.%${q}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as LicenseRow[];
+}
+
+export async function restoreLicense(id: string) {
+  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
+    .select("key")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
+
+  const { error } = await (supabase.from(licensesTable) as any).update({ deleted_at: null }).eq("id", id);
+  if (error) throw error;
+
+  await logAudit("RESTORE", before.key, { restored: true });
 }
 
 export async function fetchLicenseDevices(licenseId: string) {
