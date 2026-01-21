@@ -14,6 +14,8 @@ import { LicensesListPage } from "@/pages/LicensesList";
 import { LicenseCreatePage } from "@/pages/LicenseCreate";
 import { LicenseDetailPage } from "@/pages/LicenseDetail";
 import { LicenseEditPage } from "@/pages/LicenseEdit";
+import { LicensesTrashPage } from "@/pages/LicensesTrash";
+import { AuditLogsPage } from "@/pages/AuditLogs";
 
 const queryClient = new QueryClient();
 
@@ -37,9 +39,11 @@ const App = () => (
             >
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/licenses" element={<LicensesListPage />} />
+              <Route path="/licenses/trash" element={<LicensesTrashPage />} />
               <Route path="/licenses/new" element={<LicenseCreatePage />} />
               <Route path="/licenses/:id" element={<LicenseDetailPage />} />
               <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
+              <Route path="/audit" element={<AuditLogsPage />} />
             </Route>
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

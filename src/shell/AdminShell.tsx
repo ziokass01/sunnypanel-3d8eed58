@@ -1,5 +1,5 @@
 import { Outlet, useNavigate } from "react-router-dom";
-import { LogOut, KeyRound, LayoutDashboard } from "lucide-react";
+import { LogOut, KeyRound, LayoutDashboard, Trash2, ScrollText } from "lucide-react";
 
 import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,24 @@ export function AdminShell() {
                 <NavLink to="/licenses">
                   <KeyRound />
                   <span>Licenses</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="Trash">
+                <NavLink to="/licenses/trash">
+                  <Trash2 />
+                  <span>Trash</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="Audit logs">
+                <NavLink to="/audit">
+                  <ScrollText />
+                  <span>Audit logs</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

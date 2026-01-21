@@ -131,6 +131,7 @@ export type Database = {
           id: string
           ip: string
           license_key: string
+          updated_at: string
           window_start: string
         }
         Insert: {
@@ -139,6 +140,7 @@ export type Database = {
           id?: string
           ip: string
           license_key: string
+          updated_at?: string
           window_start: string
         }
         Update: {
@@ -147,6 +149,7 @@ export type Database = {
           id?: string
           ip?: string
           license_key?: string
+          updated_at?: string
           window_start?: string
         }
         Relationships: []
@@ -156,6 +159,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_rate_limit: {
+        Args: {
+          p_ip: string
+          p_key: string
+          p_limit?: number
+          p_window_seconds?: number
+        }
+        Returns: {
+          allowed: boolean
+          current_count: number
+          window_start: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -163,7 +179,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      log_audit: {
+        Args: { p_action: string; p_detail?: Json; p_license_key: string }
+        Returns: undefined
+      }
       no_admin_exists: { Args: never; Returns: boolean }
+      verify_counts_per_day: {
+        Args: { p_days?: number }
+        Returns: {
+          count: number
+          day: string
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"

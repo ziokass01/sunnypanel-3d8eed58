@@ -71,39 +71,23 @@ Deno.serve(async (req) => {
   // 1) Rate limit (key + ip) - light
   const RATE_WINDOW_MIN = 5;
   const RATE_LIMIT = 30;
-  const windowStart = windowStartISO(now, RATE_WINDOW_MIN);
+  const RATE_WINDOW_SECONDS = RATE_WINDOW_MIN * 60;
+  const rl = await db.rpc("check_rate_limit", {
+    p_key: key,
+    p_ip: ip,
+    p_limit: RATE_LIMIT,
+    p_window_seconds: RATE_WINDOW_SECONDS,
+  });
 
-  const rl = await db
-    .from("verify_rate_limits")
-    .upsert(
-      {
-        license_key: key,
-        ip,
-        window_start: windowStart,
-        count: 1,
-      },
-      { onConflict: "license_key,ip,window_start" },
-    )
-    .select("count")
-    .maybeSingle();
-
-  if (rl.error) {
-    // If rate-limit bookkeeping fails, don't lock out legitimate users.
-  } else if ((rl.data?.count ?? 1) > RATE_LIMIT) {
+  // If rate-limit bookkeeping fails, don't lock out legitimate users.
+  const allowed = rl.error ? true : Boolean(rl.data?.[0]?.allowed);
+  if (!allowed) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: key,
-      detail: { ip, device, ok: false, msg: "RATE_LIMIT" },
+      detail: { ip, device, ok: false, msg: "RATE_LIMIT", current_count: rl.data?.[0]?.current_count ?? null },
     });
     return json({ ok: false, msg: "RATE_LIMIT" }, 429);
-  } else {
-    // increment count after upsert
-    await db
-      .from("verify_rate_limits")
-      .update({ count: (rl.data?.count ?? 1) + 1 })
-      .eq("license_key", key)
-      .eq("ip", ip)
-      .eq("window_start", windowStart);
   }
 
   // 2) Fetch license
@@ -111,7 +95,6 @@ Deno.serve(async (req) => {
     .from("licenses")
     .select("id,key,is_active,expires_at,max_devices,deleted_at")
     .eq("key", key)
-    .is("deleted_at", null)
     .maybeSingle();
 
   if (lic.error || !lic.data) {
@@ -121,6 +104,15 @@ Deno.serve(async (req) => {
       detail: { ip, device, ok: false, msg: "KEY_NOT_FOUND" },
     });
     return json({ ok: false, msg: "KEY_NOT_FOUND" });
+  }
+
+  if (lic.data.deleted_at) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: { ip, device, ok: false, msg: "KEY_DELETED" },
+    });
+    return json({ ok: false, msg: "KEY_DELETED" });
   }
 
   if (!lic.data.is_active) {
