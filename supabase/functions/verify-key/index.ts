@@ -15,6 +15,9 @@ const inputSchema = z.object({
     .max(64)
     .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "INVALID_KEY_FORMAT"),
   device: z.string().trim().min(1).max(128),
+  // Optional friendly label for display in admin panel only.
+  // IMPORTANT: device limit/enforcement MUST rely on `device` (stable id) only.
+  device_name: z.string().trim().min(1).max(128).optional(),
 });
 
 function json(data: unknown, status = 200) {
@@ -60,6 +63,7 @@ Deno.serve(async (req) => {
 
   const key = parsed.data.key.toUpperCase();
   const device = parsed.data.device;
+  const deviceName = parsed.data.device_name;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -170,15 +174,21 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 4) Upsert device + update last_seen
+  // 4) Upsert device + update last_seen (+ device_name for display only)
+  // If device already exists, this MUST NOT count as a new device.
+  const upsertPayload: Record<string, unknown> = {
+    license_id: lic.data.id,
+    device_id: device,
+    last_seen: now.toISOString(),
+  };
+  if (typeof deviceName === "string" && deviceName.trim().length > 0) {
+    upsertPayload.device_name = deviceName.trim();
+  }
+
   const up = await db
     .from("license_devices")
     .upsert(
-      {
-        license_id: lic.data.id,
-        device_id: device,
-        last_seen: now.toISOString(),
-      },
+      upsertPayload,
       { onConflict: "license_id,device_id" },
     )
     .select("id")
@@ -200,6 +210,7 @@ Deno.serve(async (req) => {
     detail: {
       ip,
       device,
+      device_name: deviceName ?? null,
       ok: true,
       license_id: lic.data.id,
       device_row: up.data?.id ?? null,
@@ -208,6 +219,7 @@ Deno.serve(async (req) => {
 
   return json({
     ok: true,
+    msg: "OK",
     expires_at: lic.data.expires_at,
     max_devices: lic.data.max_devices,
   });
