@@ -41,6 +41,7 @@ export type Database = {
       license_devices: {
         Row: {
           device_id: string
+          device_name: string | null
           first_seen: string
           id: string
           last_seen: string
@@ -48,6 +49,7 @@ export type Database = {
         }
         Insert: {
           device_id: string
+          device_name?: string | null
           first_seen?: string
           id?: string
           last_seen?: string
@@ -55,6 +57,7 @@ export type Database = {
         }
         Update: {
           device_id?: string
+          device_name?: string | null
           first_seen?: string
           id?: string
           last_seen?: string
