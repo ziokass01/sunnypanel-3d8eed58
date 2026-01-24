@@ -1,5 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
 
+function escapeILike(s: string): string {
+  // Escape ILIKE wildcards and the escape character itself.
+  return s.replace(/[\\%_]/g, "\\\\$&");
+}
+
 export type AuditLogRow = {
   id: string;
   action: string;
@@ -23,7 +28,8 @@ export async function fetchAuditLogs(params: { q?: string; action?: string; limi
   }
 
   if (q) {
-    query = query.ilike("license_key", `%${q}%`);
+    const escaped = escapeILike(q);
+    query = query.ilike("license_key", `%${escaped}%`);
   }
 
   const { data, error } = await query;
