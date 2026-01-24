@@ -1,6 +1,12 @@
 import { supabase } from "@/integrations/supabase/client";
 import { postFunction } from "@/lib/functions";
 
+function escapeILike(s: string): string {
+  // Escape ILIKE wildcards and the escape character itself.
+  // This prevents wildcard-broadening and PostgREST filter-string trickery when interpolating into `.or()`.
+  return s.replace(/[\\%_]/g, "\\\\$&");
+}
+
 export type LicenseRow = {
   id: string;
   key: string;
@@ -43,7 +49,8 @@ export async function fetchLicenses(params: { q?: string; status?: "all" | "acti
     .order("created_at", { ascending: false });
 
   if (q) {
-    query = query.or(`key.ilike.%${q}%,note.ilike.%${q}%`);
+    const escaped = escapeILike(q);
+    query = query.or(`key.ilike.%${escaped}%,note.ilike.%${escaped}%`);
   }
 
   const nowIso = new Date().toISOString();
@@ -148,7 +155,8 @@ export async function fetchDeletedLicenses(params: { q?: string } = {}) {
     .order("deleted_at", { ascending: false });
 
   if (q) {
-    query = query.or(`key.ilike.%${q}%,note.ilike.%${q}%`);
+    const escaped = escapeILike(q);
+    query = query.or(`key.ilike.%${escaped}%,note.ilike.%${escaped}%`);
   }
 
   const { data, error } = await query;
