@@ -97,6 +97,36 @@ function windowStartISO(now: Date, minutes: number) {
   return new Date(w).toISOString();
 }
 
+async function maybeInsertEnumerationAlert(
+  db: any,
+  ip: string,
+  key?: string,
+) {
+  const metrics = await db.rpc(
+    "security_metrics_for_ip" as any,
+    { p_ip: ip } as any,
+  );
+  if (metrics.error) return;
+  const row: any = metrics.data?.[0];
+  if (!row) return;
+
+  const failure5m = Number(row.failure_5m ?? 0);
+  const distinct10m = Number(row.distinct_keys_10m ?? 0);
+
+  if (failure5m <= 20 && distinct10m <= 30) return;
+
+  await db.from("security_alerts").insert({
+    kind: "ENUMERATION",
+    ip,
+    key_prefix: typeof key === "string" ? key.slice(0, 10) : null,
+    meta: {
+      failure_5m: failure5m,
+      distinct_keys_10m: distinct10m,
+      thresholds: { failure_5m: 20, distinct_keys_10m: 30 },
+    },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
@@ -132,6 +162,38 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
+  // --- Anti-replay ---
+  // Enforce timestamp window: abs(now_unix_seconds - x-ts) <= 300
+  const nowUnix = Math.floor(now.getTime() / 1000);
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+  const db = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+
+  // Store nonce with TTL 10 minutes; reject replays on conflict.
+  const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  const nonceInsert = await db.from("request_nonces").insert({
+    nonce,
+    ts: Math.trunc(tsNum),
+    expires_at: nonceExpiresAt,
+  });
+  if (nonceInsert.error) {
+    // Conflict (duplicate nonce) or any DB error: fail closed but generic.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // Lightweight cleanup (best-effort)
+  if (Math.random() < 0.02) {
+    await db.from("request_nonces").delete().lt("expires_at", now.toISOString());
+  }
+
   let body: unknown;
   try {
     body = rawBody.length ? JSON.parse(rawBody) : {};
@@ -147,13 +209,6 @@ Deno.serve(async (req) => {
   const key = parsed.data.key.toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-  const db = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false },
-  });
 
   // 1) Rate limit (key + ip) - light
   const RATE_WINDOW_MIN = 5;
@@ -174,6 +229,8 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "RATE_LIMIT", current_count: rl.data?.[0]?.current_count ?? null },
     });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "RATE_LIMIT" }, 429);
   }
 
@@ -190,6 +247,8 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "KEY_NOT_FOUND" },
     });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "KEY_NOT_FOUND" });
   }
 
@@ -199,6 +258,8 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "KEY_DELETED" },
     });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
     // Prevent attackers from distinguishing soft-deleted keys from non-existent keys.
     // Keep internal audit detail as KEY_DELETED for operators.
     return json({ ok: false, msg: "KEY_NOT_FOUND" });
@@ -210,6 +271,8 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "KEY_BLOCKED" },
     });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "KEY_BLOCKED" });
   }
 
@@ -221,6 +284,8 @@ Deno.serve(async (req) => {
         license_key: key,
         detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
       });
+
+      await maybeInsertEnumerationAlert(db, ip, key);
       return json({ ok: false, msg: "KEY_EXPIRED" });
     }
   }
@@ -239,6 +304,8 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "SERVER_ERROR" },
     });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "SERVER_ERROR" }, 500);
   }
 
@@ -255,6 +322,8 @@ Deno.serve(async (req) => {
         license_key: key,
         detail: { ip, device, ok: false, msg: "DEVICE_LIMIT" },
       });
+
+      await maybeInsertEnumerationAlert(db, ip, key);
       return json({ ok: false, msg: "DEVICE_LIMIT" });
     }
   }
@@ -285,6 +354,8 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "SERVER_ERROR" },
     });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "SERVER_ERROR" }, 500);
   }
 
