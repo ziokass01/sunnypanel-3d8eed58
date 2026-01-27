@@ -3,7 +3,8 @@ import { z } from "npm:zod@3";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -30,6 +31,60 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function toHex(bytes: ArrayBuffer) {
+  return Array.from(new Uint8Array(bytes))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256Hex(input: string) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return toHex(digest);
+}
+
+async function hmacSha256Hex(secret: string, message: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(message),
+  );
+  return toHex(sig);
+}
+
+function timingSafeEqualHex(a: string, b: string) {
+  // Constant-time-ish compare for equal-length hex strings.
+  const aa = a.toLowerCase();
+  const bb = b.toLowerCase();
+  if (aa.length !== bb.length) return false;
+  let out = 0;
+  for (let i = 0; i < aa.length; i++) {
+    out |= aa.charCodeAt(i) ^ bb.charCodeAt(i);
+  }
+  return out === 0;
+}
+
+function isValidTs(ts: string) {
+  // Strictly digits; keep it simple as requested.
+  return /^[0-9]{1,20}$/.test(ts);
+}
+
+function isValidNonce(nonce: string) {
+  // Allow common nonce formats; limit length.
+  return typeof nonce === "string" && nonce.length >= 1 && nonce.length <= 128;
+}
+
+function isValidSigHex(sig: string) {
+  return /^[a-f0-9]{64}$/i.test(sig);
+}
+
 function getClientIp(req: Request) {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
@@ -49,9 +104,37 @@ Deno.serve(async (req) => {
   const ip = getClientIp(req);
   const now = new Date();
 
+  // --- HMAC-signed requests (anti-enumeration) ---
+  // Require x-ts, x-nonce, x-sig.
+  // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
+  // Sig: HMAC_SHA256_HEX(VERIFY_HMAC_SECRET, canonical)
+  const ts = req.headers.get("x-ts") ?? "";
+  const nonce = req.headers.get("x-nonce") ?? "";
+  const sig = req.headers.get("x-sig") ?? "";
+
+  if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
+    // Don't leak key status; keep HTTP 200 as requested.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  const secret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
+  if (!secret) {
+    // Misconfigured backend; still don't leak any key status.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // Read raw body once for hashing + parsing.
+  const rawBody = await req.text();
+  const bodyHash = await sha256Hex(rawBody);
+  const canonical = `${ts}.${nonce}.${bodyHash}`;
+  const expected = await hmacSha256Hex(secret, canonical);
+  if (!timingSafeEqualHex(expected, sig)) {
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
   let body: unknown;
   try {
-    body = await req.json();
+    body = rawBody.length ? JSON.parse(rawBody) : {};
   } catch {
     return json({ ok: false, msg: "INVALID_JSON" }, 400);
   }
