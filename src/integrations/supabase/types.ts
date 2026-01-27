@@ -106,6 +106,54 @@ export type Database = {
         }
         Relationships: []
       }
+      request_nonces: {
+        Row: {
+          created_at: string
+          expires_at: string
+          nonce: string
+          ts: number
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          nonce: string
+          ts: number
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          nonce?: string
+          ts?: number
+        }
+        Relationships: []
+      }
+      security_alerts: {
+        Row: {
+          created_at: string
+          id: string
+          ip: string
+          key_prefix: string | null
+          kind: string
+          meta: Json
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          ip: string
+          key_prefix?: string | null
+          kind: string
+          meta?: Json
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          ip?: string
+          key_prefix?: string | null
+          kind?: string
+          meta?: Json
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -187,6 +235,13 @@ export type Database = {
         Returns: undefined
       }
       no_admin_exists: { Args: never; Returns: boolean }
+      security_metrics_for_ip: {
+        Args: { p_ip: string }
+        Returns: {
+          distinct_keys_10m: number
+          failure_5m: number
+        }[]
+      }
       verify_counts_per_day: {
         Args: { p_days?: number }
         Returns: {
