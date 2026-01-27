@@ -116,7 +116,9 @@ Deno.serve(async (req) => {
       license_key: key,
       detail: { ip, device, ok: false, msg: "KEY_DELETED" },
     });
-    return json({ ok: false, msg: "KEY_DELETED" });
+    // Prevent attackers from distinguishing soft-deleted keys from non-existent keys.
+    // Keep internal audit detail as KEY_DELETED for operators.
+    return json({ ok: false, msg: "KEY_NOT_FOUND" });
   }
 
   if (!lic.data.is_active) {
