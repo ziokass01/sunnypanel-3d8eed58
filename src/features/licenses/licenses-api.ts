@@ -26,6 +26,8 @@ export type LicenseDeviceRow = {
   last_seen: string;
 };
 
+export { fetchLicenseDevices, deleteLicenseDevice, resetLicenseDevices } from "./licenses-devices-api";
+
 // Note: backend schema evolved (deleted_at). Types file may lag, so we intentionally loosen typing here.
 const licensesTable = "licenses" as any;
 
@@ -178,19 +180,24 @@ export async function restoreLicense(id: string) {
   await logAudit("RESTORE", before.key, { restored: true });
 }
 
-export async function fetchLicenseDevices(licenseId: string) {
-  const { data, error } = await supabase
-    .from("license_devices")
-    .select("id,license_id,device_id,first_seen,last_seen")
-    .eq("license_id", licenseId)
-    .order("last_seen", { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as LicenseDeviceRow[];
-}
+export async function reactivateOrRenewLicense(id: string, params: { expires_at: string | null }) {
+  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
+    .select("key")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
 
-export async function deleteLicenseDevice(deviceRowId: string) {
-  const { error } = await supabase.from("license_devices").delete().eq("id", deviceRowId);
+  const patch = {
+    deleted_at: null,
+    is_active: true,
+    expires_at: params.expires_at,
+  };
+
+  const { error } = await (supabase.from(licensesTable) as any).update(patch).eq("id", id);
   if (error) throw error;
+
+  await logAudit("REACTIVATE_RENEW", before.key, { license_id: id, ...patch });
 }
 
 export async function generateLicenseKey() {
