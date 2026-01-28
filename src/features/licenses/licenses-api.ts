@@ -12,6 +12,11 @@ export type LicenseRow = {
   key: string;
   created_at: string;
   expires_at: string | null;
+  // New v2 fields
+  start_on_first_use?: boolean;
+  duration_days?: number | null;
+  first_used_at?: string | null;
+  // Legacy fields (kept for backward compatibility)
   starts_on_first_use?: boolean;
   duration_seconds?: number | null;
   activated_at?: string | null;
@@ -49,7 +54,12 @@ export async function fetchLicenses(params: { q?: string; status?: "all" | "acti
   const status = params.status ?? "all";
 
   let query = (supabase.from(licensesTable) as any)
-    .select("id,key,created_at,expires_at,starts_on_first_use,duration_seconds,activated_at,max_devices,is_active,note,deleted_at")
+    .select(
+      "id,key,created_at,expires_at," +
+        "start_on_first_use,duration_days,first_used_at," +
+        "starts_on_first_use,duration_seconds,activated_at," +
+        "max_devices,is_active,note,deleted_at",
+    )
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
@@ -74,7 +84,12 @@ export async function fetchLicenses(params: { q?: string; status?: "all" | "acti
 
 export async function fetchLicense(id: string) {
   const { data, error } = await (supabase.from(licensesTable) as any)
-    .select("id,key,created_at,expires_at,starts_on_first_use,duration_seconds,activated_at,max_devices,is_active,note,deleted_at")
+    .select(
+      "id,key,created_at,expires_at," +
+        "start_on_first_use,duration_days,first_used_at," +
+        "starts_on_first_use,duration_seconds,activated_at," +
+        "max_devices,is_active,note,deleted_at",
+    )
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -85,6 +100,11 @@ export async function fetchLicense(id: string) {
 export async function createLicense(input: {
   key: string;
   expires_at: string | null;
+  // New v2 fields
+  start_on_first_use?: boolean;
+  duration_days?: number | null;
+  first_used_at?: string | null;
+  // Legacy fields (optional)
   starts_on_first_use?: boolean;
   duration_seconds?: number | null;
   activated_at?: string | null;
@@ -96,9 +116,14 @@ export async function createLicense(input: {
     .insert({
       key: input.key,
       expires_at: input.expires_at,
-      starts_on_first_use: input.starts_on_first_use ?? false,
-      duration_seconds: input.duration_seconds ?? null,
-      activated_at: input.activated_at ?? null,
+      // New
+      start_on_first_use: input.start_on_first_use ?? false,
+      duration_days: input.duration_days ?? null,
+      first_used_at: input.first_used_at ?? null,
+      // Legacy mirror
+      starts_on_first_use: input.starts_on_first_use ?? input.start_on_first_use ?? false,
+      duration_seconds: input.duration_seconds ?? (typeof input.duration_days === "number" ? input.duration_days * 86400 : null),
+      activated_at: input.activated_at ?? input.first_used_at ?? null,
       max_devices: input.max_devices,
       is_active: input.is_active,
       note: input.note,
@@ -108,9 +133,12 @@ export async function createLicense(input: {
   if (error) throw error;
   await logAudit("CREATE", input.key, {
     expires_at: input.expires_at,
-    starts_on_first_use: input.starts_on_first_use ?? false,
-    duration_seconds: input.duration_seconds ?? null,
-    activated_at: input.activated_at ?? null,
+    start_on_first_use: input.start_on_first_use ?? false,
+    duration_days: input.duration_days ?? null,
+    first_used_at: input.first_used_at ?? null,
+    starts_on_first_use: input.starts_on_first_use ?? input.start_on_first_use ?? false,
+    duration_seconds: input.duration_seconds ?? (typeof input.duration_days === "number" ? input.duration_days * 86400 : null),
+    activated_at: input.activated_at ?? input.first_used_at ?? null,
     max_devices: input.max_devices,
     is_active: input.is_active,
     note: input.note,

@@ -36,12 +36,17 @@ function computeStatus(lic: {
   is_active: boolean;
   deleted_at?: string | null;
   expires_at: string | null;
+  start_on_first_use?: boolean;
+  duration_days?: number | null;
+  first_used_at?: string | null;
   starts_on_first_use?: boolean;
   activated_at?: string | null;
 }) {
   if (lic.deleted_at) return { label: "DELETED", variant: "secondary" as const };
   if (!lic.is_active) return { label: "BLOCKED", variant: "destructive" as const };
-  if (lic.starts_on_first_use && !lic.activated_at) return { label: "Not activated yet", variant: "outline" as const };
+  const startOnFirstUse = Boolean(lic.start_on_first_use ?? lic.starts_on_first_use);
+  const firstUsedAt = lic.first_used_at ?? lic.activated_at ?? null;
+  if (startOnFirstUse && !firstUsedAt) return { label: "Not started", variant: "outline" as const };
   if (lic.expires_at && new Date(lic.expires_at).getTime() < Date.now()) return { label: "EXPIRED", variant: "outline" as const };
   return { label: "ACTIVE", variant: "default" as const };
 }
@@ -55,6 +60,24 @@ function formatDuration(seconds: number | null | undefined) {
   if (hours >= 1) return `${hours} hour${hours === 1 ? "" : "s"}`;
   const minutes = Math.floor(s / 60);
   return `${Math.max(minutes, 1)} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function formatRemainingTime(expiresAt: string | null) {
+  if (!expiresAt) return "—";
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${Math.max(m, 0)}m`;
+}
+
+function formatDurationDays(days: number | null | undefined) {
+  const d = typeof days === "number" && days > 0 ? days : null;
+  if (!d) return "—";
+  return `${d} day${d === 1 ? "" : "s"}`;
 }
 
 export function LicenseDetailPage() {
@@ -266,19 +289,28 @@ export function LicenseDetailPage() {
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Expires</div>
                   <div className="text-sm">
-                    {licQuery.data.starts_on_first_use && !licQuery.data.activated_at
-                      ? "Not activated yet"
-                      : licQuery.data.expires_at
-                        ? new Date(licQuery.data.expires_at).toLocaleString()
-                        : "—"}
+                      {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) &&
+                      !((licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at)
+                        ? "Not started"
+                        : licQuery.data.expires_at
+                          ? new Date(licQuery.data.expires_at).toLocaleString()
+                          : "—"}
                   </div>
                 </div>
-                {licQuery.data.starts_on_first_use ? (
+                {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
                   <div className="space-y-1">
                     <div className="text-xs text-muted-foreground">Duration</div>
-                    <div className="text-sm">{formatDuration(licQuery.data.duration_seconds)}</div>
+                    <div className="text-sm">
+                      {(licQuery.data as any).duration_days != null
+                        ? formatDurationDays((licQuery.data as any).duration_days)
+                        : formatDuration((licQuery.data as any).duration_seconds)}
+                    </div>
                   </div>
                 ) : null}
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Remaining time</div>
+                  <div className="text-sm">{formatRemainingTime(licQuery.data.expires_at)}</div>
+                </div>
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Max devices</div>
                   <div className="text-sm">{licQuery.data.max_devices}</div>
@@ -287,11 +319,13 @@ export function LicenseDetailPage() {
                   <div className="text-xs text-muted-foreground">Active</div>
                   <div className="text-sm">{licQuery.data.is_active ? "Yes" : "No"}</div>
                 </div>
-                {licQuery.data.starts_on_first_use ? (
+                {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
                   <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Activated at</div>
+                    <div className="text-xs text-muted-foreground">First used at</div>
                     <div className="text-sm">
-                      {licQuery.data.activated_at ? new Date(licQuery.data.activated_at).toLocaleString() : "—"}
+                      {((licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at)
+                        ? new Date(((licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at) as string).toLocaleString()
+                        : "—"}
                     </div>
                   </div>
                 ) : null}
