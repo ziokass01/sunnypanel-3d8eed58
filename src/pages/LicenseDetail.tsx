@@ -8,6 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +22,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
-import { deleteLicenseDevice, fetchLicense, fetchLicenseDevices, softDeleteLicense } from "@/features/licenses/licenses-api";
+import {
+  deleteLicenseDevice,
+  fetchLicense,
+  fetchLicenseDevices,
+  reactivateOrRenewLicense,
+  resetLicenseDevices,
+  softDeleteLicense,
+} from "@/features/licenses/licenses-api";
+import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 
 function computeStatus(lic: {
   is_active: boolean;
@@ -38,6 +49,10 @@ export function LicenseDetailPage() {
   const queryClient = useQueryClient();
   const licenseId = id ?? "";
   const [removeTarget, setRemoveTarget] = useState<{ id: string; device_id: string } | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [reactivateOpen, setReactivateOpen] = useState(false);
+  const [reactivateResetDevices, setReactivateResetDevices] = useState(false);
+  const [reactivateExpiresLocal, setReactivateExpiresLocal] = useState<string>("");
 
   const licQuery = useQuery({
     queryKey: ["license", licenseId],
@@ -67,6 +82,40 @@ export function LicenseDetailPage() {
     },
     onError: (err) => {
       toast({ title: "Failed to remove device", description: String(err), variant: "destructive" });
+    },
+  });
+
+  const resetDevicesMutation = useMutation({
+    mutationFn: async () => resetLicenseDevices(licenseId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] });
+      toast({ title: "Devices reset" });
+      setResetOpen(false);
+    },
+    onError: (err) => {
+      toast({ title: "Failed to reset devices", description: String(err), variant: "destructive" });
+    },
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: async () => {
+      const expires_at = reactivateExpiresLocal ? localToIso(reactivateExpiresLocal) : null;
+      await reactivateOrRenewLicense(licenseId, { expires_at });
+      if (reactivateResetDevices) {
+        await resetLicenseDevices(licenseId);
+      }
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["licenses"] }),
+        queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+      ]);
+      toast({ title: "License reactivated/renewed" });
+      setReactivateOpen(false);
+    },
+    onError: (err) => {
+      toast({ title: "Failed to reactivate/renew", description: String(err), variant: "destructive" });
     },
   });
 
@@ -108,6 +157,26 @@ export function LicenseDetailPage() {
           </Button>
           <Button variant="soft" onClick={() => navigate(`/licenses/${licenseId}/edit`)} disabled={!licenseId}>
             Edit
+          </Button>
+          <Button
+            variant="soft"
+            onClick={() => {
+              const current = licQuery.data;
+              if (!current) return;
+              setReactivateExpiresLocal(isoToLocal(current.expires_at));
+              setReactivateResetDevices(false);
+              setReactivateOpen(true);
+            }}
+            disabled={!licQuery.data}
+          >
+            Reactivate/Renew
+          </Button>
+          <Button
+            variant="soft"
+            onClick={() => setResetOpen(true)}
+            disabled={!licenseId || resetDevicesMutation.isPending}
+          >
+            Reset devices
           </Button>
           <Button
             variant="destructive"
@@ -305,6 +374,67 @@ export function LicenseDetailPage() {
               disabled={removeDeviceMutation.isPending}
             >
               {removeDeviceMutation.isPending ? "Removing…" : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset all devices?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will delete all device bindings for this license. The next verify will re-register devices from scratch.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetDevicesMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => resetDevicesMutation.mutate()}
+              disabled={resetDevicesMutation.isPending}
+            >
+              {resetDevicesMutation.isPending ? "Resetting…" : "Reset devices"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={reactivateOpen} onOpenChange={setReactivateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reactivate / Renew license</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will set <span className="font-mono">deleted_at = null</span> and <span className="font-mono">is_active = true</span>, and update expiry.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reactivate-expires">Expires at (optional)</Label>
+              <Input
+                id="reactivate-expires"
+                type="datetime-local"
+                value={reactivateExpiresLocal}
+                onChange={(e) => setReactivateExpiresLocal(e.target.value)}
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={reactivateResetDevices}
+                onCheckedChange={(v) => setReactivateResetDevices(Boolean(v))}
+              />
+              Also reset devices (delete all device bindings)
+            </label>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reactivateMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => reactivateMutation.mutate()}
+              disabled={reactivateMutation.isPending}
+            >
+              {reactivateMutation.isPending ? "Applying…" : "Reactivate/Renew"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

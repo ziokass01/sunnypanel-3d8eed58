@@ -206,7 +206,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "INVALID_INPUT" }, 400);
   }
 
-  const key = parsed.data.key.toUpperCase();
+  // Normalize key before querying
+  const key = parsed.data.key.trim().toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
 
