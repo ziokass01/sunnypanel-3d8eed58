@@ -100,13 +100,14 @@ export function LicensesListPage() {
             ) : (
               data.map((row) => {
                 const expired = row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false;
-                const statusLabel = !row.is_active ? "Blocked" : expired ? "Expired" : "Active";
+                const notActivated = Boolean((row as any).starts_on_first_use) && !(row as any).activated_at;
+                const statusLabel = notActivated ? "Not activated yet" : !row.is_active ? "Blocked" : expired ? "Expired" : "Active";
 
                 return (
                   <TableRow key={row.id}>
                     <TableCell className="font-mono text-xs md:text-sm">{row.key}</TableCell>
                     <TableCell className="hidden md:table-cell">
-                      {row.expires_at ? new Date(row.expires_at).toLocaleString() : "—"}
+                        {notActivated ? "—" : row.expires_at ? new Date(row.expires_at).toLocaleString() : "—"}
                     </TableCell>
                     <TableCell className="hidden md:table-cell">{row.max_devices}</TableCell>
                     <TableCell>{statusLabel}</TableCell>
