@@ -238,7 +238,7 @@ Deno.serve(async (req) => {
   // 2) Fetch license
   const lic = await db
     .from("licenses")
-    .select("id,key,is_active,expires_at,max_devices,deleted_at")
+    .select("id,key,is_active,expires_at,max_devices,deleted_at,starts_on_first_use,duration_seconds,activated_at")
     .eq("key", key)
     .maybeSingle();
 
@@ -277,17 +277,24 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "KEY_BLOCKED" });
   }
 
-  if (lic.data.expires_at) {
-    const exp = new Date(lic.data.expires_at);
-    if (exp.getTime() < now.getTime()) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: key,
-        detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
-      });
+  const startsOnFirstUse = Boolean((lic.data as any).starts_on_first_use);
+  const activatedAt: string | null = (lic.data as any).activated_at ?? null;
+  const durationSeconds: number | null = (lic.data as any).duration_seconds ?? null;
 
-      await maybeInsertEnumerationAlert(db, ip, key);
-      return json({ ok: false, msg: "KEY_EXPIRED" });
+  // Only enforce expiry once activated (or for standard keys)
+  if (!(startsOnFirstUse && !activatedAt)) {
+    if (lic.data.expires_at) {
+      const exp = new Date(lic.data.expires_at);
+      if (exp.getTime() < now.getTime()) {
+        await db.from("audit_logs").insert({
+          action: "VERIFY",
+          license_key: key,
+          detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
+        });
+
+        await maybeInsertEnumerationAlert(db, ip, key);
+        return json({ ok: false, msg: "KEY_EXPIRED" });
+      }
     }
   }
 
@@ -360,6 +367,28 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "SERVER_ERROR" }, 500);
   }
 
+  // 4.5) First successful verify activates "start on first use" licenses
+  // Activation happens after device checks pass so it doesn't start counting on failures.
+  let effectiveExpiresAt: string | null = lic.data.expires_at;
+  if (startsOnFirstUse && !activatedAt) {
+    const dur = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
+    if (dur) {
+      const newExpiresAt = new Date(now.getTime() + dur * 1000).toISOString();
+      const activation = await db
+        .from("licenses")
+        .update({ activated_at: now.toISOString(), expires_at: newExpiresAt })
+        .eq("id", lic.data.id)
+        .is("activated_at", null)
+        .select("expires_at")
+        .maybeSingle();
+
+      // If we won the race, use the updated expiry. If we lost, keep existing value.
+      if (!activation.error && activation.data?.expires_at) {
+        effectiveExpiresAt = activation.data.expires_at;
+      }
+    }
+  }
+
   // 5) Audit log
   await db.from("audit_logs").insert({
     action: "VERIFY",
@@ -377,7 +406,7 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     msg: "OK",
-    expires_at: lic.data.expires_at,
+    expires_at: effectiveExpiresAt,
     max_devices: lic.data.max_devices,
   });
 });

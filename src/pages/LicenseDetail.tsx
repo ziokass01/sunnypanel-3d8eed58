@@ -36,11 +36,25 @@ function computeStatus(lic: {
   is_active: boolean;
   deleted_at?: string | null;
   expires_at: string | null;
+  starts_on_first_use?: boolean;
+  activated_at?: string | null;
 }) {
   if (lic.deleted_at) return { label: "DELETED", variant: "secondary" as const };
   if (!lic.is_active) return { label: "BLOCKED", variant: "destructive" as const };
+  if (lic.starts_on_first_use && !lic.activated_at) return { label: "Not activated yet", variant: "outline" as const };
   if (lic.expires_at && new Date(lic.expires_at).getTime() < Date.now()) return { label: "EXPIRED", variant: "outline" as const };
   return { label: "ACTIVE", variant: "default" as const };
+}
+
+function formatDuration(seconds: number | null | undefined) {
+  const s = typeof seconds === "number" && seconds > 0 ? seconds : null;
+  if (!s) return "—";
+  const days = Math.floor(s / 86400);
+  if (days >= 1) return `${days} day${days === 1 ? "" : "s"}`;
+  const hours = Math.floor(s / 3600);
+  if (hours >= 1) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const minutes = Math.floor(s / 60);
+  return `${Math.max(minutes, 1)} minute${minutes === 1 ? "" : "s"}`;
 }
 
 export function LicenseDetailPage() {
@@ -252,9 +266,19 @@ export function LicenseDetailPage() {
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Expires</div>
                   <div className="text-sm">
-                    {licQuery.data.expires_at ? new Date(licQuery.data.expires_at).toLocaleString() : "—"}
+                    {licQuery.data.starts_on_first_use && !licQuery.data.activated_at
+                      ? "Not activated yet"
+                      : licQuery.data.expires_at
+                        ? new Date(licQuery.data.expires_at).toLocaleString()
+                        : "—"}
                   </div>
                 </div>
+                {licQuery.data.starts_on_first_use ? (
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Duration</div>
+                    <div className="text-sm">{formatDuration(licQuery.data.duration_seconds)}</div>
+                  </div>
+                ) : null}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Max devices</div>
                   <div className="text-sm">{licQuery.data.max_devices}</div>
@@ -263,6 +287,14 @@ export function LicenseDetailPage() {
                   <div className="text-xs text-muted-foreground">Active</div>
                   <div className="text-sm">{licQuery.data.is_active ? "Yes" : "No"}</div>
                 </div>
+                {licQuery.data.starts_on_first_use ? (
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Activated at</div>
+                    <div className="text-sm">
+                      {licQuery.data.activated_at ? new Date(licQuery.data.activated_at).toLocaleString() : "—"}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Devices</div>
                   <div className="text-sm">{currentDevicesCount}</div>

@@ -12,6 +12,9 @@ export type LicenseRow = {
   key: string;
   created_at: string;
   expires_at: string | null;
+  starts_on_first_use?: boolean;
+  duration_seconds?: number | null;
+  activated_at?: string | null;
   max_devices: number;
   is_active: boolean;
   note: string | null;
@@ -46,7 +49,7 @@ export async function fetchLicenses(params: { q?: string; status?: "all" | "acti
   const status = params.status ?? "all";
 
   let query = (supabase.from(licensesTable) as any)
-    .select("id,key,created_at,expires_at,max_devices,is_active,note,deleted_at")
+    .select("id,key,created_at,expires_at,starts_on_first_use,duration_seconds,activated_at,max_devices,is_active,note,deleted_at")
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
@@ -71,7 +74,7 @@ export async function fetchLicenses(params: { q?: string; status?: "all" | "acti
 
 export async function fetchLicense(id: string) {
   const { data, error } = await (supabase.from(licensesTable) as any)
-    .select("id,key,created_at,expires_at,max_devices,is_active,note,deleted_at")
+    .select("id,key,created_at,expires_at,starts_on_first_use,duration_seconds,activated_at,max_devices,is_active,note,deleted_at")
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -82,6 +85,9 @@ export async function fetchLicense(id: string) {
 export async function createLicense(input: {
   key: string;
   expires_at: string | null;
+  starts_on_first_use?: boolean;
+  duration_seconds?: number | null;
+  activated_at?: string | null;
   max_devices: number;
   is_active: boolean;
   note: string | null;
@@ -90,6 +96,9 @@ export async function createLicense(input: {
     .insert({
       key: input.key,
       expires_at: input.expires_at,
+      starts_on_first_use: input.starts_on_first_use ?? false,
+      duration_seconds: input.duration_seconds ?? null,
+      activated_at: input.activated_at ?? null,
       max_devices: input.max_devices,
       is_active: input.is_active,
       note: input.note,
@@ -99,6 +108,9 @@ export async function createLicense(input: {
   if (error) throw error;
   await logAudit("CREATE", input.key, {
     expires_at: input.expires_at,
+    starts_on_first_use: input.starts_on_first_use ?? false,
+    duration_seconds: input.duration_seconds ?? null,
+    activated_at: input.activated_at ?? null,
     max_devices: input.max_devices,
     is_active: input.is_active,
     note: input.note,
