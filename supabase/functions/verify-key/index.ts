@@ -238,7 +238,13 @@ Deno.serve(async (req) => {
   // 2) Fetch license
   const lic = await db
     .from("licenses")
-    .select("id,key,is_active,expires_at,max_devices,deleted_at,starts_on_first_use,duration_seconds,activated_at")
+    .select(
+      "id,key,is_active,expires_at,max_devices,deleted_at," +
+        // Legacy fields
+        "starts_on_first_use,duration_seconds,activated_at," +
+        // New fields
+        "start_on_first_use,duration_days,first_used_at",
+    )
     .eq("key", key)
     .maybeSingle();
 
@@ -253,7 +259,10 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "KEY_NOT_FOUND" });
   }
 
-  if (lic.data.deleted_at) {
+  // Deno + supabase-js type inference can be noisy here; keep runtime behavior unchanged.
+  const licRow: any = lic.data as any;
+
+  if (licRow.deleted_at) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: key,
@@ -266,7 +275,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "KEY_NOT_FOUND" });
   }
 
-  if (!lic.data.is_active) {
+  if (!licRow.is_active) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: key,
@@ -277,14 +286,16 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "KEY_BLOCKED" });
   }
 
-  const startsOnFirstUse = Boolean((lic.data as any).starts_on_first_use);
-  const activatedAt: string | null = (lic.data as any).activated_at ?? null;
-  const durationSeconds: number | null = (lic.data as any).duration_seconds ?? null;
+  // Backward compatible: accept either legacy fields or the new fields.
+  const startsOnFirstUse = Boolean(licRow.start_on_first_use ?? licRow.starts_on_first_use);
+  const firstUsedAt: string | null = licRow.first_used_at ?? licRow.activated_at ?? null;
+  const durationDays: number | null = licRow.duration_days ?? null;
+  const durationSeconds: number | null = licRow.duration_seconds ?? null;
 
   // Only enforce expiry once activated (or for standard keys)
-  if (!(startsOnFirstUse && !activatedAt)) {
-    if (lic.data.expires_at) {
-      const exp = new Date(lic.data.expires_at);
+  if (!(startsOnFirstUse && !firstUsedAt)) {
+    if (licRow.expires_at) {
+      const exp = new Date(licRow.expires_at);
       if (exp.getTime() < now.getTime()) {
         await db.from("audit_logs").insert({
           action: "VERIFY",
@@ -302,7 +313,7 @@ Deno.serve(async (req) => {
   const existing = await db
     .from("license_devices")
     .select("id")
-    .eq("license_id", lic.data.id)
+    .eq("license_id", licRow.id)
     .eq("device_id", device)
     .maybeSingle();
 
@@ -321,10 +332,10 @@ Deno.serve(async (req) => {
     const count = await db
       .from("license_devices")
       .select("id", { count: "exact", head: true })
-      .eq("license_id", lic.data.id);
+      .eq("license_id", licRow.id);
 
     const used = count.count ?? 0;
-    if (used >= (lic.data.max_devices ?? 1)) {
+    if (used >= (licRow.max_devices ?? 1)) {
       await db.from("audit_logs").insert({
         action: "VERIFY",
         license_key: key,
@@ -339,7 +350,7 @@ Deno.serve(async (req) => {
   // 4) Upsert device + update last_seen (+ device_name for display only)
   // If device already exists, this MUST NOT count as a new device.
   const upsertPayload: Record<string, unknown> = {
-    license_id: lic.data.id,
+    license_id: licRow.id,
     device_id: device,
     last_seen: now.toISOString(),
   };
@@ -369,16 +380,26 @@ Deno.serve(async (req) => {
 
   // 4.5) First successful verify activates "start on first use" licenses
   // Activation happens after device checks pass so it doesn't start counting on failures.
-  let effectiveExpiresAt: string | null = lic.data.expires_at;
-  if (startsOnFirstUse && !activatedAt) {
-    const dur = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
-    if (dur) {
-      const newExpiresAt = new Date(now.getTime() + dur * 1000).toISOString();
+  let effectiveExpiresAt: string | null = licRow.expires_at;
+  if (startsOnFirstUse && !firstUsedAt) {
+    const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays : null;
+    const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
+    const durSeconds = dDays ? dDays * 86400 : dSecs;
+
+    if (durSeconds) {
+      const newExpiresAt = new Date(now.getTime() + durSeconds * 1000).toISOString();
+
+      // Activate atomically (win the race) using the new columns; also set legacy activated_at
+      // for backward-compat display.
       const activation = await db
         .from("licenses")
-        .update({ activated_at: now.toISOString(), expires_at: newExpiresAt })
-        .eq("id", lic.data.id)
-        .is("activated_at", null)
+        .update({
+          first_used_at: now.toISOString(),
+          activated_at: now.toISOString(),
+          expires_at: newExpiresAt,
+        })
+        .eq("id", licRow.id)
+        .is("first_used_at", null)
         .select("expires_at")
         .maybeSingle();
 
@@ -398,15 +419,21 @@ Deno.serve(async (req) => {
       device,
       device_name: deviceName ?? null,
       ok: true,
-      license_id: lic.data.id,
+      license_id: licRow.id,
       device_row: up.data?.id ?? null,
     },
   });
+
+  const remainingSeconds = effectiveExpiresAt
+    ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000))
+    : null;
 
   return json({
     ok: true,
     msg: "OK",
     expires_at: effectiveExpiresAt,
-    max_devices: lic.data.max_devices,
+    max_devices: licRow.max_devices,
+    remaining_seconds: remainingSeconds,
+    server_time: now.toISOString(),
   });
 });

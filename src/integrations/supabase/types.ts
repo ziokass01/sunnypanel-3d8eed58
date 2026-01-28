@@ -78,39 +78,48 @@ export type Database = {
           activated_at: string | null
           created_at: string
           deleted_at: string | null
+          duration_days: number | null
           duration_seconds: number | null
           expires_at: string | null
+          first_used_at: string | null
           id: string
           is_active: boolean
           key: string
           max_devices: number
           note: string | null
+          start_on_first_use: boolean
           starts_on_first_use: boolean
         }
         Insert: {
           activated_at?: string | null
           created_at?: string
           deleted_at?: string | null
+          duration_days?: number | null
           duration_seconds?: number | null
           expires_at?: string | null
+          first_used_at?: string | null
           id?: string
           is_active?: boolean
           key: string
           max_devices?: number
           note?: string | null
+          start_on_first_use?: boolean
           starts_on_first_use?: boolean
         }
         Update: {
           activated_at?: string | null
           created_at?: string
           deleted_at?: string | null
+          duration_days?: number | null
           duration_seconds?: number | null
           expires_at?: string | null
+          first_used_at?: string | null
           id?: string
           is_active?: boolean
           key?: string
           max_devices?: number
           note?: string | null
+          start_on_first_use?: boolean
           starts_on_first_use?: boolean
         }
         Relationships: []
