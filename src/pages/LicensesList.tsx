@@ -20,6 +20,18 @@ import { NavLink } from "@/components/NavLink";
 import { toast } from "@/hooks/use-toast";
 import { fetchLicenses, softDeleteLicense } from "@/features/licenses/licenses-api";
 
+function formatRemainingTime(expiresAt: string | null) {
+  if (!expiresAt) return "—";
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${Math.max(m, 0)}m`;
+}
+
 export function LicensesListPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "expired" | "blocked">("all");
@@ -79,6 +91,7 @@ export function LicensesListPage() {
             <TableRow>
               <TableHead>Key</TableHead>
               <TableHead className="hidden md:table-cell">Expires</TableHead>
+              <TableHead className="hidden lg:table-cell">Remaining</TableHead>
               <TableHead className="hidden md:table-cell">Max devices</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Action</TableHead>
@@ -87,13 +100,13 @@ export function LicensesListPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
                   No licenses found.
                 </TableCell>
               </TableRow>
@@ -109,7 +122,10 @@ export function LicensesListPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-mono text-xs md:text-sm">{row.key}</TableCell>
                     <TableCell className="hidden md:table-cell">
-                        {notStarted ? "—" : row.expires_at ? new Date(row.expires_at).toLocaleString() : "—"}
+                      {notStarted ? "—" : row.expires_at ? new Date(row.expires_at).toLocaleString() : "—"}
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      {notStarted ? "Not started" : formatRemainingTime(row.expires_at)}
                     </TableCell>
                     <TableCell className="hidden md:table-cell">{row.max_devices}</TableCell>
                     <TableCell>{statusLabel}</TableCell>
