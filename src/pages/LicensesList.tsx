@@ -33,17 +33,23 @@ function formatRemainingTime(expiresAt: string | null, nowMs: number) {
   return `${Math.max(m, 0)}m`;
 }
 
+function formatDurationShort(seconds: number | null | undefined) {
+  const s = typeof seconds === "number" && seconds > 0 ? seconds : null;
+  if (!s) return "";
+  if (s % 86400 === 0) return `${s / 86400}d`;
+  if (s % 3600 === 0) return `${s / 3600}h`;
+  const mins = Math.max(1, Math.round(s / 60));
+  return `${mins}m`;
+}
+
 function getLicenseType(row: any) {
   const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
-  return startOnFirstUse ? "Start on first use" : "Fixed";
+  return startOnFirstUse ? "Countdown" : "Fixed";
 }
 
 function formatNotStarted(row: any) {
-  const dd = typeof row?.duration_days === "number" && row.duration_days > 0 ? row.duration_days : null;
-  if (dd) return `Not started (${dd}d)`;
-
   const ds = typeof row?.duration_seconds === "number" && row.duration_seconds > 0 ? row.duration_seconds : null;
-  if (ds) return `Not started (${Math.max(1, Math.round(ds / 86400))}d)`;
+  if (ds) return `Not started (${formatDurationShort(ds)})`;
 
   return "Not started";
 }
@@ -104,7 +110,7 @@ export function LicensesListPage() {
           <SelectContent>
             <SelectItem value="all">All types</SelectItem>
             <SelectItem value="fixed">Fixed</SelectItem>
-            <SelectItem value="first_use">Start on first use</SelectItem>
+            <SelectItem value="first_use">Countdown</SelectItem>
           </SelectContent>
         </Select>
         <Select value={status} onValueChange={(v) => setStatus(v as any)}>

@@ -400,7 +400,8 @@ Deno.serve(async (req) => {
   // 4.5) First successful verify activates "start on first use" licenses
   // Activation happens after device checks pass so it doesn't start counting on failures.
   let effectiveExpiresAt: string | null = licRow.expires_at;
-  let started = startsOnFirstUse && Boolean(firstUsedAt);
+  let effectiveFirstUsedAt: string | null = firstUsedAt;
+  let started = Boolean(effectiveFirstUsedAt);
   if (startsOnFirstUse && !firstUsedAt) {
     const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays : null;
     const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
@@ -420,14 +421,26 @@ Deno.serve(async (req) => {
         })
         .eq("id", licRow.id)
         .is("first_used_at", null)
-        .select("expires_at")
+        .select("expires_at,first_used_at")
         .maybeSingle();
 
-      // If we won the race, use the updated expiry. If we lost, keep existing value.
-      if (!activation.error && activation.data?.expires_at) {
+      // If we won the race, use the updated values. If we lost, re-select to avoid returning started=false.
+      if (!activation.error && activation.data?.expires_at && activation.data?.first_used_at) {
         effectiveExpiresAt = activation.data.expires_at;
-        started = true;
+        effectiveFirstUsedAt = activation.data.first_used_at;
+      } else {
+        const latest = await db
+          .from("licenses")
+          .select("expires_at,first_used_at")
+          .eq("id", licRow.id)
+          .maybeSingle();
+        if (!latest.error && latest.data) {
+          effectiveExpiresAt = latest.data.expires_at ?? effectiveExpiresAt;
+          effectiveFirstUsedAt = latest.data.first_used_at ?? effectiveFirstUsedAt;
+        }
       }
+
+      started = Boolean(effectiveFirstUsedAt);
     }
   }
 

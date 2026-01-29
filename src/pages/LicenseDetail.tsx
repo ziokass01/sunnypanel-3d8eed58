@@ -331,7 +331,7 @@ export function LicenseDetailPage() {
                   <div className="text-xs text-muted-foreground">Type</div>
                   <div className="text-sm">
                     {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use)
-                      ? "Start on first use"
+                      ? "Countdown"
                       : "Fixed"}
                   </div>
                 </div>

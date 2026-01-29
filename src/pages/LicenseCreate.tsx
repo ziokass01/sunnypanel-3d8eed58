@@ -16,17 +16,18 @@ import { localToIso } from "@/features/licenses/license-utils";
 const schema = z
   .object({
     license_type: z.enum(["fixed", "first_use"]).default("fixed"),
-  key: z
-    .string()
-    .trim()
-    .min(1, "Key is required")
-    .max(64)
-    .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "Format: SUNNY-XXXX-XXXX-XXXX"),
-  expires_at: z.string().optional(),
-    duration_days: z.coerce.number().int().min(1).max(3650).optional(),
-  max_devices: z.coerce.number().int().min(1).max(999),
-  is_active: z.boolean(),
-  note: z.string().trim().max(2000).optional(),
+    key: z
+      .string()
+      .trim()
+      .min(1, "Key is required")
+      .max(64)
+      .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "Format: SUNNY-XXXX-XXXX-XXXX"),
+    expires_at: z.string().optional(),
+    duration_value: z.coerce.number().int().min(1).max(3650).optional(),
+    duration_unit: z.enum(["minutes", "hours", "days"]).default("days"),
+    max_devices: z.coerce.number().int().min(1).max(999),
+    is_active: z.boolean(),
+    note: z.string().trim().max(2000).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.license_type !== "first_use") {
@@ -34,8 +35,8 @@ const schema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expires_at"], message: "Expires at is required" });
       }
     } else {
-      if (!v.duration_days || v.duration_days <= 0) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_days"], message: "Duration days is required" });
+      if (!v.duration_value || v.duration_value <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_value"], message: "Duration is required" });
       }
     }
   });
@@ -51,7 +52,8 @@ export function LicenseCreatePage() {
       license_type: "fixed",
       key: "",
       expires_at: "",
-      duration_days: 30,
+      duration_value: 2,
+      duration_unit: "hours",
       max_devices: 1,
       is_active: true,
       note: "",
@@ -68,19 +70,21 @@ export function LicenseCreatePage() {
       const startOnFirstUse = values.license_type === "first_use";
       const expiresIso = !startOnFirstUse ? localToIso(values.expires_at || "") : null;
 
-      const durationDays = startOnFirstUse ? Number(values.duration_days ?? 0) : null;
-      const safeDays = Number.isFinite(durationDays as any) && (durationDays as any) > 0 ? (durationDays as number) : null;
-      const durationSeconds = safeDays ? safeDays * 86400 : null;
+      const durValue = startOnFirstUse ? Number(values.duration_value ?? 0) : null;
+      const safeValue = Number.isFinite(durValue as any) && (durValue as any) > 0 ? (durValue as number) : null;
+      const mult = values.duration_unit === "minutes" ? 60 : values.duration_unit === "hours" ? 3600 : 86400;
+      const durationSeconds = startOnFirstUse && safeValue ? safeValue * mult : null;
+
       return await createLicense({
         key: values.key.toUpperCase(),
         expires_at: expiresIso,
         // New
         start_on_first_use: startOnFirstUse,
-        duration_days: safeDays,
+        duration_days: null,
+        duration_seconds: durationSeconds,
         first_used_at: null,
         // Legacy mirror
         starts_on_first_use: startOnFirstUse,
-        duration_seconds: durationSeconds,
         activated_at: null,
         max_devices: values.max_devices,
         is_active: values.is_active,
@@ -122,7 +126,7 @@ export function LicenseCreatePage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="fixed">Fixed expiry</SelectItem>
-              <SelectItem value="first_use">Start on first use</SelectItem>
+              <SelectItem value="first_use">Countdown</SelectItem>
             </SelectContent>
           </Select>
           <div className="text-xs text-muted-foreground">
@@ -134,12 +138,36 @@ export function LicenseCreatePage() {
 
         {form.watch("license_type") === "first_use" ? (
           <div className="space-y-2">
-            <Label htmlFor="duration_days">Duration days</Label>
-            <Input id="duration_days" type="number" min={1} max={3650} {...form.register("duration_days")} />
-            {form.formState.errors.duration_days ? (
-              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_days?.message)}</div>
+            <Label>Duration</Label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="duration_value" className="sr-only">
+                  Duration value
+                </Label>
+                <Input id="duration_value" type="number" min={1} max={3650} {...form.register("duration_value")} />
+              </div>
+              <div className="space-y-2">
+                <Label className="sr-only">Duration unit</Label>
+                <Select
+                  value={form.watch("duration_unit")}
+                  onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">Minutes</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                    <SelectItem value="days">Days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {form.formState.errors.duration_value ? (
+              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_value?.message)}</div>
             ) : null}
-            <div className="text-xs text-muted-foreground">Expires will be set automatically on the first successful verify.</div>
+            <div className="text-xs text-muted-foreground">Countdown starts on the first successful verify.</div>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">

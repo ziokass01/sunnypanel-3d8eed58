@@ -10,18 +10,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchLicense, updateLicense } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 
 const schema = z.object({
   expires_at: z.string().optional(),
-  duration_days: z.coerce.number().int().min(1).max(3650).optional(),
+  duration_value: z.coerce.number().int().min(1).max(3650).optional(),
+  duration_unit: z.enum(["minutes", "hours", "days"]).default("days"),
   max_devices: z.coerce.number().int().min(1).max(999),
   is_active: z.boolean(),
   note: z.string().trim().max(2000).optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
+
+function secondsToFields(seconds: number | null | undefined): { duration_value: number; duration_unit: "minutes" | "hours" | "days" } {
+  const s = typeof seconds === "number" && seconds > 0 ? seconds : 3600;
+  if (s % 86400 === 0) return { duration_value: Math.max(1, Math.round(s / 86400)), duration_unit: "days" };
+  if (s % 3600 === 0) return { duration_value: Math.max(1, Math.round(s / 3600)), duration_unit: "hours" };
+  return { duration_value: Math.max(1, Math.round(s / 60)), duration_unit: "minutes" };
+}
+
+function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes" | "hours" | "days" }) {
+  const value = typeof v.duration_value === "number" && Number.isFinite(v.duration_value) ? v.duration_value : null;
+  if (!value || value <= 0) return null;
+  const unit = v.duration_unit ?? "days";
+  const mult = unit === "minutes" ? 60 : unit === "hours" ? 3600 : 86400;
+  return value * mult;
+}
 
 export function LicenseEditPage() {
   const { id } = useParams();
@@ -38,7 +55,8 @@ export function LicenseEditPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       expires_at: "",
-      duration_days: 30,
+      duration_value: 2,
+      duration_unit: "hours",
       max_devices: 1,
       is_active: true,
       note: "",
@@ -46,7 +64,9 @@ export function LicenseEditPage() {
     values: data
       ? {
           expires_at: isoToLocal(data.expires_at),
-          duration_days: (data as any).duration_days ?? undefined,
+          ...(Boolean((data as any)?.start_on_first_use ?? (data as any)?.starts_on_first_use)
+            ? secondsToFields((data as any).duration_seconds ?? ((data as any).duration_days ? (data as any).duration_days * 86400 : null))
+            : { duration_value: 2, duration_unit: "hours" as const }),
           max_devices: data.max_devices,
           is_active: data.is_active,
           note: data.note ?? "",
@@ -67,14 +87,21 @@ export function LicenseEditPage() {
 
       if (startOnFirstUse) {
         // For start-on-first-use licenses, expires_at is managed by verify-key.
-        // Allow editing duration_days ONLY before first use.
+        // Allow editing duration ONLY before first use.
         if (!firstUsedAt) {
-          patch.duration_days = typeof values.duration_days === "number" ? values.duration_days : null;
+          patch.duration_seconds = fieldsToSeconds(values);
+          // keep v2 days field unused
+          patch.duration_days = null;
           patch.expires_at = null;
         }
       } else {
         // Standard fixed-expiry licenses keep the legacy flow.
         patch.expires_at = values.expires_at ? localToIso(values.expires_at) : null;
+        // Ensure constraints stay satisfied.
+        patch.duration_seconds = null;
+        patch.duration_days = null;
+        patch.first_used_at = null;
+        patch.activated_at = null;
       }
 
       await updateLicense(licenseId, patch as any);
@@ -101,15 +128,31 @@ export function LicenseEditPage() {
 
           {Boolean((data as any).start_on_first_use ?? (data as any).starts_on_first_use) ? (
             <div className="space-y-2">
-              <Label htmlFor="duration_days">Duration days</Label>
-              <Input
-                id="duration_days"
-                type="number"
-                min={1}
-                max={3650}
-                disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
-                {...form.register("duration_days")}
-              />
+              <Label>Duration</Label>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Input
+                  id="duration_value"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
+                  {...form.register("duration_value")}
+                />
+                <Select
+                  value={form.watch("duration_unit")}
+                  onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
+                  disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">Minutes</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                    <SelectItem value="days">Days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="text-xs text-muted-foreground">
                 {Boolean((data as any).first_used_at ?? (data as any).activated_at)
                   ? "Already started. Use Reset activation on the detail page to change duration."
