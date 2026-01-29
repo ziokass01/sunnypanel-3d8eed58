@@ -48,9 +48,7 @@ function getLicenseType(row: any) {
 }
 
 function formatNotStarted(row: any) {
-  const ds = typeof row?.duration_seconds === "number" && row.duration_seconds > 0 ? row.duration_seconds : null;
-  if (ds) return `Not started (${formatDurationShort(ds)})`;
-
+  // Requirement: before first use, show plain "Not started" (duration is optional).
   return "Not started";
 }
 
