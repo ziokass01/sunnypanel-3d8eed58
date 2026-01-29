@@ -44,7 +44,8 @@ function computeRemainingLabel(row: any, nowMs: number) {
 
   if (!row?.expires_at) {
     // Fixed key with expires_at=NULL => never expires
-    return startOnFirstUse ? "Not started" : "Never expires";
+    // For start-on-first-use, expires_at should be set once started; if missing, keep it neutral.
+    return startOnFirstUse ? "—" : "Never expires";
   }
 
   return formatRemainingFromExpires(row.expires_at, nowMs) ?? "—";
