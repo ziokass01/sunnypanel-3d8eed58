@@ -23,20 +23,21 @@ const schema = z
       .max(64)
       .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "Format: SUNNY-XXXX-XXXX-XXXX"),
     expires_at: z.string().optional(),
-    duration_value: z.coerce.number().int().min(1).max(3650).optional(),
-    duration_unit: z.enum(["minutes", "hours", "days"]).default("days"),
+    duration_days: z.coerce.number().int().min(0).max(3650).optional(),
+    duration_hours: z.coerce.number().int().min(0).max(23).optional(),
+    duration_minutes: z.coerce.number().int().min(0).max(59).optional(),
     max_devices: z.coerce.number().int().min(1).max(999),
     is_active: z.boolean(),
     note: z.string().trim().max(2000).optional(),
   })
   .superRefine((v, ctx) => {
-    if (v.license_type !== "first_use") {
-      if (!v.expires_at || !String(v.expires_at).trim()) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expires_at"], message: "Expires at is required" });
-      }
-    } else {
-      if (!v.duration_value || v.duration_value <= 0) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_value"], message: "Duration is required" });
+    if (v.license_type === "first_use") {
+      const dd = Number(v.duration_days ?? 0);
+      const hh = Number(v.duration_hours ?? 0);
+      const mm = Number(v.duration_minutes ?? 0);
+      const totalSeconds = (Number.isFinite(dd) ? dd : 0) * 86400 + (Number.isFinite(hh) ? hh : 0) * 3600 + (Number.isFinite(mm) ? mm : 0) * 60;
+      if (!totalSeconds || totalSeconds <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_minutes"], message: "Duration is required" });
       }
     }
   });
@@ -52,8 +53,9 @@ export function LicenseCreatePage() {
       license_type: "fixed",
       key: "",
       expires_at: "",
-      duration_value: 2,
-      duration_unit: "hours",
+      duration_days: 0,
+      duration_hours: 2,
+      duration_minutes: 0,
       max_devices: 1,
       is_active: true,
       note: "",
@@ -70,14 +72,18 @@ export function LicenseCreatePage() {
       const startOnFirstUse = values.license_type === "first_use";
       const expiresIso = !startOnFirstUse ? localToIso(values.expires_at || "") : null;
 
-      const durValue = startOnFirstUse ? Number(values.duration_value ?? 0) : null;
-      const safeValue = Number.isFinite(durValue as any) && (durValue as any) > 0 ? (durValue as number) : null;
-      const mult = values.duration_unit === "minutes" ? 60 : values.duration_unit === "hours" ? 3600 : 86400;
-      const durationSeconds = startOnFirstUse && safeValue ? safeValue * mult : null;
+      const dd = Number(values.duration_days ?? 0);
+      const hh = Number(values.duration_hours ?? 0);
+      const mm = Number(values.duration_minutes ?? 0);
+      const durationSeconds = startOnFirstUse
+        ? (Math.max(0, Number.isFinite(dd) ? dd : 0) * 86400 +
+            Math.max(0, Number.isFinite(hh) ? hh : 0) * 3600 +
+            Math.max(0, Number.isFinite(mm) ? mm : 0) * 60) || null
+        : null;
 
       return await createLicense({
         key: values.key.toUpperCase(),
-        expires_at: expiresIso,
+          expires_at: startOnFirstUse ? null : expiresIso,
         // New
         start_on_first_use: startOnFirstUse,
         duration_days: null,
@@ -132,40 +138,36 @@ export function LicenseCreatePage() {
           <div className="text-xs text-muted-foreground">
             {form.watch("license_type") === "first_use"
               ? "Countdown starts on the first successful verify. Expires will be set automatically."
-              : "Expiry is enforced immediately based on the Expires at field."}
+              : "Leave Expires at empty = Never expires."}
           </div>
         </div>
 
         {form.watch("license_type") === "first_use" ? (
           <div className="space-y-2">
             <Label>Duration</Label>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="duration_value" className="sr-only">
-                  Duration value
+                <Label htmlFor="duration_days" className="text-xs text-muted-foreground">
+                  Days
                 </Label>
-                <Input id="duration_value" type="number" min={1} max={3650} {...form.register("duration_value")} />
+                <Input id="duration_days" type="number" min={0} max={3650} {...form.register("duration_days")} />
               </div>
               <div className="space-y-2">
-                <Label className="sr-only">Duration unit</Label>
-                <Select
-                  value={form.watch("duration_unit")}
-                  onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="minutes">Minutes</SelectItem>
-                    <SelectItem value="hours">Hours</SelectItem>
-                    <SelectItem value="days">Days</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="duration_hours" className="text-xs text-muted-foreground">
+                  Hours
+                </Label>
+                <Input id="duration_hours" type="number" min={0} max={23} {...form.register("duration_hours")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="duration_minutes" className="text-xs text-muted-foreground">
+                  Minutes
+                </Label>
+                <Input id="duration_minutes" type="number" min={0} max={59} {...form.register("duration_minutes")} />
               </div>
             </div>
 
-            {form.formState.errors.duration_value ? (
-              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_value?.message)}</div>
+            {form.formState.errors.duration_minutes ? (
+              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_minutes?.message)}</div>
             ) : null}
             <div className="text-xs text-muted-foreground">Countdown starts on the first successful verify.</div>
           </div>
@@ -174,9 +176,7 @@ export function LicenseCreatePage() {
             <div className="space-y-2">
               <Label htmlFor="expires_at">Expires at</Label>
               <Input id="expires_at" type="datetime-local" {...form.register("expires_at")} />
-              {form.formState.errors.expires_at ? (
-                <div className="text-sm text-destructive">{String(form.formState.errors.expires_at.message)}</div>
-              ) : null}
+              <div className="text-xs text-muted-foreground">Leave empty = Never expires.</div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="max_devices">Max devices</Label>

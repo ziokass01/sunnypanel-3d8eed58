@@ -33,6 +33,7 @@ import {
   updateLicense,
 } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
+import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
 
 function computeStatus(lic: {
   is_active: boolean;
@@ -53,27 +54,10 @@ function computeStatus(lic: {
   return { label: "ACTIVE", variant: "default" as const };
 }
 
-function formatDuration(seconds: number | null | undefined) {
-  const s = typeof seconds === "number" && seconds > 0 ? seconds : null;
-  if (!s) return "—";
-  const days = Math.floor(s / 86400);
-  if (days >= 1) return `${days} day${days === 1 ? "" : "s"}`;
-  const hours = Math.floor(s / 3600);
-  if (hours >= 1) return `${hours} hour${hours === 1 ? "" : "s"}`;
-  const minutes = Math.floor(s / 60);
-  return `${Math.max(minutes, 1)} minute${minutes === 1 ? "" : "s"}`;
-}
-
-function formatRemainingTime(expiresAt: string | null) {
-  if (!expiresAt) return "—";
-  const ms = new Date(expiresAt).getTime() - Date.now();
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${Math.max(m, 0)}m`;
+function formatDurationSecondsOrDays(lic: any) {
+  const dSecs = typeof lic?.duration_seconds === "number" && lic.duration_seconds > 0 ? lic.duration_seconds : null;
+  const dDays = typeof lic?.duration_days === "number" && lic.duration_days > 0 ? lic.duration_days * 86400 : null;
+  return formatDurationDHMS(dSecs ?? dDays);
 }
 
 function formatDurationDays(days: number | null | undefined) {
@@ -94,8 +78,8 @@ export function LicenseDetailPage() {
   const [reactivateResetDevices, setReactivateResetDevices] = useState(false);
   const [reactivateExpiresLocal, setReactivateExpiresLocal] = useState<string>("");
 
-  // Re-render countdown every 60s
-  useNow(60_000);
+  // Live countdown (1s)
+  const nowMs = useNow(1_000);
 
   const licQuery = useQuery({
     queryKey: ["license", licenseId],
@@ -319,12 +303,13 @@ export function LicenseDetailPage() {
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Expires</div>
                   <div className="text-sm">
-                      {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) &&
-                      !((licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at)
-                        ? "Not started"
-                        : licQuery.data.expires_at
-                          ? new Date(licQuery.data.expires_at).toLocaleString()
-                          : "—"}
+                    {(() => {
+                      const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
+                      const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
+                      if (startOnFirstUse && !firstUsedAt) return "Not started";
+                      if (!licQuery.data.expires_at) return startOnFirstUse ? "—" : "Never expires";
+                      return new Date(licQuery.data.expires_at).toLocaleString();
+                    })()}
                   </div>
                 </div>
                 <div className="space-y-1">
@@ -339,19 +324,20 @@ export function LicenseDetailPage() {
                   <div className="space-y-1">
                     <div className="text-xs text-muted-foreground">Duration</div>
                     <div className="text-sm">
-                      {(licQuery.data as any).duration_days != null
-                        ? formatDurationDays((licQuery.data as any).duration_days)
-                        : formatDuration((licQuery.data as any).duration_seconds)}
+                      {formatDurationSecondsOrDays(licQuery.data)}
                     </div>
                   </div>
                 ) : null}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Remaining time</div>
                   <div className="text-sm">
-                    {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) &&
-                    !((licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at)
-                      ? "Not started"
-                      : formatRemainingTime(licQuery.data.expires_at)}
+                    {(() => {
+                      const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
+                      const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
+                      if (startOnFirstUse && !firstUsedAt) return `Not started • ${formatDurationSecondsOrDays(licQuery.data)}`;
+                      if (!licQuery.data.expires_at) return startOnFirstUse ? "Not started" : "Never expires";
+                      return formatRemainingFromExpires(licQuery.data.expires_at, nowMs) ?? "—";
+                    })()}
                   </div>
                 </div>
                 <div className="space-y-1">
