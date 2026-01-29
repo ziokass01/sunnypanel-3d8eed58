@@ -22,6 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { useNow } from "@/hooks/use-now";
 import {
   deleteLicenseDevice,
   fetchLicense,
@@ -29,6 +30,7 @@ import {
   reactivateOrRenewLicense,
   resetLicenseDevices,
   softDeleteLicense,
+  updateLicense,
 } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 
@@ -88,8 +90,12 @@ export function LicenseDetailPage() {
   const [removeTarget, setRemoveTarget] = useState<{ id: string; device_id: string } | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [reactivateOpen, setReactivateOpen] = useState(false);
+  const [resetActivationOpen, setResetActivationOpen] = useState(false);
   const [reactivateResetDevices, setReactivateResetDevices] = useState(false);
   const [reactivateExpiresLocal, setReactivateExpiresLocal] = useState<string>("");
+
+  // Re-render countdown every 60s
+  useNow(60_000);
 
   const licQuery = useQuery({
     queryKey: ["license", licenseId],
@@ -168,6 +174,25 @@ export function LicenseDetailPage() {
     },
   });
 
+  const resetActivationMutation = useMutation({
+    mutationFn: async () => {
+      await updateLicense(licenseId, {
+        first_used_at: null,
+        expires_at: null,
+        // Keep legacy mirror in sync for older UIs
+        activated_at: null,
+      } as any);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["license", licenseId] });
+      toast({ title: "Activation reset" });
+      setResetActivationOpen(false);
+    },
+    onError: (err) => {
+      toast({ title: "Failed to reset activation", description: String(err), variant: "destructive" });
+    },
+  });
+
   return (
     <section className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -215,6 +240,11 @@ export function LicenseDetailPage() {
           >
             Reset devices
           </Button>
+          {Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use) ? (
+            <Button variant="soft" onClick={() => setResetActivationOpen(true)} disabled={!licQuery.data}>
+              Reset activation
+            </Button>
+          ) : null}
           <Button
             variant="destructive"
             onClick={() => {
@@ -295,6 +325,14 @@ export function LicenseDetailPage() {
                         : licQuery.data.expires_at
                           ? new Date(licQuery.data.expires_at).toLocaleString()
                           : "—"}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Type</div>
+                  <div className="text-sm">
+                    {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use)
+                      ? "Start on first use"
+                      : "Fixed"}
                   </div>
                 </div>
                 {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
@@ -510,6 +548,25 @@ export function LicenseDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={resetActivationOpen} onOpenChange={setResetActivationOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset activation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will set <span className="font-mono">first_used_at = null</span> and <span className="font-mono">expires_at = null</span>.
+              The next successful verify will start the countdown again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetActivationMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => resetActivationMutation.mutate()} disabled={resetActivationMutation.isPending}>
+              {resetActivationMutation.isPending ? "Resetting…" : "Reset activation"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
+

@@ -15,6 +15,7 @@ import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 
 const schema = z.object({
   expires_at: z.string().optional(),
+  duration_days: z.coerce.number().int().min(1).max(3650).optional(),
   max_devices: z.coerce.number().int().min(1).max(999),
   is_active: z.boolean(),
   note: z.string().trim().max(2000).optional(),
@@ -37,6 +38,7 @@ export function LicenseEditPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       expires_at: "",
+      duration_days: 30,
       max_devices: 1,
       is_active: true,
       note: "",
@@ -44,6 +46,7 @@ export function LicenseEditPage() {
     values: data
       ? {
           expires_at: isoToLocal(data.expires_at),
+          duration_days: (data as any).duration_days ?? undefined,
           max_devices: data.max_devices,
           is_active: data.is_active,
           note: data.note ?? "",
@@ -53,12 +56,28 @@ export function LicenseEditPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
-      await updateLicense(licenseId, {
-        expires_at: values.expires_at ? localToIso(values.expires_at) : null,
+      const startOnFirstUse = Boolean((data as any)?.start_on_first_use ?? (data as any)?.starts_on_first_use);
+      const firstUsedAt = (data as any)?.first_used_at ?? (data as any)?.activated_at ?? null;
+
+      const patch: Record<string, unknown> = {
         max_devices: values.max_devices,
         is_active: values.is_active,
         note: values.note?.trim() ? values.note.trim() : null,
-      } as any);
+      };
+
+      if (startOnFirstUse) {
+        // For start-on-first-use licenses, expires_at is managed by verify-key.
+        // Allow editing duration_days ONLY before first use.
+        if (!firstUsedAt) {
+          patch.duration_days = typeof values.duration_days === "number" ? values.duration_days : null;
+          patch.expires_at = null;
+        }
+      } else {
+        // Standard fixed-expiry licenses keep the legacy flow.
+        patch.expires_at = values.expires_at ? localToIso(values.expires_at) : null;
+      }
+
+      await updateLicense(licenseId, patch as any);
     },
     onSuccess: () => navigate(`/licenses/${licenseId}`),
   });
@@ -80,15 +99,33 @@ export function LicenseEditPage() {
             <div className="font-mono text-sm">{data.key}</div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          {Boolean((data as any).start_on_first_use ?? (data as any).starts_on_first_use) ? (
+            <div className="space-y-2">
+              <Label htmlFor="duration_days">Duration days</Label>
+              <Input
+                id="duration_days"
+                type="number"
+                min={1}
+                max={3650}
+                disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
+                {...form.register("duration_days")}
+              />
+              <div className="text-xs text-muted-foreground">
+                {Boolean((data as any).first_used_at ?? (data as any).activated_at)
+                  ? "Already started. Use Reset activation on the detail page to change duration."
+                  : "Countdown will start on first successful verify."}
+              </div>
+            </div>
+          ) : (
             <div className="space-y-2">
               <Label htmlFor="expires_at">Expires at (optional)</Label>
               <Input id="expires_at" type="datetime-local" {...form.register("expires_at")} />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="max_devices">Max devices</Label>
-              <Input id="max_devices" type="number" min={1} max={999} {...form.register("max_devices")} />
-            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="max_devices">Max devices</Label>
+            <Input id="max_devices" type="number" min={1} max={999} {...form.register("max_devices")} />
           </div>
 
           <div className="flex items-center justify-between rounded-lg border p-3">
