@@ -7,6 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { createLicense, generateLicenseKey } from "@/features/licenses/licenses-api";
@@ -14,7 +15,7 @@ import { localToIso } from "@/features/licenses/license-utils";
 
 const schema = z
   .object({
-    start_on_first_use: z.boolean().default(false),
+    license_type: z.enum(["fixed", "first_use"]).default("fixed"),
   key: z
     .string()
     .trim()
@@ -28,7 +29,7 @@ const schema = z
   note: z.string().trim().max(2000).optional(),
   })
   .superRefine((v, ctx) => {
-    if (!v.start_on_first_use) {
+    if (v.license_type !== "first_use") {
       if (!v.expires_at || !String(v.expires_at).trim()) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expires_at"], message: "Expires at is required" });
       }
@@ -47,10 +48,10 @@ export function LicenseCreatePage() {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-       start_on_first_use: false,
+      license_type: "fixed",
       key: "",
       expires_at: "",
-       duration_days: 30,
+      duration_days: 30,
       max_devices: 1,
       is_active: true,
       note: "",
@@ -64,7 +65,7 @@ export function LicenseCreatePage() {
 
   const createMutation = useMutation({
     mutationFn: async (values: FormValues) => {
-      const startOnFirstUse = Boolean(values.start_on_first_use);
+      const startOnFirstUse = values.license_type === "first_use";
       const expiresIso = !startOnFirstUse ? localToIso(values.expires_at || "") : null;
 
       const durationDays = startOnFirstUse ? Number(values.duration_days ?? 0) : null;
@@ -110,18 +111,28 @@ export function LicenseCreatePage() {
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border p-3">
-          <div>
-            <div className="text-sm font-medium">Start on first use</div>
-            <div className="text-xs text-muted-foreground">If on, countdown starts on first successful verify.</div>
+        <div className="space-y-2">
+          <Label>License type</Label>
+          <Select
+            value={form.watch("license_type")}
+            onValueChange={(v) => form.setValue("license_type", v as any, { shouldDirty: true, shouldValidate: true })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="fixed">Fixed expiry</SelectItem>
+              <SelectItem value="first_use">Start on first use</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground">
+            {form.watch("license_type") === "first_use"
+              ? "Countdown starts on the first successful verify. Expires will be set automatically."
+              : "Expiry is enforced immediately based on the Expires at field."}
           </div>
-          <Switch
-            checked={form.watch("start_on_first_use")}
-            onCheckedChange={(v) => form.setValue("start_on_first_use", v, { shouldDirty: true, shouldValidate: true })}
-          />
         </div>
 
-        {form.watch("start_on_first_use") ? (
+        {form.watch("license_type") === "first_use" ? (
           <div className="space-y-2">
             <Label htmlFor="duration_days">Duration days</Label>
             <Input id="duration_days" type="number" min={1} max={3650} {...form.register("duration_days")} />
@@ -149,7 +160,7 @@ export function LicenseCreatePage() {
           </div>
         )}
 
-        {form.watch("start_on_first_use") ? (
+        {form.watch("license_type") === "first_use" ? (
           <div className="space-y-2">
             <Label htmlFor="max_devices_first_use">Max devices</Label>
             <Input id="max_devices_first_use" type="number" min={1} max={999} {...form.register("max_devices")} />

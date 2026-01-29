@@ -381,6 +381,7 @@ Deno.serve(async (req) => {
   // 4.5) First successful verify activates "start on first use" licenses
   // Activation happens after device checks pass so it doesn't start counting on failures.
   let effectiveExpiresAt: string | null = licRow.expires_at;
+  let started = startsOnFirstUse && Boolean(firstUsedAt);
   if (startsOnFirstUse && !firstUsedAt) {
     const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays : null;
     const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
@@ -406,6 +407,7 @@ Deno.serve(async (req) => {
       // If we won the race, use the updated expiry. If we lost, keep existing value.
       if (!activation.error && activation.data?.expires_at) {
         effectiveExpiresAt = activation.data.expires_at;
+        started = true;
       }
     }
   }
@@ -426,13 +428,21 @@ Deno.serve(async (req) => {
 
   const remainingSeconds = effectiveExpiresAt
     ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000))
-    : null;
+    : startsOnFirstUse && !started
+      ? (() => {
+          const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays : null;
+          const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
+          const durSeconds = dDays ? dDays * 86400 : dSecs;
+          return typeof durSeconds === "number" ? durSeconds : null;
+        })()
+      : null;
 
   return json({
     ok: true,
     msg: "OK",
     expires_at: effectiveExpiresAt,
     max_devices: licRow.max_devices,
+    started,
     remaining_seconds: remainingSeconds,
     server_time: now.toISOString(),
   });
