@@ -335,7 +335,7 @@ export function LicenseDetailPage() {
                       const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
                       const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
                       if (startOnFirstUse && !firstUsedAt) return `Not started • ${formatDurationSecondsOrDays(licQuery.data)}`;
-                      if (!licQuery.data.expires_at) return startOnFirstUse ? "Not started" : "Never expires";
+                      if (!licQuery.data.expires_at) return startOnFirstUse ? "—" : "Never expires";
                       return formatRemainingFromExpires(licQuery.data.expires_at, nowMs) ?? "—";
                     })()}
                   </div>

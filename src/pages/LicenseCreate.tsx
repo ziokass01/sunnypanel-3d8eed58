@@ -23,26 +23,30 @@ const schema = z
       .max(64)
       .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "Format: SUNNY-XXXX-XXXX-XXXX"),
     expires_at: z.string().optional(),
-    duration_days: z.coerce.number().int().min(0).max(3650).optional(),
-    duration_hours: z.coerce.number().int().min(0).max(23).optional(),
-    duration_minutes: z.coerce.number().int().min(0).max(59).optional(),
+    duration_value: z.coerce.number().int().min(1).max(3650).optional(),
+    duration_unit: z.enum(["minutes", "hours", "days"]).default("hours"),
     max_devices: z.coerce.number().int().min(1).max(999),
     is_active: z.boolean(),
     note: z.string().trim().max(2000).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.license_type === "first_use") {
-      const dd = Number(v.duration_days ?? 0);
-      const hh = Number(v.duration_hours ?? 0);
-      const mm = Number(v.duration_minutes ?? 0);
-      const totalSeconds = (Number.isFinite(dd) ? dd : 0) * 86400 + (Number.isFinite(hh) ? hh : 0) * 3600 + (Number.isFinite(mm) ? mm : 0) * 60;
-      if (!totalSeconds || totalSeconds <= 0) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_minutes"], message: "Duration is required" });
+      const value = typeof v.duration_value === "number" && Number.isFinite(v.duration_value) ? v.duration_value : null;
+      if (!value || value <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_value"], message: "Duration is required" });
       }
     }
   });
 
 type FormValues = z.infer<typeof schema>;
+
+function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes" | "hours" | "days" }) {
+  const value = typeof v.duration_value === "number" && Number.isFinite(v.duration_value) ? v.duration_value : null;
+  if (!value || value <= 0) return null;
+  const unit = v.duration_unit ?? "hours";
+  const mult = unit === "minutes" ? 60 : unit === "hours" ? 3600 : 86400;
+  return value * mult;
+}
 
 export function LicenseCreatePage() {
   const navigate = useNavigate();
@@ -53,9 +57,8 @@ export function LicenseCreatePage() {
       license_type: "fixed",
       key: "",
       expires_at: "",
-      duration_days: 0,
-      duration_hours: 2,
-      duration_minutes: 0,
+      duration_value: 2,
+      duration_unit: "hours",
       max_devices: 1,
       is_active: true,
       note: "",
@@ -72,18 +75,11 @@ export function LicenseCreatePage() {
       const startOnFirstUse = values.license_type === "first_use";
       const expiresIso = !startOnFirstUse ? localToIso(values.expires_at || "") : null;
 
-      const dd = Number(values.duration_days ?? 0);
-      const hh = Number(values.duration_hours ?? 0);
-      const mm = Number(values.duration_minutes ?? 0);
-      const durationSeconds = startOnFirstUse
-        ? (Math.max(0, Number.isFinite(dd) ? dd : 0) * 86400 +
-            Math.max(0, Number.isFinite(hh) ? hh : 0) * 3600 +
-            Math.max(0, Number.isFinite(mm) ? mm : 0) * 60) || null
-        : null;
+      const durationSeconds = startOnFirstUse ? fieldsToSeconds(values) : null;
 
       return await createLicense({
         key: values.key.toUpperCase(),
-          expires_at: startOnFirstUse ? null : expiresIso,
+        expires_at: startOnFirstUse ? null : expiresIso,
         // New
         start_on_first_use: startOnFirstUse,
         duration_days: null,
@@ -145,29 +141,25 @@ export function LicenseCreatePage() {
         {form.watch("license_type") === "first_use" ? (
           <div className="space-y-2">
             <Label>Duration</Label>
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="duration_days" className="text-xs text-muted-foreground">
-                  Days
-                </Label>
-                <Input id="duration_days" type="number" min={0} max={3650} {...form.register("duration_days")} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="duration_hours" className="text-xs text-muted-foreground">
-                  Hours
-                </Label>
-                <Input id="duration_hours" type="number" min={0} max={23} {...form.register("duration_hours")} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="duration_minutes" className="text-xs text-muted-foreground">
-                  Minutes
-                </Label>
-                <Input id="duration_minutes" type="number" min={0} max={59} {...form.register("duration_minutes")} />
-              </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Input id="duration_value" type="number" min={1} max={3650} {...form.register("duration_value")} />
+              <Select
+                value={form.watch("duration_unit")}
+                onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Unit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="minutes">Minutes</SelectItem>
+                  <SelectItem value="hours">Hours</SelectItem>
+                  <SelectItem value="days">Days</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            {form.formState.errors.duration_minutes ? (
-              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_minutes?.message)}</div>
+            {form.formState.errors.duration_value ? (
+              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_value?.message)}</div>
             ) : null}
             <div className="text-xs text-muted-foreground">Countdown starts on the first successful verify.</div>
           </div>
