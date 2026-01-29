@@ -309,7 +309,12 @@ export function LicenseDetailPage() {
                 ) : null}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Remaining time</div>
-                  <div className="text-sm">{formatRemainingTime(licQuery.data.expires_at)}</div>
+                  <div className="text-sm">
+                    {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) &&
+                    !((licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at)
+                      ? "Not started"
+                      : formatRemainingTime(licQuery.data.expires_at)}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Max devices</div>
