@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -70,8 +70,6 @@ export function LicensesListPage() {
     return data.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) === wantFirstUse);
   }, [data, type]);
 
-  // If the current selection becomes impossible (e.g. filtered list empty after changes), keep it.
-  useEffect(() => void nowMs, [nowMs]);
 
   const softDeleteMutation = useMutation({
     mutationFn: async (id: string) => softDeleteLicense(id),

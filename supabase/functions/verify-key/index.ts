@@ -134,42 +134,6 @@ Deno.serve(async (req) => {
   const ip = getClientIp(req);
   const now = new Date();
 
-  // --- HMAC-signed requests (anti-enumeration) ---
-  // Require x-ts, x-nonce, x-sig.
-  // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
-  // Sig: HMAC_SHA256_HEX(VERIFY_HMAC_SECRET, canonical)
-  const ts = req.headers.get("x-ts") ?? "";
-  const nonce = req.headers.get("x-nonce") ?? "";
-  const sig = req.headers.get("x-sig") ?? "";
-
-  if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
-    // Don't leak key status; keep HTTP 200 as requested.
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-  }
-
-  const secret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
-  if (!secret) {
-    // Misconfigured backend; still don't leak any key status.
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-  }
-
-  // Read raw body once for hashing + parsing.
-  const rawBody = await req.text();
-  const bodyHash = await sha256Hex(rawBody);
-  const canonical = `${ts}.${nonce}.${bodyHash}`;
-  const expected = await hmacSha256Hex(secret, canonical);
-  if (!timingSafeEqualHex(expected, sig)) {
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-  }
-
-  // --- Anti-replay ---
-  // Enforce timestamp window: abs(now_unix_seconds - x-ts) <= 300
-  const nowUnix = Math.floor(now.getTime() / 1000);
-  const tsNum = Number(ts);
-  if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-  }
-
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -177,21 +141,76 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  // Store nonce with TTL 10 minutes; reject replays on conflict.
-  const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
-  const nonceInsert = await db.from("request_nonces").insert({
-    nonce,
-    ts: Math.trunc(tsNum),
-    expires_at: nonceExpiresAt,
-  });
-  if (nonceInsert.error) {
-    // Conflict (duplicate nonce) or any DB error: fail closed but generic.
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  // Optional admin-only bypass for testing/ops:
+  // If an authenticated admin calls this endpoint with Authorization: Bearer <JWT>,
+  // we skip the HMAC/nonce checks but keep all business logic (device limit, expiry, etc.).
+  let adminBypass = false;
+  const authHeader = req.headers.get("authorization") ?? "";
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    const token = authHeader.slice("bearer ".length).trim();
+    if (token) {
+      const userRes = await db.auth.getUser(token);
+      const userId = userRes.data.user?.id ?? null;
+      if (!userRes.error && userId) {
+        const roleRes = await db.rpc("has_role" as any, { _user_id: userId, _role: "admin" } as any);
+        adminBypass = !roleRes.error && Boolean(roleRes.data);
+      }
+    }
   }
 
-  // Lightweight cleanup (best-effort)
-  if (Math.random() < 0.02) {
-    await db.from("request_nonces").delete().lt("expires_at", now.toISOString());
+  // --- HMAC-signed requests (anti-enumeration) ---
+  // Require x-ts, x-nonce, x-sig.
+  // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
+  // Sig: HMAC_SHA256_HEX(VERIFY_HMAC_SECRET, canonical)
+  const rawBody = await req.text();
+
+  if (!adminBypass) {
+    const ts = req.headers.get("x-ts") ?? "";
+    const nonce = req.headers.get("x-nonce") ?? "";
+    const sig = req.headers.get("x-sig") ?? "";
+
+    if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
+      // Don't leak key status; keep HTTP 200 as requested.
+      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    }
+
+    const secret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
+    if (!secret) {
+      // Misconfigured backend; still don't leak any key status.
+      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    }
+
+    const bodyHash = await sha256Hex(rawBody);
+    const canonical = `${ts}.${nonce}.${bodyHash}`;
+    const expected = await hmacSha256Hex(secret, canonical);
+    if (!timingSafeEqualHex(expected, sig)) {
+      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    }
+
+    // --- Anti-replay ---
+    // Enforce timestamp window: abs(now_unix_seconds - x-ts) <= 300
+    const nowUnix = Math.floor(now.getTime() / 1000);
+    const tsNum = Number(ts);
+    if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
+      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    }
+
+    // Store nonce with TTL 10 minutes; reject replays on conflict.
+    const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+    const nonceInsert = await db.from("request_nonces").insert({
+      nonce,
+      ts: Math.trunc(tsNum),
+      expires_at: nonceExpiresAt,
+    });
+    if (nonceInsert.error) {
+      // Conflict (duplicate nonce) or any DB error: fail closed but generic.
+      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    }
+
+    // Lightweight cleanup (best-effort)
+    if (Math.random() < 0.02) {
+      await db.from("request_nonces").delete().lt("expires_at", now.toISOString());
+    }
   }
 
   let body: unknown;
