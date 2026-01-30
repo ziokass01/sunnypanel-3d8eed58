@@ -39,8 +39,11 @@ function computeRemainingLabel(row: any, nowMs: number) {
   const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
   const firstUsedAt = row?.first_used_at ?? row?.activated_at ?? null;
   const notStarted = startOnFirstUse && !firstUsedAt;
+  const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
 
   if (notStarted) return `Not started • ${formatDurationForRow(row)}`;
+
+  if (badState) return "BAD STATE (expires cleared)";
 
   if (!row?.expires_at) {
     // Fixed key with expires_at=NULL => never expires
@@ -55,7 +58,9 @@ function computeExpiresLabel(row: any) {
   const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
   const firstUsedAt = row?.first_used_at ?? row?.activated_at ?? null;
   const notStarted = startOnFirstUse && !firstUsedAt;
+  const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
   if (notStarted) return "Not started";
+  if (badState) return "BAD STATE (expires cleared)";
   if (!row?.expires_at) return startOnFirstUse ? "—" : "Never expires";
   return new Date(row.expires_at).toLocaleString();
 }

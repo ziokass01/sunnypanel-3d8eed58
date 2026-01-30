@@ -126,7 +126,16 @@ export function LicenseDetailPage() {
 
   const reactivateMutation = useMutation({
     mutationFn: async () => {
+      const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
+      const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
+
       const expires_at = reactivateExpiresLocal ? localToIso(reactivateExpiresLocal) : null;
+
+      // Countdown licenses: do not allow clearing expires_at while started.
+      if (startOnFirstUse && firstUsedAt && !expires_at) {
+        throw new Error("CANNOT_CLEAR_EXPIRES");
+      }
+
       await reactivateOrRenewLicense(licenseId, { expires_at });
       if (reactivateResetDevices) {
         await resetLicenseDevices(licenseId);
@@ -142,7 +151,14 @@ export function LicenseDetailPage() {
       setReactivateOpen(false);
     },
     onError: (err) => {
-      toast({ title: "Failed to reactivate/renew", description: String(err), variant: "destructive" });
+      const msg = String(err);
+      toast({
+        title: "Failed to reactivate/renew",
+        description: msg.includes("CANNOT_CLEAR_EXPIRES")
+          ? "Countdown licenses cannot clear expires_at after they have started."
+          : msg,
+        variant: "destructive",
+      });
     },
   });
 
@@ -334,12 +350,26 @@ export function LicenseDetailPage() {
                     {(() => {
                       const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
                       const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
+                      const badState = startOnFirstUse && Boolean(firstUsedAt) && !licQuery.data.expires_at;
                       if (startOnFirstUse && !firstUsedAt) return `Not started • ${formatDurationSecondsOrDays(licQuery.data)}`;
+                      if (badState) return "BAD STATE (expires cleared)";
                       if (!licQuery.data.expires_at) return startOnFirstUse ? "—" : "Never expires";
                       return formatRemainingFromExpires(licQuery.data.expires_at, nowMs) ?? "—";
                     })()}
                   </div>
                 </div>
+
+                {(() => {
+                  const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
+                  const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
+                  const badState = startOnFirstUse && Boolean(firstUsedAt) && !licQuery.data.expires_at;
+                  if (!badState) return null;
+                  return (
+                    <div className="col-span-2 rounded-md border p-3 text-sm text-destructive">
+                      BAD STATE (expires cleared)
+                    </div>
+                  );
+                })()}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Max devices</div>
                   <div className="text-sm">{licQuery.data.max_devices}</div>
@@ -505,13 +535,20 @@ export function LicenseDetailPage() {
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="reactivate-expires">Expires at (optional)</Label>
+              <Label htmlFor="reactivate-expires">Expires at</Label>
               <Input
                 id="reactivate-expires"
                 type="datetime-local"
                 value={reactivateExpiresLocal}
                 onChange={(e) => setReactivateExpiresLocal(e.target.value)}
               />
+              {(() => {
+                const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
+                const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
+                if (!startOnFirstUse) return <div className="text-xs text-muted-foreground">Optional. Leave empty = Never expires.</div>;
+                if (!firstUsedAt) return <div className="text-xs text-muted-foreground">Countdown: expires_at will be set automatically on first verify.</div>;
+                return <div className="text-xs text-muted-foreground">Countdown (started): expires_at cannot be cleared.</div>;
+              })()}
             </div>
 
             <label className="flex items-center gap-2 text-sm">
@@ -527,7 +564,14 @@ export function LicenseDetailPage() {
             <AlertDialogCancel disabled={reactivateMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => reactivateMutation.mutate()}
-              disabled={reactivateMutation.isPending}
+              disabled={(() => {
+                if (reactivateMutation.isPending) return true;
+                const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
+                const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
+                // Prevent clearing expires_at for countdown licenses that have started.
+                if (startOnFirstUse && firstUsedAt && !reactivateExpiresLocal) return true;
+                return false;
+              })()}
             >
               {reactivateMutation.isPending ? "Applying…" : "Reactivate/Renew"}
             </AlertDialogAction>
