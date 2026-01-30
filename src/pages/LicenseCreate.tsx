@@ -51,10 +51,16 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
 export function LicenseCreatePage() {
   const navigate = useNavigate();
 
+  // Allow /licenses2/new to default to countdown keys without adding new wrapper components.
+  const initialLicenseType: FormValues["license_type"] =
+    typeof window !== "undefined" && window.location?.pathname === "/licenses2/new" ? "first_use" : "fixed";
+
+  const cancelTo = initialLicenseType === "first_use" ? "/licenses2" : "/licenses";
+
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      license_type: "fixed",
+      license_type: initialLicenseType,
       key: "",
       expires_at: "",
       duration_value: 2,
@@ -211,7 +217,7 @@ export function LicenseCreatePage() {
           <Button type="submit" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Saving…" : "Save"}
           </Button>
-          <Button type="button" variant="soft" onClick={() => navigate("/licenses")}>
+          <Button type="button" variant="soft" onClick={() => navigate(cancelTo)}>
             Cancel
           </Button>
         </div>

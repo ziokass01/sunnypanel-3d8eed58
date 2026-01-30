@@ -311,6 +311,13 @@ Deno.serve(async (req) => {
   const durationDays: number | null = licRow.duration_days ?? null;
   const durationSeconds: number | null = licRow.duration_seconds ?? null;
 
+  // Duration helper (prefer seconds, fallback days)
+  const effectiveDurationSeconds = (() => {
+    const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
+    const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays * 86400 : null;
+    return dSecs ?? dDays;
+  })();
+
   // Only enforce expiry once activated (or for standard keys)
   if (!(startsOnFirstUse && !firstUsedAt)) {
     if (licRow.expires_at) {
@@ -402,13 +409,41 @@ Deno.serve(async (req) => {
   let effectiveExpiresAt: string | null = licRow.expires_at;
   let effectiveFirstUsedAt: string | null = firstUsedAt;
   let started = Boolean(effectiveFirstUsedAt);
-  if (startsOnFirstUse && !firstUsedAt) {
-    const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays : null;
-    const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
-    const durSeconds = dDays ? dDays * 86400 : dSecs;
+  if (startsOnFirstUse) {
+    // ✅ Rule A: start-on-first-use must have duration.
+    // If countdown key is misconfigured (missing/<=0 duration), do not activate.
+    if (!effectiveDurationSeconds || effectiveDurationSeconds <= 0) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: { ip, device, ok: false, msg: "LICENSE_MISCONFIGURED" },
+      });
 
-    if (durSeconds) {
-      const newExpiresAt = new Date(now.getTime() + durSeconds * 1000).toISOString();
+      await maybeInsertEnumerationAlert(db, ip, key);
+      return json({ ok: false, msg: "LICENSE_MISCONFIGURED" });
+    }
+
+    // ✅ Rule B: if already started but expires_at is NULL, heal it from first_used_at + duration.
+    if (firstUsedAt && !licRow.expires_at) {
+      const fuMs = new Date(firstUsedAt).getTime();
+      if (Number.isFinite(fuMs)) {
+        const healedExpiresAt = new Date(fuMs + effectiveDurationSeconds * 1000).toISOString();
+        const heal = await db
+          .from("licenses")
+          .update({ expires_at: healedExpiresAt })
+          .eq("id", licRow.id)
+          .is("expires_at", null)
+          .select("expires_at")
+          .maybeSingle();
+
+        // Use healed value regardless of race outcome.
+        effectiveExpiresAt = heal.data?.expires_at ?? healedExpiresAt;
+      }
+    }
+
+    // Activate only if not started yet
+    if (!firstUsedAt) {
+      const newExpiresAt = new Date(now.getTime() + effectiveDurationSeconds * 1000).toISOString();
 
       // Activate atomically (win the race) using the new columns; also set legacy activated_at
       // for backward-compat display.
@@ -462,10 +497,7 @@ Deno.serve(async (req) => {
     ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000))
     : startsOnFirstUse && !started
       ? (() => {
-          const dDays = typeof durationDays === "number" && durationDays > 0 ? durationDays : null;
-          const dSecs = typeof durationSeconds === "number" && durationSeconds > 0 ? durationSeconds : null;
-          const durSeconds = dDays ? dDays * 86400 : dSecs;
-          return typeof durSeconds === "number" ? durSeconds : null;
+          return typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
         })()
       : null;
 
