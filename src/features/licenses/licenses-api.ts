@@ -220,6 +220,24 @@ export async function restoreLicense(id: string) {
   await logAudit("RESTORE", before.key, { restored: true });
 }
 
+export async function hardDeleteLicense(id: string) {
+  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
+    .select("key")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
+
+  // Ensure we don't violate FK constraints (license_devices -> licenses)
+  const { error: devicesErr } = await supabase.from("license_devices").delete().eq("license_id", id);
+  if (devicesErr) throw devicesErr;
+
+  const { error } = await (supabase.from(licensesTable) as any).delete().eq("id", id);
+  if (error) throw error;
+
+  await logAudit("HARD_DELETE", before.key, { license_id: id, hard_deleted: true });
+}
+
 export async function reactivateOrRenewLicense(id: string, params: { expires_at: string | null }) {
   const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
     .select("key")
