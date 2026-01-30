@@ -67,8 +67,8 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
 
-  // Live countdown (1s)
-  const nowMs = useNow(1_000);
+  // Live countdown (list can be less frequent than detail)
+  const nowMs = useNow(10_000);
 
   const queryKey = useMemo(() => ["licenses", { q, status }] as const, [q, status]);
   const { data = [], isLoading, error } = useQuery({
@@ -102,7 +102,9 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
             <NavLink to="/licenses/trash">View Trash</NavLink>
           </Button>
           <Button asChild>
-            <NavLink to="/licenses/new">Create license</NavLink>
+            <NavLink to={props.filterMode === "start_on_first_use" ? "/licenses2/new" : "/licenses/new"}>
+              Create license
+            </NavLink>
           </Button>
         </div>
       </header>
@@ -149,7 +151,7 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
               <TableHead>Key</TableHead>
               <TableHead className="hidden md:table-cell">Type</TableHead>
               <TableHead className="hidden md:table-cell">Expires</TableHead>
-              <TableHead className="hidden lg:table-cell">Remaining</TableHead>
+              <TableHead className="hidden md:table-cell">Remaining</TableHead>
               <TableHead className="hidden md:table-cell">Max devices</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Action</TableHead>
@@ -182,7 +184,7 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
                     </TableCell>
                     <TableCell className="hidden md:table-cell">{getLicenseType(row)}</TableCell>
                     <TableCell className="hidden md:table-cell">{computeExpiresLabel(row)}</TableCell>
-                    <TableCell className="hidden lg:table-cell">{remaining}</TableCell>
+                    <TableCell className="hidden md:table-cell">{remaining}</TableCell>
                     <TableCell className="hidden md:table-cell">{row.max_devices}</TableCell>
                     <TableCell>{statusLabel}</TableCell>
                     <TableCell className="text-right">

@@ -46,6 +46,7 @@ const App = () => (
               <Route path="/licenses2" element={<Licenses2Page />} />
               <Route path="/licenses/trash" element={<LicensesTrashPage />} />
               <Route path="/licenses/new" element={<LicenseCreatePage />} />
+              <Route path="/licenses2/new" element={<LicenseCreatePage />} />
               <Route path="/licenses/:id" element={<LicenseDetailPage />} />
               <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
               <Route path="/audit" element={<AuditLogsPage />} />
