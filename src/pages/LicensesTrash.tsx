@@ -4,11 +4,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { NavLink } from "@/components/NavLink";
-import { fetchDeletedLicenses, restoreLicense } from "@/features/licenses/licenses-api";
+import { fetchDeletedLicenses, hardDeleteLicense, restoreLicense } from "@/features/licenses/licenses-api";
 
 export function LicensesTrashPage() {
   const [q, setQ] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
 
   const queryKey = useMemo(() => ["licenses", "trash", { q }] as const, [q]);
@@ -19,6 +30,16 @@ export function LicensesTrashPage() {
 
   const restoreMutation = useMutation({
     mutationFn: async (id: string) => restoreLicense(id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["licenses"] }),
+        queryClient.invalidateQueries({ queryKey }),
+      ]);
+    },
+  });
+
+  const hardDeleteMutation = useMutation({
+    mutationFn: async (id: string) => hardDeleteLicense(id),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["licenses"] }),
@@ -76,17 +97,26 @@ export function LicensesTrashPage() {
                     {row.deleted_at ? new Date(row.deleted_at).toLocaleString() : "—"}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      variant="soft"
-                      onClick={() => {
-                        if (!confirm("Restore this license?")) return;
-                        restoreMutation.mutate(row.id);
-                      }}
-                      disabled={restoreMutation.isPending}
-                    >
-                      Restore
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="soft"
+                        onClick={() => {
+                          if (!confirm("Restore this license?")) return;
+                          restoreMutation.mutate(row.id);
+                        }}
+                        disabled={restoreMutation.isPending}
+                      >
+                        Restore
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => setDeleteTarget({ id: row.id, key: row.key })}
+                      >
+                        Xóa vĩnh viễn
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -94,6 +124,41 @@ export function LicensesTrashPage() {
           </TableBody>
         </Table>
       </div>
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? setDeleteTarget(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xóa vĩnh viễn?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Hành động này sẽ xóa license khỏi hệ thống và không thể khôi phục lại.
+              {deleteTarget?.key ? (
+                <span className="mt-2 block font-mono text-xs text-muted-foreground break-all">{deleteTarget.key}</span>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={hardDeleteMutation.isPending}
+              onClick={() => {
+                setDeleteTarget(null);
+              }}
+            >
+              Hủy
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!deleteTarget) return;
+                hardDeleteMutation.mutate(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+              disabled={hardDeleteMutation.isPending}
+            >
+              Xóa vĩnh viễn
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
