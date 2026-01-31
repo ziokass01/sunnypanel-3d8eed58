@@ -25,7 +25,7 @@ const schema = z
     expires_at: z.string().optional(),
     duration_value: z.coerce.number().int().min(1).max(3650).optional(),
     duration_unit: z.enum(["minutes", "hours", "days"]).default("hours"),
-    max_devices: z.coerce.number().int().min(1).max(999),
+    max_devices: z.coerce.number().int().min(1),
     is_active: z.boolean(),
     note: z.string().trim().max(2000).optional(),
   })
@@ -178,7 +178,7 @@ export function LicenseCreatePage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="max_devices">Max devices</Label>
-              <Input id="max_devices" type="number" min={1} max={999} {...form.register("max_devices")} />
+              <Input id="max_devices" type="number" min={1} {...form.register("max_devices")} />
               {form.formState.errors.max_devices ? (
                 <div className="text-sm text-destructive">{form.formState.errors.max_devices.message}</div>
               ) : null}
@@ -189,7 +189,7 @@ export function LicenseCreatePage() {
         {form.watch("license_type") === "first_use" ? (
           <div className="space-y-2">
             <Label htmlFor="max_devices_first_use">Max devices</Label>
-            <Input id="max_devices_first_use" type="number" min={1} max={999} {...form.register("max_devices")} />
+            <Input id="max_devices_first_use" type="number" min={1} {...form.register("max_devices")} />
             {form.formState.errors.max_devices ? (
               <div className="text-sm text-destructive">{form.formState.errors.max_devices.message}</div>
             ) : null}
