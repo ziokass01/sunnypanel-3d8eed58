@@ -38,6 +38,33 @@ export type Database = {
         }
         Relationships: []
       }
+      blocked_ips: {
+        Row: {
+          blocked_until: string
+          created_at: string
+          ip: string
+          meta: Json
+          reason: string
+          updated_at: string
+        }
+        Insert: {
+          blocked_until: string
+          created_at?: string
+          ip: string
+          meta?: Json
+          reason?: string
+          updated_at?: string
+        }
+        Update: {
+          blocked_until?: string
+          created_at?: string
+          ip?: string
+          meta?: Json
+          reason?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       license_devices: {
         Row: {
           device_id: string
@@ -193,6 +220,60 @@ export type Database = {
         }
         Relationships: []
       }
+      verify_ip_rate_limits: {
+        Row: {
+          count: number
+          created_at: string
+          id: string
+          ip: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          id?: string
+          ip: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          id?: string
+          ip?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      verify_new_device_rate_limits: {
+        Row: {
+          count: number
+          created_at: string
+          id: string
+          license_key: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          id?: string
+          license_key: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          id?: string
+          license_key?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       verify_rate_limits: {
         Row: {
           count: number
@@ -228,6 +309,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_ip_rate_limit: {
+        Args: { p_ip: string; p_limit?: number; p_window_seconds?: number }
+        Returns: {
+          allowed: boolean
+          current_count: number
+          window_start: string
+        }[]
+      }
+      check_new_device_rate_limit: {
+        Args: { p_key: string; p_limit?: number; p_window_seconds?: number }
+        Returns: {
+          allowed: boolean
+          current_count: number
+          window_start: string
+        }[]
+      }
       check_rate_limit: {
         Args: {
           p_ip: string
@@ -240,6 +337,10 @@ export type Database = {
           current_count: number
           window_start: string
         }[]
+      }
+      cleanup_verify_tables: {
+        Args: { p_rate_limit_ttl_days?: number }
+        Returns: undefined
       }
       has_role: {
         Args: {
