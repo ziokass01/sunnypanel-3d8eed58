@@ -125,6 +125,42 @@ async function maybeInsertEnumerationAlert(
       thresholds: { failure_5m: 20, distinct_keys_10m: 30 },
     },
   });
+
+  // Auto-block IP temporarily when enumeration looks high.
+  // Response contract remains unchanged; callers will see RATE_LIMIT.
+  try {
+    const now = new Date();
+    const blockMinutes = 30;
+    const newUntil = new Date(now.getTime() + blockMinutes * 60 * 1000).toISOString();
+
+    const existing = await db
+      .from("blocked_ips")
+      .select("blocked_until")
+      .eq("ip", ip)
+      .maybeSingle();
+
+    const prevUntil = existing.data?.blocked_until ? new Date(existing.data.blocked_until).getTime() : 0;
+    const nextUntilMs = Math.max(prevUntil, new Date(newUntil).getTime());
+
+    await db
+      .from("blocked_ips")
+      .upsert(
+        {
+          ip,
+          blocked_until: new Date(nextUntilMs).toISOString(),
+          reason: "ENUMERATION",
+          meta: {
+            failure_5m: failure5m,
+            distinct_keys_10m: distinct10m,
+            block_minutes: blockMinutes,
+          },
+          updated_at: now.toISOString(),
+        },
+        { onConflict: "ip" },
+      );
+  } catch {
+    // Best-effort only.
+  }
 }
 
 Deno.serve(async (req) => {
@@ -158,6 +194,27 @@ Deno.serve(async (req) => {
     }
   }
 
+  // --- Early blocklist check (auto-blocked IPs) ---
+  // Keep contract unchanged: return RATE_LIMIT.
+  if (!adminBypass) {
+    const blk = await db
+      .from("blocked_ips")
+      .select("blocked_until")
+      .eq("ip", ip)
+      .maybeSingle();
+
+    const untilIso = blk.data?.blocked_until ?? null;
+    const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
+    if (untilMs && untilMs > now.getTime()) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: "",
+        detail: { ip, ok: false, msg: "RATE_LIMIT", reason: "IP_BLOCKED" },
+      });
+      return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+    }
+  }
+
   // --- HMAC-signed requests (anti-enumeration) ---
   // Require x-ts, x-nonce, x-sig.
   // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
@@ -170,12 +227,22 @@ Deno.serve(async (req) => {
     const sig = req.headers.get("x-sig") ?? "";
 
     if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: "",
+        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_HEADERS" },
+      });
       // Don't leak key status; keep HTTP 200 as requested.
       return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
     }
 
     const secret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
     if (!secret) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: "",
+        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "MISCONFIGURED" },
+      });
       // Misconfigured backend; still don't leak any key status.
       return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
     }
@@ -184,6 +251,11 @@ Deno.serve(async (req) => {
     const canonical = `${ts}.${nonce}.${bodyHash}`;
     const expected = await hmacSha256Hex(secret, canonical);
     if (!timingSafeEqualHex(expected, sig)) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: "",
+        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_SIG" },
+      });
       return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
     }
 
@@ -192,6 +264,11 @@ Deno.serve(async (req) => {
     const nowUnix = Math.floor(now.getTime() / 1000);
     const tsNum = Number(ts);
     if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: "",
+        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "TS_WINDOW" },
+      });
       return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
     }
 
@@ -203,6 +280,11 @@ Deno.serve(async (req) => {
       expires_at: nonceExpiresAt,
     });
     if (nonceInsert.error) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: "",
+        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "NONCE_REPLAY" },
+      });
       // Conflict (duplicate nonce) or any DB error: fail closed but generic.
       return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
     }
@@ -229,6 +311,34 @@ Deno.serve(async (req) => {
   const key = parsed.data.key.trim().toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
+
+  // 0) IP-only rate limit (in parallel with key+ip)
+  // This helps even when attackers rotate keys.
+  const IP_RATE_LIMIT = 180;
+  const IP_RATE_WINDOW_SECONDS = 60;
+  const ipRl = await db.rpc("check_ip_rate_limit", {
+    p_ip: ip,
+    p_limit: IP_RATE_LIMIT,
+    p_window_seconds: IP_RATE_WINDOW_SECONDS,
+  });
+  const ipAllowed = ipRl.error ? true : Boolean(ipRl.data?.[0]?.allowed);
+  if (!ipAllowed) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: {
+        ip,
+        device,
+        ok: false,
+        msg: "RATE_LIMIT",
+        kind: "IP_ONLY",
+        current_count: ipRl.data?.[0]?.current_count ?? null,
+      },
+    });
+
+    await maybeInsertEnumerationAlert(db, ip, key);
+    return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+  }
 
   // 1) Rate limit (key + ip) - light
   const RATE_WINDOW_MIN = 5;
@@ -355,6 +465,34 @@ Deno.serve(async (req) => {
   }
 
   if (!existing.data) {
+    // 3.1) Anti "device slot burning": throttle *new* device registrations per key.
+    // If this triggers, we return RATE_LIMIT (contract unchanged).
+    const NEW_DEVICE_LIMIT = 10;
+    const NEW_DEVICE_WINDOW_SECONDS = 3600;
+    const nd = await db.rpc("check_new_device_rate_limit", {
+      p_key: key,
+      p_limit: NEW_DEVICE_LIMIT,
+      p_window_seconds: NEW_DEVICE_WINDOW_SECONDS,
+    });
+    const ndAllowed = nd.error ? true : Boolean(nd.data?.[0]?.allowed);
+    if (!ndAllowed) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: {
+          ip,
+          device,
+          ok: false,
+          msg: "RATE_LIMIT",
+          kind: "NEW_DEVICE",
+          current_count: nd.data?.[0]?.current_count ?? null,
+        },
+      });
+
+      await maybeInsertEnumerationAlert(db, ip, key);
+      return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+    }
+
     const count = await db
       .from("license_devices")
       .select("id", { count: "exact", head: true })
