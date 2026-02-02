@@ -28,7 +28,9 @@ export function FreeLandingPage() {
     return m.length ? m.join(", ") : null;
   }, [cfg]);
 
-  const outbound = cfg?.free_outbound_url ?? null;
+  const fallbackOutbound = `${window.location.origin}/free/gate`;
+  const outbound = (cfg?.free_outbound_url ?? fallbackOutbound) || fallbackOutbound;
+  const usingFallback = !cfg?.free_outbound_url;
   const canGo = Boolean(outbound);
 
   return (
@@ -67,7 +69,7 @@ export function FreeLandingPage() {
                 window.location.href = "/admin/free-keys";
               }}
             >
-              Mở Admin Get Key
+              Mở Panel Admin
             </Button>
 
             {cfg?.show_test_redirect_button ? (
@@ -79,7 +81,7 @@ export function FreeLandingPage() {
                     if (!outbound) return;
                     window.open(outbound, "_blank", "noopener,noreferrer");
                   }}
-                  disabled={!outbound}
+                  disabled={loading && !cfg}
                 >
                   Test Redirect (temporary)
                 </Button>

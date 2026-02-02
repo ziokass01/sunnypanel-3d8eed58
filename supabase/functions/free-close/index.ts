@@ -50,8 +50,22 @@ function json(req: Request, data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers });
 }
 
+function preflight(req: Request) {
+  // CORS preflight for browser requests
+  const origin = req.headers.get("Origin") ?? "";
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": "content-type, authorization",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
+  // Mirror the same allow-origin policy as json()
+  headers["Access-Control-Allow-Origin"] = origin && (origin.endsWith(".lovable.app") || origin.endsWith(".lovable.dev") || origin === "https://lovable.dev") ? origin : origin || "null";
+  return new Response(null, { status: 204, headers });
+}
+
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204 });
+  if (req.method === "OPTIONS") return preflight(req);
   if (req.method !== "POST") return json(req, { ok: false }, 405);
 
   const ip = getClientIp(req);
@@ -59,8 +73,11 @@ Deno.serve(async (req) => {
   const sessId = cookies.fk_sess ?? "";
   if (!sessId) return json(req, { ok: false, msg: "UNAUTHORIZED" }, 401);
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
+  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return json(req, { ok: false, msg: "SERVER_MISCONFIG" }, 500);
+  }
   const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   // Rate limit close lightly (by plain IP hash isn't available here without crypto; keep minimal)

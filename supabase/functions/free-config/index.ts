@@ -100,18 +100,21 @@ Deno.serve(async (req) => {
   const publicBase = inferBaseUrl(req);
 
   // 1) Prefer DB override (admin-managed). 2) Fallback to ENV.
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
+  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  const canReadDb = !!supabaseUrl && !!serviceRoleKey;
+  const db = canReadDb ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } }) : null;
 
   let dbOutbound: string | null = null;
-  const settings = await db
-    .from("licenses_free_settings")
-    .select("free_outbound_url")
-    .eq("id", 1)
-    .maybeSingle();
-  if (!settings.error) {
-    dbOutbound = fixCommonGateTypo(normalizeHttpsUrl((settings.data as any)?.free_outbound_url ?? null));
+  if (db) {
+    const settings = await db
+      .from("licenses_free_settings")
+      .select("free_outbound_url")
+      .eq("id", 1)
+      .maybeSingle();
+    if (!settings.error) {
+      dbOutbound = fixCommonGateTypo(normalizeHttpsUrl((settings.data as any)?.free_outbound_url ?? null));
+    }
   }
 
   const envOutbound = fixCommonGateTypo(normalizeHttpsUrl((Deno.env.get("FREE_OUTBOUND_URL") ?? "").trim() || null));

@@ -51,6 +51,31 @@ function cookie(name: string, value: string, opts: { maxAgeSeconds?: number; htt
 function inferBaseUrl(req: Request) {
   const env = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim();
   if (env) return env.replace(/\/$/, "");
+
+  // Prefer Referer for top-level navigations (Origin may be missing)
+  const referer = (req.headers.get("referer") ?? "").trim();
+  const origin = (req.headers.get("origin") ?? "").trim();
+
+  const pick = (u: string) => {
+    try {
+      const url = new URL(u);
+      const host = url.host.toLowerCase();
+      // Only trust our own frontends, not Link4M/other referrers
+      if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) {
+        return `${url.protocol}//${url.host}`.replace(/\/$/, "");
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  };
+
+  const refBase = pick(referer);
+  if (refBase) return refBase;
+
+  const orgBase = pick(origin);
+  if (orgBase) return orgBase;
+
   const url = new URL(req.url);
   return `${url.protocol}//${url.host}`;
 }
@@ -65,8 +90,12 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204 });
   if (req.method !== "GET") return new Response("METHOD_NOT_ALLOWED", { status: 405 });
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
+  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    // Misconfigured backend secrets (avoid throwing without redirect)
+    return redirect(`${base}/free?err=SERVER_MISCONFIG`);
+  }
   const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   const base = inferBaseUrl(req);

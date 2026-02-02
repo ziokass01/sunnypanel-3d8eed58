@@ -73,6 +73,31 @@ function normalizeBool(v: string | undefined | null) {
 function inferBaseUrl(req: Request) {
   const env = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim();
   if (env) return env.replace(/\/$/, "");
+
+  // Prefer Referer for top-level navigations (Origin may be missing)
+  const referer = (req.headers.get("referer") ?? "").trim();
+  const origin = (req.headers.get("origin") ?? "").trim();
+
+  const pick = (u: string) => {
+    try {
+      const url = new URL(u);
+      const host = url.host.toLowerCase();
+      // Only trust our own frontends, not Link4M/other referrers
+      if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) {
+        return `${url.protocol}//${url.host}`.replace(/\/$/, "");
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  };
+
+  const refBase = pick(referer);
+  if (refBase) return refBase;
+
+  const orgBase = pick(origin);
+  if (orgBase) return orgBase;
+
   const url = new URL(req.url);
   return `${url.protocol}//${url.host}`;
 }
@@ -114,8 +139,22 @@ async function verifyTurnstile(secret: string, token: string, remoteIp?: string)
   return Boolean(data?.success);
 }
 
+function preflight(req: Request) {
+  // CORS preflight for browser requests
+  const origin = req.headers.get("Origin") ?? "";
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": "content-type, authorization",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
+  // Mirror the same allow-origin policy as json()
+  headers["Access-Control-Allow-Origin"] = origin && (origin.endsWith(".lovable.app") || origin.endsWith(".lovable.dev") || origin === "https://lovable.dev") ? origin : origin || "null";
+  return new Response(null, { status: 204, headers });
+}
+
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204 });
+  if (req.method === "OPTIONS") return preflight(req);
   if (req.method !== "POST") return json(req, { ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
 
   const ip = getClientIp(req);
@@ -134,8 +173,11 @@ Deno.serve(async (req) => {
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) return json(req, { ok: false, msg: "INVALID_INPUT" }, 400);
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
+  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return json(req, { ok: false, msg: "SERVER_MISCONFIG" }, 500);
+  }
   const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   // Blocked IP check
