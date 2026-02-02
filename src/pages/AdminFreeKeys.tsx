@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -32,9 +32,13 @@ type IssueRow = {
 };
 
 export function AdminFreeKeysPage() {
+  const qc = useQueryClient();
   const [status, setStatus] = useState<string>("all");
   const [ipHash, setIpHash] = useState("");
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const [outboundUrl, setOutboundUrl] = useState<string>("");
+  const [outboundErr, setOutboundErr] = useState<string | null>(null);
 
   const range = useMemo(() => {
     // day in YYYY-MM-DD
@@ -42,6 +46,63 @@ export function AdminFreeKeysPage() {
     const to = new Date(`${day}T23:59:59.999Z`).toISOString();
     return { from, to };
   }, [day]);
+
+  const settingsQuery = useQuery({
+    queryKey: ["free-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("licenses_free_settings")
+        .select("id,free_outbound_url,updated_at,updated_by")
+        .eq("id", 1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as
+        | { id: number; free_outbound_url: string | null; updated_at: string; updated_by: string | null }
+        | null;
+    },
+  });
+
+  useEffect(() => {
+    const v = settingsQuery.data?.free_outbound_url ?? "";
+    setOutboundUrl(v);
+  }, [settingsQuery.data?.free_outbound_url]);
+
+  const saveOutbound = useMutation({
+    mutationFn: async () => {
+      setOutboundErr(null);
+
+      const v = outboundUrl.trim();
+      if (!v) throw new Error("Vui lòng nhập outbound URL");
+
+      let url: URL;
+      try {
+        url = new URL(v);
+      } catch {
+        throw new Error("Outbound URL không hợp lệ");
+      }
+      if (url.protocol !== "https:") throw new Error("Outbound URL phải là https://");
+
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const uid = userRes.user?.id ?? null;
+
+      const { error } = await supabase.from("licenses_free_settings").upsert(
+        {
+          id: 1,
+          free_outbound_url: url.toString(),
+          updated_by: uid,
+        },
+        { onConflict: "id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["free-settings"] });
+    },
+    onError: (e: any) => {
+      setOutboundErr(e?.message ?? "Save failed");
+    },
+  });
 
   const sessionsQuery = useQuery({
     queryKey: ["free-sessions", range.from, range.to, status, ipHash],
@@ -87,6 +148,45 @@ export function AdminFreeKeysPage() {
 
   return (
     <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Free outbound URL</CardTitle>
+          <CardDescription>
+            Cấu hình link Link4M dùng cho /free. Ưu tiên giá trị này (DB) hơn biến môi trường.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Outbound URL (https)</div>
+            <Input
+              value={outboundUrl}
+              onChange={(e) => setOutboundUrl(e.target.value)}
+              placeholder="https://..."
+              inputMode="url"
+            />
+          </div>
+
+          {outboundErr ? <div className="text-sm text-destructive">{outboundErr}</div> : null}
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => saveOutbound.mutate()} disabled={saveOutbound.isPending}>
+              Save
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => settingsQuery.refetch()}
+              disabled={settingsQuery.isFetching}
+            >
+              Reload
+            </Button>
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            Updated: {settingsQuery.data?.updated_at ?? ""}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Free keys</CardTitle>

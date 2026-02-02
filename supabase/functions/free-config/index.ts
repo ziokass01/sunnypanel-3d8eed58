@@ -1,3 +1,5 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+
 const corsHeaders = (req: Request) => {
   const origin = req.headers.get("Origin") ?? "";
   const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
@@ -11,7 +13,7 @@ const corsHeaders = (req: Request) => {
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Headers": "content-type,authorization",
     "Access-Control-Allow-Methods": "GET,OPTIONS",
-    Vary: "Origin",
+    "Vary": "Origin",
   };
 };
 
@@ -32,9 +34,28 @@ function normalizeBool(v: string | undefined | null) {
 
 function inferBaseUrl(req: Request) {
   const url = new URL(req.url);
+  const host = url.host;
+
+  // If this is a Lovable preview host, prefer the request origin to keep preview flow correct.
+  if (host.includes("preview--") && host.endsWith(".lovable.app")) {
+    return `${url.protocol}//${url.host}`;
+  }
+
   const env = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim();
   if (env) return env.replace(/\/$/, "");
   return `${url.protocol}//${url.host}`;
+}
+
+function normalizeHttpsUrl(input: string | null) {
+  const v = (input ?? "").trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:") return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -44,9 +65,26 @@ Deno.serve(async (req) => {
   if (req.method !== "GET") return json(req, { ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
 
   const publicBase = inferBaseUrl(req);
-  const freeOutbound = (Deno.env.get("FREE_OUTBOUND_URL") ?? "").trim() || null;
-  const showTest = normalizeBool(Deno.env.get("SHOW_TEST_REDIRECT_BUTTON"));
 
+  // 1) Prefer DB override (admin-managed). 2) Fallback to ENV.
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+  let dbOutbound: string | null = null;
+  const settings = await db
+    .from("licenses_free_settings")
+    .select("free_outbound_url")
+    .eq("id", 1)
+    .maybeSingle();
+  if (!settings.error) {
+    dbOutbound = normalizeHttpsUrl((settings.data as any)?.free_outbound_url ?? null);
+  }
+
+  const envOutbound = normalizeHttpsUrl((Deno.env.get("FREE_OUTBOUND_URL") ?? "").trim() || null);
+  const freeOutbound = dbOutbound ?? envOutbound;
+
+  const showTest = normalizeBool(Deno.env.get("SHOW_TEST_REDIRECT_BUTTON"));
   const turnEnabled = normalizeBool(Deno.env.get("FREE_TURNSTILE_ENABLED"));
   const turnSiteKey = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim() || null;
 

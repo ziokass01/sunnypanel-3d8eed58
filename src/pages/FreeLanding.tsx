@@ -60,6 +60,16 @@ export function FreeLandingPage() {
               Get 1-day key
             </Button>
 
+            <Button
+              className="w-full"
+              variant="secondary"
+              onClick={() => {
+                window.location.href = "/admin/free-keys";
+              }}
+            >
+              Mở Admin Get Key
+            </Button>
+
             {cfg?.show_test_redirect_button ? (
               <div className="space-y-3">
                 <Button
