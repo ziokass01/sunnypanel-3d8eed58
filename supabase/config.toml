@@ -5,3 +5,15 @@ verify_jwt = false
 
 [functions.generate-license-key]
 verify_jwt = false
+
+[functions.free-config]
+verify_jwt = false
+
+[functions.free-gate]
+verify_jwt = false
+
+[functions.free-reveal]
+verify_jwt = false
+
+[functions.free-close]
+verify_jwt = false

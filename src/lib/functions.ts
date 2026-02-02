@@ -4,6 +4,27 @@ export function getFunctionsBaseUrl() {
   return `${base}/functions/v1`;
 }
 
+export async function getFunction<T>(
+  path: string,
+  opts?: { authToken?: string | null },
+): Promise<T> {
+  const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
+    },
+    credentials: "include",
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = (data && (data.msg || data.error)) || `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+  return data as T;
+}
+
 export async function postFunction<T>(
   path: string,
   body: unknown,
@@ -16,6 +37,7 @@ export async function postFunction<T>(
       "Content-Type": "application/json",
       ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
     },
+    credentials: "include",
     body: JSON.stringify(body ?? {}),
   });
 

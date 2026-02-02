@@ -191,6 +191,7 @@ export type Database = {
           key_mask: string
           license_id: string
           session_id: string
+          ua_hash: string
         }
         Insert: {
           created_at?: string
@@ -201,6 +202,7 @@ export type Database = {
           key_mask: string
           license_id: string
           session_id: string
+          ua_hash?: string
         }
         Update: {
           created_at?: string
@@ -211,6 +213,7 @@ export type Database = {
           key_mask?: string
           license_id?: string
           session_id?: string
+          ua_hash?: string
         }
         Relationships: [
           {
