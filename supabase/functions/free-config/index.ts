@@ -58,6 +58,12 @@ function normalizeHttpsUrl(input: string | null) {
   }
 }
 
+function fixCommonGateTypo(url: string | null) {
+  if (!url) return null;
+  // Normalize a common typo that caused 404: /free/gat -> /free/gate
+  return url.replace(/\/free\/gat(?=\b|\/|$)/g, "/free/gate");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
@@ -78,10 +84,10 @@ Deno.serve(async (req) => {
     .eq("id", 1)
     .maybeSingle();
   if (!settings.error) {
-    dbOutbound = normalizeHttpsUrl((settings.data as any)?.free_outbound_url ?? null);
+    dbOutbound = fixCommonGateTypo(normalizeHttpsUrl((settings.data as any)?.free_outbound_url ?? null));
   }
 
-  const envOutbound = normalizeHttpsUrl((Deno.env.get("FREE_OUTBOUND_URL") ?? "").trim() || null);
+  const envOutbound = fixCommonGateTypo(normalizeHttpsUrl((Deno.env.get("FREE_OUTBOUND_URL") ?? "").trim() || null));
   const freeOutbound = dbOutbound ?? envOutbound;
 
   const showTest = normalizeBool(Deno.env.get("SHOW_TEST_REDIRECT_BUTTON"));
