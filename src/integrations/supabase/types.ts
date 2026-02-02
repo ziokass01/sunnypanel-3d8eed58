@@ -270,6 +270,27 @@ export type Database = {
         }
         Relationships: []
       }
+      licenses_free_settings: {
+        Row: {
+          free_outbound_url: string | null
+          id: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          free_outbound_url?: string | null
+          id: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          free_outbound_url?: string | null
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       request_nonces: {
         Row: {
           created_at: string
