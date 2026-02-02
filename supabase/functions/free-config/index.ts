@@ -1,17 +1,32 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+function isAllowedOrigin(origin: string, publicBaseUrl: string) {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    const host = u.host;
+    return (
+      host === "lovable.dev" ||
+      host.endsWith(".lovable.dev") ||
+      host.endsWith(".lovable.app") ||
+      (publicBaseUrl ? origin === publicBaseUrl : false)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const corsHeaders = (req: Request) => {
   const origin = req.headers.get("Origin") ?? "";
   const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
 
-  const allowed =
-    (origin && origin.endsWith(".lovable.app")) || // preview + published lovable
-    (pub && origin === pub); // your real domain
+  const allowed = isAllowedOrigin(origin, pub);
 
   return {
     "Access-Control-Allow-Origin": allowed ? origin : "null",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "content-type,authorization",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
     "Access-Control-Allow-Methods": "GET,OPTIONS",
     "Vary": "Origin",
   };
@@ -33,16 +48,28 @@ function normalizeBool(v: string | undefined | null) {
 }
 
 function inferBaseUrl(req: Request) {
-  const url = new URL(req.url);
-  const host = url.host;
+  const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
+  const origin = req.headers.get("Origin") ?? "";
 
-  // If this is a Lovable preview host, prefer the request origin to keep preview flow correct.
-  if (host.includes("preview--") && host.endsWith(".lovable.app")) {
-    return `${url.protocol}//${url.host}`;
+  // Prefer a valid Origin when it represents the actual site domain (preview, published, custom).
+  if (origin && isAllowedOrigin(origin, pub)) {
+    try {
+      const host = new URL(origin).host;
+      // In the Lovable editor, Origin can be lovable.dev; in that case, use PUBLIC_BASE_URL.
+      if (host === "lovable.dev" || host.endsWith(".lovable.dev")) {
+        if (pub) return pub;
+      } else {
+        return origin.replace(/\/$/, "");
+      }
+    } catch {
+      // ignore
+    }
   }
 
-  const env = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim();
-  if (env) return env.replace(/\/$/, "");
+  // Fallback to configured public base url.
+  if (pub) return pub;
+
+  const url = new URL(req.url);
   return `${url.protocol}//${url.host}`;
 }
 
