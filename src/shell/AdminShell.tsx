@@ -1,5 +1,5 @@
 import { Outlet, useNavigate } from "react-router-dom";
-import { LogOut, KeyRound, LayoutDashboard, Trash2, ScrollText, KeySquare } from "lucide-react";
+import { LogOut, KeyRound, LayoutDashboard, Trash2, ScrollText, KeySquare, Gift } from "lucide-react";
 
 import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,15 @@ export function AdminShell() {
                 <NavLink to="/audit">
                   <ScrollText />
                   <span>Audit logs</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="Free keys">
+                <NavLink to="/admin/free-keys">
+                  <Gift />
+                  <span>Free keys</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

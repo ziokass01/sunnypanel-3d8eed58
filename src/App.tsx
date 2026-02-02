@@ -18,6 +18,10 @@ import { LicenseDetailPage } from "@/pages/LicenseDetail";
 import { LicenseEditPage } from "@/pages/LicenseEdit";
 import { LicensesTrashPage } from "@/pages/LicensesTrash";
 import { AuditLogsPage } from "@/pages/AuditLogs";
+import { FreeLandingPage } from "@/pages/FreeLanding";
+import { FreeGatePage } from "@/pages/FreeGate";
+import { FreeClaimPage } from "@/pages/FreeClaim";
+import { AdminFreeKeysPage } from "@/pages/AdminFreeKeys";
 
 const queryClient = new QueryClient();
 
@@ -31,6 +35,11 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/login" element={<LoginPage />} />
+
+            {/* Public free-key flow (add-only) */}
+            <Route path="/free" element={<FreeLandingPage />} />
+            <Route path="/free/gate" element={<FreeGatePage />} />
+            <Route path="/free/claim" element={<FreeClaimPage />} />
 
             <Route
               element={
@@ -50,6 +59,7 @@ const App = () => (
               <Route path="/licenses/:id" element={<LicenseDetailPage />} />
               <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
               <Route path="/audit" element={<AuditLogsPage />} />
+              <Route path="/admin/free-keys" element={<AdminFreeKeysPage />} />
             </Route>
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
