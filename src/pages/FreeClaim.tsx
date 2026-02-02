@@ -85,6 +85,11 @@ export function FreeClaimPage() {
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium">Missing claim token</div>
                 <div className="text-muted-foreground">Hãy quay lại /free và làm lại flow.</div>
+                <div className="mt-3">
+                  <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
+                    Quay lại /free
+                  </Button>
+                </div>
               </div>
             ) : null}
 

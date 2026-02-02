@@ -1,5 +1,21 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+function isAllowedOrigin(origin: string, publicBaseUrl: string) {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    const host = u.host;
+    return (
+      host === "lovable.dev" ||
+      host.endsWith(".lovable.dev") ||
+      host.endsWith(".lovable.app") ||
+      (publicBaseUrl ? origin === publicBaseUrl : false)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function getClientIp(req: Request) {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
@@ -20,15 +36,17 @@ function parseCookies(req: Request) {
 
 function json(req: Request, data: unknown, status = 200) {
   const origin = req.headers.get("Origin") ?? "";
+  const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Cache-Control": "no-store",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     Vary: "Origin",
   };
-  headers["Access-Control-Allow-Origin"] = origin && origin.endsWith(".lovable.app") ? origin : origin || "null";
+  headers["Access-Control-Allow-Origin"] = isAllowedOrigin(origin, pub) ? origin : "null";
   return new Response(JSON.stringify(data), { status, headers });
 }
 
