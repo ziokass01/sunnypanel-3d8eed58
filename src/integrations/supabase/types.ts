@@ -65,6 +65,36 @@ export type Database = {
         }
         Relationships: []
       }
+      free_ip_rate_limits: {
+        Row: {
+          count: number
+          created_at: string
+          id: string
+          ip_hash: string
+          route: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          id?: string
+          ip_hash: string
+          route: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          id?: string
+          ip_hash?: string
+          route?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       license_devices: {
         Row: {
           device_id: string
@@ -148,6 +178,92 @@ export type Database = {
           note?: string | null
           start_on_first_use?: boolean
           starts_on_first_use?: boolean
+        }
+        Relationships: []
+      }
+      licenses_free_issues: {
+        Row: {
+          created_at: string
+          expires_at: string
+          fingerprint_hash: string
+          ip_hash: string
+          issue_id: string
+          key_mask: string
+          license_id: string
+          session_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          fingerprint_hash: string
+          ip_hash: string
+          issue_id?: string
+          key_mask: string
+          license_id: string
+          session_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          fingerprint_hash?: string
+          ip_hash?: string
+          issue_id?: string
+          key_mask?: string
+          license_id?: string
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "licenses_free_issues_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "licenses_free_sessions"
+            referencedColumns: ["session_id"]
+          },
+        ]
+      }
+      licenses_free_sessions: {
+        Row: {
+          claim_expires_at: string | null
+          claim_token_hash: string | null
+          closed_at: string | null
+          created_at: string
+          expires_at: string
+          fingerprint_hash: string
+          ip_hash: string
+          last_error: string | null
+          reveal_count: number
+          session_id: string
+          status: string
+          ua_hash: string
+        }
+        Insert: {
+          claim_expires_at?: string | null
+          claim_token_hash?: string | null
+          closed_at?: string | null
+          created_at?: string
+          expires_at: string
+          fingerprint_hash: string
+          ip_hash: string
+          last_error?: string | null
+          reveal_count?: number
+          session_id?: string
+          status?: string
+          ua_hash: string
+        }
+        Update: {
+          claim_expires_at?: string | null
+          claim_token_hash?: string | null
+          closed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          fingerprint_hash?: string
+          ip_hash?: string
+          last_error?: string | null
+          reveal_count?: number
+          session_id?: string
+          status?: string
+          ua_hash?: string
         }
         Relationships: []
       }
@@ -309,6 +425,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_free_ip_rate_limit: {
+        Args: {
+          p_ip_hash: string
+          p_limit?: number
+          p_route: string
+          p_window_seconds?: number
+        }
+        Returns: {
+          allowed: boolean
+          current_count: number
+          window_start: string
+        }[]
+      }
       check_ip_rate_limit: {
         Args: { p_ip: string; p_limit?: number; p_window_seconds?: number }
         Returns: {
@@ -337,6 +466,14 @@ export type Database = {
           current_count: number
           window_start: string
         }[]
+      }
+      cleanup_free_key_tables: {
+        Args: {
+          p_nonce_ttl_days?: number
+          p_rate_limit_ttl_days?: number
+          p_session_ttl_days?: number
+        }
+        Returns: undefined
       }
       cleanup_verify_tables: {
         Args: { p_rate_limit_ttl_days?: number }
