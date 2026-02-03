@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { z } from "npm:zod@3";
 
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
@@ -16,80 +17,85 @@ function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   }
 }
 
-function getClientIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "0.0.0.0";
+function toHex(bytes: ArrayBuffer) {
+  return Array.from(new Uint8Array(bytes))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-function parseCookies(req: Request) {
-  const raw = req.headers.get("cookie") ?? "";
-  const out: Record<string, string> = {};
-  raw.split(";").forEach((part) => {
-    const [k, ...rest] = part.split("=");
-    const key = (k ?? "").trim();
-    if (!key) return;
-    out[key] = decodeURIComponent(rest.join("=").trim());
-  });
-  return out;
+async function sha256Hex(input: string) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return toHex(digest);
 }
 
-function json(req: Request, data: unknown, status = 200) {
-  const origin = req.headers.get("Origin") ?? "";
-  const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Cache-Control": "no-store",
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    Vary: "Origin",
-  };
-  headers["Access-Control-Allow-Origin"] = isAllowedOrigin(origin, pub) ? origin : "null";
-  return new Response(JSON.stringify(data), { status, headers });
-}
-
-function preflight(req: Request) {
-  // CORS preflight for browser requests
-  const origin = req.headers.get("Origin") ?? "";
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "content-type, authorization",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    Vary: "Origin",
-  };
-  // Mirror the same allow-origin policy as json()
-  headers["Access-Control-Allow-Origin"] = origin && (origin.endsWith(".lovable.app") || origin.endsWith(".lovable.dev") || origin === "https://lovable.dev") ? origin : origin || "null";
-  return new Response(null, { status: 204, headers });
-}
+const BodySchema = z.object({
+  out_token: z.string().min(8).max(256),
+});
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return preflight(req);
-  if (req.method !== "POST") return json(req, { ok: false }, 405);
+  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
+  const origin = req.headers.get("origin") ?? "";
+  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL) ? origin : PUBLIC_BASE_URL;
 
-  const ip = getClientIp(req);
-  const cookies = parseCookies(req);
-  const sessId = cookies.fk_sess ?? "";
-  if (!sessId) return json(req, { ok: false, msg: "UNAUTHORIZED" }, 401);
-
-  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
-  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
-  if (!supabaseUrl || !serviceRoleKey) {
-    return json(req, { ok: false, msg: "SERVER_MISCONFIG" }, 500);
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": allowOrigin,
+        "Access-Control-Allow-Methods": "POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
-  const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
-  // Rate limit close lightly (by plain IP hash isn't available here without crypto; keep minimal)
-  const blk = await db.from("blocked_ips").select("blocked_until").eq("ip", ip).maybeSingle();
-  const untilIso = blk.data?.blocked_until ?? null;
-  const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
-  if (untilMs && untilMs > Date.now()) return json(req, { ok: false, msg: "RATE_LIMIT" }, 429);
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
 
-  await db
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+
+  const parsed = BodySchema.safeParse(body);
+  if (!parsed.success) {
+    return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceRole) {
+    return new Response(JSON.stringify({ ok: false, msg: "SERVER_MISCONFIG" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+  const outHash = await sha256Hex(parsed.data.out_token);
+
+  await sb
     .from("licenses_free_sessions")
-    .update({ status: "closed", closed_at: new Date().toISOString() })
-    .eq("session_id", sessId);
+    .update({
+      status: "closed",
+      claim_token_hash: null,
+      claim_expires_at: null,
+      out_expires_at: new Date().toISOString(),
+    })
+    .eq("out_token_hash", outHash);
 
-  return json(req, { ok: true });
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin },
+  });
 });

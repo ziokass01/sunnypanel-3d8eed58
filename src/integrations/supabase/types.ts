@@ -239,7 +239,14 @@ export type Database = {
           session_id: string
           status: string
           ua_hash: string
-        }
+
+duration_seconds: number | null
+gate_ok_at: string | null
+key_type_code: string | null
+out_expires_at: string | null
+out_token_hash: string | null
+revealed_at: string | null
+started_at: string | null        }
         Insert: {
           claim_expires_at?: string | null
           claim_token_hash?: string | null
@@ -253,7 +260,14 @@ export type Database = {
           session_id?: string
           status?: string
           ua_hash: string
-        }
+
+duration_seconds?: number | null
+gate_ok_at?: string | null
+key_type_code?: string | null
+out_expires_at?: string | null
+out_token_hash?: string | null
+revealed_at?: string | null
+started_at?: string | null        }
         Update: {
           claim_expires_at?: string | null
           claim_token_hash?: string | null
@@ -267,28 +281,90 @@ export type Database = {
           session_id?: string
           status?: string
           ua_hash?: string
-        }
+
+duration_seconds?: number | null
+gate_ok_at?: string | null
+key_type_code?: string | null
+out_expires_at?: string | null
+out_token_hash?: string | null
+revealed_at?: string | null
+started_at?: string | null        }
         Relationships: []
       }
+
+licenses_free_key_types: {
+  Row: {
+    code: string
+    created_at: string
+    duration_seconds: number
+    enabled: boolean
+    kind: string
+    label: string
+    sort_order: number
+    updated_at: string
+    value: number
+  }
+  Insert: {
+    code: string
+    created_at?: string
+    duration_seconds: number
+    enabled?: boolean
+    kind: string
+    label: string
+    sort_order: number
+    updated_at?: string
+    value: number
+  }
+  Update: {
+    code?: string
+    created_at?: string
+    duration_seconds?: number
+    enabled?: boolean
+    kind?: string
+    label?: string
+    sort_order?: number
+    updated_at?: string
+    value?: number
+  }
+  Relationships: []
+}
       licenses_free_settings: {
         Row: {
           free_outbound_url: string | null
           id: number
           updated_at: string
           updated_by: string | null
-        }
+
+free_daily_limit_per_fingerprint: number
+free_disabled_message: string
+free_enabled: boolean
+free_min_delay_seconds: number
+free_require_link4m_referrer: boolean
+free_return_seconds: number        }
         Insert: {
           free_outbound_url?: string | null
           id: number
           updated_at?: string
           updated_by?: string | null
-        }
+
+free_daily_limit_per_fingerprint?: number
+free_disabled_message?: string
+free_enabled?: boolean
+free_min_delay_seconds?: number
+free_require_link4m_referrer?: boolean
+free_return_seconds?: number        }
         Update: {
           free_outbound_url?: string | null
           id?: number
           updated_at?: string
           updated_by?: string | null
-        }
+
+free_daily_limit_per_fingerprint?: number
+free_disabled_message?: string
+free_enabled?: boolean
+free_min_delay_seconds?: number
+free_require_link4m_referrer?: boolean
+free_return_seconds?: number        }
         Relationships: []
       }
       request_nonces: {

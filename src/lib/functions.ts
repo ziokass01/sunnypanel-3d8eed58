@@ -14,7 +14,7 @@ export async function getFunction<T>(
     headers: {
       ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
     },
-    credentials: "include",
+    credentials: "omit",
   });
 
   const data = await res.json().catch(() => null);
@@ -37,7 +37,7 @@ export async function postFunction<T>(
       "Content-Type": "application/json",
       ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
     },
-    credentials: "include",
+    credentials: "omit",
     body: JSON.stringify(body ?? {}),
   });
 

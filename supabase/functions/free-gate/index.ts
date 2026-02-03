@@ -1,4 +1,21 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { z } from "npm:zod@3";
+
+function isAllowedOrigin(origin: string, publicBaseUrl: string) {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    const host = u.host;
+    return (
+      host === "lovable.dev" ||
+      host.endsWith(".lovable.dev") ||
+      host.endsWith(".lovable.app") ||
+      (publicBaseUrl ? origin === publicBaseUrl : false)
+    );
+  } catch {
+    return false;
+  }
+}
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -12,167 +29,205 @@ async function sha256Hex(input: string) {
   return toHex(digest);
 }
 
-function randomBase64Url(bytesLen = 32) {
+function base64url(bytesLen = 18) {
   const bytes = new Uint8Array(bytesLen);
   crypto.getRandomValues(bytes);
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
-  const b64 = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  return b64;
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function getClientIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "0.0.0.0";
-}
-
-function parseCookies(req: Request) {
-  const raw = req.headers.get("cookie") ?? "";
-  const out: Record<string, string> = {};
-  raw.split(";").forEach((part) => {
-    const [k, ...rest] = part.split("=");
-    const key = (k ?? "").trim();
-    if (!key) return;
-    out[key] = decodeURIComponent(rest.join("=").trim());
-  });
-  return out;
-}
-
-function cookie(name: string, value: string, opts: { maxAgeSeconds?: number; httpOnly?: boolean } = {}) {
-  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "SameSite=Lax"];
-  // Secure on https only
-  parts.push("Secure");
-  if (opts.httpOnly !== false) parts.push("HttpOnly");
-  if (opts.maxAgeSeconds) parts.push(`Max-Age=${opts.maxAgeSeconds}`);
-  return parts.join("; ");
-}
-
-function inferBaseUrl(req: Request) {
-  const env = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim();
-  if (env) return env.replace(/\/$/, "");
-
-  // Prefer Referer for top-level navigations (Origin may be missing)
-  const referer = (req.headers.get("referer") ?? "").trim();
-  const origin = (req.headers.get("origin") ?? "").trim();
-
-  const pick = (u: string) => {
-    try {
-      const url = new URL(u);
-      const host = url.host.toLowerCase();
-      // Only trust our own frontends, not Link4M/other referrers
-      if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) {
-        return `${url.protocol}//${url.host}`.replace(/\/$/, "");
-      }
-      return "";
-    } catch {
-      return "";
-    }
-  };
-
-  const refBase = pick(referer);
-  if (refBase) return refBase;
-
-  const orgBase = pick(origin);
-  if (orgBase) return orgBase;
-
-  const url = new URL(req.url);
-  return `${url.protocol}//${url.host}`;
-}
-
-function redirect(location: string, setCookies: string[] = []) {
-  const headers = new Headers({ Location: location, "Cache-Control": "no-store" });
-  for (const c of setCookies) headers.append("Set-Cookie", c);
-  return new Response(null, { status: 302, headers });
-}
+const BodySchema = z.object({
+  out_token: z.string().min(8).max(256),
+  fingerprint: z.string().min(6).max(128),
+  referrer: z.string().optional().default(""),
+});
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-  if (req.method !== "GET") return new Response("METHOD_NOT_ALLOWED", { status: 405 });
+  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
+  const origin = req.headers.get("origin") ?? "";
+  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL) ? origin : PUBLIC_BASE_URL;
 
-  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
-  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
-  if (!supabaseUrl || !serviceRoleKey) {
-    // Misconfigured backend secrets (avoid throwing without redirect)
-    return redirect(`${base}/free?err=SERVER_MISCONFIG`);
-  }
-  const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
-
-  const base = inferBaseUrl(req);
-  const ip = getClientIp(req);
-  const ua = req.headers.get("user-agent") ?? "";
-
-  // Blocked IPs -> bounce back to /free
-  const blk = await db.from("blocked_ips").select("blocked_until").eq("ip", ip).maybeSingle();
-  const untilIso = blk.data?.blocked_until ?? null;
-  const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
-  if (untilMs && untilMs > Date.now()) {
-    return redirect(`${base}/free?err=RATE_LIMIT`);
-  }
-
-  const ipHash = await sha256Hex(ip);
-  const uaHash = await sha256Hex(ua);
-
-  // Rate limit gate (by IP hash)
-  const rl = await db.rpc("check_free_ip_rate_limit" as any, {
-    p_ip_hash: ipHash,
-    p_route: "gate",
-    p_limit: 30,
-    p_window_seconds: 600,
-  } as any);
-  const allowed = rl.error ? true : Boolean(rl.data?.[0]?.allowed);
-  if (!allowed) {
-    // auto-block 30 minutes
-    const until = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    await db.from("blocked_ips").upsert(
-      {
-        ip,
-        blocked_until: until,
-        reason: "FREE_SPAM",
-        meta: { route: "gate", kind: "RATE_LIMIT" },
-        updated_at: new Date().toISOString(),
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": allowOrigin,
+        "Access-Control-Allow-Methods": "POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Max-Age": "86400",
       },
-      { onConflict: "ip" },
-    );
-    return redirect(`${base}/free?err=RATE_LIMIT`);
+    });
   }
 
-  const cookies = parseCookies(req);
-  const fp = cookies.fk_fp || randomBase64Url(18);
-  const fpHash = await sha256Hex(fp);
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
 
-  const now = new Date();
-  const sessionExpires = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
-  const claimToken = randomBase64Url(32);
-  const claimHash = await sha256Hex(claimToken);
-  const claimExpires = new Date(now.getTime() + 2 * 60 * 1000).toISOString();
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceRole) {
+    return new Response(JSON.stringify({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
 
-  const ins = await db
+  const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+
+  let body: unknown = null;
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+
+  const parsed = BodySchema.safeParse(body);
+  if (!parsed.success) {
+    return new Response(JSON.stringify({ ok: false, msg: "BAD_REQUEST" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const { out_token, fingerprint, referrer } = parsed.data;
+
+  // Settings
+  const { data: settings, error: sErr } = await sb
+    .from("licenses_free_settings")
+    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_require_link4m_referrer")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (sErr) {
+    return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  if (!Boolean(settings?.free_enabled ?? true)) {
+    return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
+  if (requireRef) {
+    try {
+      const u = new URL(referrer);
+      if (!u.hostname.endsWith("link4m.com")) {
+        return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+        });
+      }
+    } catch {
+      return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      });
+    }
+  }
+
+  const outHash = await sha256Hex(out_token);
+  const fpHash = await sha256Hex(fingerprint);
+  const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
+
+  // Find session
+  const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
-    .insert({
-      expires_at: sessionExpires,
-      status: "gate_returned",
-      ip_hash: ipHash,
-      ua_hash: uaHash,
-      fingerprint_hash: fpHash,
-      reveal_count: 0,
+    .select(
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,reveal_count,claim_token_hash,claim_expires_at",
+    )
+    .eq("out_token_hash", outHash)
+    .maybeSingle();
+
+  if (qErr) {
+    return new Response(JSON.stringify({ ok: false, msg: qErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  if (!sess) {
+    return new Response(JSON.stringify({ ok: false, msg: "INVALID_SESSION" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  // Expired?
+  const now = Date.now();
+  const expiresAt = Date.parse(sess.expires_at);
+  if (!isFinite(expiresAt) || expiresAt <= now) {
+    return new Response(JSON.stringify({ ok: false, msg: "SESSION_EXPIRED" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash) {
+    return new Response(JSON.stringify({ ok: false, msg: "DEVICE_MISMATCH" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  if (sess.reveal_count && sess.reveal_count > 0) {
+    return new Response(JSON.stringify({ ok: false, msg: "ALREADY_REVEALED" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+  const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
+  const startedAtMs = Date.parse(startedAtIso);
+  const mustWaitUntil = startedAtMs + minDelay * 1000;
+  if (isFinite(startedAtMs) && now < mustWaitUntil) {
+    const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
+    return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST", wait_seconds }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  // Idempotency: if claim token already issued and still valid, just re-issue (helps if user refreshes)
+  const existingClaim = sess.claim_token_hash;
+  const claimExp = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
+  if (existingClaim && claimExp && claimExp > now) {
+    // We cannot return the raw token (only hash stored), so generate a new token instead.
+  }
+
+  // Generate claim token
+  const claim_token = base64url(20);
+  const claim_token_hash = await sha256Hex(claim_token);
+  const claim_expires_at = new Date(Date.now() + 3 * 60 * 1000).toISOString(); // 3 minutes
+
+  const { error: updErr } = await sb
+    .from("licenses_free_sessions")
+    .update({
+      status: "gate_ok",
+      gate_ok_at: new Date().toISOString(),
+      claim_token_hash,
+      claim_expires_at,
       last_error: null,
-      claim_token_hash: claimHash,
-      claim_expires_at: claimExpires,
     })
-    .select("session_id")
-    .single();
+    .eq("session_id", sess.session_id);
 
-  if (ins.error || !ins.data?.session_id) {
-    return redirect(`${base}/free?err=SERVER_ERROR`);
+  if (updErr) {
+    return new Response(JSON.stringify({ ok: false, msg: updErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
   }
 
-  const set: string[] = [
-    cookie("fk_sess", String(ins.data.session_id), { httpOnly: true, maxAgeSeconds: 60 * 60 }),
-  ];
-  if (!cookies.fk_fp) {
-    set.push(cookie("fk_fp", fp, { httpOnly: true, maxAgeSeconds: 90 * 24 * 60 * 60 }));
-  }
-
-  return redirect(`${base}/free/claim?c=${encodeURIComponent(claimToken)}`, set);
+  return new Response(JSON.stringify({ ok: true, claim_token }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin },
+  });
 });

@@ -106,6 +106,9 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
           <Button variant="soft" asChild>
             <NavLink to="/licenses/trash">View Trash</NavLink>
           </Button>
+          <Button variant="soft" asChild>
+            <a href="/free" target="_blank" rel="noreferrer">Open GetKey</a>
+          </Button>
           <Button asChild>
             <NavLink to={props.filterMode === "start_on_first_use" ? "/licenses2/new" : "/licenses/new"}>
               Create license

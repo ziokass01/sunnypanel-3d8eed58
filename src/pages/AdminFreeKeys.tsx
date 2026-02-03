@@ -1,22 +1,63 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+type SettingsRow = {
+  id: number;
+  free_outbound_url: string | null;
+  free_enabled: boolean;
+  free_disabled_message: string;
+  free_min_delay_seconds: number;
+  free_return_seconds: number;
+  free_daily_limit_per_fingerprint: number;
+  free_require_link4m_referrer: boolean;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+type KeyTypeRow = {
+  code: string;
+  label: string;
+  kind: "hour" | "day";
+  value: number;
+  duration_seconds: number;
+  sort_order: number;
+  enabled: boolean;
+  updated_at: string;
+};
 
 type SessionRow = {
   session_id: string;
   created_at: string;
-  expires_at: string;
   status: string;
-  ip_hash: string;
-  fingerprint_hash: string;
   reveal_count: number;
-  closed_at: string | null;
+  ip_hash: string;
+  ua_hash: string;
+  fingerprint_hash: string;
   last_error: string | null;
+  started_at: string | null;
+  gate_ok_at: string | null;
+  revealed_at: string | null;
+  key_type_code: string | null;
+  duration_seconds: number | null;
+  out_token_hash: string | null;
+  claim_token_hash: string | null;
 };
 
 type IssueRow = {
@@ -31,78 +72,136 @@ type IssueRow = {
   ua_hash: string;
 };
 
+function utcDayRange(day: string) {
+  // day = YYYY-MM-DD in UTC
+  const from = `${day}T00:00:00.000Z`;
+  const to = `${day}T23:59:59.999Z`;
+  return { from, to };
+}
+
 export function AdminFreeKeysPage() {
-  const qc = useQueryClient();
-  const [status, setStatus] = useState<string>("all");
-  const [ipHash, setIpHash] = useState("");
-  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const { toast } = useToast();
 
-  const [outboundUrl, setOutboundUrl] = useState<string>("");
-  const [outboundErr, setOutboundErr] = useState<string | null>(null);
-
-  const range = useMemo(() => {
-    // day in YYYY-MM-DD
-    const from = new Date(`${day}T00:00:00.000Z`).toISOString();
-    const to = new Date(`${day}T23:59:59.999Z`).toISOString();
-    return { from, to };
-  }, [day]);
-
+  // -------- Settings (admin-controlled) --------
   const settingsQuery = useQuery({
     queryKey: ["free-settings"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("licenses_free_settings")
-        .select("id,free_outbound_url,updated_at,updated_by")
+        .select(
+          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,updated_at,updated_by",
+        )
         .eq("id", 1)
         .maybeSingle();
       if (error) throw error;
-      return data as
-        | { id: number; free_outbound_url: string | null; updated_at: string; updated_by: string | null }
-        | null;
+      return (data as any) as SettingsRow | null;
     },
   });
+
+  const [outboundUrl, setOutboundUrl] = useState("");
+  const [freeEnabled, setFreeEnabled] = useState(true);
+  const [disabledMessage, setDisabledMessage] = useState("Trang GetKey đang tạm đóng.");
+  const [minDelay, setMinDelay] = useState(25);
+  const [returnSeconds, setReturnSeconds] = useState(10);
+  const [dailyLimit, setDailyLimit] = useState(1);
+  const [requireRef, setRequireRef] = useState(false);
 
   useEffect(() => {
-    const v = settingsQuery.data?.free_outbound_url ?? "";
-    setOutboundUrl(v);
-  }, [settingsQuery.data?.free_outbound_url]);
+    const s = settingsQuery.data;
+    if (!s) return;
+    setOutboundUrl(s.free_outbound_url ?? "");
+    setFreeEnabled(Boolean(s.free_enabled));
+    setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
+    setMinDelay(Number(s.free_min_delay_seconds ?? 25));
+    setReturnSeconds(Number(s.free_return_seconds ?? 10));
+    setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
+    setRequireRef(Boolean(s.free_require_link4m_referrer));
+  }, [settingsQuery.data]);
 
-  const saveOutbound = useMutation({
+  const saveSettings = useMutation({
     mutationFn: async () => {
-      setOutboundErr(null);
+      const patch = {
+        free_outbound_url: outboundUrl.trim() || null,
+        free_enabled: Boolean(freeEnabled),
+        free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
+        free_min_delay_seconds: Math.max(5, Math.floor(Number(minDelay) || 25)),
+        free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
+        free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
+        free_require_link4m_referrer: Boolean(requireRef),
+      };
 
-      const v = outboundUrl.trim();
-      if (!v) throw new Error("Vui lòng nhập outbound URL");
+      const { data, error } = await supabase
+        .from("licenses_free_settings")
+        .upsert({ id: 1, ...patch }, { onConflict: "id" })
+        .select("id")
+        .single();
 
-      let url: URL;
-      try {
-        url = new URL(v);
-      } catch {
-        throw new Error("Outbound URL không hợp lệ");
-      }
-      if (url.protocol !== "https:") throw new Error("Outbound URL phải là https://");
-
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-      const uid = userRes.user?.id ?? null;
-
-      const { error } = await supabase.from("licenses_free_settings").upsert(
-        {
-          id: 1,
-          free_outbound_url: url.toString(),
-          updated_by: uid,
-        },
-        { onConflict: "id" },
-      );
       if (error) throw error;
+      return data;
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["free-settings"] });
+      toast({ title: "Saved", description: "Free settings updated." });
+      await settingsQuery.refetch();
     },
     onError: (e: any) => {
-      setOutboundErr(e?.message ?? "Save failed");
+      toast({ title: "Save failed", description: e?.message ?? "Error", variant: "destructive" });
     },
   });
+
+  // -------- Key types --------
+  const keyTypesQuery = useQuery({
+    queryKey: ["free-key-types"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("licenses_free_key_types")
+        .select("code,label,kind,value,duration_seconds,sort_order,enabled,updated_at")
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as any as KeyTypeRow[];
+    },
+  });
+
+  const toggleKeyType = useMutation({
+    mutationFn: async (args: { code: string; enabled: boolean }) => {
+      const { error } = await supabase
+        .from("licenses_free_key_types")
+        .update({ enabled: args.enabled })
+        .eq("code", args.code);
+      if (error) throw error;
+      return true;
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+    onSuccess: async () => {
+      await keyTypesQuery.refetch();
+    },
+  });
+
+  const bulkSet = useMutation({
+    mutationFn: async (args: { kind: "hour" | "day" | "all"; enabled: boolean }) => {
+      let q = supabase.from("licenses_free_key_types").update({ enabled: args.enabled });
+      if (args.kind !== "all") q = q.eq("kind", args.kind);
+      const { error } = await q;
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Updated", description: "Key types updated." });
+      await keyTypesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Bulk update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  // -------- Sessions / Issues --------
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const [day, setDay] = useState(todayUtc);
+  const [status, setStatus] = useState<string>("all");
+  const [ipHash, setIpHash] = useState<string>("");
+
+  const range = useMemo(() => utcDayRange(day), [day]);
 
   const sessionsQuery = useQuery({
     queryKey: ["free-sessions", range.from, range.to, status, ipHash],
@@ -110,7 +209,7 @@ export function AdminFreeKeysPage() {
       let q = supabase
         .from("licenses_free_sessions")
         .select(
-          "session_id,created_at,expires_at,status,ip_hash,fingerprint_hash,reveal_count,closed_at,last_error",
+          "session_id,created_at,status,reveal_count,ip_hash,ua_hash,fingerprint_hash,last_error,started_at,gate_ok_at,revealed_at,key_type_code,duration_seconds,out_token_hash,claim_token_hash",
         )
         .gte("created_at", range.from)
         .lte("created_at", range.to)
@@ -122,7 +221,7 @@ export function AdminFreeKeysPage() {
 
       const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []) as SessionRow[];
+      return (data ?? []) as any as SessionRow[];
     },
   });
 
@@ -131,9 +230,7 @@ export function AdminFreeKeysPage() {
     queryFn: async () => {
       let q = supabase
         .from("licenses_free_issues")
-        .select(
-          "issue_id,created_at,expires_at,license_id,key_mask,session_id,ip_hash,fingerprint_hash,ua_hash",
-        )
+        .select("issue_id,created_at,expires_at,license_id,key_mask,session_id,ip_hash,fingerprint_hash,ua_hash")
         .gte("created_at", range.from)
         .lte("created_at", range.to)
         .order("created_at", { ascending: false })
@@ -142,7 +239,7 @@ export function AdminFreeKeysPage() {
       if (ipHash.trim()) q = q.eq("ip_hash", ipHash.trim());
       const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []) as IssueRow[];
+      return (data ?? []) as any as IssueRow[];
     },
   });
 
@@ -150,33 +247,88 @@ export function AdminFreeKeysPage() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Free outbound URL</CardTitle>
+          <CardTitle>Free GetKey Settings</CardTitle>
           <CardDescription>
-            Cấu hình link Link4M dùng cho /free. Ưu tiên giá trị này (DB) hơn biến môi trường.
+            Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Outbound URL (https)</div>
-            <Input
-              value={outboundUrl}
-              onChange={(e) => setOutboundUrl(e.target.value)}
-              placeholder="https://..."
-              inputMode="url"
-            />
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+            <div>
+              <div className="font-medium">Bật/tắt trang GetKey</div>
+              <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
+            </div>
+            <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
           </div>
 
-          {outboundErr ? <div className="text-sm text-destructive">{outboundErr}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Link4M outbound URL (https)</div>
+              <Input
+                value={outboundUrl}
+                onChange={(e) => setOutboundUrl(e.target.value)}
+                placeholder="https://link4m.com/xxxx"
+                inputMode="url"
+              />
+              <div className="text-xs text-muted-foreground">
+                Đây là link bạn đã rút gọn (Link4M) để dẫn người dùng sang /free/gate.
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Thông báo khi tắt</div>
+              <Textarea value={disabledMessage} onChange={(e) => setDisabledMessage(e.target.value)} rows={3} />
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Delay tối thiểu (giây)</div>
+              <Input
+                type="number"
+                value={minDelay}
+                onChange={(e) => setMinDelay(Number(e.target.value))}
+                min={5}
+              />
+              <div className="text-xs text-muted-foreground">Gate chỉ hợp lệ sau thời gian này (chống spam/bypass cơ bản).</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Tự quay lại /free (giây)</div>
+              <Input
+                type="number"
+                value={returnSeconds}
+                onChange={(e) => setReturnSeconds(Number(e.target.value))}
+                min={10}
+              />
+              <div className="text-xs text-muted-foreground">Trang nhận key sẽ tự out về /free.</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Giới hạn / 24h (theo fingerprint)</div>
+              <Input
+                type="number"
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(Number(e.target.value))}
+                min={1}
+              />
+              <div className="text-xs text-muted-foreground">Chặn spam tạo key vô hạn trên 1 thiết bị.</div>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div>
+                <div className="font-medium">Yêu cầu referrer Link4M</div>
+                <div className="text-xs text-muted-foreground">
+                  Nếu bật: gate sẽ kiểm tra document.referrer (có thể bị spoof, nhưng tăng độ khó).
+                </div>
+              </div>
+              <Switch checked={requireRef} onCheckedChange={setRequireRef} />
+            </div>
+          </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => saveOutbound.mutate()} disabled={saveOutbound.isPending}>
-              Save
+            <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
+              Save settings
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => settingsQuery.refetch()}
-              disabled={settingsQuery.isFetching}
-            >
+            <Button variant="secondary" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching}>
               Reload
             </Button>
           </div>
@@ -188,8 +340,67 @@ export function AdminFreeKeysPage() {
       </Card>
 
       <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <div>
+            <CardTitle>Key types (giờ/ngày)</CardTitle>
+            <CardDescription>Chỉ loại nào bật thì trang /free mới hiện lựa chọn.</CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => bulkSet.mutate({ kind: "hour", enabled: true })} disabled={bulkSet.isPending}>
+              Enable all hours
+            </Button>
+            <Button variant="secondary" onClick={() => bulkSet.mutate({ kind: "day", enabled: true })} disabled={bulkSet.isPending}>
+              Enable all days
+            </Button>
+            <Button variant="secondary" onClick={() => bulkSet.mutate({ kind: "all", enabled: false })} disabled={bulkSet.isPending}>
+              Disable all
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>On</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead>Label</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Value</TableHead>
+                <TableHead>Seconds</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(keyTypesQuery.data ?? []).map((k) => (
+                <TableRow key={k.code}>
+                  <TableCell className="w-16">
+                    <Switch
+                      checked={k.enabled}
+                      onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono">{k.code}</TableCell>
+                  <TableCell>{k.label}</TableCell>
+                  <TableCell>{k.kind}</TableCell>
+                  <TableCell>{k.value}</TableCell>
+                  <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                </TableRow>
+              ))}
+              {!keyTypesQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
-          <CardTitle>Free keys</CardTitle>
+          <CardTitle>Free keys monitor</CardTitle>
+          <CardDescription>Log sessions + keys đã phát.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div className="space-y-2">
@@ -204,10 +415,12 @@ export function AdminFreeKeysPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
-                <SelectItem value="init">init</SelectItem>
-                <SelectItem value="gate_returned">gate_returned</SelectItem>
+                <SelectItem value="started">started</SelectItem>
+                <SelectItem value="gate_ok">gate_ok</SelectItem>
                 <SelectItem value="revealed">revealed</SelectItem>
                 <SelectItem value="closed">closed</SelectItem>
+                <SelectItem value="init">init (legacy)</SelectItem>
+                <SelectItem value="gate_returned">gate_returned (legacy)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -231,6 +444,7 @@ export function AdminFreeKeysPage() {
               <TableRow>
                 <TableHead>Created</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Reveal</TableHead>
                 <TableHead>IP hash</TableHead>
                 <TableHead>FP hash</TableHead>
@@ -238,20 +452,23 @@ export function AdminFreeKeysPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(sessionsQuery.data ?? []).map((r) => (
-                <TableRow key={r.session_id}>
-                  <TableCell className="whitespace-nowrap text-xs">{r.created_at}</TableCell>
-                  <TableCell className="text-xs">{r.status}</TableCell>
-                  <TableCell className="text-xs">{r.reveal_count}</TableCell>
-                  <TableCell className="max-w-[240px] truncate font-mono text-xs">{r.ip_hash}</TableCell>
-                  <TableCell className="max-w-[240px] truncate font-mono text-xs">{r.fingerprint_hash}</TableCell>
-                  <TableCell className="max-w-[240px] truncate text-xs">{r.last_error ?? ""}</TableCell>
+              {(sessionsQuery.data ?? []).map((s) => (
+                <TableRow key={s.session_id}>
+                  <TableCell className="whitespace-nowrap">{s.created_at}</TableCell>
+                  <TableCell>{s.status}</TableCell>
+                  <TableCell className="font-mono">
+                    {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
+                  </TableCell>
+                  <TableCell>{s.reveal_count}</TableCell>
+                  <TableCell className="font-mono">{s.ip_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="font-mono">{s.fingerprint_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
                 </TableRow>
               ))}
               {!sessionsQuery.data?.length ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
-                    No sessions
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                    No rows
                   </TableCell>
                 </TableRow>
               ) : null}
@@ -262,7 +479,7 @@ export function AdminFreeKeysPage() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
-          <CardTitle>Issues (masked)</CardTitle>
+          <CardTitle>Issued keys</CardTitle>
           <Button variant="secondary" onClick={() => issuesQuery.refetch()} disabled={issuesQuery.isFetching}>
             Refresh
           </Button>
@@ -272,26 +489,26 @@ export function AdminFreeKeysPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Created</TableHead>
-                <TableHead>Key mask</TableHead>
                 <TableHead>Expires</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Session</TableHead>
                 <TableHead>IP hash</TableHead>
-                <TableHead>FP hash</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(issuesQuery.data ?? []).map((r) => (
-                <TableRow key={r.issue_id}>
-                  <TableCell className="whitespace-nowrap text-xs">{r.created_at}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.key_mask}</TableCell>
-                  <TableCell className="whitespace-nowrap text-xs">{r.expires_at}</TableCell>
-                  <TableCell className="max-w-[240px] truncate font-mono text-xs">{r.ip_hash}</TableCell>
-                  <TableCell className="max-w-[240px] truncate font-mono text-xs">{r.fingerprint_hash}</TableCell>
+              {(issuesQuery.data ?? []).map((i) => (
+                <TableRow key={i.issue_id}>
+                  <TableCell className="whitespace-nowrap">{i.created_at}</TableCell>
+                  <TableCell className="whitespace-nowrap">{i.expires_at}</TableCell>
+                  <TableCell className="font-mono">{i.key_mask}</TableCell>
+                  <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
+                  <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
                 </TableRow>
               ))}
               {!issuesQuery.data?.length ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    No issues
+                    No rows
                   </TableCell>
                 </TableRow>
               ) : null}

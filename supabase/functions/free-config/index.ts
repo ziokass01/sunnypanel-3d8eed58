@@ -16,128 +16,125 @@ function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   }
 }
 
-const corsHeaders = (req: Request) => {
-  const origin = req.headers.get("Origin") ?? "";
-  const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
-
-  const allowed = isAllowedOrigin(origin, pub);
-
-  return {
-    "Access-Control-Allow-Origin": allowed ? origin : "null",
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-    "Access-Control-Allow-Methods": "GET,OPTIONS",
-    "Vary": "Origin",
-  };
-};
-
-const json = (req: Request, data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      ...corsHeaders(req),
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    },
-  });
-
-function normalizeBool(v: string | undefined | null) {
-  const s = (v ?? "").trim().toLowerCase();
-  return s === "1" || s === "true" || s === "yes" || s === "on";
-}
-
 function inferBaseUrl(req: Request) {
-  const pub = (Deno.env.get("PUBLIC_BASE_URL") ?? "").trim().replace(/\/$/, "");
-  const origin = req.headers.get("Origin") ?? "";
-
-  // Prefer a valid Origin when it represents the actual site domain (preview, published, custom).
-  if (origin && isAllowedOrigin(origin, pub)) {
-    try {
-      const host = new URL(origin).host;
-      // In the Lovable editor, Origin can be lovable.dev; in that case, use PUBLIC_BASE_URL.
-      if (host === "lovable.dev" || host.endsWith(".lovable.dev")) {
-        if (pub) return pub;
-      } else {
-        return origin.replace(/\/$/, "");
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  // Fallback to configured public base url.
-  if (pub) return pub;
-
-  const url = new URL(req.url);
-  return `${url.protocol}//${url.host}`;
-}
-
-function normalizeHttpsUrl(input: string | null) {
-  const v = (input ?? "").trim();
-  if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol !== "https:") return null;
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
-
-function fixCommonGateTypo(url: string | null) {
-  if (!url) return null;
-  // Normalize a common typo that caused 404: /free/gat -> /free/gate
-  return url.replace(/\/free\/gat(?=\b|\/|$)/g, "/free/gate");
+  const origin = req.headers.get("origin");
+  if (origin) return origin;
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  if (host) return `${proto}://${host}`;
+  return "";
 }
 
 Deno.serve(async (req) => {
+  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
+  const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
+
+  const origin = req.headers.get("origin") ?? "";
+  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL) ? origin : PUBLIC_BASE_URL;
+
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders(req) });
-  }
-  if (req.method !== "GET") return json(req, { ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
-
-  const publicBase = inferBaseUrl(req);
-
-  // 1) Prefer DB override (admin-managed). 2) Fallback to ENV.
-  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim();
-  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
-  const canReadDb = !!supabaseUrl && !!serviceRoleKey;
-  const db = canReadDb ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } }) : null;
-
-  let dbOutbound: string | null = null;
-  if (db) {
-    const settings = await db
-      .from("licenses_free_settings")
-      .select("free_outbound_url")
-      .eq("id", 1)
-      .maybeSingle();
-    if (!settings.error) {
-      dbOutbound = fixCommonGateTypo(normalizeHttpsUrl((settings.data as any)?.free_outbound_url ?? null));
-    }
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": allowOrigin,
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
 
-  const envOutbound = fixCommonGateTypo(normalizeHttpsUrl((Deno.env.get("FREE_OUTBOUND_URL") ?? "").trim() || null));
-  const freeOutbound = dbOutbound ?? envOutbound;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceRole) {
+    return new Response(JSON.stringify({ error: "Missing SUPABASE secrets" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
 
-  const showTest = normalizeBool(Deno.env.get("SHOW_TEST_REDIRECT_BUTTON"));
-  const turnEnabled = normalizeBool(Deno.env.get("FREE_TURNSTILE_ENABLED"));
-  const turnSiteKey = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim() || null;
+  const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+
+  // Load settings row id=1
+  const { data: settings, error: sErr } = await sb
+    .from("licenses_free_settings")
+    .select(
+      "free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer",
+    )
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (sErr) {
+    return new Response(JSON.stringify({ error: sErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const free_outbound_url = settings?.free_outbound_url ?? null;
+  const free_enabled = Boolean(settings?.free_enabled ?? true);
+  const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
+  const free_min_delay_seconds = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+  const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
+  const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
+
+  // Load enabled key types
+  const { data: keyTypes, error: kErr } = await sb
+    .from("licenses_free_key_types")
+    .select("code,label,kind,value,duration_seconds,sort_order,enabled")
+    .eq("enabled", true)
+    .order("sort_order", { ascending: true });
+
+  if (kErr) {
+    return new Response(JSON.stringify({ error: kErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+    });
+  }
+
+  const TURNSTILE_SITE_KEY = Deno.env.get("TURNSTILE_SITE_KEY") ?? "";
+  const TURNSTILE_SECRET_KEY = Deno.env.get("TURNSTILE_SECRET_KEY") ?? "";
+  const turnstile_enabled = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 
   const missing: string[] = [];
-  if (!freeOutbound) missing.push("FREE_OUTBOUND_URL");
-  if (turnEnabled) {
-    if (!turnSiteKey) missing.push("TURNSTILE_SITE_KEY");
-    if (!(Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim()) missing.push("TURNSTILE_SECRET_KEY");
-  }
+  if (!free_outbound_url) missing.push("free_outbound_url");
+  if (!keyTypes?.length) missing.push("no_key_types_enabled");
+  if (!baseUrl) missing.push("public_base_url");
 
-  return json(req, {
-    public_base_url: publicBase,
-    destination_gate_url: `${publicBase}/free/gate`,
-    free_outbound_url: freeOutbound,
-    show_test_redirect_button: showTest,
-    turnstile_enabled: turnEnabled,
-    turnstile_site_key: turnSiteKey,
+  const destination_gate_url = `${baseUrl}/free/gate`;
+
+  const body = {
+    public_base_url: baseUrl || null,
+    destination_gate_url,
+
+    free_enabled,
+    free_disabled_message,
+    free_outbound_url,
+    free_min_delay_seconds,
+    free_return_seconds,
+    free_daily_limit_per_fingerprint,
+    free_require_link4m_referrer,
+
+    key_types: (keyTypes ?? []).map((k) => ({
+      code: k.code,
+      label: k.label,
+      kind: k.kind,
+      value: k.value,
+      duration_seconds: k.duration_seconds,
+    })),
+
+    turnstile_enabled,
+    turnstile_site_key: TURNSTILE_SITE_KEY || null,
+
     missing,
+  };
+
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": allowOrigin,
+    },
   });
 });
