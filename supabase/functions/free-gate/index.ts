@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_require_link4m_referrer")
+    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_min_delay_enabled,free_require_link4m_referrer")
     .eq("id", 1)
     .maybeSingle();
 
@@ -201,17 +201,24 @@ Deno.serve(async (req) => {
     });
   }
 
-  const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
-  const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
-  const startedAtMs = Date.parse(startedAtIso);
-  const mustWaitUntil = startedAtMs + minDelay * 1000;
-  if (isFinite(startedAtMs) && now < mustWaitUntil) {
-    const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
-    return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST", wait_seconds }), {
-      status: 429,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+  const delayEnabled = Boolean((settings as any)?.free_min_delay_enabled ?? true);
+  if (delayEnabled) {
+    const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+    const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
+    const startedAtMs = Date.parse(startedAtIso);
+    const mustWaitUntil = startedAtMs + minDelay * 1000;
+    if (isFinite(startedAtMs) && now < mustWaitUntil) {
+      const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
+      return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST", wait_seconds }), {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": allowOrigin,
+          "Vary": "Origin",
+        },
+      });
+    }
   }
 
   // Idempotency: if claim token already issued and still valid, just re-issue (helps if user refreshes)
