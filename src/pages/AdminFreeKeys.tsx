@@ -138,6 +138,16 @@ export function AdminFreeKeysPage() {
     );
   };
 
+  const isSchemaCacheMissingColumnError = (err: unknown) => {
+    const msg = String((err as any)?.message ?? "");
+    // Examples:
+    // - Could not find the 'free_daily_limit_per_fingerprint' column of 'licenses_free_settings' in the schema cache
+    // - Could not find the 'xxx' column of 'public.table' in the schema cache
+    if (!msg) return false;
+    if (!msg.toLowerCase().includes("schema cache")) return false;
+    return msg.includes("Could not find the '") && msg.includes("' column of '");
+  };
+
   const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
   const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
   const gateUrl = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
@@ -172,6 +182,8 @@ export function AdminFreeKeysPage() {
       return (data as any) as SettingsRow | null;
     },
   });
+
+  const missingSettingsColumns = isSchemaCacheMissingColumnError(settingsQuery.error);
 
   const [outboundUrl, setOutboundUrl] = useState("");
   const [freeEnabled, setFreeEnabled] = useState(true);
@@ -384,6 +396,28 @@ export function AdminFreeKeysPage() {
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
           </div>
 
+          {missingSettingsColumns ? (
+            <Alert className="mb-2">
+              <AlertTitle>DB chưa chạy đủ migration cho Free settings</AlertTitle>
+              <AlertDescription>
+                <div className="space-y-2">
+                  <div>
+                    Backend đang báo thiếu cột của <span className="font-mono">licenses_free_settings</span> trong schema cache.
+                  </div>
+                  <div>
+                    Hãy chạy các migration:
+                    <span className="font-mono"> 20260202090807_7f0f8af7-d5f8-441e-96ff-66aa666b9326.sql</span>,
+                    <span className="font-mono"> 20260203093000_free_key_types_and_settings.sql</span>,
+                    <span className="font-mono"> 20260204110000_free_public_content.sql</span>
+                    &nbsp;và reload schema cache:
+                  </div>
+                  <div className="rounded-md border p-2 font-mono text-xs">select pg_notify('pgrst','reload schema');</div>
+                  <div>Tạm thời đã khóa nút “Save settings” để tránh spam lỗi.</div>
+                </div>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <div className="text-sm font-medium">Link4M outbound URL (https)</div>
@@ -520,7 +554,7 @@ export function AdminFreeKeysPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
+            <Button onClick={() => saveSettings.mutate()} disabled={missingSettingsColumns || saveSettings.isPending}>
               Save settings
             </Button>
             <Button variant="secondary" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching}>
