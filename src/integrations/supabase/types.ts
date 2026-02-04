@@ -308,19 +308,43 @@ export type Database = {
       }
       licenses_free_settings: {
         Row: {
+          free_daily_limit_per_fingerprint: number
+          free_disabled_message: string
+          free_enabled: boolean
+          free_min_delay_seconds: number
           free_outbound_url: string | null
+          free_public_links: Json
+          free_public_note: string
+          free_require_link4m_referrer: boolean
+          free_return_seconds: number
           id: number
           updated_at: string
           updated_by: string | null
         }
         Insert: {
+          free_daily_limit_per_fingerprint?: number
+          free_disabled_message?: string
+          free_enabled?: boolean
+          free_min_delay_seconds?: number
           free_outbound_url?: string | null
+          free_public_links?: Json
+          free_public_note?: string
+          free_require_link4m_referrer?: boolean
+          free_return_seconds?: number
           id: number
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
+          free_daily_limit_per_fingerprint?: number
+          free_disabled_message?: string
+          free_enabled?: boolean
+          free_min_delay_seconds?: number
           free_outbound_url?: string | null
+          free_public_links?: Json
+          free_public_note?: string
+          free_require_link4m_referrer?: boolean
+          free_return_seconds?: number
           id?: number
           updated_at?: string
           updated_by?: string | null
