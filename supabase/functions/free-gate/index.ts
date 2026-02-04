@@ -126,7 +126,10 @@ Deno.serve(async (req) => {
   if (requireRef) {
     try {
       const u = new URL(referrer);
-      if (!u.hostname.endsWith("link4m.com")) {
+      const host = (u.hostname || "").toLowerCase();
+      // Link4M domains can vary (e.g. link4m.com / link4m.xyz / link4m.app...).
+      // Referrer is not 100% reliable across browsers, so keep this check lenient.
+      if (!host.includes("link4m")) {
         return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
           status: 400,
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,

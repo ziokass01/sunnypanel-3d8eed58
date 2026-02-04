@@ -14,7 +14,16 @@ type RevealErr = { ok: false; msg: string };
 export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
-  const claimToken = sp.get("c") ?? "";
+  const claimToken = useMemo(() => {
+    const fromQuery = sp.get("c");
+    if (fromQuery) return fromQuery;
+    // Some redirect/shortener flows can strip query params; keep a fallback token.
+    try {
+      return localStorage.getItem("free_claim_token") ?? "";
+    } catch {
+      return "";
+    }
+  }, [sp]);
 
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [turnToken, setTurnToken] = useState<string>("");
@@ -167,6 +176,11 @@ export function FreeClaimPage() {
                       if (!res.ok) {
                         setError((res as RevealErr).msg || "Reveal failed");
                         return;
+                      }
+                      try {
+                        localStorage.removeItem("free_claim_token");
+                      } catch {
+                        // ignore
                       }
                       setRevealed({
                         key: (res as RevealOk).key,

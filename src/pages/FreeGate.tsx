@@ -58,13 +58,19 @@ export function FreeGatePage() {
 
       if ((res as GateOk).ok) {
         const claim = (res as GateOk).claim_token;
+        // Fallback for edge-cases where query params are stripped by a redirect/shortener.
+        try {
+          localStorage.setItem("free_claim_token", String(claim));
+        } catch {
+          // ignore
+        }
         nav(`/free/claim?c=${encodeURIComponent(claim)}`, { replace: true });
         return;
       }
 
       const msg = (res as GateErr).msg || "GATE_FAILED";
 
-      if (msg === "TOO_FAST") {
+      if (msg === "TOO_FAST" || msg.startsWith("TOO_FAST")) {
         const w = Math.max(1, Math.floor((res as GateTooFast).wait_seconds ?? 1));
         setStatus("waiting");
         setWait(w);

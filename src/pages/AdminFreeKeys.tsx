@@ -612,7 +612,8 @@ const disableAllKeyTypes = useMutation({
             </div>
           </div>
 
-          <Table>
+          <div className="overflow-x-auto">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>On</TableHead>
@@ -661,7 +662,8 @@ const disableAllKeyTypes = useMutation({
                 </TableRow>
               ) : null}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -707,7 +709,8 @@ const disableAllKeyTypes = useMutation({
           </Button>
         </CardHeader>
         <CardContent>
-          <Table>
+          <div className="overflow-x-auto">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Created</TableHead>
@@ -741,7 +744,8 @@ const disableAllKeyTypes = useMutation({
                 </TableRow>
               ) : null}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -753,7 +757,8 @@ const disableAllKeyTypes = useMutation({
           </Button>
         </CardHeader>
         <CardContent>
-          <Table>
+          <div className="overflow-x-auto">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Created</TableHead>
@@ -781,7 +786,8 @@ const disableAllKeyTypes = useMutation({
                 </TableRow>
               ) : null}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
