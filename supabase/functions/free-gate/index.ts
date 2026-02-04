@@ -47,13 +47,14 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL) ? origin : PUBLIC_BASE_URL;
+  const allowOrigin = origin || "*";
 
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
         "Access-Control-Allow-Origin": allowOrigin,
-        "Access-Control-Allow-Methods": "POST,OPTIONS",
+      "Vary": "Origin",
+      "Access-Control-Allow-Methods": "POST,OPTIONS",
         "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
         "Access-Control-Max-Age": "86400",
       },
@@ -63,7 +64,8 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
       status: 405,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -72,7 +74,8 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRole) {
     return new Response(JSON.stringify({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -89,7 +92,8 @@ Deno.serve(async (req) => {
   if (!parsed.success) {
     return new Response(JSON.stringify({ ok: false, msg: "BAD_REQUEST" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -105,14 +109,16 @@ Deno.serve(async (req) => {
   if (sErr) {
     return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
   if (!Boolean(settings?.free_enabled ?? true)) {
     return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
       status: 403,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -123,13 +129,15 @@ Deno.serve(async (req) => {
       if (!u.hostname.endsWith("link4m.com")) {
         return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
           status: 400,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
         });
       }
     } catch {
       return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
       });
     }
   }
@@ -150,14 +158,16 @@ Deno.serve(async (req) => {
   if (qErr) {
     return new Response(JSON.stringify({ ok: false, msg: qErr.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
   if (!sess) {
     return new Response(JSON.stringify({ ok: false, msg: "INVALID_SESSION" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -167,21 +177,24 @@ Deno.serve(async (req) => {
   if (!isFinite(expiresAt) || expiresAt <= now) {
     return new Response(JSON.stringify({ ok: false, msg: "SESSION_EXPIRED" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
   if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash) {
     return new Response(JSON.stringify({ ok: false, msg: "DEVICE_MISMATCH" }), {
       status: 403,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
   if (sess.reveal_count && sess.reveal_count > 0) {
     return new Response(JSON.stringify({ ok: false, msg: "ALREADY_REVEALED" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -193,7 +206,8 @@ Deno.serve(async (req) => {
     const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
     return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST", wait_seconds }), {
       status: 429,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -223,12 +237,14 @@ Deno.serve(async (req) => {
   if (updErr) {
     return new Response(JSON.stringify({ ok: false, msg: updErr.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
   return new Response(JSON.stringify({ ok: true, claim_token }), {
     status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
   });
 });

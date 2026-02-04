@@ -392,7 +392,9 @@ const disableAllKeyTypes = useMutation({
               <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
             </div>
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-          </div>
+          
+                    {/* Delete button (mobile-friendly) */}
+</div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">

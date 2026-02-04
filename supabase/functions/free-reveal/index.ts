@@ -1,17 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 
-function corsHeaders(allowOrigin: string) {
-  return {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Credentials": "true",
-    Vary: "Origin",
-  } as const;
-}
-
-const allowHeaders =
-  "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version";
-
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
@@ -90,17 +79,16 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL)
-    ? origin
-    : (origin && !PUBLIC_BASE_URL ? origin : (PUBLIC_BASE_URL || "*"));
+  const allowOrigin = origin || "*";
 
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: {
-        ...corsHeaders(allowOrigin),
-        "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": allowHeaders,
+        "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin",
+      "Access-Control-Allow-Methods": "POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
         "Access-Control-Max-Age": "86400",
       },
     });
@@ -109,7 +97,8 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
       status: 405,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -119,7 +108,8 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -127,7 +117,8 @@ Deno.serve(async (req) => {
   if (!parsed.success) {
     return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -136,7 +127,8 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRole) {
     return new Response(JSON.stringify({ ok: false, msg: "SERVER_MISCONFIG" }), {
       status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -155,14 +147,16 @@ Deno.serve(async (req) => {
   if (sErr) {
     return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
   if (!Boolean(settings?.free_enabled ?? true)) {
     return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
       status: 403,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -172,14 +166,11 @@ Deno.serve(async (req) => {
   const turnstile_enabled = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
   if (turnstile_enabled) {
     const token = (parsed.data.turnstile_token ?? "")?.trim();
-    if (!token) {
-      return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
-      });
-    }
+    if (!token) return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" } });
     const ok = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
-    if (!ok) return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) } });
+    if (!ok) return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" } });
   }
 
   const claimHash = await sha256Hex(parsed.data.claim_token);
@@ -201,7 +192,8 @@ Deno.serve(async (req) => {
   if (qErr || !sess) {
     return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
       status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -224,7 +216,8 @@ Deno.serve(async (req) => {
     await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sess.session_id);
     return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
       status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -242,7 +235,8 @@ Deno.serve(async (req) => {
     await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA" }).eq("session_id", sess.session_id);
     return new Response(JSON.stringify({ ok: false, msg: "RATE_LIMIT" }), {
       status: 429,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -288,7 +282,8 @@ Deno.serve(async (req) => {
     await sb.from("licenses_free_sessions").update({ last_error: "INSERT_FAILED" }).eq("session_id", sess.session_id);
     return new Response(JSON.stringify({ ok: false, msg: "SERVER_ERROR" }), {
       status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
     });
   }
 
@@ -320,6 +315,7 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({ ok: true, key: inserted.key, expires_at, key_type_label: keyTypeLabel }), {
     status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...corsHeaders(allowOrigin) },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
   });
 });
