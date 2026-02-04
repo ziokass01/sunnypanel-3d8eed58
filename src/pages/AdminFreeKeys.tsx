@@ -27,6 +27,8 @@ type SettingsRow = {
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
   free_require_link4m_referrer: boolean;
+  free_public_note: string;
+  free_public_links: any;
   updated_at: string;
   updated_by: string | null;
 };
@@ -72,6 +74,12 @@ type IssueRow = {
   ua_hash: string;
 };
 
+type PublicLink = {
+  label: string;
+  url: string;
+  icon?: string | null;
+};
+
 function utcDayRange(day: string) {
   // day = YYYY-MM-DD in UTC
   const from = `${day}T00:00:00.000Z`;
@@ -79,8 +87,65 @@ function utcDayRange(day: string) {
   return { from, to };
 }
 
+function pad2(n: number) {
+  return String(Math.max(0, Math.floor(n))).padStart(2, "0");
+}
+
+function toLinksText(value: any): string {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((l) => {
+      const label = String(l?.label ?? "").trim();
+      const url = String(l?.url ?? "").trim();
+      const icon = String(l?.icon ?? "").trim();
+      if (!label || !url) return "";
+      return `${label}|${url}${icon ? `|${icon}` : ""}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseLinksText(text: string): PublicLink[] {
+  const lines = (text || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const out: PublicLink[] = [];
+  for (const line of lines) {
+    const [labelRaw, urlRaw, iconRaw] = line.split("|");
+    const label = (labelRaw ?? "").trim();
+    const url = (urlRaw ?? "").trim();
+    const icon = (iconRaw ?? "").trim();
+    if (!label || !url) continue;
+    // Very light url sanity
+    if (!/^https?:\/\//i.test(url)) continue;
+    out.push({ label, url, icon: icon || null });
+  }
+  return out.slice(0, 8);
+}
+
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
+
+  const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
+  const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
+  const gateUrl = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
+  const claimBaseUrl = baseUrl ? `${baseUrl}/free/claim` : "/free/claim";
+
+  const openUrl = (u: string) => {
+    if (!u) return;
+    window.open(u, "_blank", "noopener,noreferrer");
+  };
+
+  const copyText = async (t: string) => {
+    try {
+      await navigator.clipboard.writeText(t);
+      toast({ title: "Copied", description: "Đã copy vào clipboard." });
+    } catch {
+      toast({ title: "Copy failed", description: "Không thể copy. Hãy copy thủ công.", variant: "destructive" });
+    }
+  };
 
   // -------- Settings (admin-controlled) --------
   const settingsQuery = useQuery({
@@ -89,7 +154,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,updated_at,updated_by",
+          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -105,6 +170,8 @@ export function AdminFreeKeysPage() {
   const [returnSeconds, setReturnSeconds] = useState(10);
   const [dailyLimit, setDailyLimit] = useState(1);
   const [requireRef, setRequireRef] = useState(false);
+  const [publicNote, setPublicNote] = useState("");
+  const [publicLinksText, setPublicLinksText] = useState("");
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -116,6 +183,8 @@ export function AdminFreeKeysPage() {
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
     setRequireRef(Boolean(s.free_require_link4m_referrer));
+    setPublicNote(String(s.free_public_note ?? ""));
+    setPublicLinksText(toLinksText(s.free_public_links));
   }, [settingsQuery.data]);
 
   const saveSettings = useMutation({
@@ -128,6 +197,8 @@ export function AdminFreeKeysPage() {
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
         free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
         free_require_link4m_referrer: Boolean(requireRef),
+        free_public_note: publicNote,
+        free_public_links: parseLinksText(publicLinksText),
       };
 
       const { data, error } = await supabase
@@ -178,20 +249,60 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const bulkSet = useMutation({
-    mutationFn: async (args: { kind: "hour" | "day" | "all"; enabled: boolean }) => {
-      let q = supabase.from("licenses_free_key_types").update({ enabled: args.enabled });
-      if (args.kind !== "all") q = q.eq("kind", args.kind);
-      const { error } = await q;
+  const disableAllKeyTypes = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("licenses_free_key_types").update({ enabled: false });
       if (error) throw error;
       return true;
     },
     onSuccess: async () => {
-      toast({ title: "Updated", description: "Key types updated." });
+      toast({ title: "Updated", description: "All key types disabled." });
       await keyTypesQuery.refetch();
     },
     onError: (e: any) => {
-      toast({ title: "Bulk update failed", description: e?.message ?? "Error", variant: "destructive" });
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  // Create/enable a key type (hours: 1..24, days: 1..30)
+  const [newKind, setNewKind] = useState<"hour" | "day">("hour");
+  const [newValue, setNewValue] = useState<number>(1);
+  const [newLabel, setNewLabel] = useState<string>("");
+
+  const createKeyType = useMutation({
+    mutationFn: async () => {
+      const v = Math.max(1, Math.floor(Number(newValue) || 1));
+      const max = newKind === "hour" ? 24 : 30;
+      const value = Math.min(max, v);
+      const code = `${newKind === "hour" ? "h" : "d"}${pad2(value)}`;
+      const label = (newLabel?.trim() || `${value} ${newKind === "hour" ? "giờ" : "ngày"}`);
+      const duration_seconds = newKind === "hour" ? value * 3600 : value * 86400;
+      const sort_order = newKind === "hour" ? value : 100 + value;
+
+      const { error } = await supabase
+        .from("licenses_free_key_types")
+        .upsert(
+          {
+            code,
+            label,
+            kind: newKind,
+            value,
+            duration_seconds,
+            sort_order,
+            enabled: true,
+          },
+          { onConflict: "code" },
+        );
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Created", description: "Key type enabled." });
+      setNewLabel("");
+      await keyTypesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Create failed", description: e?.message ?? "Error", variant: "destructive" });
     },
   });
 
@@ -324,6 +435,78 @@ export function AdminFreeKeysPage() {
             </div>
           </div>
 
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Ghi chú (hiện cho người dùng)</div>
+              <Textarea
+                value={publicNote}
+                onChange={(e) => setPublicNote(e.target.value)}
+                rows={4}
+                placeholder="Ví dụ: cre, ghi chú, hướng dẫn..."
+              />
+              <div className="text-xs text-muted-foreground">Hiện trên /free và /free/claim (nếu có nội dung).</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Link cộng đồng (mỗi dòng)</div>
+              <Textarea
+                value={publicLinksText}
+                onChange={(e) => setPublicLinksText(e.target.value)}
+                rows={4}
+                placeholder={`Zalo|https://zalo.me/your-group|zalo\nYouTube|https://youtube.com/@yourchannel|youtube`}
+              />
+              <div className="text-xs text-muted-foreground">
+                Format: <span className="font-mono">label|url|icon</span> (icon optional: zalo/youtube/telegram).
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-md border p-3 space-y-3">
+            <div>
+              <div className="font-medium">Link gốc (để copy/open)</div>
+              <div className="text-xs text-muted-foreground">Trang nhận key dùng claim token, link gốc là base.</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium">Trang chọn key</div>
+              <div className="flex gap-2">
+                <Input value={getKeyUrl} readOnly />
+                <Button variant="secondary" onClick={() => copyText(getKeyUrl)}>
+                  Copy
+                </Button>
+                <Button variant="outline" onClick={() => openUrl(getKeyUrl)}>
+                  Open
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium">Gate callback</div>
+              <div className="flex gap-2">
+                <Input value={gateUrl} readOnly />
+                <Button variant="secondary" onClick={() => copyText(gateUrl)}>
+                  Copy
+                </Button>
+                <Button variant="outline" onClick={() => openUrl(gateUrl)}>
+                  Open
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium">Trang nhận key (base)</div>
+              <div className="flex gap-2">
+                <Input value={claimBaseUrl} readOnly />
+                <Button variant="secondary" onClick={() => copyText(claimBaseUrl)}>
+                  Copy
+                </Button>
+                <Button variant="outline" onClick={() => openUrl(claimBaseUrl)}>
+                  Open
+                </Button>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
               Save settings
@@ -346,18 +529,65 @@ export function AdminFreeKeysPage() {
             <CardDescription>Chỉ loại nào bật thì trang /free mới hiện lựa chọn.</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => bulkSet.mutate({ kind: "hour", enabled: true })} disabled={bulkSet.isPending}>
-              Enable all hours
-            </Button>
-            <Button variant="secondary" onClick={() => bulkSet.mutate({ kind: "day", enabled: true })} disabled={bulkSet.isPending}>
-              Enable all days
-            </Button>
-            <Button variant="secondary" onClick={() => bulkSet.mutate({ kind: "all", enabled: false })} disabled={bulkSet.isPending}>
+            <Button
+              variant="secondary"
+              onClick={() => disableAllKeyTypes.mutate()}
+              disabled={disableAllKeyTypes.isPending}
+            >
               Disable all
+            </Button>
+            <Button variant="outline" onClick={() => keyTypesQuery.refetch()} disabled={keyTypesQuery.isFetching}>
+              Reload
             </Button>
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 rounded-md border p-3">
+            <div className="font-medium">Tạo / bật loại key</div>
+            <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Loại</div>
+                <Select value={newKind} onValueChange={(v) => setNewKind(v as any)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hour">Giờ (1..24)</SelectItem>
+                    <SelectItem value="day">Ngày (1..30)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Số</div>
+                <Input
+                  type="number"
+                  value={newValue}
+                  min={1}
+                  max={newKind === "hour" ? 24 : 30}
+                  onChange={(e) => setNewValue(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tên hiển thị (optional)</div>
+                <Input
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder={newKind === "hour" ? "Ví dụ: 6 giờ" : "Ví dụ: 3 ngày"}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <Button onClick={() => createKeyType.mutate()} disabled={createKeyType.isPending}>
+                Create / Enable
+              </Button>
+            </div>
+          </div>
+
           <Table>
             <TableHeader>
               <TableRow>

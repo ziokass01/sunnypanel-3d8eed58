@@ -5,12 +5,13 @@ function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   try {
     const u = new URL(origin);
     const host = u.host;
-    return (
-      host === "lovable.dev" ||
-      host.endsWith(".lovable.dev") ||
-      host.endsWith(".lovable.app") ||
-      (publicBaseUrl ? origin === publicBaseUrl : false)
-    );
+    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
+    if (publicBaseUrl) {
+      const pb = new URL(publicBaseUrl);
+      const pbHost = pb.host;
+      return host === pbHost || host.endsWith(`.${pbHost}`);
+    }
+    return false;
   } catch {
     return false;
   }
@@ -58,7 +59,7 @@ Deno.serve(async (req) => {
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
     .select(
-      "free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer",
+      "free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -77,6 +78,8 @@ Deno.serve(async (req) => {
   const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
   const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
+  const free_public_note = String(settings?.free_public_note ?? "");
+  const free_public_links = Array.isArray(settings?.free_public_links) ? settings?.free_public_links : [];
 
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
@@ -114,6 +117,9 @@ Deno.serve(async (req) => {
     free_return_seconds,
     free_daily_limit_per_fingerprint,
     free_require_link4m_referrer,
+
+    free_public_note,
+    free_public_links,
 
     key_types: (keyTypes ?? []).map((k) => ({
       code: k.code,

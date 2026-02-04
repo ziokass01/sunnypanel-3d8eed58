@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
+import { PublicInfo } from "@/features/free/PublicInfo";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode } from "@/features/free/fingerprint";
 
@@ -106,8 +107,13 @@ export function FreeClaimPage() {
       <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
         <Card className="w-full">
           <CardHeader>
-            <CardTitle>Nhận key</CardTitle>
-            <CardDescription>Key chỉ hiển thị 1 lần duy nhất.</CardDescription>
+            <div className="flex items-center gap-3">
+              <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
+              <div>
+                <CardTitle>Nhận key</CardTitle>
+                <CardDescription>Key chỉ hiển thị 1 lần duy nhất.</CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {!claimToken ? (
@@ -177,6 +183,8 @@ export function FreeClaimPage() {
                   {loading ? "Đang xác minh…" : "Nhận key"}
                 </Button>
 
+                <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
+
                 <div className="text-center text-xs text-muted-foreground">Tự động quay lại sau {returnSeconds}s.</div>
               </div>
             ) : (
@@ -200,6 +208,8 @@ export function FreeClaimPage() {
                 >
                   Copy & quay lại
                 </Button>
+
+                <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
                 <div className="text-center text-xs text-muted-foreground">
                   Tự động quay lại sau {returnSeconds}s nếu không bấm Copy.

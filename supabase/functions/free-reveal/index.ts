@@ -6,12 +6,13 @@ function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   try {
     const u = new URL(origin);
     const host = u.host;
-    return (
-      host === "lovable.dev" ||
-      host.endsWith(".lovable.dev") ||
-      host.endsWith(".lovable.app") ||
-      (publicBaseUrl ? origin === publicBaseUrl : false)
-    );
+    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
+    if (publicBaseUrl) {
+      const pb = new URL(publicBaseUrl);
+      const pbHost = pb.host;
+      return host === pbHost || host.endsWith(`.${pbHost}`);
+    }
+    return false;
   } catch {
     return false;
   }

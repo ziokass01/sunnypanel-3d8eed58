@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
+import { PublicInfo } from "@/features/free/PublicInfo";
 import { postFunction } from "@/lib/functions";
 import { getOrCreateFingerprint, setOutToken, setSelectedKeyTypeCode } from "@/features/free/fingerprint";
 
@@ -46,11 +47,13 @@ export function FreeLandingPage() {
     <div className="min-h-svh bg-background">
       <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
         <Card className="w-full">
-          <CardHeader>
-            <CardTitle>Get key free</CardTitle>
-            <CardDescription>
-              Chọn loại key → bấm Get Key → vượt Link4M → nhận key. (Không có quyền nào khác)
-            </CardDescription>
+          <CardHeader className="space-y-3">
+            <div className="flex items-center gap-3">
+              <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
+              <div>
+                <CardTitle>Get key free</CardTitle>
+              </div>
+            </div>
           </CardHeader>
 
           <CardContent className="space-y-4">
@@ -70,6 +73,8 @@ export function FreeLandingPage() {
               </div>
             ) : null}
 
+            <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
+
             <div className="space-y-2">
               <div className="text-sm font-medium">Chọn loại key</div>
               <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || isClosed || loading}>
@@ -84,14 +89,6 @@ export function FreeLandingPage() {
                   ))}
                 </SelectContent>
               </Select>
-
-              <div className="text-xs text-muted-foreground">
-                {cfg?.free_outbound_url ? (
-                  <>Bạn sẽ được chuyển sang Link4M để vượt link.</>
-                ) : (
-                  <>Admin chưa cấu hình Link4M outbound URL.</>
-                )}
-              </div>
             </div>
 
             <Button
@@ -130,10 +127,6 @@ export function FreeLandingPage() {
             >
               {loading ? "Đang chuyển hướng…" : "Get Key"}
             </Button>
-
-            <div className="text-center text-xs text-muted-foreground">
-              Nếu lỗi/treo, hãy quay lại trang này và bấm Get Key lại.
-            </div>
           </CardContent>
         </Card>
       </main>

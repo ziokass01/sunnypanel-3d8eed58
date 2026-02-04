@@ -8,6 +8,12 @@ export type FreeKeyType = {
   duration_seconds: number;
 };
 
+export type PublicLink = {
+  label: string;
+  url: string;
+  icon?: string | null;
+};
+
 export type FreeConfig = {
   public_base_url: string | null;
   destination_gate_url: string;
@@ -20,6 +26,10 @@ export type FreeConfig = {
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
   free_require_link4m_referrer: boolean;
+
+  // Public content (optional)
+  free_public_note: string;
+  free_public_links: PublicLink[];
 
   // Available options (only enabled key types are returned)
   key_types: FreeKeyType[];
