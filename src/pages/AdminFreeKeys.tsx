@@ -275,7 +275,10 @@ export function AdminFreeKeysPage() {
 
   const disableAllKeyTypes = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("licenses_free_key_types").update({ enabled: false });
+      const { error } = await supabase
+        .from("licenses_free_key_types")
+        .update({ enabled: false })
+        .eq("enabled", true);
       if (error) throw error;
       return true;
     },
