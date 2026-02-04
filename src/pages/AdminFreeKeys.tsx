@@ -25,6 +25,7 @@ type SettingsRow = {
   free_enabled: boolean;
   free_disabled_message: string;
   free_min_delay_seconds: number;
+  free_min_delay_enabled?: boolean;
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
   free_require_link4m_referrer: boolean;
@@ -155,7 +156,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
+          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -167,6 +168,7 @@ export function AdminFreeKeysPage() {
   const [outboundUrl, setOutboundUrl] = useState("");
   const [freeEnabled, setFreeEnabled] = useState(true);
   const [disabledMessage, setDisabledMessage] = useState("Trang GetKey đang tạm đóng.");
+  const [minDelayEnabled, setMinDelayEnabled] = useState(true);
   const [minDelay, setMinDelay] = useState(25);
   const [returnSeconds, setReturnSeconds] = useState(10);
   const [dailyLimit, setDailyLimit] = useState(1);
@@ -180,6 +182,7 @@ export function AdminFreeKeysPage() {
     setOutboundUrl(s.free_outbound_url ?? "");
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
+    setMinDelayEnabled(Boolean((s as any).free_min_delay_enabled ?? true));
     setMinDelay(Number(s.free_min_delay_seconds ?? 25));
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
@@ -194,6 +197,7 @@ export function AdminFreeKeysPage() {
         free_outbound_url: outboundUrl.trim() || null,
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
+        free_min_delay_enabled: Boolean(minDelayEnabled),
         free_min_delay_seconds: Math.max(5, Math.floor(Number(minDelay) || 25)),
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
         free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
@@ -416,14 +420,25 @@ const disableAllKeyTypes = useMutation({
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium">Delay tối thiểu (giây)</div>
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm font-medium">Delay tối thiểu (giây)</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-muted-foreground">Bật</div>
+                  <Switch checked={minDelayEnabled} onCheckedChange={setMinDelayEnabled} />
+                </div>
+              </div>
               <Input
                 type="number"
                 value={minDelay}
                 onChange={(e) => setMinDelay(Number(e.target.value))}
                 min={5}
+                disabled={!minDelayEnabled}
               />
-              <div className="text-xs text-muted-foreground">Gate chỉ hợp lệ sau thời gian này (chống spam/bypass cơ bản).</div>
+              <div className="text-xs text-muted-foreground">
+                {minDelayEnabled
+                  ? "Gate chỉ hợp lệ sau thời gian này (chống spam/bypass cơ bản)."
+                  : "Đang tắt: không kiểm tra delay ở /free/gate."}
+              </div>
             </div>
 
             <div className="space-y-2">

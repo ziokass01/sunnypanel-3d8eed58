@@ -332,6 +332,7 @@ export type Database = {
           free_daily_limit_per_fingerprint: number
           free_disabled_message: string
           free_enabled: boolean
+          free_min_delay_enabled: boolean
           free_min_delay_seconds: number
           free_outbound_url: string | null
           free_public_links: Json
@@ -346,6 +347,7 @@ export type Database = {
           free_daily_limit_per_fingerprint?: number
           free_disabled_message?: string
           free_enabled?: boolean
+          free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
           free_outbound_url?: string | null
           free_public_links?: Json
@@ -360,6 +362,7 @@ export type Database = {
           free_daily_limit_per_fingerprint?: number
           free_disabled_message?: string
           free_enabled?: boolean
+          free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
           free_outbound_url?: string | null
           free_public_links?: Json
