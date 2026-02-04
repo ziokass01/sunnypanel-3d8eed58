@@ -32,27 +32,31 @@ Deno.serve(async (req) => {
 
   const origin = req.headers.get("origin") ?? "";
   const allowOrigin = origin || "*";
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Max-Age": "86400",
+  };
+  const jsonResponse = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
       headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-        "Access-Control-Max-Age": "86400",
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
       },
     });
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders, status: 204 });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return new Response(JSON.stringify({ error: "Missing SUPABASE secrets" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ error: "Missing SUPABASE secrets" }, 500);
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -67,11 +71,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (sErr) {
-    return new Response(JSON.stringify({ error: sErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ error: sErr.message }, 500);
   }
 
   const free_outbound_url = settings?.free_outbound_url ?? null;
@@ -92,11 +92,7 @@ Deno.serve(async (req) => {
     .order("sort_order", { ascending: true });
 
   if (kErr) {
-    return new Response(JSON.stringify({ error: kErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ error: kErr.message }, 500);
   }
 
   const TURNSTILE_SITE_KEY = Deno.env.get("TURNSTILE_SITE_KEY") ?? "";
@@ -139,13 +135,5 @@ Deno.serve(async (req) => {
     missing,
   };
 
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin",
-      },
-  });
+  return jsonResponse(body, 200);
 });

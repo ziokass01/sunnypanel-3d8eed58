@@ -27,7 +27,7 @@ export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
   const claimToken = useMemo(() => {
-    const fromQuery = sp.get("c");
+    const fromQuery = sp.get("claim");
     if (fromQuery) return fromQuery;
     // Some redirect/shortener flows can strip query params; keep a fallback token.
     try {
@@ -75,6 +75,15 @@ export function FreeClaimPage() {
       // ignore
     }
   }, [claimToken]);
+
+  const clearRevealedCache = () => {
+    if (!claimToken) return;
+    try {
+      sessionStorage.removeItem(cacheKeyForClaimToken(claimToken));
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     // noindex for claim page
@@ -206,7 +215,9 @@ export function FreeClaimPage() {
                       if (!res.ok) {
                         const msg = (res as RevealErr).msg || "Reveal failed";
                         // If backend refuses (already revealed/invalid), guide user safely.
-                        if (msg === "UNAUTHORIZED") {
+                        if (msg === "REVEAL_IN_PROGRESS") {
+                          setError("Hệ thống đang xử lý. Vui lòng chờ vài giây rồi thử lại.");
+                        } else if (msg === "UNAUTHORIZED") {
                           setError("Key đã được reveal hoặc session không hợp lệ. Vui lòng quay lại và làm lại flow.");
                         } else {
                           setError(msg);
@@ -261,6 +272,22 @@ export function FreeClaimPage() {
                   }}
                 >
                   Copy
+                </Button>
+
+                <Button
+                  className="w-full"
+                  variant="secondary"
+                  onClick={async () => {
+                    clearRevealedCache();
+                    try {
+                      localStorage.removeItem("free_claim_token");
+                    } catch {
+                      // ignore
+                    }
+                    await closeAndReturn();
+                  }}
+                >
+                  Xóa key
                 </Button>
 
                 <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />

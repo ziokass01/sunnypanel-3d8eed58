@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getFreeTestMode, setFreeTestMode } from "@/features/free/fingerprint";
 
 type SettingsRow = {
   id: number;
@@ -175,6 +176,7 @@ export function AdminFreeKeysPage() {
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
+  const [testMode, setTestMode] = useState(false);
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -190,6 +192,10 @@ export function AdminFreeKeysPage() {
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
   }, [settingsQuery.data]);
+
+  useEffect(() => {
+    setTestMode(getFreeTestMode());
+  }, []);
 
   const saveSettings = useMutation({
     mutationFn: async () => {
@@ -254,7 +260,6 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  
   const deleteKeyType = useMutation({
     mutationFn: async (code: string) => {
       const { error } = await supabase.from("licenses_free_key_types").delete().eq("code", code);
@@ -270,7 +275,7 @@ export function AdminFreeKeysPage() {
     },
   });
 
-const disableAllKeyTypes = useMutation({
+  const disableAllKeyTypes = useMutation({
     mutationFn: async () => {
       // Some PostgREST/Supabase setups reject UPDATE without a WHERE clause.
       // Keep behavior (disable all) while satisfying that requirement.
@@ -380,6 +385,54 @@ const disableAllKeyTypes = useMutation({
     },
   });
 
+  const disableLicense = useMutation({
+    mutationFn: async (licenseId: string) => {
+      const { error } = await supabase.from("licenses").update({ is_active: false }).eq("id", licenseId);
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Updated", description: "License disabled." });
+      await issuesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  const expireLicenseNow = useMutation({
+    mutationFn: async (licenseId: string) => {
+      const { error } = await supabase
+        .from("licenses")
+        .update({ expires_at: new Date().toISOString() })
+        .eq("id", licenseId);
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Updated", description: "License expired now." });
+      await issuesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  const deleteIssue = useMutation({
+    mutationFn: async (issueId: string) => {
+      const { error } = await supabase.from("licenses_free_issues").delete().eq("issue_id", issueId);
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Deleted", description: "Issue record removed." });
+      await issuesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Delete failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
   return (
     <div className="space-y-4">
       <Card>
@@ -396,9 +449,23 @@ const disableAllKeyTypes = useMutation({
               <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
             </div>
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-          
-                    {/* Delete button (mobile-friendly) */}
-</div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+            <div>
+              <div className="font-medium">Test mode (admin only)</div>
+              <div className="text-xs text-muted-foreground">
+                Bypass Link4M khi test flow. Chỉ admin mới dùng được (server kiểm tra quyền).
+              </div>
+            </div>
+            <Switch
+              checked={testMode}
+              onCheckedChange={(next) => {
+                setTestMode(next);
+                setFreeTestMode(next);
+              }}
+            />
+          </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -553,6 +620,9 @@ const disableAllKeyTypes = useMutation({
             <Button variant="secondary" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching}>
               Reload
             </Button>
+            <Button variant="outline" onClick={() => openUrl(getKeyUrl)} disabled={!testMode}>
+              Open /free (test)
+            </Button>
           </div>
 
           <div className="text-xs text-muted-foreground">
@@ -629,54 +699,54 @@ const disableAllKeyTypes = useMutation({
 
           <div className="overflow-x-auto">
             <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>On</TableHead>
-                <TableHead>Code</TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Seconds</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(keyTypesQuery.data ?? []).map((k) => (
-                <TableRow key={k.code}>
-                  <TableCell className="w-16">
-                    <Switch
-                      checked={k.enabled}
-                      onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono">{k.code}</TableCell>
-                  <TableCell>{k.label}</TableCell>
-                  <TableCell>{k.kind}</TableCell>
-                  <TableCell>{k.value}</TableCell>
-                  <TableCell className="font-mono">{k.duration_seconds}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Delete"
-                      onClick={() => {
-                        const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
-                        if (ok) deleteKeyType.mutate(k.code);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!keyTypesQuery.data?.length ? (
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
-                    No rows
-                  </TableCell>
+                  <TableHead>On</TableHead>
+                  <TableHead>Code</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Value</TableHead>
+                  <TableHead>Seconds</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
+              </TableHeader>
+              <TableBody>
+                {(keyTypesQuery.data ?? []).map((k) => (
+                  <TableRow key={k.code}>
+                    <TableCell className="w-16">
+                      <Switch
+                        checked={k.enabled}
+                        onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono">{k.code}</TableCell>
+                    <TableCell>{k.label}</TableCell>
+                    <TableCell>{k.kind}</TableCell>
+                    <TableCell>{k.value}</TableCell>
+                    <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Delete"
+                        onClick={() => {
+                          const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
+                          if (ok) deleteKeyType.mutate(k.code);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!keyTypesQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>
@@ -726,39 +796,39 @@ const disableAllKeyTypes = useMutation({
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Created</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Reveal</TableHead>
-                <TableHead>IP hash</TableHead>
-                <TableHead>FP hash</TableHead>
-                <TableHead>Error</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(sessionsQuery.data ?? []).map((s) => (
-                <TableRow key={s.session_id}>
-                  <TableCell className="whitespace-nowrap">{s.created_at}</TableCell>
-                  <TableCell>{s.status}</TableCell>
-                  <TableCell className="font-mono">
-                    {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
-                  </TableCell>
-                  <TableCell>{s.reveal_count}</TableCell>
-                  <TableCell className="font-mono">{s.ip_hash.slice(0, 10)}…</TableCell>
-                  <TableCell className="font-mono">{s.fingerprint_hash.slice(0, 10)}…</TableCell>
-                  <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
-                </TableRow>
-              ))}
-              {!sessionsQuery.data?.length ? (
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
-                    No rows
-                  </TableCell>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Reveal</TableHead>
+                  <TableHead>IP hash</TableHead>
+                  <TableHead>FP hash</TableHead>
+                  <TableHead>Error</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
+              </TableHeader>
+              <TableBody>
+                {(sessionsQuery.data ?? []).map((s) => (
+                  <TableRow key={s.session_id}>
+                    <TableCell className="whitespace-nowrap">{s.created_at}</TableCell>
+                    <TableCell>{s.status}</TableCell>
+                    <TableCell className="font-mono">
+                      {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
+                    </TableCell>
+                    <TableCell>{s.reveal_count}</TableCell>
+                    <TableCell className="font-mono">{s.ip_hash.slice(0, 10)}…</TableCell>
+                    <TableCell className="font-mono">{s.fingerprint_hash.slice(0, 10)}…</TableCell>
+                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
+                  </TableRow>
+                ))}
+                {!sessionsQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>
@@ -774,33 +844,65 @@ const disableAllKeyTypes = useMutation({
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Created</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Session</TableHead>
-                <TableHead>IP hash</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(issuesQuery.data ?? []).map((i) => (
-                <TableRow key={i.issue_id}>
-                  <TableCell className="whitespace-nowrap">{i.created_at}</TableCell>
-                  <TableCell className="whitespace-nowrap">{i.expires_at}</TableCell>
-                  <TableCell className="font-mono">{i.key_mask}</TableCell>
-                  <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
-                  <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
-                </TableRow>
-              ))}
-              {!issuesQuery.data?.length ? (
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    No rows
-                  </TableCell>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Key</TableHead>
+                  <TableHead>Session</TableHead>
+                  <TableHead>IP hash</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
+              </TableHeader>
+              <TableBody>
+                {(issuesQuery.data ?? []).map((i) => (
+                  <TableRow key={i.issue_id}>
+                    <TableCell className="whitespace-nowrap">{i.created_at}</TableCell>
+                    <TableCell className="whitespace-nowrap">{i.expires_at}</TableCell>
+                    <TableCell className="font-mono">{i.key_mask}</TableCell>
+                    <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
+                    <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => disableLicense.mutate(i.license_id)}
+                          disabled={disableLicense.isPending}
+                        >
+                          Disable
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => expireLicenseNow.mutate(i.license_id)}
+                          disabled={expireLicenseNow.isPending}
+                        >
+                          Expire now
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            const ok = window.confirm("Delete issue record?");
+                            if (ok) deleteIssue.mutate(i.issue_id);
+                          }}
+                          disabled={deleteIssue.isPending}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!issuesQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>
