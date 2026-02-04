@@ -4,6 +4,7 @@ import "@/features/free/turnstile";
 type Props = {
   siteKey: string;
   onToken: (token: string) => void;
+  onError?: (message: string) => void;
 };
 
 let scriptPromise: Promise<void> | null = null;
@@ -32,7 +33,7 @@ function loadTurnstileScript(): Promise<void> {
   return scriptPromise;
 }
 
-export function TurnstileWidget({ siteKey, onToken }: Props) {
+export function TurnstileWidget({ siteKey, onToken, onError }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -47,7 +48,9 @@ export function TurnstileWidget({ siteKey, onToken }: Props) {
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e?.message ?? "Turnstile load error");
+        const msg = e?.message ?? "Turnstile load error";
+        setError(msg);
+        onError?.(msg);
       });
     return () => {
       cancelled = true;
@@ -61,11 +64,18 @@ export function TurnstileWidget({ siteKey, onToken }: Props) {
 
     const host = hostRef.current;
     host.innerHTML = "";
-    widgetIdRef.current = window.turnstile.render(host, {
-      sitekey: siteKey,
-      theme: "auto",
-      callback: (token: string) => onToken(token),
-    });
+    try {
+      widgetIdRef.current = window.turnstile.render(host, {
+        sitekey: siteKey,
+        theme: "auto",
+        callback: (token: string) => onToken(token),
+      });
+    } catch (e: any) {
+      const msg = e?.message ?? "Turnstile render error";
+      setError(msg);
+      onError?.(msg);
+      return;
+    }
 
     return () => {
       try {
@@ -74,7 +84,7 @@ export function TurnstileWidget({ siteKey, onToken }: Props) {
         // ignore
       }
     };
-  }, [ready, siteKey, onToken]);
+  }, [ready, siteKey, onToken, onError]);
 
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   return <div ref={hostRef} />;

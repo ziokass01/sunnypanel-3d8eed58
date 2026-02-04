@@ -13,9 +13,9 @@ type GateErr = { ok: false; msg: string; wait_seconds?: number };
 export function FreeGatePage() {
   const nav = useNavigate();
   const [cfgReturn, setCfgReturn] = useState<number>(10);
-  const [status, setStatus] = useState<"working" | "waiting" | "error">("working");
+  const [outboundUrl, setOutboundUrl] = useState<string>("");
+  const [status, setStatus] = useState<"working" | "too_fast" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
-  const [wait, setWait] = useState<number>(0);
 
   const outToken = useMemo(() => getOutToken(), []);
 
@@ -26,6 +26,7 @@ export function FreeGatePage() {
         if (cancelled) return;
         const r = Math.max(10, Number(c.free_return_seconds ?? 10));
         setCfgReturn(r);
+        setOutboundUrl(String(c.free_outbound_url ?? ""));
       })
       .catch(() => {
         // ignore; keep default
@@ -71,10 +72,10 @@ export function FreeGatePage() {
       const msg = (res as GateErr).msg || "GATE_FAILED";
 
       if (msg === "TOO_FAST" || msg.startsWith("TOO_FAST")) {
-        const w = Math.max(1, Math.floor((res as GateTooFast).wait_seconds ?? 1));
-        setStatus("waiting");
-        setWait(w);
-        setMessage("Vui lòng chờ…");
+        setStatus("too_fast");
+        setMessage(
+          "Xác thực không thành công. Bạn vượt link quá nhanh hoặc chưa vượt đúng. Vui lòng quay lại và vượt link lại.",
+        );
         return;
       }
 
@@ -95,17 +96,6 @@ export function FreeGatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (status !== "waiting") return;
-    if (wait <= 0) {
-      void tryGate();
-      return;
-    }
-    const t = window.setTimeout(() => setWait((s) => s - 1), 1000);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, wait]);
-
   return (
     <div className="min-h-svh bg-background">
       <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
@@ -117,22 +107,23 @@ export function FreeGatePage() {
           <CardContent className="space-y-4">
             <div className="rounded-md border p-3 text-sm">
               <div className="font-medium">{message}</div>
-              {status === "waiting" ? (
-                <div className="mt-1 text-muted-foreground">Còn {wait}s</div>
-              ) : (
-                <div className="mt-1 text-muted-foreground">Vui lòng không tắt trang.</div>
-              )}
+              <div className="mt-1 text-muted-foreground">Vui lòng không tắt trang.</div>
             </div>
 
-            {status === "error" ? (
+            {status === "error" || status === "too_fast" ? (
               <Button className="w-full" variant="secondary" onClick={() => nav("/free", { replace: true })}>
                 Quay lại Get Key
               </Button>
             ) : null}
 
-            {status === "waiting" ? (
-              <Button className="w-full" variant="secondary" onClick={() => void tryGate()}>
-                Thử lại ngay
+            {status === "too_fast" && outboundUrl ? (
+              <Button
+                className="w-full"
+                onClick={() => {
+                  window.location.href = outboundUrl;
+                }}
+              >
+                Mở lại link vượt
               </Button>
             ) : null}
           </CardContent>

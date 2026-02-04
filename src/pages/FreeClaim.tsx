@@ -11,6 +11,18 @@ import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedK
 type RevealOk = { ok: true; key: string; expires_at: string; key_type_label?: string | null };
 type RevealErr = { ok: false; msg: string };
 
+type RevealedCache = { key: string; expiresAt: string; label: string };
+
+function cacheKeyForClaimToken(claimToken: string) {
+  return `fk_revealed_v1:${claimToken}`;
+}
+
+function isValidTurnstileSiteKey(key: string | null | undefined) {
+  const k = String(key ?? "").trim();
+  // Cloudflare Turnstile site keys typically start with "0x". Treat anything else as invalid/dummy.
+  return k.length >= 16 && k.startsWith("0x");
+}
+
 export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
@@ -27,6 +39,7 @@ export function FreeClaimPage() {
 
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [turnToken, setTurnToken] = useState<string>("");
+  const [turnstileError, setTurnstileError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +62,19 @@ export function FreeClaimPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    // Restore revealed key after reload so we don't re-issue keys.
+    if (!claimToken) return;
+    try {
+      const raw = sessionStorage.getItem(cacheKeyForClaimToken(claimToken));
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as RevealedCache;
+      if (parsed?.key && parsed?.expiresAt) setRevealed(parsed);
+    } catch {
+      // ignore
+    }
+  }, [claimToken]);
 
   useEffect(() => {
     // noindex for claim page
@@ -75,9 +101,13 @@ export function FreeClaimPage() {
   const canVerify = useMemo(() => {
     if (!claimToken) return false;
     if (!outToken) return false;
-    if (!cfg?.turnstile_enabled) return true;
+    const turnstileRequired =
+      Boolean(cfg?.turnstile_enabled) &&
+      isValidTurnstileSiteKey(cfg?.turnstile_site_key) &&
+      !turnstileError;
+    if (!turnstileRequired) return true;
     return Boolean(turnToken);
-  }, [claimToken, outToken, cfg?.turnstile_enabled, turnToken]);
+  }, [claimToken, outToken, cfg?.turnstile_enabled, cfg?.turnstile_site_key, turnToken, turnstileError]);
 
   async function closeAndReturn() {
     try {
@@ -91,16 +121,6 @@ export function FreeClaimPage() {
       nav("/free", { replace: true });
     }
   }
-
-  // Safety: never let user stuck on claim page
-  useEffect(() => {
-    if (revealed) return;
-    const t = window.setTimeout(() => {
-      if (!revealed) void closeAndReturn();
-    }, returnSeconds * 1000);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnSeconds]);
 
   useEffect(() => {
     if (!revealed) return;
@@ -153,8 +173,15 @@ export function FreeClaimPage() {
 
             {!revealed ? (
               <div className="space-y-3">
-                {cfg?.turnstile_enabled && cfg.turnstile_site_key ? (
-                  <TurnstileWidget siteKey={cfg.turnstile_site_key} onToken={setTurnToken} />
+                {cfg?.turnstile_enabled && isValidTurnstileSiteKey(cfg?.turnstile_site_key) ? (
+                  <TurnstileWidget
+                    siteKey={cfg.turnstile_site_key!}
+                    onToken={setTurnToken}
+                    onError={(msg) => {
+                      // Treat Turnstile failures as disabled to avoid permanently blocking Verify.
+                      setTurnstileError(msg || "Turnstile error");
+                    }}
+                  />
                 ) : null}
 
                 <Button
@@ -170,11 +197,20 @@ export function FreeClaimPage() {
                         claim_token: claimToken,
                         out_token: outToken,
                         fingerprint: fp,
-                        turnstile_token: cfg?.turnstile_enabled ? turnToken : null,
+                        turnstile_token:
+                          cfg?.turnstile_enabled && isValidTurnstileSiteKey(cfg?.turnstile_site_key) && !turnstileError
+                            ? turnToken
+                            : null,
                       });
 
                       if (!res.ok) {
-                        setError((res as RevealErr).msg || "Reveal failed");
+                        const msg = (res as RevealErr).msg || "Reveal failed";
+                        // If backend refuses (already revealed/invalid), guide user safely.
+                        if (msg === "UNAUTHORIZED") {
+                          setError("Key đã được reveal hoặc session không hợp lệ. Vui lòng quay lại và làm lại flow.");
+                        } else {
+                          setError(msg);
+                        }
                         return;
                       }
                       try {
@@ -182,11 +218,17 @@ export function FreeClaimPage() {
                       } catch {
                         // ignore
                       }
-                      setRevealed({
+                      const next: RevealedCache = {
                         key: (res as RevealOk).key,
                         expiresAt: (res as RevealOk).expires_at,
                         label: (res as RevealOk).key_type_label || selectedLabel,
-                      });
+                      };
+                      setRevealed(next);
+                      try {
+                        sessionStorage.setItem(cacheKeyForClaimToken(claimToken), JSON.stringify(next));
+                      } catch {
+                        // ignore
+                      }
                     } catch (e: any) {
                       setError(e?.message ?? "Reveal failed");
                     } finally {
@@ -194,12 +236,10 @@ export function FreeClaimPage() {
                     }
                   }}
                 >
-                  {loading ? "Đang xác minh…" : "Nhận key"}
+                  {loading ? "Đang xác minh…" : "Verify"}
                 </Button>
 
                 <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
-
-                <div className="text-center text-xs text-muted-foreground">Tự động quay lại sau {returnSeconds}s.</div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -220,7 +260,7 @@ export function FreeClaimPage() {
                     await closeAndReturn();
                   }}
                 >
-                  Copy & quay lại
+                  Copy
                 </Button>
 
                 <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
