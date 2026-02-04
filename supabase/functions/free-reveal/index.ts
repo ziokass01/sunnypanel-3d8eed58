@@ -54,14 +54,6 @@ function getClientIp(req: Request) {
   return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "0.0.0.0";
 }
 
-function isMissingFreeKeyTypesTableError(msg: string) {
-  return (
-    msg.includes("Could not find the table 'public.licenses_free_key_types' in the schema cache") ||
-    msg.includes('Could not find the table "public.licenses_free_key_types" in the schema cache') ||
-    msg.includes('relation "public.licenses_free_key_types" does not exist')
-  );
-}
-
 async function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
   const body = new URLSearchParams();
   body.set("secret", secret);
@@ -87,7 +79,9 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL) ? origin : PUBLIC_BASE_URL;
+  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL)
+    ? origin
+    : (origin && !PUBLIC_BASE_URL ? origin : (PUBLIC_BASE_URL || "*"));
 
   if (req.method === "OPTIONS") {
     return new Response(null, {
@@ -244,25 +238,7 @@ Deno.serve(async (req) => {
   let keyTypeLabel: string | null = null;
   if (sess.key_type_code) {
     const kt = await sb.from("licenses_free_key_types").select("label").eq("code", sess.key_type_code).maybeSingle();
-    if (kt.error) {
-      if (isMissingFreeKeyTypesTableError(String(kt.error.message ?? ""))) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            code: "MISSING_FREE_KEY_TYPES_TABLE",
-            msg:
-              "DB chưa chạy migration 20260203093000_free_key_types_and_settings.sql. Hãy chạy migration và reload schema cache: select pg_notify('pgrst','reload schema');",
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
-          },
-        );
-      }
-      // fallback: keep label null but do not break the flow for other errors
-    } else {
-      keyTypeLabel = kt.data?.label ?? null;
-    }
+    keyTypeLabel = kt.data?.label ?? null;
   }
 
   // Mint a license row compatible with verify-key (lookup = public.licenses)

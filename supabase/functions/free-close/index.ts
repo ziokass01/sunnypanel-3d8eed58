@@ -37,7 +37,9 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL) ? origin : PUBLIC_BASE_URL;
+  const allowOrigin = isAllowedOrigin(origin, PUBLIC_BASE_URL)
+    ? origin
+    : (origin && !PUBLIC_BASE_URL ? origin : (PUBLIC_BASE_URL || "*"));
 
   if (req.method === "OPTIONS") {
     return new Response(null, {
