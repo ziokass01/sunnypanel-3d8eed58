@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -128,6 +129,15 @@ function parseLinksText(text: string): PublicLink[] {
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
 
+  const isMissingFreeKeyTypesTableError = (err: unknown) => {
+    const msg = String((err as any)?.message ?? "");
+    return (
+      msg.includes("Could not find the table 'public.licenses_free_key_types' in the schema cache") ||
+      msg.includes('Could not find the table "public.licenses_free_key_types" in the schema cache') ||
+      msg.includes('relation "public.licenses_free_key_types" does not exist')
+    );
+  };
+
   const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
   const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
   const gateUrl = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
@@ -231,6 +241,8 @@ export function AdminFreeKeysPage() {
       return (data ?? []) as any as KeyTypeRow[];
     },
   });
+
+  const missingKeyTypesTable = isMissingFreeKeyTypesTableError(keyTypesQuery.error);
 
   const toggleKeyType = useMutation({
     mutationFn: async (args: { code: string; enabled: boolean }) => {
@@ -532,16 +544,40 @@ export function AdminFreeKeysPage() {
             <Button
               variant="secondary"
               onClick={() => disableAllKeyTypes.mutate()}
-              disabled={disableAllKeyTypes.isPending}
+              disabled={missingKeyTypesTable || disableAllKeyTypes.isPending}
             >
               Disable all
             </Button>
-            <Button variant="outline" onClick={() => keyTypesQuery.refetch()} disabled={keyTypesQuery.isFetching}>
+            <Button
+              variant="outline"
+              onClick={() => keyTypesQuery.refetch()}
+              disabled={missingKeyTypesTable || keyTypesQuery.isFetching}
+            >
               Reload
             </Button>
           </div>
         </CardHeader>
         <CardContent>
+          {missingKeyTypesTable ? (
+            <Alert className="mb-4">
+              <AlertTitle>DB chưa chạy migration cho Free Key Types</AlertTitle>
+              <AlertDescription>
+                <div className="space-y-2">
+                  <div>
+                    Hệ thống đang báo: <span className="font-mono">licenses_free_key_types</span> chưa có trong schema cache.
+                  </div>
+                  <div>
+                    Hãy chạy migration <span className="font-mono">20260203093000_free_key_types_and_settings.sql</span> (và nếu
+                    thiếu settings thì chạy thêm <span className="font-mono">20260202090807_7f0f8af7-d5f8-441e-96ff-66aa666b9326.sql</span>)
+                    rồi reload schema cache:
+                  </div>
+                  <div className="rounded-md border p-2 font-mono text-xs">select pg_notify('pgrst','reload schema');</div>
+                  <div>Tạm thời đã khóa các nút Create/Enable/DisableAll/Toggle để tránh spam lỗi.</div>
+                </div>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           <div className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
@@ -549,7 +585,11 @@ export function AdminFreeKeysPage() {
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               <div className="space-y-2">
                 <div className="text-sm font-medium">Loại</div>
-                <Select value={newKind} onValueChange={(v) => setNewKind(v as any)}>
+                <Select
+                  value={newKind}
+                  onValueChange={(v) => setNewKind(v as any)}
+                  disabled={missingKeyTypesTable}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -568,6 +608,7 @@ export function AdminFreeKeysPage() {
                   min={1}
                   max={newKind === "hour" ? 24 : 30}
                   onChange={(e) => setNewValue(Number(e.target.value))}
+                  disabled={missingKeyTypesTable}
                 />
               </div>
 
@@ -577,12 +618,13 @@ export function AdminFreeKeysPage() {
                   value={newLabel}
                   onChange={(e) => setNewLabel(e.target.value)}
                   placeholder={newKind === "hour" ? "Ví dụ: 6 giờ" : "Ví dụ: 3 ngày"}
+                  disabled={missingKeyTypesTable}
                 />
               </div>
             </div>
 
             <div className="mt-3">
-              <Button onClick={() => createKeyType.mutate()} disabled={createKeyType.isPending}>
+              <Button onClick={() => createKeyType.mutate()} disabled={missingKeyTypesTable || createKeyType.isPending}>
                 Create / Enable
               </Button>
             </div>
@@ -605,7 +647,11 @@ export function AdminFreeKeysPage() {
                   <TableCell className="w-16">
                     <Switch
                       checked={k.enabled}
-                      onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
+                      disabled={missingKeyTypesTable || toggleKeyType.isPending}
+                      onCheckedChange={(v) => {
+                        if (missingKeyTypesTable) return;
+                        toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) });
+                      }}
                     />
                   </TableCell>
                   <TableCell className="font-mono">{k.code}</TableCell>
