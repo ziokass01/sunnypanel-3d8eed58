@@ -44,6 +44,14 @@ function base64url(bytesLen = 24) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function isMissingFreeKeyTypesTableError(msg: string) {
+  return (
+    msg.includes("Could not find the table 'public.licenses_free_key_types' in the schema cache") ||
+    msg.includes('Could not find the table "public.licenses_free_key_types" in the schema cache') ||
+    msg.includes('relation "public.licenses_free_key_types" does not exist')
+  );
+}
+
 const BodySchema = z.object({
   key_type_code: z.string().min(2).max(8),
   fingerprint: z.string().min(6).max(128),
@@ -137,6 +145,20 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (kErr) {
+    if (isMissingFreeKeyTypesTableError(String(kErr.message ?? ""))) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          code: "MISSING_FREE_KEY_TYPES_TABLE",
+          msg:
+            "DB chưa chạy migration 20260203093000_free_key_types_and_settings.sql. Hãy chạy migration và reload schema cache: select pg_notify('pgrst','reload schema');",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+        },
+      );
+    }
     return new Response(JSON.stringify({ ok: false, msg: kErr.message }), {
       status: 500,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },

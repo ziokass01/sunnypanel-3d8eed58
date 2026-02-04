@@ -54,6 +54,14 @@ function getClientIp(req: Request) {
   return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "0.0.0.0";
 }
 
+function isMissingFreeKeyTypesTableError(msg: string) {
+  return (
+    msg.includes("Could not find the table 'public.licenses_free_key_types' in the schema cache") ||
+    msg.includes('Could not find the table "public.licenses_free_key_types" in the schema cache') ||
+    msg.includes('relation "public.licenses_free_key_types" does not exist')
+  );
+}
+
 async function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
   const body = new URLSearchParams();
   body.set("secret", secret);
@@ -236,7 +244,25 @@ Deno.serve(async (req) => {
   let keyTypeLabel: string | null = null;
   if (sess.key_type_code) {
     const kt = await sb.from("licenses_free_key_types").select("label").eq("code", sess.key_type_code).maybeSingle();
-    keyTypeLabel = kt.data?.label ?? null;
+    if (kt.error) {
+      if (isMissingFreeKeyTypesTableError(String(kt.error.message ?? ""))) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            code: "MISSING_FREE_KEY_TYPES_TABLE",
+            msg:
+              "DB chưa chạy migration 20260203093000_free_key_types_and_settings.sql. Hãy chạy migration và reload schema cache: select pg_notify('pgrst','reload schema');",
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+          },
+        );
+      }
+      // fallback: keep label null but do not break the flow for other errors
+    } else {
+      keyTypeLabel = kt.data?.label ?? null;
+    }
   }
 
   // Mint a license row compatible with verify-key (lookup = public.licenses)
