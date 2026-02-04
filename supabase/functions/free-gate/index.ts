@@ -42,41 +42,42 @@ const BodySchema = z.object({
   out_token: z.string().min(8).max(256),
   fingerprint: z.string().min(6).max(128),
   referrer: z.string().optional().default(""),
+  test_mode: z.boolean().optional().default(false),
 });
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
   const allowOrigin = origin || "*";
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Max-Age": "86400",
+  };
+  const jsonResponse = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
       headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin",
-      "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-        "Access-Control-Max-Age": "86400",
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
       },
     });
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders, status: 204 });
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return new Response(JSON.stringify({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }, 500);
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -90,14 +91,28 @@ Deno.serve(async (req) => {
 
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ ok: false, msg: "BAD_REQUEST" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "BAD_REQUEST" }, 400);
   }
 
-  const { out_token, fingerprint, referrer } = parsed.data;
+  const { out_token, fingerprint, referrer, test_mode } = parsed.data;
+
+  if (test_mode) {
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
+    const authHeader = req.headers.get("Authorization");
+    if (!anonKey || !authHeader?.startsWith("Bearer ")) {
+      return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
+    }
+    const authed = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: authHeader } },
+    });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claims, error: claimsError } = await authed.auth.getClaims(token);
+    if (claimsError || !claims?.claims?.sub) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
+    const userId = claims.claims.sub;
+    const roleCheck = await authed.rpc("has_role", { _user_id: userId, _role: "admin" });
+    if (roleCheck.error || roleCheck.data !== true) return jsonResponse({ ok: false, msg: "FORBIDDEN" }, 403);
+  }
 
   // Settings
   const { data: settings, error: sErr } = await sb
@@ -107,41 +122,25 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (sErr) {
-    return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: sErr.message }, 500);
   }
 
   if (!Boolean(settings?.free_enabled ?? true)) {
-    return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "CLOSED" }, 403);
   }
 
   const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
-  if (requireRef) {
+  if (requireRef && !test_mode) {
     try {
       const u = new URL(referrer);
       const host = (u.hostname || "").toLowerCase();
       // Link4M domains can vary (e.g. link4m.com / link4m.xyz / link4m.app...).
       // Referrer is not 100% reliable across browsers, so keep this check lenient.
       if (!host.includes("link4m")) {
-        return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-        });
+        return jsonResponse({ ok: false, msg: "BAD_REFERRER" }, 400);
       }
     } catch {
-      return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-      });
+      return jsonResponse({ ok: false, msg: "BAD_REFERRER" }, 400);
     }
   }
 
@@ -159,65 +158,46 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (qErr) {
-    return new Response(JSON.stringify({ ok: false, msg: qErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: qErr.message }, 500);
   }
 
   if (!sess) {
-    return new Response(JSON.stringify({ ok: false, msg: "INVALID_SESSION" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "INVALID_SESSION" }, 400);
   }
 
   // Expired?
   const now = Date.now();
   const expiresAt = Date.parse(sess.expires_at);
   if (!isFinite(expiresAt) || expiresAt <= now) {
-    return new Response(JSON.stringify({ ok: false, msg: "SESSION_EXPIRED" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "SESSION_EXPIRED" }, 400);
   }
 
   if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash) {
-    return new Response(JSON.stringify({ ok: false, msg: "DEVICE_MISMATCH" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "DEVICE_MISMATCH" }, 403);
   }
 
   if (sess.reveal_count && sess.reveal_count > 0) {
-    return new Response(JSON.stringify({ ok: false, msg: "ALREADY_REVEALED" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "ALREADY_REVEALED" }, 400);
   }
 
   const delayEnabled = Boolean((settings as any)?.free_min_delay_enabled ?? true);
-  if (delayEnabled) {
+  if (delayEnabled && !test_mode) {
     const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
     const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
     const startedAtMs = Date.parse(startedAtIso);
     const mustWaitUntil = startedAtMs + minDelay * 1000;
     if (isFinite(startedAtMs) && now < mustWaitUntil) {
       const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
-      return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST", wait_seconds }), {
-        status: 429,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-          "Access-Control-Allow-Origin": allowOrigin,
-          "Vary": "Origin",
-        },
-      });
+      await sb
+        .from("licenses_free_sessions")
+        .update({
+          status: "gate_failed",
+          last_error: "TOO_FAST",
+          expires_at: new Date().toISOString(),
+          out_expires_at: new Date().toISOString(),
+        })
+        .eq("session_id", sess.session_id);
+      return jsonResponse({ ok: false, msg: "TOO_FAST", wait_seconds }, 429);
     }
   }
 
@@ -245,16 +225,8 @@ Deno.serve(async (req) => {
     .eq("session_id", sess.session_id);
 
   if (updErr) {
-    return new Response(JSON.stringify({ ok: false, msg: updErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: updErr.message }, 500);
   }
 
-  return new Response(JSON.stringify({ ok: true, claim_token }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-  });
+  return jsonResponse({ ok: true, claim_token }, 200);
 });

@@ -5,7 +5,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { postFunction } from "@/lib/functions";
-import { getOrCreateFingerprint, setOutToken, setSelectedKeyTypeCode } from "@/features/free/fingerprint";
+import {
+  getFreeTestMode,
+  getOrCreateFingerprint,
+  setOutToken,
+  setSelectedKeyTypeCode,
+} from "@/features/free/fingerprint";
+import { supabase } from "@/integrations/supabase/client";
 
 type StartOk = { ok: true; out_token: string; outbound_url: string; min_delay_seconds: number };
 type StartErr = { ok: false; msg: string };
@@ -103,10 +109,23 @@ export function FreeLandingPage() {
                 setErr(null);
                 try {
                   const fp = getOrCreateFingerprint();
-                  const res = await postFunction<StartOk | StartErr>("/free-start", {
-                    key_type_code: selected,
-                    fingerprint: fp,
-                  });
+                  const testMode = getFreeTestMode();
+                  const session = testMode ? await supabase.auth.getSession() : null;
+                  if (testMode && !session?.data?.session?.access_token) {
+                    setErr("Test mode yêu cầu đăng nhập admin.");
+                    return;
+                  }
+                  const res = await postFunction<StartOk | StartErr>(
+                    "/free-start",
+                    {
+                      key_type_code: selected,
+                      fingerprint: fp,
+                      test_mode: testMode,
+                    },
+                    {
+                      authToken: testMode ? session?.data?.session?.access_token ?? null : null,
+                    },
+                  );
 
                   if (!res.ok) {
                     setErr((res as StartErr).msg || "Start failed");

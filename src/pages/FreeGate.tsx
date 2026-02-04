@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
-import { getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
+import { clearFreeFlowStorage, getFreeTestMode, getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
+import { supabase } from "@/integrations/supabase/client";
 
 type GateOk = { ok: true; claim_token: string };
 type GateTooFast = { ok: false; msg: "TOO_FAST"; wait_seconds: number };
@@ -18,6 +19,7 @@ export function FreeGatePage() {
   const [message, setMessage] = useState<string>("Đang xác thực…");
 
   const outToken = useMemo(() => getOutToken(), []);
+  const testMode = useMemo(() => getFreeTestMode(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +41,7 @@ export function FreeGatePage() {
   async function tryGate() {
     const tok = outToken;
     if (!tok) {
+      clearFreeFlowStorage();
       setStatus("error");
       setMessage("Thiếu session. Hãy quay lại trang Get Key và làm lại.");
       window.setTimeout(() => nav("/free", { replace: true }), 1500);
@@ -51,10 +54,19 @@ export function FreeGatePage() {
     try {
       const fp = getOrCreateFingerprint();
       const referrer = document.referrer || "";
+      const session = testMode ? await supabase.auth.getSession() : null;
+      if (testMode && !session?.data?.session?.access_token) {
+        setStatus("error");
+        setMessage("Test mode yêu cầu đăng nhập admin.");
+        return;
+      }
       const res = await postFunction<GateOk | GateTooFast | GateErr>("/free-gate", {
         out_token: tok,
         fingerprint: fp,
         referrer,
+        test_mode: testMode,
+      }, {
+        authToken: testMode ? session?.data?.session?.access_token ?? null : null,
       });
 
       if ((res as GateOk).ok) {
@@ -65,13 +77,19 @@ export function FreeGatePage() {
         } catch {
           // ignore
         }
-        nav(`/free/claim?c=${encodeURIComponent(claim)}`, { replace: true });
+        nav(`/free/claim?claim=${encodeURIComponent(claim)}`, { replace: true });
         return;
       }
 
       const msg = (res as GateErr).msg || "GATE_FAILED";
 
       if (msg === "TOO_FAST" || msg.startsWith("TOO_FAST")) {
+        clearFreeFlowStorage();
+        try {
+          localStorage.removeItem("free_claim_token");
+        } catch {
+          // ignore
+        }
         setStatus("too_fast");
         setMessage(
           "Xác thực không thành công. Bạn vượt link quá nhanh hoặc chưa vượt đúng. Vui lòng quay lại và vượt link lại.",

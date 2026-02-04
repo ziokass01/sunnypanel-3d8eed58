@@ -35,29 +35,31 @@ const BodySchema = z.object({
 });
 
 Deno.serve(async (req) => {
-  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
   const allowOrigin = origin || "*";
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Max-Age": "86400",
+  };
+  const jsonResponse = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
       headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin",
-      "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-        "Access-Control-Max-Age": "86400",
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
       },
     });
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
   }
 
   let body: unknown;
@@ -69,21 +71,13 @@ Deno.serve(async (req) => {
 
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "INVALID_INPUT" }, 200);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return new Response(JSON.stringify({ ok: false, msg: "SERVER_MISCONFIG" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return jsonResponse({ ok: false, msg: "SERVER_MISCONFIG" }, 500);
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -99,9 +93,5 @@ Deno.serve(async (req) => {
     })
     .eq("out_token_hash", outHash);
 
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-  });
+  return jsonResponse({ ok: true }, 200);
 });

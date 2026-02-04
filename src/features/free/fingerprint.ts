@@ -1,6 +1,7 @@
 export const FREE_FP_KEY = "fk_fp_v1";
 export const FREE_OUT_TOKEN_KEY = "fk_out_v1";
 export const FREE_KEY_TYPE_CODE_KEY = "fk_type_v1";
+export const FREE_TEST_MODE_KEY = "fk_test_mode_v1";
 
 function randomBase64Url(bytesLen = 18) {
   const bytes = new Uint8Array(bytesLen);
@@ -45,6 +46,26 @@ export function clearFreeFlowStorage() {
     localStorage.removeItem(FREE_KEY_TYPE_CODE_KEY);
   } catch {
     // ignore
+  }
+}
+
+export function setFreeTestMode(enabled: boolean) {
+  try {
+    if (enabled) {
+      localStorage.setItem(FREE_TEST_MODE_KEY, "1");
+    } else {
+      localStorage.removeItem(FREE_TEST_MODE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function getFreeTestMode(): boolean {
+  try {
+    return localStorage.getItem(FREE_TEST_MODE_KEY) === "1";
+  } catch {
+    return false;
   }
 }
 
