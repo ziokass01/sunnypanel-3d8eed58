@@ -1,5 +1,16 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+function corsHeaders(allowOrigin: string) {
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Credentials": "true",
+    Vary: "Origin",
+  } as const;
+}
+
+const allowHeaders =
+  "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version";
+
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
@@ -38,9 +49,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
+        ...corsHeaders(allowOrigin),
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Headers": allowHeaders,
         "Access-Control-Max-Age": "86400",
       },
     });
@@ -51,7 +62,7 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRole) {
     return new Response(JSON.stringify({ error: "Missing SUPABASE secrets" }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
     });
   }
 
@@ -69,7 +80,7 @@ Deno.serve(async (req) => {
   if (sErr) {
     return new Response(JSON.stringify({ error: sErr.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
     });
   }
 
@@ -93,7 +104,7 @@ Deno.serve(async (req) => {
   if (kErr) {
     return new Response(JSON.stringify({ error: kErr.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
     });
   }
 
@@ -142,7 +153,7 @@ Deno.serve(async (req) => {
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": allowOrigin,
+      ...corsHeaders(allowOrigin),
     },
   });
 });

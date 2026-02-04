@@ -1,6 +1,17 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 
+function corsHeaders(allowOrigin: string) {
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Credentials": "true",
+    Vary: "Origin",
+  } as const;
+}
+
+const allowHeaders =
+  "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version";
+
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
@@ -45,9 +56,9 @@ Deno.serve(async (req) => {
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
+        ...corsHeaders(allowOrigin),
         "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Headers": allowHeaders,
         "Access-Control-Max-Age": "86400",
       },
     });
@@ -56,7 +67,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
       status: 405,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
     });
   }
 
@@ -71,7 +82,7 @@ Deno.serve(async (req) => {
   if (!parsed.success) {
     return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
       status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
     });
   }
 
@@ -80,7 +91,7 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRole) {
     return new Response(JSON.stringify({ ok: false, msg: "SERVER_MISCONFIG" }), {
       status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin },
+      headers: { "Content-Type": "application/json", ...corsHeaders(allowOrigin) },
     });
   }
 
@@ -99,6 +110,6 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...corsHeaders(allowOrigin) },
   });
 });
