@@ -217,8 +217,7 @@ Deno.serve(async (req) => {
     p_window_seconds: 60,
   });
   if (rl.error) {
-    if (isMissingRateLimitSetup(rl.error)) {
-      await safeInsertStartErrorSession(sb, {
+    if (isMissingRateLimitSetup(rl.error)) {      await safeInsertStartErrorSession(sb, {
         ipHash,
         uaHash,
         fpHash,
