@@ -380,10 +380,11 @@ const disableAllKeyTypes = useMutation({
       const token = sess.data.session?.access_token;
       if (!token) throw new Error("Bạn cần đăng nhập admin");
 
-      const { data, error } = await supabase.functions.invoke("admin-free-test", {
-        body: { key_type_code: testKeyTypeCode, dry_run: testDryRun },
-      });
-      if (error) throw error;
+      const data = await postFunction(
+        "/admin-free-test",
+        { key_type_code: testKeyTypeCode, dry_run: testDryRun },
+        { authToken: token },
+      );
       return (data ?? { ok: false, message: "NO_RESPONSE" }) as AdminTestResult;
     },
     onSuccess: (data) => {
