@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.admin-free-test]
 verify_jwt = true
 
+[functions.free-admin-test]
+verify_jwt = true
+
 [functions.admin-free-block]
 verify_jwt = true
 

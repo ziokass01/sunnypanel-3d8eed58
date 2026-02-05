@@ -12,6 +12,12 @@ Edge Function `free-start` gọi RPC `check_free_ip_rate_limit`, nhưng producti
 3. Copy toàn bộ SQL trong file và chạy 1 lần trên production.
 4. Test lại `/free`.
 
+## Query kiểm tra nhanh sau khi apply
+```sql
+select proname from pg_proc where proname='check_free_ip_rate_limit';
+select * from free_ip_rate_limits limit 1;
+```
+
 > Migration này là **idempotent**: có thể chạy lại an toàn, tự tạo (nếu thiếu) table/index/RLS/policy/RPC cho IP + fingerprint rate-limit.
 
 ## Kết quả sau khi áp dụng
@@ -19,4 +25,4 @@ Edge Function `free-start` gọi RPC `check_free_ip_rate_limit`, nhưng producti
 - Có thêm lớp chống spam theo fingerprint (`check_free_fp_rate_limit`) khi client gửi fingerprint.
 - Có bảng log `licenses_free_security_logs` để audit các trường hợp rate-limit/blocklist.
 - Nếu DB chưa apply migration, frontend sẽ báo thân thiện: “Server đang cấu hình thiếu, vui lòng thử lại sau”.
-- Các function admin-only mới (`admin-free-*`) cần được deploy và bật `verify_jwt=true` trong `supabase/config.toml`.
+- Các function admin-only (`admin-free-test`, `admin-free-block`, `admin-free-delete-session`, `admin-free-delete-issued`) cần được deploy và bật `verify_jwt=true` trong `supabase/config.toml`.

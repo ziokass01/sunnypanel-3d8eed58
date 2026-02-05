@@ -393,7 +393,12 @@ const disableAllKeyTypes = useMutation({
       issuesQuery.refetch();
     },
     onError: (e: any) => {
-      toast({ title: "Test failed", description: e?.message ?? "Error", variant: "destructive" });
+      const msg = String(e?.message ?? "Error");
+      toast({
+        title: "Test failed",
+        description: msg.includes("MISCONFIG") ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)` : msg,
+        variant: "destructive",
+      });
     },
   });
 
