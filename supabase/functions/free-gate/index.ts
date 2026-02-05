@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
     return new Response(JSON.stringify({ ok: false, msg: "BAD_REQUEST" }), {
-      status: 400,
+      status: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
       "Vary": "Origin" },
     });
@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_min_delay_enabled,free_require_link4m_referrer")
+    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_require_link4m_referrer")
     .eq("id", 1)
     .maybeSingle();
 
@@ -195,30 +195,60 @@ Deno.serve(async (req) => {
 
   if (sess.reveal_count && sess.reveal_count > 0) {
     return new Response(JSON.stringify({ ok: false, msg: "ALREADY_REVEALED" }), {
-      status: 400,
+      status: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
       "Vary": "Origin" },
     });
   }
 
-  const delayEnabled = Boolean((settings as any)?.free_min_delay_enabled ?? true);
-  if (delayEnabled) {
-    const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
-    const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
-    const startedAtMs = Date.parse(startedAtIso);
-    const mustWaitUntil = startedAtMs + minDelay * 1000;
-    if (isFinite(startedAtMs) && now < mustWaitUntil) {
-      const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
-      return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST", wait_seconds }), {
-        status: 429,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-          "Access-Control-Allow-Origin": allowOrigin,
-          "Vary": "Origin",
-        },
-      });
+  const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+  const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
+  const startedAtMs = Date.parse(startedAtIso);
+  const mustWaitUntil = startedAtMs + minDelay * 1000;
+  if (isFinite(startedAtMs) && now < mustWaitUntil) {
+    // Too fast => treat as FAILED verification (do NOT allow waiting/reload to pass).
+    // This blocks the dangerous bug: user can keep reloading until enough time passes.
+    const nowIso = new Date().toISOString();
+
+    try {
+      const upd = await sb
+        .from("licenses_free_sessions")
+        .update({
+          status: "gate_fail",
+          last_error: "TOO_FAST",
+          expires_at: nowIso,
+          out_expires_at: nowIso,
+          claim_token_hash: null,
+          claim_expires_at: null,
+        })
+        .eq("session_id", sess.session_id);
+
+      // Fallback if the database doesn't have newer columns (e.g. out_expires_at)
+      if (upd.error) {
+        await sb
+          .from("licenses_free_sessions")
+          .update({
+            status: "gate_fail",
+            last_error: "TOO_FAST",
+            expires_at: nowIso,
+            claim_token_hash: null,
+            claim_expires_at: null,
+          })
+          .eq("session_id", sess.session_id);
+      }
+    } catch {
+      // ignore
     }
+
+    return new Response(JSON.stringify({ ok: false, msg: "VERIFY_FAILED" }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": allowOrigin,
+        "Vary": "Origin",
+      },
+    });
   }
 
   // Idempotency: if claim token already issued and still valid, just re-issue (helps if user refreshes)

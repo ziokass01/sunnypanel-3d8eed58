@@ -380,6 +380,25 @@ const disableAllKeyTypes = useMutation({
     },
   });
 
+  const revokeLicense = useMutation({
+    mutationFn: async (licenseId: string) => {
+      const nowIso = new Date().toISOString();
+      const { error } = await supabase
+        .from("licenses")
+        .update({ is_active: false, expires_at: nowIso })
+        .eq("id", licenseId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Updated", description: "Đã chặn key (is_active=false, expires_at=now)." });
+      issuesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Failed", description: e?.message ?? "Không thể chặn key.", variant: "destructive" });
+    },
+  });
+
+
   return (
     <div className="space-y-4">
       <Card>
@@ -702,6 +721,7 @@ const disableAllKeyTypes = useMutation({
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="started">started</SelectItem>
                 <SelectItem value="gate_ok">gate_ok</SelectItem>
+                <SelectItem value="gate_fail">gate_fail</SelectItem>
                 <SelectItem value="revealed">revealed</SelectItem>
                 <SelectItem value="closed">closed</SelectItem>
                 <SelectItem value="init">init (legacy)</SelectItem>
@@ -781,6 +801,7 @@ const disableAllKeyTypes = useMutation({
                 <TableHead>Key</TableHead>
                 <TableHead>Session</TableHead>
                 <TableHead>IP hash</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -791,11 +812,29 @@ const disableAllKeyTypes = useMutation({
                   <TableCell className="font-mono">{i.key_mask}</TableCell>
                   <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
                   <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
+                        Open
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={revokeLicense.isPending}
+                        onClick={() => {
+                          const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
+                          if (ok) revokeLicense.mutate(i.license_id);
+                        }}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
               {!issuesQuery.data?.length ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                     No rows
                   </TableCell>
                 </TableRow>
