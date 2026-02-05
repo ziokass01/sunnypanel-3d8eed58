@@ -56,9 +56,47 @@ function base64url(bytesLen = 32) {
 
 const BodySchema = z.object({
   key_type_code: z.string().min(2).max(8),
-  fingerprint: z.string().min(6).max(128),
+  fingerprint: z.string().min(6).max(128).optional(),
   test_mode: z.boolean().optional().default(false),
 });
+
+function isMissingRateLimitSetup(error: { message?: string | null; details?: string | null; hint?: string | null } | null | undefined) {
+  const haystack = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`.toLowerCase();
+  return haystack.includes("check_free_ip_rate_limit")
+    || haystack.includes("check_free_fp_rate_limit")
+    || haystack.includes("could not find the function")
+    || haystack.includes("does not exist")
+    || (haystack.includes("relation") && haystack.includes("rate_limit"));
+}
+
+async function safeInsertStartErrorSession(
+  sb: ReturnType<typeof createClient>,
+  payload: {
+    ipHash: string;
+    uaHash: string;
+    fpHash: string;
+    keyTypeCode: string;
+    lastError: string;
+  },
+) {
+  try {
+    const now = new Date();
+    await sb.from("licenses_free_sessions").insert({
+      status: "start_error",
+      reveal_count: 0,
+      ip_hash: payload.ipHash,
+      ua_hash: payload.uaHash,
+      fingerprint_hash: payload.fpHash,
+      key_type_code: payload.keyTypeCode,
+      duration_seconds: 0,
+      started_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 3 * 60 * 1000).toISOString(),
+      last_error: payload.lastError,
+    });
+  } catch {
+    // no-op
+  }
+}
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
@@ -68,7 +106,7 @@ Deno.serve(async (req) => {
     "Access-Control-Allow-Origin": allowOrigin,
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST,OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
     "Access-Control-Max-Age": "86400",
   };
   const jsonResponse = (data: unknown, status = 200) =>
@@ -95,6 +133,19 @@ Deno.serve(async (req) => {
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+  const safeLogSecurity = async (event_type: string, details: Record<string, unknown>, ip_hash?: string, fingerprint_hash?: string | null) => {
+    try {
+      await sb.from("licenses_free_security_logs").insert({
+        event_type,
+        route: "free-start",
+        details,
+        ip_hash: ip_hash ?? null,
+        fingerprint_hash: fingerprint_hash ?? null,
+      });
+    } catch {
+      // no-op
+    }
+  };
 
   let body: unknown = null;
   try {
@@ -108,7 +159,9 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, msg: "BAD_REQUEST" }, 400);
   }
 
-  const { key_type_code, fingerprint, test_mode } = parsed.data;
+  const { key_type_code, test_mode } = parsed.data;
+  const fpFromHeader = (req.headers.get("x-fp") ?? "").trim();
+  const fingerprint = fpFromHeader || parsed.data.fingerprint || "";
 
   if (test_mode) {
     const admin = await assertAdmin(req);
@@ -153,7 +206,7 @@ Deno.serve(async (req) => {
   const ua = req.headers.get("user-agent") ?? "";
   const ip = getClientIp(req);
 
-  const fpHash = await sha256Hex(fingerprint);
+  const fpHash = fingerprint ? await sha256Hex(fingerprint) : await sha256Hex(`missing:${ua}:${ip}`);
   const uaHash = await sha256Hex(ua);
   const ipHash = await sha256Hex(ip);
 
@@ -164,11 +217,63 @@ Deno.serve(async (req) => {
     p_window_seconds: 60,
   });
   if (rl.error) {
+    if (isMissingRateLimitSetup(rl.error)) {
+      await safeInsertStartErrorSession(sb, {
+        ipHash,
+        uaHash,
+        fpHash,
+        keyTypeCode: key_type_code,
+        lastError: "SERVER_RATE_LIMIT_MISCONFIG",
+      });
+      return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
+    }
+    await safeInsertStartErrorSession(sb, {
+      ipHash,
+      uaHash,
+      fpHash,
+      keyTypeCode: key_type_code,
+      lastError: "RATE_LIMIT_CHECK_FAILED",
+    });
     return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
   }
   const allowed = Array.isArray(rl.data) ? rl.data[0]?.allowed : rl.data?.allowed;
   if (allowed === false) {
+    await safeLogSecurity("rate_limit_ip_blocked", { key_type_code }, ipHash, fingerprint ? fpHash : null);
     return jsonResponse({ ok: false, msg: "RATE_LIMIT" }, 429);
+  }
+
+  if (fingerprint) {
+    const fpRl = await sb.rpc("check_free_fp_rate_limit", {
+      p_fp_hash: fpHash,
+      p_route: "free-start",
+      p_limit: 12,
+      p_window_seconds: 60,
+    });
+    if (fpRl.error) {
+      if (isMissingRateLimitSetup(fpRl.error)) {
+        await safeInsertStartErrorSession(sb, {
+          ipHash,
+          uaHash,
+          fpHash,
+          keyTypeCode: key_type_code,
+          lastError: "SERVER_RATE_LIMIT_MISCONFIG",
+        });
+        return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
+      }
+      await safeInsertStartErrorSession(sb, {
+        ipHash,
+        uaHash,
+        fpHash,
+        keyTypeCode: key_type_code,
+        lastError: "RATE_LIMIT_CHECK_FAILED",
+      });
+      return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
+    }
+    const fpAllowed = Array.isArray(fpRl.data) ? fpRl.data[0]?.allowed : fpRl.data?.allowed;
+    if (fpAllowed === false) {
+      await safeLogSecurity("rate_limit_fp_blocked", { key_type_code }, ipHash, fpHash);
+      return jsonResponse({ ok: false, msg: "RATE_LIMIT" }, 429);
+    }
   }
 
   const banned = await sb
@@ -179,6 +284,7 @@ Deno.serve(async (req) => {
     .limit(1)
     .maybeSingle();
   if (banned.data?.id) {
+    await safeLogSecurity("blocklist_hit", { key_type_code }, ipHash, fingerprint ? fpHash : null);
     return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
   }
 

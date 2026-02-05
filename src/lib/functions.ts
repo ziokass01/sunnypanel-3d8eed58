@@ -28,7 +28,7 @@ export async function getFunction<T>(
 export async function postFunction<T>(
   path: string,
   body: unknown,
-  opts?: { authToken?: string | null },
+  opts?: { authToken?: string | null; headers?: Record<string, string> },
 ): Promise<T> {
   const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, {
@@ -36,6 +36,7 @@ export async function postFunction<T>(
     headers: {
       "Content-Type": "application/json",
       ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
+      ...(opts?.headers ?? {}),
     },
     credentials: "omit",
     body: JSON.stringify(body ?? {}),
@@ -44,7 +45,10 @@ export async function postFunction<T>(
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const msg = (data && (data.msg || data.error)) || `Request failed (${res.status})`;
-    throw new Error(msg);
+    const err = new Error(msg) as Error & { code?: string; status?: number };
+    if (data?.code) err.code = String(data.code);
+    err.status = res.status;
+    throw err;
   }
   return data as T;
 }
