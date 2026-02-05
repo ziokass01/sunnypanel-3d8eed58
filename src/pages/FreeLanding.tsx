@@ -133,6 +133,7 @@ export function FreeLandingPage() {
                   }
 
                   setOutToken(res.out_token);
+                  try { localStorage.removeItem("free_claim_token"); } catch {}
                   setSelectedKeyTypeCode(selected);
 
                   // Redirect to Link4M outbound

@@ -6,7 +6,7 @@ import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
-import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode } from "@/features/free/fingerprint";
+import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode, setOutToken } from "@/features/free/fingerprint";
 
 type RevealOk = { ok: true; key: string; expires_at: string; key_type_label?: string | null };
 type RevealErr = { ok: false; msg: string };
@@ -27,10 +27,10 @@ export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
   const claimToken = useMemo(() => {
-    // Compat: prefer `claim`, fallback to legacy `c`, then local cache.
-    const primary = sp.get("claim");
+    // Compat: prefer `c`, fallback to `claim`, then local cache.
+    const primary = sp.get("c");
     if (primary && primary.trim()) return primary.trim();
-    const legacy = sp.get("c");
+    const legacy = sp.get("claim");
     if (!primary && legacy && legacy.trim()) return legacy.trim();
     // Some redirect/shortener flows can strip query params; keep a fallback token.
     if (!primary && !legacy) {
@@ -51,7 +51,14 @@ export function FreeClaimPage() {
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<{ key: string; expiresAt: string; label: string } | null>(null);
 
-  const outToken = useMemo(() => getOutToken(), []);
+  const outToken = useMemo(() => {
+    const queryOut = (sp.get("o") ?? "").trim();
+    if (queryOut) {
+      setOutToken(queryOut);
+      return queryOut;
+    }
+    return getOutToken();
+  }, [sp]);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,8 +169,8 @@ export function FreeClaimPage() {
           <CardContent className="space-y-4">
             {!claimToken ? (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Thiếu claim token</div>
-                <div className="text-muted-foreground">Hãy quay lại /free và làm lại flow.</div>
+                <div className="font-medium">Phiên không hợp lệ</div>
+                <div className="text-muted-foreground">Thiếu claim token. Hãy quay lại /free và làm lại flow.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
                     Quay lại Get Key
