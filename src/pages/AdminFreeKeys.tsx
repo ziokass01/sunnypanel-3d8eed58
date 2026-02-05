@@ -18,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getFreeTestMode, setFreeTestMode } from "@/features/free/fingerprint";
+import { getFreeTestMode, getOrCreateFingerprint, setFreeTestMode } from "@/features/free/fingerprint";
+import { postFunction } from "@/lib/functions";
 
 type SettingsRow = {
   id: number;
@@ -82,6 +83,13 @@ type PublicLink = {
   url: string;
   icon?: string | null;
 };
+
+type StartOk = { ok: true; out_token: string; outbound_url: string };
+type StartErr = { ok: false; msg: string };
+type GateOk = { ok: true; claim_token: string };
+type GateErr = { ok: false; msg: string };
+type RevealOk = { ok: true; key: string; expires_at: string };
+type RevealErr = { ok: false; msg: string };
 
 function utcDayRange(day: string) {
   // day = YYYY-MM-DD in UTC
@@ -177,6 +185,12 @@ export function AdminFreeKeysPage() {
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
   const [testMode, setTestMode] = useState(false);
+  const [testFlowStatus, setTestFlowStatus] = useState<{
+    state: "idle" | "running" | "done" | "error";
+    message?: string;
+    key?: string;
+    expiresAt?: string;
+  }>({ state: "idle" });
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -229,6 +243,64 @@ export function AdminFreeKeysPage() {
       toast({ title: "Save failed", description: e?.message ?? "Error", variant: "destructive" });
     },
   });
+
+  const runTestFlow = async () => {
+    if (!testMode) {
+      toast({ title: "Test mode đang tắt", description: "Bật test mode trước khi chạy test flow.", variant: "destructive" });
+      return;
+    }
+    const enabledType = (keyTypesQuery.data ?? []).find((k) => k.enabled);
+    if (!enabledType) {
+      toast({ title: "Thiếu key type", description: "Hãy bật ít nhất 1 loại key để test.", variant: "destructive" });
+      return;
+    }
+    setTestFlowStatus({ state: "running", message: "Đang chạy test flow…" });
+    try {
+      const session = await supabase.auth.getSession();
+      const authToken = session?.data?.session?.access_token ?? null;
+      if (!authToken) {
+        throw new Error("Test mode yêu cầu đăng nhập admin.");
+      }
+      const fp = getOrCreateFingerprint();
+      const startRes = await postFunction<StartOk | StartErr>(
+        "/free-start",
+        { key_type_code: enabledType.code, fingerprint: fp, test_mode: true },
+        { authToken },
+      );
+      if (!startRes.ok) throw new Error((startRes as StartErr).msg || "Start failed");
+
+      const gateRes = await postFunction<GateOk | GateErr>(
+        "/free-gate",
+        { out_token: startRes.out_token, fingerprint: fp, referrer: baseUrl, test_mode: true },
+        { authToken },
+      );
+      if (!gateRes.ok) throw new Error((gateRes as GateErr).msg || "Gate failed");
+
+      const revealRes = await postFunction<RevealOk | RevealErr>(
+        "/free-reveal",
+        {
+          claim_token: gateRes.claim_token,
+          out_token: startRes.out_token,
+          fingerprint: fp,
+          turnstile_token: null,
+          test_mode: true,
+        },
+        { authToken },
+      );
+      if (!revealRes.ok) throw new Error((revealRes as RevealErr).msg || "Reveal failed");
+
+      setTestFlowStatus({
+        state: "done",
+        message: "Test flow OK",
+        key: (revealRes as RevealOk).key,
+        expiresAt: (revealRes as RevealOk).expires_at,
+      });
+      toast({ title: "Test flow OK", description: "Đã tạo key test thành công." });
+    } catch (e: any) {
+      setTestFlowStatus({ state: "error", message: e?.message ?? "Test flow failed" });
+      toast({ title: "Test flow failed", description: e?.message ?? "Error", variant: "destructive" });
+    }
+  };
 
   // -------- Key types --------
   const keyTypesQuery = useQuery({
@@ -465,6 +537,31 @@ export function AdminFreeKeysPage() {
                 setFreeTestMode(next);
               }}
             />
+          </div>
+
+          <div className="rounded-md border p-3 space-y-2">
+            <div className="font-medium">Admin test flow</div>
+            <div className="text-xs text-muted-foreground">
+              Chạy nhanh full flow (start → gate → reveal) để kiểm tra hệ thống. Tuân thủ reveal 1 lần/session.
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={runTestFlow} disabled={testFlowStatus.state === "running" || !testMode}>
+                {testFlowStatus.state === "running" ? "Đang chạy…" : "Run test flow"}
+              </Button>
+              {testFlowStatus.state === "done" && testFlowStatus.key ? (
+                <Button variant="secondary" onClick={() => copyText(testFlowStatus.key!)}>
+                  Copy key
+                </Button>
+              ) : null}
+            </div>
+            {testFlowStatus.message ? (
+              <div className="text-xs">
+                <span className={testFlowStatus.state === "error" ? "text-destructive" : "text-muted-foreground"}>
+                  {testFlowStatus.message}
+                  {testFlowStatus.expiresAt ? ` • Expires: ${testFlowStatus.expiresAt}` : ""}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
