@@ -69,6 +69,35 @@ function isMissingRateLimitSetup(error: { message?: string | null; details?: str
     || (haystack.includes("relation") && haystack.includes("rate_limit"));
 }
 
+async function safeInsertStartErrorSession(
+  sb: ReturnType<typeof createClient>,
+  payload: {
+    ipHash: string;
+    uaHash: string;
+    fpHash: string;
+    keyTypeCode: string;
+    lastError: string;
+  },
+) {
+  try {
+    const now = new Date();
+    await sb.from("licenses_free_sessions").insert({
+      status: "start_error",
+      reveal_count: 0,
+      ip_hash: payload.ipHash,
+      ua_hash: payload.uaHash,
+      fingerprint_hash: payload.fpHash,
+      key_type_code: payload.keyTypeCode,
+      duration_seconds: 0,
+      started_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 3 * 60 * 1000).toISOString(),
+      last_error: payload.lastError,
+    });
+  } catch {
+    // no-op
+  }
+}
+
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
@@ -188,9 +217,22 @@ Deno.serve(async (req) => {
     p_window_seconds: 60,
   });
   if (rl.error) {
-    if (isMissingRateLimitSetup(rl.error)) {
-      return jsonResponse({ ok: false, msg: "Server đang cấu hình, thử lại sau.", code: "SERVER_SETUP_MISSING_RATE_LIMIT_RPC" }, 503);
+    if (isMissingRateLimitSetup(rl.error)) {      await safeInsertStartErrorSession(sb, {
+        ipHash,
+        uaHash,
+        fpHash,
+        keyTypeCode: key_type_code,
+        lastError: "SERVER_RATE_LIMIT_MISCONFIG",
+      });
+      return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
     }
+    await safeInsertStartErrorSession(sb, {
+      ipHash,
+      uaHash,
+      fpHash,
+      keyTypeCode: key_type_code,
+      lastError: "RATE_LIMIT_CHECK_FAILED",
+    });
     return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
   }
   const allowed = Array.isArray(rl.data) ? rl.data[0]?.allowed : rl.data?.allowed;
@@ -208,8 +250,22 @@ Deno.serve(async (req) => {
     });
     if (fpRl.error) {
       if (isMissingRateLimitSetup(fpRl.error)) {
-        return jsonResponse({ ok: false, msg: "Server đang cấu hình, thử lại sau.", code: "SERVER_SETUP_MISSING_RATE_LIMIT_RPC" }, 503);
+        await safeInsertStartErrorSession(sb, {
+          ipHash,
+          uaHash,
+          fpHash,
+          keyTypeCode: key_type_code,
+          lastError: "SERVER_RATE_LIMIT_MISCONFIG",
+        });
+        return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
       }
+      await safeInsertStartErrorSession(sb, {
+        ipHash,
+        uaHash,
+        fpHash,
+        keyTypeCode: key_type_code,
+        lastError: "RATE_LIMIT_CHECK_FAILED",
+      });
       return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
     }
     const fpAllowed = Array.isArray(fpRl.data) ? fpRl.data[0]?.allowed : fpRl.data?.allowed;

@@ -8,7 +8,16 @@ import { PublicInfo } from "@/features/free/PublicInfo";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode } from "@/features/free/fingerprint";
 
-type RevealOk = { ok: true; key: string; expires_at: string; key_type_label?: string | null };
+type RevealOk = {
+  ok: true;
+  key: string;
+  expires_at: string;
+  key_type_label?: string | null;
+  key_type_code?: string | null;
+  created_at?: string | null;
+  session_id?: string | null;
+  ip_hash?: string | null;
+};
 type RevealErr = { ok: false; msg: string };
 
 function isValidClaimToken(tok: string) {
@@ -30,6 +39,7 @@ function friendlyRevealError(msg: string) {
 }
 
 type RevealedState = { key: string; expiresAt: string; label: string };
+const LAST_FREE_KEY_STORAGE = "lastFreeKey";
 
 export function FreeClaimPage() {
   const nav = useNavigate();
@@ -242,6 +252,21 @@ export function FreeClaimPage() {
                         } catch {
                           // ignore
                         }
+                      }
+
+                      try {
+                        const okRes = res as RevealOk;
+                        const payload = {
+                          key: okRes.key,
+                          key_type: okRes.key_type_label || okRes.key_type_code || selectedLabel,
+                          created_at: okRes.created_at || new Date().toISOString(),
+                          expires_at: okRes.expires_at,
+                          ip_hash: okRes.ip_hash || null,
+                          session_id: okRes.session_id || null,
+                        };
+                        localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
+                      } catch {
+                        // ignore
                       }
                     } catch (e: any) {
                       setError(friendlyRevealError(e?.message ?? "UNAUTHORIZED"));

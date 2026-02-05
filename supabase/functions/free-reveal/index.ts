@@ -228,7 +228,16 @@ Deno.serve(async (req) => {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
     if (existing) {
-      return new Response(JSON.stringify({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }), {
+      return new Response(JSON.stringify({
+        ok: true,
+        key: existing.key,
+        expires_at: existing.expires_at,
+        key_type_label,
+        key_type_code: sess.key_type_code ?? null,
+        created_at: new Date().toISOString(),
+        session_id: sessionId,
+        ip_hash: ipHash,
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
       });
@@ -375,7 +384,16 @@ Deno.serve(async (req) => {
     ua_hash: uaHash,
   });
 
-  return new Response(JSON.stringify({ ok: true, key: inserted.key, expires_at, key_type_label }), {
+  return new Response(JSON.stringify({
+    ok: true,
+    key: inserted.key,
+    expires_at,
+    key_type_label,
+    key_type_code: sess.key_type_code ?? null,
+    created_at: new Date().toISOString(),
+    session_id: sessionId,
+    ip_hash: ipHash,
+  }), {
     status: 200,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
   });
