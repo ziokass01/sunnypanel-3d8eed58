@@ -6,59 +6,83 @@ import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
-import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode, setOutToken } from "@/features/free/fingerprint";
+import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode } from "@/features/free/fingerprint";
 
 type RevealOk = { ok: true; key: string; expires_at: string; key_type_label?: string | null };
 type RevealErr = { ok: false; msg: string };
 
-type RevealedCache = { key: string; expiresAt: string; label: string };
-
-function cacheKeyForClaimToken(claimToken: string) {
-  return `fk_revealed_v1:${claimToken}`;
+function isValidClaimToken(tok: string) {
+  const t = String(tok || "").trim();
+  if (t.length < 16 || t.length > 512) return false;
+  // base64url-ish (we generate with btoa url-safe)
+  return /^[A-Za-z0-9_-]+$/.test(t);
 }
 
-function isValidTurnstileSiteKey(key: string | null | undefined) {
-  const k = String(key ?? "").trim();
-  // Cloudflare Turnstile site keys typically start with "0x". Treat anything else as invalid/dummy.
-  return k.length >= 16 && k.startsWith("0x");
+function friendlyRevealError(msg: string) {
+  const m = String(msg || "").trim();
+  if (!m) return "Xác thực không thành công. Vui lòng làm lại.";
+  if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại Get Key và vượt link lại.";
+  if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong 24 giờ. Vui lòng thử lại sau.";
+  if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
+  if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "ALREADY_REVEALED") return "Key đã được phát. Hãy copy key bên dưới.";
+  return `Xác thực không thành công (${m}).`;
 }
+
+type RevealedState = { key: string; expiresAt: string; label: string };
 
 export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
-  const claimToken = useMemo(() => {
-    // Compat: prefer `c`, fallback to `claim`, then local cache.
-    const primary = sp.get("c");
-    if (primary && primary.trim()) return primary.trim();
-    const legacy = sp.get("claim");
-    if (!primary && legacy && legacy.trim()) return legacy.trim();
-    // Some redirect/shortener flows can strip query params; keep a fallback token.
-    if (!primary && !legacy) {
-      try {
-        return localStorage.getItem("free_claim_token") ?? "";
-      } catch {
-        return "";
-      }
+
+  // IMPORTANT: do NOT memo claimToken from a URLSearchParams object reference
+  // (some browsers / router transitions may keep object identity, causing stale empty token).
+  const queryClaimRaw = (sp.get("claim") || sp.get("c") || "").trim();
+  const claimToken = (() => {
+    if (isValidClaimToken(queryClaimRaw)) return queryClaimRaw;
+    try {
+      const fb = (localStorage.getItem("free_claim_token") ?? "").trim();
+      return isValidClaimToken(fb) ? fb : "";
+    } catch {
+      return "";
     }
-    return "";
-  }, [sp]);
+  })();
+
+  const outToken = (getOutToken() || "").trim();
 
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [turnToken, setTurnToken] = useState<string>("");
-  const [turnstileError, setTurnstileError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<{ key: string; expiresAt: string; label: string } | null>(null);
+  const [revealed, setRevealed] = useState<RevealedState | null>(null);
 
-  const outToken = useMemo(() => {
-    const queryOut = (sp.get("o") ?? "").trim();
-    if (queryOut) {
-      setOutToken(queryOut);
-      return queryOut;
+  // Persist query claim token as a fallback (some redirect/shortener flows can strip params).
+  useEffect(() => {
+    if (!isValidClaimToken(queryClaimRaw)) return;
+    try {
+      localStorage.setItem("free_claim_token", queryClaimRaw);
+    } catch {
+      // ignore
     }
-    return getOutToken();
-  }, [sp]);
+  }, [queryClaimRaw]);
+
+  const revealedStoreKey = useMemo(() => {
+    if (!outToken) return "";
+    return `free_revealed_v1:${outToken}`;
+  }, [outToken]);
+
+  useEffect(() => {
+    if (!revealedStoreKey) return;
+    try {
+      const raw = sessionStorage.getItem(revealedStoreKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as RevealedState;
+      if (parsed?.key && parsed?.expiresAt) setRevealed(parsed);
+    } catch {
+      // ignore
+    }
+  }, [revealedStoreKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,28 +99,6 @@ export function FreeClaimPage() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    // Restore revealed key after reload so we don't re-issue keys.
-    if (!claimToken) return;
-    try {
-      const raw = sessionStorage.getItem(cacheKeyForClaimToken(claimToken));
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as RevealedCache;
-      if (parsed?.key && parsed?.expiresAt) setRevealed(parsed);
-    } catch {
-      // ignore
-    }
-  }, [claimToken]);
-
-  const clearRevealedCache = () => {
-    if (!claimToken) return;
-    try {
-      sessionStorage.removeItem(cacheKeyForClaimToken(claimToken));
-    } catch {
-      // ignore
-    }
-  };
 
   useEffect(() => {
     // noindex for claim page
@@ -121,15 +123,12 @@ export function FreeClaimPage() {
   }, [cfg]);
 
   const canVerify = useMemo(() => {
+    if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
-    const turnstileRequired =
-      Boolean(cfg?.turnstile_enabled) &&
-      isValidTurnstileSiteKey(cfg?.turnstile_site_key) &&
-      !turnstileError;
-    if (!turnstileRequired) return true;
+    if (!cfg?.turnstile_enabled) return true;
     return Boolean(turnToken);
-  }, [claimToken, outToken, cfg?.turnstile_enabled, cfg?.turnstile_site_key, turnToken, turnstileError]);
+  }, [claimToken, outToken, cfg?.turnstile_enabled, turnToken, revealed]);
 
   async function closeAndReturn() {
     try {
@@ -139,11 +138,21 @@ export function FreeClaimPage() {
     } catch {
       // ignore
     } finally {
+      // Clear local flow storage so reload cannot mint again
       clearFreeFlowStorage();
+      try { localStorage.removeItem("free_claim_token"); } catch { /* ignore */ }
+      if (revealedStoreKey) {
+        try {
+          sessionStorage.removeItem(revealedStoreKey);
+        } catch {
+          // ignore
+        }
+      }
       nav("/free", { replace: true });
     }
   }
 
+  // Start countdown ONLY AFTER key is revealed (per requirement).
   useEffect(() => {
     if (!revealed) return;
     const t = window.setTimeout(() => {
@@ -162,15 +171,15 @@ export function FreeClaimPage() {
               <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
               <div>
                 <CardTitle>Nhận key</CardTitle>
-                <CardDescription>Key chỉ hiển thị 1 lần duy nhất.</CardDescription>
+                <CardDescription>Nhấn Verify để hiện key. Sau khi có key, reload sẽ KHÔNG tạo key mới.</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {!claimToken ? (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Phiên không hợp lệ</div>
-                <div className="text-muted-foreground">Thiếu claim token. Hãy quay lại /free và làm lại flow.</div>
+                <div className="font-medium">Thiếu claim token</div>
+                <div className="text-muted-foreground">Hãy quay lại /free và làm lại flow.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
                     Quay lại Get Key
@@ -195,15 +204,8 @@ export function FreeClaimPage() {
 
             {!revealed ? (
               <div className="space-y-3">
-                {cfg?.turnstile_enabled && isValidTurnstileSiteKey(cfg?.turnstile_site_key) ? (
-                  <TurnstileWidget
-                    siteKey={cfg.turnstile_site_key!}
-                    onToken={setTurnToken}
-                    onError={(msg) => {
-                      // Treat Turnstile failures as disabled to avoid permanently blocking Verify.
-                      setTurnstileError(msg || "Turnstile error");
-                    }}
-                  />
+                {cfg?.turnstile_enabled && cfg.turnstile_site_key ? (
+                  <TurnstileWidget siteKey={cfg.turnstile_site_key} onToken={setTurnToken} />
                 ) : null}
 
                 <Button
@@ -219,42 +221,30 @@ export function FreeClaimPage() {
                         claim_token: claimToken,
                         out_token: outToken,
                         fingerprint: fp,
-                        turnstile_token:
-                          cfg?.turnstile_enabled && isValidTurnstileSiteKey(cfg?.turnstile_site_key) && !turnstileError
-                            ? turnToken
-                            : null,
+                        turnstile_token: cfg?.turnstile_enabled ? turnToken : null,
                       });
 
                       if (!res.ok) {
-                        const msg = (res as RevealErr).msg || "Reveal failed";
-                        // If backend refuses (already revealed/invalid), guide user safely.
-                        if (msg === "REVEAL_IN_PROGRESS") {
-                          setError("Hệ thống đang xử lý. Vui lòng chờ vài giây rồi thử lại.");
-                        } else if (msg === "UNAUTHORIZED" || msg === "ALREADY_REVEALED") {
-                          setError("Key đã được reveal hoặc session không hợp lệ. Vui lòng quay lại và làm lại flow.");
-                        } else {
-                          setError(msg);
-                        }
+                        setError(friendlyRevealError((res as RevealErr).msg || "UNAUTHORIZED"));
                         return;
                       }
-                      try {
-                        localStorage.removeItem("free_claim_token");
-                      } catch {
-                        // ignore
-                      }
-                      const next: RevealedCache = {
+
+                      const st: RevealedState = {
                         key: (res as RevealOk).key,
                         expiresAt: (res as RevealOk).expires_at,
                         label: (res as RevealOk).key_type_label || selectedLabel,
                       };
-                      setRevealed(next);
-                      try {
-                        sessionStorage.setItem(cacheKeyForClaimToken(claimToken), JSON.stringify(next));
-                      } catch {
-                        // ignore
+
+                      setRevealed(st);
+                      if (revealedStoreKey) {
+                        try {
+                          sessionStorage.setItem(revealedStoreKey, JSON.stringify(st));
+                        } catch {
+                          // ignore
+                        }
                       }
                     } catch (e: any) {
-                      setError(e?.message ?? "Reveal failed");
+                      setError(friendlyRevealError(e?.message ?? "UNAUTHORIZED"));
                     } finally {
                       setLoading(false);
                     }
@@ -285,22 +275,6 @@ export function FreeClaimPage() {
                   }}
                 >
                   Copy
-                </Button>
-
-                <Button
-                  className="w-full"
-                  variant="secondary"
-                  onClick={async () => {
-                    clearRevealedCache();
-                    try {
-                      localStorage.removeItem("free_claim_token");
-                    } catch {
-                      // ignore
-                    }
-                    await closeAndReturn();
-                  }}
-                >
-                  Xóa key
                 </Button>
 
                 <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />

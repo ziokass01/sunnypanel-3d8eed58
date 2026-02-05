@@ -1,15 +1,11 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
-import { assertAdmin } from "../_shared/admin.ts";
-
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
 
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
     const u = new URL(origin);
     const host = u.host;
-    if (KNOWN_HOSTS.has(host)) return true;
     if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
     if (publicBaseUrl) {
       const pb = new URL(publicBaseUrl);
@@ -20,12 +16,6 @@ function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   } catch {
     return false;
   }
-}
-
-function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
-  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
-  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
-  return "https://mityangho.id.vn";
 }
 
 function toHex(bytes: ArrayBuffer) {
@@ -40,7 +30,7 @@ async function sha256Hex(input: string) {
   return toHex(digest);
 }
 
-function base64url(bytesLen = 32) {
+function base64url(bytesLen = 18) {
   const bytes = new Uint8Array(bytesLen);
   crypto.getRandomValues(bytes);
   let bin = "";
@@ -52,42 +42,41 @@ const BodySchema = z.object({
   out_token: z.string().min(8).max(256),
   fingerprint: z.string().min(6).max(128),
   referrer: z.string().optional().default(""),
-  test_mode: z.boolean().optional().default(false),
 });
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Vary": "Origin",
-    "Access-Control-Allow-Methods": "POST,OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Max-Age": "86400",
-  };
-  const jsonResponse = (data: unknown, status = 200) =>
-    new Response(JSON.stringify(data), {
-      status,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
-      },
-    });
+  const allowOrigin = origin || "*";
 
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders, status: 204 });
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin",
+      "Access-Control-Allow-Methods": "POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
 
   if (req.method !== "POST") {
-    return jsonResponse({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
+    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return jsonResponse({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }, 500);
+    return new Response(JSON.stringify({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -101,140 +90,176 @@ Deno.serve(async (req) => {
 
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return jsonResponse({ ok: false, msg: "BAD_REQUEST" }, 400);
+    return new Response(JSON.stringify({ ok: false, msg: "BAD_REQUEST" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
-  const { out_token, fingerprint, referrer, test_mode } = parsed.data;
-
-  if (test_mode) {
-    const admin = await assertAdmin(req);
-    if (!admin.ok) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, admin.status);
-  }
+  const { out_token, fingerprint, referrer } = parsed.data;
 
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_min_delay_enabled,free_require_link4m_referrer")
+    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_require_link4m_referrer")
     .eq("id", 1)
     .maybeSingle();
 
   if (sErr) {
-    return jsonResponse({ ok: false, msg: sErr.message }, 500);
+    return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   if (!Boolean(settings?.free_enabled ?? true)) {
-    return jsonResponse({ ok: false, msg: "CLOSED" }, 403);
+    return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
-  if (requireRef && !test_mode) {
+  if (requireRef) {
     try {
       const u = new URL(referrer);
       const host = (u.hostname || "").toLowerCase();
       // Link4M domains can vary (e.g. link4m.com / link4m.xyz / link4m.app...).
       // Referrer is not 100% reliable across browsers, so keep this check lenient.
       if (!host.includes("link4m")) {
-        return jsonResponse({ ok: false, msg: "BAD_REFERRER" }, 400);
+        return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+        });
       }
     } catch {
-      return jsonResponse({ ok: false, msg: "BAD_REFERRER" }, 400);
+      return new Response(JSON.stringify({ ok: false, msg: "BAD_REFERRER" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+      });
     }
   }
 
   const outHash = await sha256Hex(out_token);
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
-  const ipHash = await sha256Hex(ip);
-
-  const rl = await sb.rpc("check_free_ip_rate_limit", {
-    p_ip_hash: ipHash,
-    p_route: "free-gate",
-    p_limit: 50,
-    p_window_seconds: 60,
-  });
-  if (rl.error) return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
-  const allowed = Array.isArray(rl.data) ? rl.data[0]?.allowed : rl.data?.allowed;
-  if (allowed === false) return jsonResponse({ ok: false, msg: "RATE_LIMIT" }, 429);
-
-  const banned = await sb
-    .from("licenses_free_blocklist")
-    .select("id")
-    .eq("enabled", true)
-    .or(`fingerprint_hash.eq.${fpHash},ip_hash.eq.${ipHash}`)
-    .limit(1)
-    .maybeSingle();
-  if (banned.data?.id) return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
 
   // Find session
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,reveal_count,claim_token_hash,claim_expires_at,claim_token_plain",
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,reveal_count,claim_token_hash,claim_expires_at",
     )
     .eq("out_token_hash", outHash)
     .maybeSingle();
 
   if (qErr) {
-    return jsonResponse({ ok: false, msg: qErr.message }, 500);
+    return new Response(JSON.stringify({ ok: false, msg: qErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   if (!sess) {
-    return jsonResponse({ ok: false, msg: "INVALID_SESSION" }, 400);
-  }
-
-  if (sess.status && !["started", "gate_ok"].includes(sess.status)) {
-    return jsonResponse({ ok: false, msg: "INVALID_SESSION" }, 400);
+    return new Response(JSON.stringify({ ok: false, msg: "INVALID_SESSION" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   // Expired?
   const now = Date.now();
   const expiresAt = Date.parse(sess.expires_at);
   if (!isFinite(expiresAt) || expiresAt <= now) {
-    return jsonResponse({ ok: false, msg: "SESSION_EXPIRED" }, 400);
+    return new Response(JSON.stringify({ ok: false, msg: "SESSION_EXPIRED" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash) {
-    return jsonResponse({ ok: false, msg: "DEVICE_MISMATCH" }, 403);
+    return new Response(JSON.stringify({ ok: false, msg: "DEVICE_MISMATCH" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
   if (sess.reveal_count && sess.reveal_count > 0) {
-    return jsonResponse({ ok: false, msg: "ALREADY_REVEALED" }, 400);
+    return new Response(JSON.stringify({ ok: false, msg: "ALREADY_REVEALED" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
-  const delayEnabled = Boolean((settings as any)?.free_min_delay_enabled ?? true);
-  if (delayEnabled && !test_mode) {
-    const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
-    const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
-    const startedAtMs = Date.parse(startedAtIso);
-    const mustWaitUntil = startedAtMs + minDelay * 1000;
-    if (isFinite(startedAtMs) && now < mustWaitUntil) {
-      const wait_seconds = Math.ceil((mustWaitUntil - now) / 1000);
-      await sb
+  const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+  const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
+  const startedAtMs = Date.parse(startedAtIso);
+  const mustWaitUntil = startedAtMs + minDelay * 1000;
+  if (isFinite(startedAtMs) && now < mustWaitUntil) {
+    // Too fast => treat as FAILED verification (do NOT allow waiting/reload to pass).
+    // This blocks the dangerous bug: user can keep reloading until enough time passes.
+    const nowIso = new Date().toISOString();
+
+    try {
+      const upd = await sb
         .from("licenses_free_sessions")
         .update({
-          status: "gate_failed",
+          status: "gate_fail",
           last_error: "TOO_FAST",
-          expires_at: new Date().toISOString(),
-          out_expires_at: new Date().toISOString(),
+          expires_at: nowIso,
+          out_expires_at: nowIso,
+          claim_token_hash: null,
+          claim_expires_at: null,
         })
         .eq("session_id", sess.session_id);
-      return jsonResponse({ ok: false, msg: "TOO_FAST", wait_seconds }, 429);
+
+      // Fallback if the database doesn't have newer columns (e.g. out_expires_at)
+      if (upd.error) {
+        await sb
+          .from("licenses_free_sessions")
+          .update({
+            status: "gate_fail",
+            last_error: "TOO_FAST",
+            expires_at: nowIso,
+            claim_token_hash: null,
+            claim_expires_at: null,
+          })
+          .eq("session_id", sess.session_id);
+      }
+    } catch {
+      // ignore
     }
+
+    return new Response(JSON.stringify({ ok: false, msg: "VERIFY_FAILED" }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": allowOrigin,
+        "Vary": "Origin",
+      },
+    });
   }
 
-  // Idempotency: if claim token already issued and still valid, return the same plaintext token.
+  // Idempotency: if claim token already issued and still valid, just re-issue (helps if user refreshes)
+  const existingClaim = sess.claim_token_hash;
   const claimExp = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
-  if (sess.status === "gate_ok" && sess.claim_token_hash && sess.claim_token_plain && claimExp && claimExp > now) {
-    return jsonResponse({ ok: true, claim_token: sess.claim_token_plain }, 200);
-  }
-
-  if (sess.status === "gate_ok" && sess.claim_token_hash && !sess.claim_token_plain) {
-    return jsonResponse({ ok: false, msg: "ALREADY_GATE_OK" }, 409);
+  if (existingClaim && claimExp && claimExp > now) {
+    // We cannot return the raw token (only hash stored), so generate a new token instead.
   }
 
   // Generate claim token
-  const claim_token = base64url(32);
+  const claim_token = base64url(20);
   const claim_token_hash = await sha256Hex(claim_token);
   const claim_expires_at = new Date(Date.now() + 3 * 60 * 1000).toISOString(); // 3 minutes
 
@@ -244,15 +269,22 @@ Deno.serve(async (req) => {
       status: "gate_ok",
       gate_ok_at: new Date().toISOString(),
       claim_token_hash,
-      claim_token_plain: claim_token,
       claim_expires_at,
       last_error: null,
     })
     .eq("session_id", sess.session_id);
 
   if (updErr) {
-    return jsonResponse({ ok: false, msg: updErr.message }, 500);
+    return new Response(JSON.stringify({ ok: false, msg: updErr.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+    });
   }
 
-  return jsonResponse({ ok: true, claim_token }, 200);
+  return new Response(JSON.stringify({ ok: true, claim_token }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin" },
+  });
 });

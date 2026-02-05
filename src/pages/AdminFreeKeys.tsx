@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "@/auth/AuthProvider";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -19,8 +18,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getFreeTestMode, getOrCreateFingerprint, setFreeTestMode } from "@/features/free/fingerprint";
-import { postFunction } from "@/lib/functions";
 
 type SettingsRow = {
   id: number;
@@ -85,13 +82,6 @@ type PublicLink = {
   icon?: string | null;
 };
 
-type StartOk = { ok: true; out_token: string; outbound_url: string };
-type StartErr = { ok: false; msg: string };
-type GateOk = { ok: true; claim_token: string };
-type GateErr = { ok: false; msg: string };
-type RevealOk = { ok: true; key: string; expires_at: string };
-type RevealErr = { ok: false; msg: string };
-
 function utcDayRange(day: string) {
   // day = YYYY-MM-DD in UTC
   const from = `${day}T00:00:00.000Z`;
@@ -139,7 +129,6 @@ function parseLinksText(text: string): PublicLink[] {
 
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
-  const { user } = useAuth();
 
   const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
   const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
@@ -186,13 +175,6 @@ export function AdminFreeKeysPage() {
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
-  const [testMode, setTestMode] = useState(false);
-  const [testFlowStatus, setTestFlowStatus] = useState<{
-    state: "idle" | "running" | "done" | "error";
-    message?: string;
-    key?: string;
-    expiresAt?: string;
-  }>({ state: "idle" });
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -208,10 +190,6 @@ export function AdminFreeKeysPage() {
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
   }, [settingsQuery.data]);
-
-  useEffect(() => {
-    setTestMode(getFreeTestMode());
-  }, []);
 
   const saveSettings = useMutation({
     mutationFn: async () => {
@@ -246,65 +224,6 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const runTestFlow = async () => {
-    if (!testMode) {
-      toast({ title: "Test mode đang tắt", description: "Bật test mode trước khi chạy test flow.", variant: "destructive" });
-      return;
-    }
-    const enabledType = (keyTypesQuery.data ?? []).find((k) => k.enabled);
-    if (!enabledType) {
-      toast({ title: "Thiếu key type", description: "Hãy bật ít nhất 1 loại key để test.", variant: "destructive" });
-      return;
-    }
-    setTestFlowStatus({ state: "running", message: "Đang chạy test flow…" });
-    try {
-      const session = await supabase.auth.getSession();
-      const authToken = session?.data?.session?.access_token ?? null;
-      if (!authToken) {
-        throw new Error("Test mode yêu cầu đăng nhập admin.");
-      }
-      const fp = getOrCreateFingerprint();
-      const startRes = await postFunction<StartOk | StartErr>(
-        "/free-start",
-        { key_type_code: enabledType.code, fingerprint: fp, test_mode: true },
-        { authToken },
-      );
-      if (!startRes.ok) throw new Error((startRes as StartErr).msg || "Start failed");
-
-      const gateRes = await postFunction<GateOk | GateErr>(
-        "/free-gate",
-        { out_token: startRes.out_token, fingerprint: fp, referrer: baseUrl, test_mode: true },
-        { authToken },
-      );
-      if (!gateRes.ok) throw new Error((gateRes as GateErr).msg || "Gate failed");
-
-      const revealRes = await postFunction<RevealOk | RevealErr>(
-        "/free-reveal",
-        {
-          claim_token: gateRes.claim_token,
-          out_token: startRes.out_token,
-          fingerprint: fp,
-          turnstile_token: null,
-          test_mode: true,
-        },
-        { authToken },
-      );
-      if (!revealRes.ok) throw new Error((revealRes as RevealErr).msg || "Reveal failed");
-
-      setTestFlowStatus({
-        state: "done",
-        message: "Test flow OK",
-        key: (revealRes as RevealOk).key,
-        expiresAt: (revealRes as RevealOk).expires_at,
-      });
-      toast({ title: "Test flow OK", description: "Đã tạo key test thành công." });
-    } catch (e: any) {
-      const msg = e?.message === "UNAUTHORIZED" ? "Bạn chưa đăng nhập admin / không đủ quyền." : (e?.message ?? "Test flow failed");
-      setTestFlowStatus({ state: "error", message: msg });
-      toast({ title: "Test flow failed", description: msg, variant: "destructive" });
-    }
-  };
-
   // -------- Key types --------
   const keyTypesQuery = useQuery({
     queryKey: ["free-key-types"],
@@ -335,6 +254,7 @@ export function AdminFreeKeysPage() {
     },
   });
 
+  
   const deleteKeyType = useMutation({
     mutationFn: async (code: string) => {
       const { error } = await supabase.from("licenses_free_key_types").delete().eq("code", code);
@@ -350,7 +270,7 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const disableAllKeyTypes = useMutation({
+const disableAllKeyTypes = useMutation({
     mutationFn: async () => {
       // Some PostgREST/Supabase setups reject UPDATE without a WHERE clause.
       // Keep behavior (disable all) while satisfying that requirement.
@@ -460,83 +380,24 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const disableLicense = useMutation({
+  const revokeLicense = useMutation({
     mutationFn: async (licenseId: string) => {
-      const { error } = await supabase.from("licenses").update({ is_active: false }).eq("id", licenseId);
-      if (error) throw error;
-      return true;
-    },
-    onSuccess: async () => {
-      toast({ title: "Updated", description: "License disabled." });
-      await issuesQuery.refetch();
-    },
-    onError: (e: any) => {
-      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
-    },
-  });
-
-  const expireLicenseNow = useMutation({
-    mutationFn: async (licenseId: string) => {
+      const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from("licenses")
-        .update({ expires_at: new Date().toISOString() })
+        .update({ is_active: false, expires_at: nowIso })
         .eq("id", licenseId);
       if (error) throw error;
-      return true;
     },
-    onSuccess: async () => {
-      toast({ title: "Updated", description: "License expired now." });
-      await issuesQuery.refetch();
-    },
-    onError: (e: any) => {
-      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
-    },
-  });
-
-  const deleteIssue = useMutation({
-    mutationFn: async (issueId: string) => {
-      const { error } = await supabase.from("licenses_free_issues").delete().eq("issue_id", issueId);
-      if (error) throw error;
-      return true;
-    },
-    onSuccess: async () => {
-      toast({ title: "Deleted", description: "Issue record removed." });
-      await issuesQuery.refetch();
+    onSuccess: () => {
+      toast({ title: "Updated", description: "Đã chặn key (is_active=false, expires_at=now)." });
+      issuesQuery.refetch();
     },
     onError: (e: any) => {
-      toast({ title: "Delete failed", description: e?.message ?? "Error", variant: "destructive" });
+      toast({ title: "Failed", description: e?.message ?? "Không thể chặn key.", variant: "destructive" });
     },
   });
 
-  const markSessionClosed = useMutation({
-    mutationFn: async (sessionId: string) => {
-      const { error } = await supabase.from("licenses_free_sessions").update({ status: "closed" }).eq("session_id", sessionId);
-      if (error) throw error;
-      return true;
-    },
-    onSuccess: async () => {
-      await sessionsQuery.refetch();
-      toast({ title: "Updated", description: "Session closed." });
-    },
-  });
-
-  const banFingerprint = useMutation({
-    mutationFn: async (fingerprintHash: string) => {
-      const { error } = await supabase.from("licenses_free_blocklist").insert({ fingerprint_hash: fingerprintHash, reason: "admin_ban_fp" });
-      if (error) throw error;
-      return true;
-    },
-    onSuccess: () => toast({ title: "Blocked", description: "Fingerprint blocked." }),
-  });
-
-  const banIp = useMutation({
-    mutationFn: async (ipHash: string) => {
-      const { error } = await supabase.from("licenses_free_blocklist").insert({ ip_hash: ipHash, reason: "admin_ban_ip" });
-      if (error) throw error;
-      return true;
-    },
-    onSuccess: () => toast({ title: "Blocked", description: "IP hash blocked." }),
-  });
 
   return (
     <div className="space-y-4">
@@ -548,59 +409,15 @@ export function AdminFreeKeysPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!user ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-              Bạn chưa đăng nhập admin. Hãy đăng nhập để dùng đầy đủ chức năng quản trị.
-            </div>
-          ) : null}
           <div className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div>
               <div className="font-medium">Bật/tắt trang GetKey</div>
               <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
             </div>
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-          </div>
-
-          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-            <div>
-              <div className="font-medium">Test mode (admin only)</div>
-              <div className="text-xs text-muted-foreground">
-                Bypass Link4M khi test flow. Chỉ admin mới dùng được (server kiểm tra quyền).
-              </div>
-            </div>
-            <Switch
-              checked={testMode}
-              onCheckedChange={(next) => {
-                setTestMode(next);
-                setFreeTestMode(next);
-              }}
-            />
-          </div>
-
-          <div className="rounded-md border p-3 space-y-2">
-            <div className="font-medium">Admin test flow</div>
-            <div className="text-xs text-muted-foreground">
-              Chạy nhanh full flow (start → gate → reveal) để kiểm tra hệ thống. Tuân thủ reveal 1 lần/session.
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={runTestFlow} disabled={testFlowStatus.state === "running" || !testMode}>
-                {testFlowStatus.state === "running" ? "Đang chạy…" : "Run test flow"}
-              </Button>
-              {testFlowStatus.state === "done" && testFlowStatus.key ? (
-                <Button variant="secondary" onClick={() => copyText(testFlowStatus.key!)}>
-                  Copy key
-                </Button>
-              ) : null}
-            </div>
-            {testFlowStatus.message ? (
-              <div className="text-xs">
-                <span className={testFlowStatus.state === "error" ? "text-destructive" : "text-muted-foreground"}>
-                  {testFlowStatus.message}
-                  {testFlowStatus.expiresAt ? ` • Expires: ${testFlowStatus.expiresAt}` : ""}
-                </span>
-              </div>
-            ) : null}
-          </div>
+          
+                    {/* Delete button (mobile-friendly) */}
+</div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -755,9 +572,6 @@ export function AdminFreeKeysPage() {
             <Button variant="secondary" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching}>
               Reload
             </Button>
-            <Button variant="outline" onClick={() => openUrl(getKeyUrl)} disabled={!testMode}>
-              Open /free (test)
-            </Button>
           </div>
 
           <div className="text-xs text-muted-foreground">
@@ -834,54 +648,54 @@ export function AdminFreeKeysPage() {
 
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>On</TableHead>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Value</TableHead>
-                  <TableHead>Seconds</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead>On</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead>Label</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Value</TableHead>
+                <TableHead>Seconds</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(keyTypesQuery.data ?? []).map((k) => (
+                <TableRow key={k.code}>
+                  <TableCell className="w-16">
+                    <Switch
+                      checked={k.enabled}
+                      onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono">{k.code}</TableCell>
+                  <TableCell>{k.label}</TableCell>
+                  <TableCell>{k.kind}</TableCell>
+                  <TableCell>{k.value}</TableCell>
+                  <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Delete"
+                      onClick={() => {
+                        const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
+                        if (ok) deleteKeyType.mutate(k.code);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(keyTypesQuery.data ?? []).map((k) => (
-                  <TableRow key={k.code}>
-                    <TableCell className="w-16">
-                      <Switch
-                        checked={k.enabled}
-                        onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono">{k.code}</TableCell>
-                    <TableCell>{k.label}</TableCell>
-                    <TableCell>{k.kind}</TableCell>
-                    <TableCell>{k.value}</TableCell>
-                    <TableCell className="font-mono">{k.duration_seconds}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Delete"
-                        onClick={() => {
-                          const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
-                          if (ok) deleteKeyType.mutate(k.code);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!keyTypesQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
+              ))}
+              {!keyTypesQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
             </Table>
           </div>
         </CardContent>
@@ -907,6 +721,7 @@ export function AdminFreeKeysPage() {
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="started">started</SelectItem>
                 <SelectItem value="gate_ok">gate_ok</SelectItem>
+                <SelectItem value="gate_fail">gate_fail</SelectItem>
                 <SelectItem value="revealed">revealed</SelectItem>
                 <SelectItem value="closed">closed</SelectItem>
                 <SelectItem value="init">init (legacy)</SelectItem>
@@ -931,47 +746,39 @@ export function AdminFreeKeysPage() {
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Reveal</TableHead>
-                  <TableHead>IP hash</TableHead>
-                  <TableHead>FP hash</TableHead>
-                  <TableHead>Error</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Reveal</TableHead>
+                <TableHead>IP hash</TableHead>
+                <TableHead>FP hash</TableHead>
+                <TableHead>Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(sessionsQuery.data ?? []).map((s) => (
+                <TableRow key={s.session_id}>
+                  <TableCell className="whitespace-nowrap">{s.created_at}</TableCell>
+                  <TableCell>{s.status}</TableCell>
+                  <TableCell className="font-mono">
+                    {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
+                  </TableCell>
+                  <TableCell>{s.reveal_count}</TableCell>
+                  <TableCell className="font-mono">{s.ip_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="font-mono">{s.fingerprint_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(sessionsQuery.data ?? []).map((s) => (
-                  <TableRow key={s.session_id}>
-                    <TableCell className="whitespace-nowrap">{s.created_at}</TableCell>
-                    <TableCell>{s.status}</TableCell>
-                    <TableCell className="font-mono">
-                      {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
-                    </TableCell>
-                    <TableCell>{s.reveal_count}</TableCell>
-                    <TableCell className="font-mono">{s.ip_hash.slice(0, 10)}…</TableCell>
-                    <TableCell className="font-mono">{s.fingerprint_hash.slice(0, 10)}…</TableCell>
-                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => markSessionClosed.mutate(s.session_id)}>Close</Button>
-                        <Button size="sm" variant="secondary" onClick={() => banFingerprint.mutate(s.fingerprint_hash)}>Ban FP</Button>
-                        <Button size="sm" variant="ghost" onClick={() => banIp.mutate(s.ip_hash)}>Ban IP</Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!sessionsQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
+              ))}
+              {!sessionsQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
             </Table>
           </div>
         </CardContent>
@@ -987,65 +794,52 @@ export function AdminFreeKeysPage() {
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Key</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>IP hash</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Session</TableHead>
+                <TableHead>IP hash</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(issuesQuery.data ?? []).map((i) => (
+                <TableRow key={i.issue_id}>
+                  <TableCell className="whitespace-nowrap">{i.created_at}</TableCell>
+                  <TableCell className="whitespace-nowrap">{i.expires_at}</TableCell>
+                  <TableCell className="font-mono">{i.key_mask}</TableCell>
+                  <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
+                  <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
+                        Open
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={revokeLicense.isPending}
+                        onClick={() => {
+                          const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
+                          if (ok) revokeLicense.mutate(i.license_id);
+                        }}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(issuesQuery.data ?? []).map((i) => (
-                  <TableRow key={i.issue_id}>
-                    <TableCell className="whitespace-nowrap">{i.created_at}</TableCell>
-                    <TableCell className="whitespace-nowrap">{i.expires_at}</TableCell>
-                    <TableCell className="font-mono">{i.key_mask}</TableCell>
-                    <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
-                    <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => disableLicense.mutate(i.license_id)}
-                          disabled={disableLicense.isPending}
-                        >
-                          Disable
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => expireLicenseNow.mutate(i.license_id)}
-                          disabled={expireLicenseNow.isPending}
-                        >
-                          Expire now
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            const ok = window.confirm("Delete issue record?");
-                            if (ok) deleteIssue.mutate(i.issue_id);
-                          }}
-                          disabled={deleteIssue.isPending}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!issuesQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
+              ))}
+              {!issuesQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
             </Table>
           </div>
         </CardContent>

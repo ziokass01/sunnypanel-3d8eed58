@@ -4,22 +4,32 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
-import { clearFreeFlowStorage, getFreeTestMode, getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
-import { supabase } from "@/integrations/supabase/client";
+import { getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
 
 type GateOk = { ok: true; claim_token: string };
-type GateTooFast = { ok: false; msg: "TOO_FAST"; wait_seconds: number };
-type GateErr = { ok: false; msg: string; wait_seconds?: number };
+type GateErr = { ok: false; msg: string };
+
+function friendlyGateError(msg: string) {
+  const m = String(msg || "").trim();
+  if (!m) return "Xác thực không thành công. Vui lòng vượt link lại.";
+  if (m === "TOO_FAST" || m.startsWith("TOO_FAST") || m === "VERIFY_FAILED") {
+    return "Xác thực không thành công. Vui lòng vượt link lại rồi thử lại.";
+  }
+  if (m === "BAD_REFERRER") return "Xác thực không thành công. Bạn chưa vượt link (Link4M).";
+  if (m === "SESSION_EXPIRED") return "Phiên đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi. Nếu muốn lấy key mới, hãy quay lại Get Key.";
+  return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
+}
 
 export function FreeGatePage() {
   const nav = useNavigate();
   const [cfgReturn, setCfgReturn] = useState<number>(10);
-  const [outboundUrl, setOutboundUrl] = useState<string>("");
-  const [status, setStatus] = useState<"working" | "too_fast" | "error">("working");
+  const [status, setStatus] = useState<"working" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
 
   const outToken = useMemo(() => getOutToken(), []);
-  const testMode = useMemo(() => getFreeTestMode(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +38,6 @@ export function FreeGatePage() {
         if (cancelled) return;
         const r = Math.max(10, Number(c.free_return_seconds ?? 10));
         setCfgReturn(r);
-        setOutboundUrl(String(c.free_outbound_url ?? ""));
       })
       .catch(() => {
         // ignore; keep default
@@ -38,13 +47,12 @@ export function FreeGatePage() {
     };
   }, []);
 
-  async function tryGate() {
+  async function gateOnce() {
     const tok = outToken;
     if (!tok) {
-      clearFreeFlowStorage();
       setStatus("error");
       setMessage("Thiếu session. Hãy quay lại trang Get Key và làm lại.");
-      window.setTimeout(() => nav("/free", { replace: true }), 1500);
+      window.setTimeout(() => nav("/free", { replace: true }), 1200);
       return;
     }
 
@@ -54,19 +62,10 @@ export function FreeGatePage() {
     try {
       const fp = getOrCreateFingerprint();
       const referrer = document.referrer || "";
-      const session = testMode ? await supabase.auth.getSession() : null;
-      if (testMode && !session?.data?.session?.access_token) {
-        setStatus("error");
-        setMessage("Test mode yêu cầu đăng nhập admin.");
-        return;
-      }
-      const res = await postFunction<GateOk | GateTooFast | GateErr>("/free-gate", {
+      const res = await postFunction<GateOk | GateErr>("/free-gate", {
         out_token: tok,
         fingerprint: fp,
         referrer,
-        test_mode: testMode,
-      }, {
-        authToken: testMode ? session?.data?.session?.access_token ?? null : null,
       });
 
       if ((res as GateOk).ok) {
@@ -77,46 +76,26 @@ export function FreeGatePage() {
         } catch {
           // ignore
         }
-        nav(`/free/claim?c=${encodeURIComponent(claim)}&o=${encodeURIComponent(tok)}`, { replace: true });
+        // IMPORTANT: use claim= (not c=) to avoid conflict with other params (e.g. c=E5).
+        nav(`/free/claim?claim=${encodeURIComponent(claim)}`, { replace: true });
         return;
       }
 
-      const msg = (res as GateErr).msg || "GATE_FAILED";
-
-      if (msg === "TOO_FAST" || msg.startsWith("TOO_FAST")) {
-        clearFreeFlowStorage();
-        try {
-          localStorage.removeItem("free_claim_token");
-        } catch {
-          // ignore
-        }
-        setStatus("too_fast");
-        setMessage(
-          "Xác thực không thành công. Vui lòng vượt lại.",
-        );
-        return;
-      }
-
-      if (msg === "ALREADY_REVEALED") {
-        setStatus("error");
-        setMessage("Phiên này đã được reveal. Vui lòng quay lại và làm lại flow.");
-        return;
-      }
-
+      const msg = (res as GateErr).msg || "VERIFY_FAILED";
       setStatus("error");
-      setMessage(msg);
+      setMessage(friendlyGateError(msg));
 
       // fail-safe: never let user stuck here
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
     } catch (e: any) {
       setStatus("error");
-      setMessage(e?.message ?? "GATE_FAILED");
+      setMessage(friendlyGateError(e?.message ?? "VERIFY_FAILED"));
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
     }
   }
 
   useEffect(() => {
-    void tryGate();
+    void gateOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -131,23 +110,14 @@ export function FreeGatePage() {
           <CardContent className="space-y-4">
             <div className="rounded-md border p-3 text-sm">
               <div className="font-medium">{message}</div>
-              <div className="mt-1 text-muted-foreground">Vui lòng không tắt trang.</div>
+              <div className="mt-1 text-muted-foreground">
+                {status === "working" ? "Vui lòng không tắt trang." : "Bạn sẽ được đưa về trang Get Key."}
+              </div>
             </div>
 
-            {status === "error" || status === "too_fast" ? (
+            {status === "error" ? (
               <Button className="w-full" variant="secondary" onClick={() => nav("/free", { replace: true })}>
                 Quay lại Get Key
-              </Button>
-            ) : null}
-
-            {status === "too_fast" && outboundUrl ? (
-              <Button
-                className="w-full"
-                onClick={() => {
-                  window.location.href = outboundUrl;
-                }}
-              >
-                Mở lại link vượt
               </Button>
             ) : null}
           </CardContent>
