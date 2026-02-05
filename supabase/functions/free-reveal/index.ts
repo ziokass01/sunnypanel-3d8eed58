@@ -179,6 +179,9 @@ Deno.serve(async (req) => {
     });
   }
 
+  // TS: capture stable, non-null values for nested helpers
+  const sessionId = sess.session_id;
+
   const now = Date.now();
   const expMs = Date.parse(sess.expires_at);
   if (!isFinite(expMs) || expMs < now) {
@@ -206,7 +209,7 @@ Deno.serve(async (req) => {
     const issue = await sb
       .from("licenses_free_issues")
       .select("license_id,expires_at")
-      .eq("session_id", sess.session_id)
+      .eq("session_id", sessionId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -283,7 +286,7 @@ Deno.serve(async (req) => {
       claim_token_hash: null,
       claim_expires_at: null,
     })
-    .eq("session_id", sess.session_id)
+    .eq("session_id", sessionId)
     .eq("status", "gate_ok")
     .eq("reveal_count", 0)
     .eq("claim_token_hash", claimHash)
@@ -343,7 +346,7 @@ Deno.serve(async (req) => {
     await sb
       .from("licenses_free_sessions")
       .update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "INSERT_FAILED" })
-      .eq("session_id", sess.session_id);
+      .eq("session_id", sessionId);
 
     return new Response(JSON.stringify({ ok: false, msg: "SERVER_ERROR" }), {
       status: 500,
@@ -359,14 +362,14 @@ Deno.serve(async (req) => {
       last_error: null,
       revealed_at: new Date().toISOString(),
     })
-    .eq("session_id", sess.session_id);
+    .eq("session_id", sessionId);
 
   // Log issue (mask only)
   await sb.from("licenses_free_issues").insert({
     license_id: inserted.id,
     key_mask: maskKey(inserted.key),
     expires_at,
-    session_id: sess.session_id,
+    session_id: sessionId,
     ip_hash: ipHash,
     fingerprint_hash: fpHash,
     ua_hash: uaHash,
