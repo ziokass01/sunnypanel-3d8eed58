@@ -16,6 +16,37 @@ import { supabase } from "@/integrations/supabase/client";
 
 type StartOk = { ok: true; out_token: string; outbound_url: string; min_delay_seconds: number };
 type StartErr = { ok: false; msg: string; code?: string };
+type LastFreeKey = {
+  key: string;
+  key_type: string;
+  created_at: string;
+  expires_at: string;
+  ip_hash?: string | null;
+  session_id?: string | null;
+};
+
+const LAST_FREE_KEY_STORAGE = "lastFreeKey";
+
+function formatVnDateTime(value?: string | null) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(d);
+}
+
+function shortHash(v?: string | null, n = 10) {
+  const x = String(v ?? "").trim();
+  if (!x) return "-";
+  return x.length > n ? `${x.slice(0, n)}…` : x;
+}
 
 export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);

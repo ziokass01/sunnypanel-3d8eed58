@@ -38,6 +38,18 @@ function base64url(bytesLen = 18) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function getClientIp(req: Request) {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
+}
+
+function isActiveBlockUntil(blockedUntil?: string | null) {
+  if (!blockedUntil) return true;
+  const t = Date.parse(blockedUntil);
+  return Number.isFinite(t) && t > Date.now();
+}
+
 const BodySchema = z.object({
   out_token: z.string().min(8).max(256),
   fingerprint: z.string().min(6).max(128),
@@ -148,12 +160,27 @@ Deno.serve(async (req) => {
   const outHash = await sha256Hex(out_token);
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
+  const ipHash = await sha256Hex(getClientIp(req));
+
+  const blocked = await sb
+    .from("licenses_free_blocklist")
+    .select("id,blocked_until")
+    .eq("enabled", true)
+    .or(`fingerprint_hash.eq.${fpHash},ip_hash.eq.${ipHash}`)
+    .limit(1)
+    .maybeSingle();
+  if (blocked.data?.id && isActiveBlockUntil((blocked.data as any).blocked_until)) {
+    return new Response(JSON.stringify({ ok: false, msg: "BLOCKED" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
+    });
+  }
 
   // Find session
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,reveal_count,claim_token_hash,claim_expires_at",
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at",
     )
     .eq("out_token_hash", outHash)
     .maybeSingle();
@@ -185,7 +212,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash) {
+  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
     return new Response(JSON.stringify({ ok: false, msg: "DEVICE_MISMATCH" }), {
       status: 403,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,

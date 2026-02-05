@@ -34,6 +34,8 @@ function friendlyRevealError(msg: string) {
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong 24 giờ. Vui lòng thử lại sau.";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
   if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "SESSION_BIND_MISMATCH") return "Phiên không khớp thiết bị/IP. Vui lòng bắt đầu lại từ trang Get Key.";
+  if (m === "BLOCKED") return "Thiết bị hoặc IP của bạn đã bị chặn.";
   if (m === "ALREADY_REVEALED") return "Key đã được phát. Hãy copy key bên dưới.";
   return `Xác thực không thành công (${m}).`;
 }

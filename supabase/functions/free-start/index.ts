@@ -69,6 +69,12 @@ function isMissingRateLimitSetup(error: { message?: string | null; details?: str
     || (haystack.includes("relation") && haystack.includes("rate_limit"));
 }
 
+function isActiveBlockUntil(blockedUntil?: string | null) {
+  if (!blockedUntil) return true;
+  const t = Date.parse(blockedUntil);
+  return Number.isFinite(t) && t > Date.now();
+}
+
 async function safeInsertStartErrorSession(
   sb: ReturnType<typeof createClient>,
   payload: {
@@ -129,7 +135,11 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return jsonResponse({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }, 500);
+    return jsonResponse({
+      ok: false,
+      msg: "SERVER_MISCONFIG_MISSING_SECRET",
+      detail: !supabaseUrl ? "SUPABASE_URL missing" : "SUPABASE_SERVICE_ROLE_KEY missing",
+    }, 500);
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -212,12 +222,12 @@ Deno.serve(async (req) => {
 
   const rl = await sb.rpc("check_free_ip_rate_limit", {
     p_ip_hash: ipHash,
-    p_route: "free-start",
     p_limit: 25,
-    p_window_seconds: 60,
+    p_window_sec: 60,
   });
   if (rl.error) {
-    if (isMissingRateLimitSetup(rl.error)) {      await safeInsertStartErrorSession(sb, {
+    if (isMissingRateLimitSetup(rl.error)) {
+      await safeInsertStartErrorSession(sb, {
         ipHash,
         uaHash,
         fpHash,
@@ -226,6 +236,7 @@ Deno.serve(async (req) => {
       });
       return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
     }
+    await safeLogSecurity("rate_limit_error", { key_type_code, error: rl.error.message || "unknown" }, ipHash, fpHash);
     await safeInsertStartErrorSession(sb, {
       ipHash,
       uaHash,
@@ -277,12 +288,12 @@ Deno.serve(async (req) => {
 
   const banned = await sb
     .from("licenses_free_blocklist")
-    .select("id")
+    .select("id,blocked_until")
     .eq("enabled", true)
     .or(`fingerprint_hash.eq.${fpHash},ip_hash.eq.${ipHash}`)
     .limit(1)
     .maybeSingle();
-  if (banned.data?.id) {
+  if (banned.data?.id && isActiveBlockUntil((banned.data as any).blocked_until)) {
     await safeLogSecurity("blocklist_hit", { key_type_code }, ipHash, fingerprint ? fpHash : null);
     return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
   }

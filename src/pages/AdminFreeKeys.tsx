@@ -381,7 +381,7 @@ const disableAllKeyTypes = useMutation({
       if (!token) throw new Error("UNAUTHORIZED");
 
       return postFunction<AdminTestResult>(
-        "/free-admin-test",
+        "/admin-free-test",
         { key_type_code: testKeyTypeCode, dry_run: testDryRun },
         { authToken: token },
       );
@@ -446,13 +446,15 @@ const disableAllKeyTypes = useMutation({
   });
 
   const revokeLicense = useMutation({
-    mutationFn: async (licenseId: string) => {
-      const nowIso = new Date().toISOString();
-      const { error } = await supabase
-        .from("licenses")
-        .update({ is_active: false, expires_at: nowIso })
-        .eq("id", licenseId);
-      if (error) throw error;
+    mutationFn: async (args: { issueId: string; licenseId: string }) => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction(
+        "/admin-free-delete-issued",
+        { issue_id: args.issueId, license_id: args.licenseId, revoke: true, delete_issue: false, reason: "admin revoke" },
+        { authToken: token },
+      );
     },
     onSuccess: () => {
       toast({ title: "Updated", description: "Đã chặn key (is_active=false, expires_at=now)." });
@@ -465,12 +467,10 @@ const disableAllKeyTypes = useMutation({
 
   const blockIp = useMutation({
     mutationFn: async (args: { ipHash: string; reason: string }) => {
-      const { error } = await supabase.from("licenses_free_blocklist").insert({
-        ip_hash: args.ipHash,
-        reason: args.reason || null,
-        enabled: true,
-      } as any);
-      if (error) throw error;
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction("/admin-free-block", { ip_hash: args.ipHash, reason: args.reason || null }, { authToken: token });
     },
     onSuccess: () => {
       toast({ title: "Blocked", description: "IP hash đã được block vĩnh viễn." });
@@ -481,12 +481,10 @@ const disableAllKeyTypes = useMutation({
 
   const blockFp = useMutation({
     mutationFn: async (args: { fpHash: string; reason: string }) => {
-      const { error } = await supabase.from("licenses_free_blocklist").insert({
-        fingerprint_hash: args.fpHash,
-        reason: args.reason || null,
-        enabled: true,
-      } as any);
-      if (error) throw error;
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction("/admin-free-block", { fingerprint_hash: args.fpHash, reason: args.reason || null }, { authToken: token });
     },
     onSuccess: () => {
       toast({ title: "Blocked", description: "Fingerprint hash đã được block vĩnh viễn." });
@@ -497,8 +495,10 @@ const disableAllKeyTypes = useMutation({
 
   const deleteSession = useMutation({
     mutationFn: async (sessionId: string) => {
-      const { error } = await supabase.from("licenses_free_sessions").delete().eq("session_id", sessionId);
-      if (error) throw error;
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction("/admin-free-delete-session", { session_id: sessionId }, { authToken: token });
     },
     onSuccess: () => {
       toast({ title: "Deleted", description: "Session đã được xóa." });
@@ -509,16 +509,14 @@ const disableAllKeyTypes = useMutation({
 
   const deleteIssuedKey = useMutation({
     mutationFn: async (args: { issueId: string; licenseId: string; reason: string }) => {
-      const nowIso = new Date().toISOString();
-      const reasonText = args.reason || "Deleted by admin";
-      const { error: upErr } = await supabase
-        .from("licenses")
-        .update({ is_active: false, expires_at: nowIso, note: `REVOKED_FREE: ${reasonText}` })
-        .eq("id", args.licenseId);
-      if (upErr) throw upErr;
-
-      const { error: issueErr } = await supabase.from("licenses_free_issues").delete().eq("issue_id", args.issueId);
-      if (issueErr) throw issueErr;
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction(
+        "/admin-free-delete-issued",
+        { issue_id: args.issueId, license_id: args.licenseId, revoke: true, delete_issue: true, reason: args.reason || "Deleted by admin" },
+        { authToken: token },
+      );
     },
     onSuccess: () => {
       toast({ title: "Deleted", description: "Issued key record đã xóa và key đã revoke." });
@@ -544,8 +542,6 @@ const disableAllKeyTypes = useMutation({
               <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
             </div>
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-          
-                    {/* Delete button (mobile-friendly) */}
 </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -728,7 +724,7 @@ const disableAllKeyTypes = useMutation({
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="text-xs md:text-sm">
           <div className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
@@ -919,7 +915,7 @@ const disableAllKeyTypes = useMutation({
             Refresh
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="text-xs md:text-sm">
           <div className="overflow-x-auto">
             <Table>
             <TableHeader>
@@ -1034,7 +1030,7 @@ const disableAllKeyTypes = useMutation({
                         disabled={revokeLicense.isPending}
                         onClick={() => {
                           const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
-                          if (ok) revokeLicense.mutate(i.license_id);
+                          if (ok) revokeLicense.mutate({ issueId: i.issue_id, licenseId: i.license_id });
                         }}
                       >
                         Revoke
