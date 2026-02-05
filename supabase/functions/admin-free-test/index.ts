@@ -25,6 +25,12 @@ function makeKey() {
   return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
+function extractErrorMessage(err: unknown) {
+  if (!err || typeof err !== "object") return "unknown";
+  const anyErr = err as Record<string, unknown>;
+  return String(anyErr.message ?? anyErr.details ?? anyErr.hint ?? "unknown");
+}
+
 function maskKey(key: string) {
   if (key.length <= 10) return "***";
   return `${key.slice(0, 9)}…${key.slice(-4)}`;
@@ -106,31 +112,46 @@ Deno.serve(async (req) => {
     return json({ ok: true, message: "DRY_RUN_OK", ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, expires_at: new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString() });
   }
 
-  const key = makeKey();
   const expiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
+  let key = "";
+  let licenseId = "";
+  let lastLicenseInsertError = "";
+  for (let attempt = 0; attempt < 12; attempt++) {
+    key = makeKey();
+    const insLic = await sb.from("licenses").insert({
+      key,
+      is_active: true,
+      max_devices: 1,
+      expires_at: expiresAt,
+      start_on_first_use: false,
+      starts_on_first_use: false,
+      duration_days: null,
+      duration_seconds: Number(keyType.duration_seconds ?? 3600),
+      activated_at: null,
+      first_used_at: null,
+      note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()}`,
+    }).select("id").single();
+    if (!insLic.error && insLic.data?.id) {
+      licenseId = insLic.data.id;
+      break;
+    }
+    lastLicenseInsertError = extractErrorMessage(insLic.error);
+  }
 
-  const insLic = await sb.from("licenses").insert({
-    key,
-    is_active: true,
-    max_devices: 1,
-    expires_at: expiresAt,
-    start_on_first_use: false,
-    starts_on_first_use: false,
-    duration_days: null,
-    duration_seconds: Number(keyType.duration_seconds ?? 3600),
-    activated_at: null,
-    first_used_at: null,
-    note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()}`,
-  }).select("id").single();
-
-  if (insLic.error || !insLic.data?.id) {
+  if (!licenseId) {
     await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "ADMIN_TEST_INSERT_FAILED" }).eq("session_id", sessionId);
-    await sb.from("licenses_free_security_logs").insert({ event_type: "admin_test_error", route: "admin-free-test", ip_hash: ipHash, fingerprint_hash: fpHash, details: { reason: "LICENSE_INSERT_FAILED" } });
-    return json({ ok: false, message: "LICENSE_INSERT_FAILED", session_id: sessionId }, 500);
+    await sb.from("licenses_free_security_logs").insert({
+      event_type: "admin_test_error",
+      route: "admin-free-test",
+      ip_hash: ipHash,
+      fingerprint_hash: fpHash,
+      details: { reason: "LICENSE_INSERT_FAILED", message: lastLicenseInsertError || "unknown" },
+    });
+    return json({ ok: false, message: "LICENSE_INSERT_FAILED", session_id: sessionId, detail: lastLicenseInsertError || undefined }, 500);
   }
 
   await sb.from("licenses_free_issues").insert({
-    license_id: insLic.data.id,
+    license_id: licenseId,
     key_mask: maskKey(key),
     created_at: now.toISOString(),
     expires_at: expiresAt,
