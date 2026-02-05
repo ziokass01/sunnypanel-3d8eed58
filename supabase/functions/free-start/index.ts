@@ -76,7 +76,7 @@ function isActiveBlockUntil(blockedUntil?: string | null) {
 }
 
 async function safeInsertStartErrorSession(
-  sb: ReturnType<typeof createClient>,
+  sb: any,
   payload: {
     ipHash: string;
     uaHash: string;
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     }, 500);
   }
 
-  const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+  const sb: any = createClient<any>(supabaseUrl, serviceRole, { auth: { persistSession: false } });
   const safeLogSecurity = async (event_type: string, details: Record<string, unknown>, ip_hash?: string, fingerprint_hash?: string | null) => {
     try {
       await sb.from("licenses_free_security_logs").insert({
