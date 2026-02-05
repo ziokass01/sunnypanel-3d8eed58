@@ -71,3 +71,15 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+## Free key flow manual test checklist
+
+- [ ] **Normal flow**: `/free` -> chọn loại key -> Get Key -> vượt Link4M -> `/free/gate` -> `/free/claim` -> bấm **Verify** -> nhận key -> bấm **Copy** -> auto quay lại `/free`.
+- [ ] **TOO_FAST**: vượt link quá nhanh, server trả `TOO_FAST`, UI hiển thị: **"Xác thực không thành công. Vui lòng vượt lại."**.
+- [ ] **Reload gate**: reload `/free/gate` nhiều lần không được xoay token vô hạn; không tự chờ đủ thời gian để pass.
+- [ ] **Reload claim**: sau khi reveal thành công, reload `/free/claim` không được tạo key mới; chỉ hiển thị lại key cũ cùng session.
+- [ ] **Reveal twice**: bấm Verify/retry nhiều lần chỉ trả cùng key đã reveal (không phát hành key mới).
+- [ ] **Missing claim**: vào `/free/claim` không có `?c=` hoặc `?claim=` phải báo phiên không hợp lệ và cho quay lại `/free`.
+- [ ] **Admin run test flow**: tại `/admin/free-keys`, đăng nhập admin, bật test mode và bấm **Run test flow** phải chạy qua start -> gate -> reveal thành công.
+- [ ] **Rate limit**: spam `free-start/free-gate/free-reveal` vượt ngưỡng sẽ trả `RATE_LIMIT`.
+- [ ] **Blocklist**: ban fingerprint/ip ở admin monitor, flow free sau đó phải bị chặn (`BLOCKED`).

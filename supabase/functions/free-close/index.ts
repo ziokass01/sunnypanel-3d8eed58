@@ -99,6 +99,7 @@ Deno.serve(async (req) => {
       status: "closed",
       claim_token_hash: null,
       claim_expires_at: null,
+      claim_token_plain: null,
       out_expires_at: new Date().toISOString(),
     })
     .eq("out_token_hash", outHash);

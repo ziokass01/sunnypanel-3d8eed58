@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
+import { assertAdmin } from "../_shared/admin.ts";
 
 const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
 
@@ -45,7 +46,7 @@ function getClientIp(req: Request) {
   return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
 }
 
-function base64url(bytesLen = 24) {
+function base64url(bytesLen = 32) {
   const bytes = new Uint8Array(bytesLen);
   crypto.getRandomValues(bytes);
   let bin = "";
@@ -110,21 +111,8 @@ Deno.serve(async (req) => {
   const { key_type_code, fingerprint, test_mode } = parsed.data;
 
   if (test_mode) {
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
-    const authHeader = req.headers.get("Authorization");
-    if (!anonKey || !authHeader?.startsWith("Bearer ")) {
-      return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
-    }
-    const authed = createClient(supabaseUrl, anonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: authHeader } },
-    });
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claims, error: claimsError } = await authed.auth.getClaims(token);
-    if (claimsError || !claims?.claims?.sub) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
-    const userId = claims.claims.sub;
-    const roleCheck = await authed.rpc("has_role", { _user_id: userId, _role: "admin" });
-    if (roleCheck.error || roleCheck.data !== true) return jsonResponse({ ok: false, msg: "FORBIDDEN" }, 403);
+    const admin = await assertAdmin(req);
+    if (!admin.ok) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, admin.status);
   }
 
   // Settings
@@ -169,8 +157,33 @@ Deno.serve(async (req) => {
   const uaHash = await sha256Hex(ua);
   const ipHash = await sha256Hex(ip);
 
+  const rl = await sb.rpc("check_free_ip_rate_limit", {
+    p_ip_hash: ipHash,
+    p_route: "free-start",
+    p_limit: 25,
+    p_window_seconds: 60,
+  });
+  if (rl.error) {
+    return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
+  }
+  const allowed = Array.isArray(rl.data) ? rl.data[0]?.allowed : rl.data?.allowed;
+  if (allowed === false) {
+    return jsonResponse({ ok: false, msg: "RATE_LIMIT" }, 429);
+  }
+
+  const banned = await sb
+    .from("licenses_free_blocklist")
+    .select("id")
+    .eq("enabled", true)
+    .or(`fingerprint_hash.eq.${fpHash},ip_hash.eq.${ipHash}`)
+    .limit(1)
+    .maybeSingle();
+  if (banned.data?.id) {
+    return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
+  }
+
   // Create a token-based session (expires quickly)
-  const out_token = base64url(24);
+  const out_token = base64url(32);
   const out_token_hash = await sha256Hex(out_token);
 
   const now = new Date();

@@ -77,7 +77,7 @@ export function FreeGatePage() {
         } catch {
           // ignore
         }
-        nav(`/free/claim?claim=${encodeURIComponent(claim)}`, { replace: true });
+        nav(`/free/claim?c=${encodeURIComponent(claim)}&o=${encodeURIComponent(tok)}`, { replace: true });
         return;
       }
 
@@ -92,7 +92,7 @@ export function FreeGatePage() {
         }
         setStatus("too_fast");
         setMessage(
-          "Xác thực không thành công. Bạn vượt link quá nhanh hoặc chưa vượt đúng. Vui lòng quay lại và vượt link lại.",
+          "Xác thực không thành công. Vui lòng vượt lại.",
         );
         return;
       }

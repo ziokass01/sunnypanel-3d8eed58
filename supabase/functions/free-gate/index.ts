@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
+import { assertAdmin } from "../_shared/admin.ts";
 
 const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
 
@@ -39,7 +40,7 @@ async function sha256Hex(input: string) {
   return toHex(digest);
 }
 
-function base64url(bytesLen = 18) {
+function base64url(bytesLen = 32) {
   const bytes = new Uint8Array(bytesLen);
   crypto.getRandomValues(bytes);
   let bin = "";
@@ -106,21 +107,8 @@ Deno.serve(async (req) => {
   const { out_token, fingerprint, referrer, test_mode } = parsed.data;
 
   if (test_mode) {
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
-    const authHeader = req.headers.get("Authorization");
-    if (!anonKey || !authHeader?.startsWith("Bearer ")) {
-      return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
-    }
-    const authed = createClient(supabaseUrl, anonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: authHeader } },
-    });
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claims, error: claimsError } = await authed.auth.getClaims(token);
-    if (claimsError || !claims?.claims?.sub) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
-    const userId = claims.claims.sub;
-    const roleCheck = await authed.rpc("has_role", { _user_id: userId, _role: "admin" });
-    if (roleCheck.error || roleCheck.data !== true) return jsonResponse({ ok: false, msg: "FORBIDDEN" }, 403);
+    const admin = await assertAdmin(req);
+    if (!admin.ok) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, admin.status);
   }
 
   // Settings
@@ -156,12 +144,33 @@ Deno.serve(async (req) => {
   const outHash = await sha256Hex(out_token);
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
+  const ipHash = await sha256Hex(ip);
+
+  const rl = await sb.rpc("check_free_ip_rate_limit", {
+    p_ip_hash: ipHash,
+    p_route: "free-gate",
+    p_limit: 50,
+    p_window_seconds: 60,
+  });
+  if (rl.error) return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
+  const allowed = Array.isArray(rl.data) ? rl.data[0]?.allowed : rl.data?.allowed;
+  if (allowed === false) return jsonResponse({ ok: false, msg: "RATE_LIMIT" }, 429);
+
+  const banned = await sb
+    .from("licenses_free_blocklist")
+    .select("id")
+    .eq("enabled", true)
+    .or(`fingerprint_hash.eq.${fpHash},ip_hash.eq.${ipHash}`)
+    .limit(1)
+    .maybeSingle();
+  if (banned.data?.id) return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
 
   // Find session
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,reveal_count,claim_token_hash,claim_expires_at",
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,reveal_count,claim_token_hash,claim_expires_at,claim_token_plain",
     )
     .eq("out_token_hash", outHash)
     .maybeSingle();
@@ -214,15 +223,18 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Idempotency: if claim token already issued and still valid, just re-issue (helps if user refreshes)
-  const existingClaim = sess.claim_token_hash;
+  // Idempotency: if claim token already issued and still valid, return the same plaintext token.
   const claimExp = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
-  if (existingClaim && claimExp && claimExp > now) {
-    // We cannot return the raw token (only hash stored), so generate a new token instead.
+  if (sess.status === "gate_ok" && sess.claim_token_hash && sess.claim_token_plain && claimExp && claimExp > now) {
+    return jsonResponse({ ok: true, claim_token: sess.claim_token_plain }, 200);
+  }
+
+  if (sess.status === "gate_ok" && sess.claim_token_hash && !sess.claim_token_plain) {
+    return jsonResponse({ ok: false, msg: "ALREADY_GATE_OK" }, 409);
   }
 
   // Generate claim token
-  const claim_token = base64url(20);
+  const claim_token = base64url(32);
   const claim_token_hash = await sha256Hex(claim_token);
   const claim_expires_at = new Date(Date.now() + 3 * 60 * 1000).toISOString(); // 3 minutes
 
@@ -232,6 +244,7 @@ Deno.serve(async (req) => {
       status: "gate_ok",
       gate_ok_at: new Date().toISOString(),
       claim_token_hash,
+      claim_token_plain: claim_token,
       claim_expires_at,
       last_error: null,
     })
