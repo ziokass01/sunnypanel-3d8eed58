@@ -12,18 +12,24 @@ function parseAdminEmails(raw: string | undefined | null): Set<string> {
 export async function assertAdmin(req: Request): Promise<{ ok: true } | { ok: false; status: number; body: { ok: false; code: string; msg: string } }> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
 
-  if (!supabaseUrl || !anonKey || !authHeader.startsWith("Bearer ")) {
+  if (!supabaseUrl || !token) {
     return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
   }
 
-  const authed = createClient(supabaseUrl, anonKey, {
+  const apiKey = anonKey || serviceRoleKey;
+  if (!apiKey) {
+    return { ok: false, status: 500, body: { ok: false, code: "SERVER_MISCONFIG_MISSING_SECRET", msg: "Admin verifier not configured" } };
+  }
+
+  const authed = createClient(supabaseUrl, apiKey, {
     auth: { persistSession: false },
-    global: { headers: { Authorization: authHeader } },
   });
 
-  const { data: userData, error: userErr } = await authed.auth.getUser();
+  const { data: userData, error: userErr } = await authed.auth.getUser(token);
   const user = userData?.user;
   if (userErr || !user) {
     return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
