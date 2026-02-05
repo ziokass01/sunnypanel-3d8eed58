@@ -1,16 +1,33 @@
 import { defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react-swc";
-import path from "path";
 
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
-  },
-  resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
-  },
+export default defineConfig(async () => {
+  const isAndroid = process.platform === "android";
+  const react = (
+    await import(isAndroid ? "@vitejs/plugin-react" : "@vitejs/plugin-react-swc")
+  ).default;
+
+  return {
+    plugins: [react()],
+    test: {
+      environment: "jsdom",
+      globals: true,
+
+      // ✅ CHỈ chạy test của project
+      include: [
+        "src/**/*.{test,spec}.{ts,tsx,js,jsx}",
+        "test/**/*.{test,spec}.{ts,tsx,js,jsx}",
+      ],
+
+      // ✅ loại trừ tuyệt đối node_modules + supabase (deno https import)
+      exclude: [
+        "**/node_modules/**",
+        "node_modules/**",
+        "**/supabase/**",
+        "supabase/**",
+        "dist/**",
+        "build/**",
+        ".next/**",
+      ],
+    },
+  };
 });
