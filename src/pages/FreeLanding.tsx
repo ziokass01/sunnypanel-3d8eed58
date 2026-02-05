@@ -8,13 +8,14 @@ import { postFunction } from "@/lib/functions";
 import {
   getFreeTestMode,
   getOrCreateFingerprint,
+  setFreeStartMeta,
   setOutToken,
   setSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
 
 type StartOk = { ok: true; out_token: string; outbound_url: string; min_delay_seconds: number };
-type StartErr = { ok: false; msg: string };
+type StartErr = { ok: false; msg: string; code?: string };
 
 export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
@@ -44,6 +45,8 @@ export function FreeLandingPage() {
     const m = cfg?.missing ?? [];
     return m.length ? m.join(", ") : null;
   }, [cfg]);
+
+  const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
@@ -124,6 +127,9 @@ export function FreeLandingPage() {
                     },
                     {
                       authToken: testMode ? session?.data?.session?.access_token ?? null : null,
+                      headers: {
+                        "x-fp": fp,
+                      },
                     },
                   );
 
@@ -133,13 +139,26 @@ export function FreeLandingPage() {
                   }
 
                   setOutToken(res.out_token);
+                  setFreeStartMeta({
+                    startedAtMs: Date.now(),
+                    minDelaySeconds: Math.max(5, Number(res.min_delay_seconds ?? 25)),
+                  });
                   try { localStorage.removeItem("free_claim_token"); } catch { /* ignore */ }
                   setSelectedKeyTypeCode(selected);
 
                   // Redirect to Link4M outbound
                   window.location.href = res.outbound_url;
                 } catch (e: any) {
-                  setErr(e?.message ?? "Start failed");
+                  const code = String(e?.code ?? "").trim();
+                  if (code === "SERVER_SETUP_MISSING_RATE_LIMIT_RPC") {
+                    setErr(
+                      debugMode
+                        ? "Server đang cấu hình, thử lại sau. (Owner: chạy migration FREE_RATE_LIMIT fix trong Supabase SQL Editor.)"
+                        : "Server đang cấu hình, thử lại sau.",
+                    );
+                  } else {
+                    setErr(e?.message ?? "Start failed");
+                  }
                 } finally {
                   setLoading(false);
                 }
