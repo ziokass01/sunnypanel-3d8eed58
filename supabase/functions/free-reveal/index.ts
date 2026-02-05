@@ -37,6 +37,12 @@ function getClientIp(req: Request) {
   return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "0.0.0.0";
 }
 
+function isActiveBlockUntil(blockedUntil?: string | null) {
+  if (!blockedUntil) return true;
+  const t = Date.parse(blockedUntil);
+  return Number.isFinite(t) && t > Date.now();
+}
+
 async function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
   const body = new URLSearchParams();
   body.set("secret", secret);
@@ -163,11 +169,25 @@ Deno.serve(async (req) => {
   const uaHash = await sha256Hex(ua);
   const ipHash = await sha256Hex(ip);
 
+  const blocked = await sb
+    .from("licenses_free_blocklist")
+    .select("id,blocked_until")
+    .eq("enabled", true)
+    .or(`fingerprint_hash.eq.${fpHash},ip_hash.eq.${ipHash}`)
+    .limit(1)
+    .maybeSingle();
+  if (blocked.data?.id && isActiveBlockUntil((blocked.data as any).blocked_until)) {
+    return new Response(JSON.stringify({ ok: false, msg: "BLOCKED" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
+    });
+  }
+
   // Load session by out_token_hash FIRST (so we can handle already-revealed idempotently).
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,key_type_code,duration_seconds",
+      "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds",
     )
     .eq("out_token_hash", outHash)
     .maybeSingle();
@@ -192,8 +212,8 @@ Deno.serve(async (req) => {
   }
 
   // Device binding
-  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash) {
-    return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
+  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
+    return new Response(JSON.stringify({ ok: false, msg: "SESSION_BIND_MISMATCH" }), {
       status: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
     });
@@ -228,7 +248,16 @@ Deno.serve(async (req) => {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
     if (existing) {
-      return new Response(JSON.stringify({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }), {
+      return new Response(JSON.stringify({
+        ok: true,
+        key: existing.key,
+        expires_at: existing.expires_at,
+        key_type_label,
+        key_type_code: sess.key_type_code ?? null,
+        created_at: new Date().toISOString(),
+        session_id: sessionId,
+        ip_hash: ipHash,
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
       });
@@ -375,7 +404,16 @@ Deno.serve(async (req) => {
     ua_hash: uaHash,
   });
 
-  return new Response(JSON.stringify({ ok: true, key: inserted.key, expires_at, key_type_label }), {
+  return new Response(JSON.stringify({
+    ok: true,
+    key: inserted.key,
+    expires_at,
+    key_type_label,
+    key_type_code: sess.key_type_code ?? null,
+    created_at: new Date().toISOString(),
+    session_id: sessionId,
+    ip_hash: ipHash,
+  }), {
     status: 200,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
   });
