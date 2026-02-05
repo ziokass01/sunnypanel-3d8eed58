@@ -2,6 +2,7 @@ export const FREE_FP_KEY = "fk_fp_v1";
 export const FREE_OUT_TOKEN_KEY = "fk_out_v1";
 export const FREE_KEY_TYPE_CODE_KEY = "fk_type_v1";
 export const FREE_TEST_MODE_KEY = "fk_test_mode_v1";
+export const FREE_START_META_KEY = "fk_start_meta_v1";
 
 function randomBase64Url(bytesLen = 18) {
   const bytes = new Uint8Array(bytesLen);
@@ -82,5 +83,28 @@ export function getSelectedKeyTypeCode(): string {
     return localStorage.getItem(FREE_KEY_TYPE_CODE_KEY) ?? "";
   } catch {
     return "";
+  }
+}
+
+export function setFreeStartMeta(data: { startedAtMs: number; minDelaySeconds: number }) {
+  try {
+    localStorage.setItem(FREE_START_META_KEY, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
+export function getFreeStartMeta(): { startedAtMs: number; minDelaySeconds: number } | null {
+  try {
+    const raw = localStorage.getItem(FREE_START_META_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { startedAtMs?: number; minDelaySeconds?: number };
+    const startedAtMs = Number(parsed.startedAtMs ?? 0);
+    const minDelaySeconds = Number(parsed.minDelaySeconds ?? 0);
+    if (!Number.isFinite(startedAtMs) || startedAtMs <= 0) return null;
+    if (!Number.isFinite(minDelaySeconds) || minDelaySeconds <= 0) return null;
+    return { startedAtMs, minDelaySeconds };
+  } catch {
+    return null;
   }
 }

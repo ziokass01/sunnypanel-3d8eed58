@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
-import { getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
+import { getFreeStartMeta, getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
 
 type GateOk = { ok: true; claim_token: string };
 type GateErr = { ok: false; msg: string };
@@ -28,6 +28,8 @@ export function FreeGatePage() {
   const [cfgReturn, setCfgReturn] = useState<number>(10);
   const [status, setStatus] = useState<"working" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
+  const [countdown, setCountdown] = useState<number>(0);
+  const [delayReady, setDelayReady] = useState(false);
 
   const outToken = useMemo(() => getOutToken(), []);
 
@@ -95,9 +97,37 @@ export function FreeGatePage() {
   }
 
   useEffect(() => {
+    const meta = getFreeStartMeta();
+    if (meta) {
+      const remain = Math.ceil(meta.startedAtMs / 1000 + meta.minDelaySeconds - Date.now() / 1000);
+      if (remain > 0) {
+        setCountdown(remain);
+        setMessage(`Vui lòng chờ ${remain}s để hoàn tất xác thực…`);
+      }
+    }
+    setDelayReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = window.setInterval(() => {
+      setCountdown((prev) => {
+        const next = prev - 1;
+        if (next > 0) {
+          setMessage(`Vui lòng chờ ${next}s để hoàn tất xác thực…`);
+        }
+        return Math.max(0, next);
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
+
+  useEffect(() => {
+    if (!delayReady) return;
+    if (countdown > 0) return;
     void gateOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [countdown, delayReady]);
 
   return (
     <div className="min-h-svh bg-background">
@@ -111,7 +141,11 @@ export function FreeGatePage() {
             <div className="rounded-md border p-3 text-sm">
               <div className="font-medium">{message}</div>
               <div className="mt-1 text-muted-foreground">
-                {status === "working" ? "Vui lòng không tắt trang." : "Bạn sẽ được đưa về trang Get Key."}
+                {status === "working"
+                  ? countdown > 0
+                    ? `Đếm ngược ${countdown}s theo cấu hình bảo vệ.`
+                    : "Vui lòng không tắt trang."
+                  : "Bạn sẽ được đưa về trang Get Key."}
               </div>
             </div>
 
