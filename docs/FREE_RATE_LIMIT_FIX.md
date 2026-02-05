@@ -26,3 +26,4 @@ select * from free_ip_rate_limits limit 1;
 - Có bảng log `licenses_free_security_logs` để audit các trường hợp rate-limit/blocklist.
 - Nếu DB chưa apply migration, frontend sẽ báo thân thiện: “Server đang cấu hình thiếu, vui lòng thử lại sau”.
 - Các function admin-only (`admin-free-test`, `admin-free-block`, `admin-free-delete-session`, `admin-free-delete-issued`) cần được deploy và bật `verify_jwt=true` trong `supabase/config.toml`.
+- Với `assertAdmin`, cần set secret `ADMIN_EMAILS` (ví dụ: `mquyet399@gmail.com`) trong Supabase Edge Functions secrets, hoặc đảm bảo user có role `admin` qua RPC `has_role`.
