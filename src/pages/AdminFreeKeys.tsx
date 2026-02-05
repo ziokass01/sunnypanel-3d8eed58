@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2 } from "lucide-react";
+import { postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,16 @@ type PublicLink = {
   icon?: string | null;
 };
 
+type AdminTestResult = {
+  ok: boolean;
+  key?: string;
+  expires_at?: string;
+  ip_hash?: string | null;
+  fp_hash?: string | null;
+  session_id?: string | null;
+  message?: string;
+};
+
 function utcDayRange(day: string) {
   // day = YYYY-MM-DD in UTC
   const from = `${day}T00:00:00.000Z`;
@@ -91,6 +102,27 @@ function utcDayRange(day: string) {
 
 function pad2(n: number) {
   return String(Math.max(0, Math.floor(n))).padStart(2, "0");
+}
+
+function formatVnDateTime(value?: string | null) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(d);
+}
+
+function shortText(v?: string | null, n = 10) {
+  const x = String(v ?? "").trim();
+  if (!x) return "-";
+  return x.length > n ? `${x.slice(0, n)}…` : x;
 }
 
 function toLinksText(value: any): string {
@@ -332,6 +364,44 @@ const disableAllKeyTypes = useMutation({
     },
   });
 
+  const [testKeyTypeCode, setTestKeyTypeCode] = useState<string>("h01");
+  const [testDryRun, setTestDryRun] = useState(false);
+  const [adminTestResult, setAdminTestResult] = useState<AdminTestResult | null>(null);
+
+  useEffect(() => {
+    if (!keyTypesQuery.data?.length) return;
+    if (keyTypesQuery.data.some((x) => x.code === testKeyTypeCode)) return;
+    setTestKeyTypeCode(keyTypesQuery.data[0].code);
+  }, [keyTypesQuery.data, testKeyTypeCode]);
+
+  const adminTestGetKey = useMutation({
+    mutationFn: async () => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+
+      return postFunction<AdminTestResult>(
+        "/admin-free-test",
+        { key_type_code: testKeyTypeCode, dry_run: testDryRun },
+        { authToken: token },
+      );
+    },
+    onSuccess: (data) => {
+      setAdminTestResult(data);
+      toast({ title: data.ok ? "Test success" : "Test failed", description: data.message || "Completed" });
+      sessionsQuery.refetch();
+      issuesQuery.refetch();
+    },
+    onError: (e: any) => {
+      const msg = String(e?.message ?? "Error");
+      toast({
+        title: "Test failed",
+        description: msg.includes("MISCONFIG") ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)` : msg,
+        variant: "destructive",
+      });
+    },
+  });
+
   // -------- Sessions / Issues --------
   const todayUtc = new Date().toISOString().slice(0, 10);
   const [day, setDay] = useState(todayUtc);
@@ -381,13 +451,15 @@ const disableAllKeyTypes = useMutation({
   });
 
   const revokeLicense = useMutation({
-    mutationFn: async (licenseId: string) => {
-      const nowIso = new Date().toISOString();
-      const { error } = await supabase
-        .from("licenses")
-        .update({ is_active: false, expires_at: nowIso })
-        .eq("id", licenseId);
-      if (error) throw error;
+    mutationFn: async (args: { issueId: string; licenseId: string }) => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction(
+        "/admin-free-delete-issued",
+        { issue_id: args.issueId, license_id: args.licenseId, revoke: true, delete_issue: false, reason: "admin revoke" },
+        { authToken: token },
+      );
     },
     onSuccess: () => {
       toast({ title: "Updated", description: "Đã chặn key (is_active=false, expires_at=now)." });
@@ -396,6 +468,66 @@ const disableAllKeyTypes = useMutation({
     onError: (e: any) => {
       toast({ title: "Failed", description: e?.message ?? "Không thể chặn key.", variant: "destructive" });
     },
+  });
+
+  const blockIp = useMutation({
+    mutationFn: async (args: { ipHash: string; reason: string }) => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction("/admin-free-block", { ip_hash: args.ipHash, reason: args.reason || null }, { authToken: token });
+    },
+    onSuccess: () => {
+      toast({ title: "Blocked", description: "IP hash đã được block vĩnh viễn." });
+      sessionsQuery.refetch();
+    },
+    onError: (e: any) => toast({ title: "Block failed", description: e?.message ?? "Error", variant: "destructive" }),
+  });
+
+  const blockFp = useMutation({
+    mutationFn: async (args: { fpHash: string; reason: string }) => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction("/admin-free-block", { fingerprint_hash: args.fpHash, reason: args.reason || null }, { authToken: token });
+    },
+    onSuccess: () => {
+      toast({ title: "Blocked", description: "Fingerprint hash đã được block vĩnh viễn." });
+      sessionsQuery.refetch();
+    },
+    onError: (e: any) => toast({ title: "Block failed", description: e?.message ?? "Error", variant: "destructive" }),
+  });
+
+  const deleteSession = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction("/admin-free-delete-session", { session_id: sessionId }, { authToken: token });
+    },
+    onSuccess: () => {
+      toast({ title: "Deleted", description: "Session đã được xóa." });
+      sessionsQuery.refetch();
+    },
+    onError: (e: any) => toast({ title: "Delete failed", description: e?.message ?? "Error", variant: "destructive" }),
+  });
+
+  const deleteIssuedKey = useMutation({
+    mutationFn: async (args: { issueId: string; licenseId: string; reason: string }) => {
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("UNAUTHORIZED");
+      await postFunction(
+        "/admin-free-delete-issued",
+        { issue_id: args.issueId, license_id: args.licenseId, revoke: true, delete_issue: true, reason: args.reason || "Deleted by admin" },
+        { authToken: token },
+      );
+    },
+    onSuccess: () => {
+      toast({ title: "Deleted", description: "Issued key record đã xóa và key đã revoke." });
+      issuesQuery.refetch();
+    },
+    onError: (e: any) => toast({ title: "Delete failed", description: e?.message ?? "Error", variant: "destructive" }),
   });
 
 
@@ -415,8 +547,6 @@ const disableAllKeyTypes = useMutation({
               <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
             </div>
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-          
-                    {/* Delete button (mobile-friendly) */}
 </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -575,7 +705,7 @@ const disableAllKeyTypes = useMutation({
           </div>
 
           <div className="text-xs text-muted-foreground">
-            Updated: {settingsQuery.data?.updated_at ?? ""}
+            Updated: {formatVnDateTime(settingsQuery.data?.updated_at ?? "")}
           </div>
         </CardContent>
       </Card>
@@ -599,7 +729,7 @@ const disableAllKeyTypes = useMutation({
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="text-xs md:text-sm">
           <div className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
@@ -737,13 +867,60 @@ const disableAllKeyTypes = useMutation({
       </Card>
 
       <Card>
+        <CardHeader>
+          <CardTitle>🧪 Admin Test GetKey</CardTitle>
+          <CardDescription>Chạy test server-side để kiểm tra flow phát key (không cần vượt gate như user).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Key type</div>
+              <Select value={testKeyTypeCode} onValueChange={setTestKeyTypeCode}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(keyTypesQuery.data ?? []).map((k) => (
+                    <SelectItem key={k.code} value={k.code}>
+                      {k.code} - {k.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div className="text-sm">Dry run (không phát key)</div>
+              <Switch checked={testDryRun} onCheckedChange={setTestDryRun} />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={() => adminTestGetKey.mutate()} disabled={adminTestGetKey.isPending || !testKeyTypeCode}>
+                {adminTestGetKey.isPending ? "Testing..." : "Test"}
+              </Button>
+            </div>
+          </div>
+
+          {adminTestResult ? (
+            <div className="rounded-md border p-3 text-sm space-y-1">
+              <div>Result: {adminTestResult.ok ? "OK" : "FAILED"}</div>
+              <div>Message: {adminTestResult.message || "-"}</div>
+              <div>Key: {adminTestResult.key || "-"}</div>
+              <div>Expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
+              <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>
+              <div>FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span></div>
+              <div>Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span></div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Sessions</CardTitle>
           <Button variant="secondary" onClick={() => sessionsQuery.refetch()} disabled={sessionsQuery.isFetching}>
             Refresh
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="text-xs md:text-sm">
           <div className="overflow-x-auto">
             <Table>
             <TableHeader>
@@ -755,25 +932,60 @@ const disableAllKeyTypes = useMutation({
                 <TableHead>IP hash</TableHead>
                 <TableHead>FP hash</TableHead>
                 <TableHead>Error</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(sessionsQuery.data ?? []).map((s) => (
                 <TableRow key={s.session_id}>
-                  <TableCell className="whitespace-nowrap">{s.created_at}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
                   <TableCell>{s.status}</TableCell>
                   <TableCell className="font-mono">
                     {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
                   </TableCell>
                   <TableCell>{s.reveal_count}</TableCell>
-                  <TableCell className="font-mono">{s.ip_hash.slice(0, 10)}…</TableCell>
-                  <TableCell className="font-mono">{s.fingerprint_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
+                  <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
                   <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? "";
+                          if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason });
+                        }}
+                      >
+                        Block IP
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? "";
+                          if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason });
+                        }}
+                      >
+                        Block FP
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          const ok = window.confirm("Delete session này?");
+                          if (ok) deleteSession.mutate(s.session_id);
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
               {!sessionsQuery.data?.length ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
                     No rows
                   </TableCell>
                 </TableRow>
@@ -807,11 +1019,11 @@ const disableAllKeyTypes = useMutation({
             <TableBody>
               {(issuesQuery.data ?? []).map((i) => (
                 <TableRow key={i.issue_id}>
-                  <TableCell className="whitespace-nowrap">{i.created_at}</TableCell>
-                  <TableCell className="whitespace-nowrap">{i.expires_at}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
                   <TableCell className="font-mono">{i.key_mask}</TableCell>
-                  <TableCell className="font-mono">{i.session_id.slice(0, 8)}…</TableCell>
-                  <TableCell className="font-mono">{i.ip_hash.slice(0, 10)}…</TableCell>
+                  <TableCell className="font-mono">{shortText(i.session_id, 12)}</TableCell>
+                  <TableCell className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
                   <TableCell className="text-right whitespace-nowrap">
                     <div className="flex justify-end gap-2">
                       <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
@@ -823,10 +1035,23 @@ const disableAllKeyTypes = useMutation({
                         disabled={revokeLicense.isPending}
                         onClick={() => {
                           const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
-                          if (ok) revokeLicense.mutate(i.license_id);
+                          if (ok) revokeLicense.mutate({ issueId: i.issue_id, licenseId: i.license_id });
                         }}
                       >
                         Revoke
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deleteIssuedKey.isPending}
+                        onClick={() => {
+                          const ok = window.confirm("Delete issued key record này? Key sẽ bị revoke trước khi xóa log.");
+                          if (!ok) return;
+                          const reason = window.prompt("Reason (optional):", "admin delete") ?? "";
+                          deleteIssuedKey.mutate({ issueId: i.issue_id, licenseId: i.license_id, reason });
+                        }}
+                      >
+                        Delete key
                       </Button>
                     </div>
                   </TableCell>
