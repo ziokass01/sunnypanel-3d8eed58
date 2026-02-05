@@ -97,6 +97,12 @@ export function FreeGatePage() {
         return;
       }
 
+      if (msg === "ALREADY_REVEALED") {
+        setStatus("error");
+        setMessage("Phiên này đã được reveal. Vui lòng quay lại và làm lại flow.");
+        return;
+      }
+
       setStatus("error");
       setMessage(msg);
 

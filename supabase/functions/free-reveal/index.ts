@@ -1,6 +1,32 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 
+const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
+
+function isAllowedOrigin(origin: string, publicBaseUrl: string) {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    const host = u.host;
+    if (KNOWN_HOSTS.has(host)) return true;
+    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
+    if (publicBaseUrl) {
+      const pb = new URL(publicBaseUrl);
+      const pbHost = pb.host;
+      return host === pbHost || host.endsWith(`.${pbHost}`);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
+  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
+  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
+  return "https://mityangho.id.vn";
+}
+
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -57,11 +83,13 @@ const BodySchema = z.object({
   out_token: z.string().min(8).max(256),
   fingerprint: z.string().min(6).max(128),
   turnstile_token: z.string().min(10).max(4096).nullable().optional(),
+  test_mode: z.boolean().optional().default(false),
 });
 
 Deno.serve(async (req) => {
+  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = origin || "*";
+  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowOrigin,
     "Vary": "Origin",
@@ -99,6 +127,8 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, msg: "INVALID_INPUT" }, 400);
   }
 
+  const { test_mode } = parsed.data;
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
@@ -106,6 +136,24 @@ Deno.serve(async (req) => {
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+
+  if (test_mode) {
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
+    const authHeader = req.headers.get("Authorization");
+    if (!anonKey || !authHeader?.startsWith("Bearer ")) {
+      return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
+    }
+    const authed = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: authHeader } },
+    });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claims, error: claimsError } = await authed.auth.getClaims(token);
+    if (claimsError || !claims?.claims?.sub) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 401);
+    const userId = claims.claims.sub;
+    const roleCheck = await authed.rpc("has_role", { _user_id: userId, _role: "admin" });
+    if (roleCheck.error || roleCheck.data !== true) return jsonResponse({ ok: false, msg: "FORBIDDEN" }, 403);
+  }
 
   const ip = getClientIp(req);
   const ua = req.headers.get("user-agent") ?? "";
@@ -129,7 +177,7 @@ Deno.serve(async (req) => {
   const TURNSTILE_SITE_KEY = Deno.env.get("TURNSTILE_SITE_KEY") ?? "";
   const TURNSTILE_SECRET_KEY = Deno.env.get("TURNSTILE_SECRET_KEY") ?? "";
   const turnstile_enabled = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
-  if (turnstile_enabled) {
+  if (turnstile_enabled && !test_mode) {
     const token = (parsed.data.turnstile_token ?? "")?.trim();
     if (!token) return jsonResponse({ ok: false, msg: "UNAUTHORIZED" }, 200);
     const ok = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
@@ -179,6 +227,7 @@ Deno.serve(async (req) => {
   };
 
   if (sess.reveal_count > 0 || sess.status === "revealed" || sess.revealed_license_id) {
+    // Idempotent: never create a new license once revealed.
     const existing = await fetchLicense();
     if (existing?.key) {
       let keyTypeLabel: string | null = null;
@@ -188,6 +237,7 @@ Deno.serve(async (req) => {
       }
       return jsonResponse({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label: keyTypeLabel });
     }
+    return jsonResponse({ ok: false, msg: "ALREADY_REVEALED" }, 200);
   }
 
   const now = Date.now();
@@ -214,6 +264,7 @@ Deno.serve(async (req) => {
     .eq("session_id", sess.session_id)
     .eq("status", "gate_ok")
     .eq("reveal_count", 0)
+    .is("revealed_license_id", null)
     .select("session_id")
     .maybeSingle();
 
@@ -233,6 +284,7 @@ Deno.serve(async (req) => {
         }
         return jsonResponse({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label: keyTypeLabel });
       }
+      return jsonResponse({ ok: false, msg: "ALREADY_REVEALED" }, 200);
     }
     return jsonResponse({ ok: false, msg: "REVEAL_IN_PROGRESS" }, 200);
   }
@@ -297,7 +349,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, msg: "SERVER_ERROR" }, 500);
   }
 
-  await sb
+  const finalize = await sb
     .from("licenses_free_sessions")
     .update({
       status: "revealed",
@@ -306,7 +358,20 @@ Deno.serve(async (req) => {
       revealed_license_id: inserted.id,
       last_error: null,
     })
-    .eq("session_id", sess.session_id);
+    .eq("session_id", sess.session_id)
+    .eq("status", "revealing")
+    .is("revealed_license_id", null)
+    .select("session_id")
+    .maybeSingle();
+
+  if (!finalize.data) {
+    await sb.from("licenses").delete().eq("id", inserted.id);
+    const existing = await fetchLicense();
+    if (existing?.key) {
+      return jsonResponse({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label: keyTypeLabel });
+    }
+    return jsonResponse({ ok: false, msg: "ALREADY_REVEALED" }, 200);
+  }
 
   await sb.from("licenses_free_issues").insert({
     license_id: inserted.id,

@@ -1,10 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
+
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
     const u = new URL(origin);
     const host = u.host;
+    if (KNOWN_HOSTS.has(host)) return true;
     if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
     if (publicBaseUrl) {
       const pb = new URL(publicBaseUrl);
@@ -15,6 +18,12 @@ function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   } catch {
     return false;
   }
+}
+
+function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
+  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
+  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
+  return "https://mityangho.id.vn";
 }
 
 function inferBaseUrl(req: Request) {
@@ -31,7 +40,7 @@ Deno.serve(async (req) => {
   const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
 
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = origin || "*";
+  const allowOrigin = resolveCorsOrigin(origin, baseUrl || PUBLIC_BASE_URL);
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowOrigin,
     "Vary": "Origin",

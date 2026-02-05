@@ -27,14 +27,20 @@ export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
   const claimToken = useMemo(() => {
-    const fromQuery = sp.get("claim");
-    if (fromQuery) return fromQuery;
+    // Compat: prefer `claim`, fallback to legacy `c`, then local cache.
+    const primary = sp.get("claim");
+    if (primary && primary.trim()) return primary.trim();
+    const legacy = sp.get("c");
+    if (!primary && legacy && legacy.trim()) return legacy.trim();
     // Some redirect/shortener flows can strip query params; keep a fallback token.
-    try {
-      return localStorage.getItem("free_claim_token") ?? "";
-    } catch {
-      return "";
+    if (!primary && !legacy) {
+      try {
+        return localStorage.getItem("free_claim_token") ?? "";
+      } catch {
+        return "";
+      }
     }
+    return "";
   }, [sp]);
 
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
@@ -217,7 +223,7 @@ export function FreeClaimPage() {
                         // If backend refuses (already revealed/invalid), guide user safely.
                         if (msg === "REVEAL_IN_PROGRESS") {
                           setError("Hệ thống đang xử lý. Vui lòng chờ vài giây rồi thử lại.");
-                        } else if (msg === "UNAUTHORIZED") {
+                        } else if (msg === "UNAUTHORIZED" || msg === "ALREADY_REVEALED") {
                           setError("Key đã được reveal hoặc session không hợp lệ. Vui lòng quay lại và làm lại flow.");
                         } else {
                           setError(msg);
