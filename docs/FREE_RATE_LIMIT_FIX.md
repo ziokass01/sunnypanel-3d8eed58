@@ -8,7 +8,7 @@ Edge Function `free-start` gọi RPC `check_free_ip_rate_limit`, nhưng producti
 
 ## Cách fix nhanh (owner)
 1. Mở **Supabase Dashboard → SQL Editor**.
-2. Mở file migration mới trong repo: `supabase/migrations/20260205193000_fix_free_rate_limit_rpc_and_admin_ops.sql`.
+2. Mở file migration mới trong repo: `supabase/migrations/20260206113000_free_flow_schema_guardrails.sql` (hoặc các migration free trước đó nếu chưa chạy).
 3. Copy toàn bộ SQL trong file và chạy 1 lần trên production.
 4. Test lại `/free`.
 
@@ -30,12 +30,19 @@ select * from free_ip_rate_limits limit 1;
 
 
 ## Bổ sung fix 401 cho trang `/admin/free-keys`
-- Frontend đã được chuẩn hoá gọi `admin-free-test` qua `postFunction(..., { authToken })` để luôn đính kèm `Authorization: Bearer <JWT>`.
+- Frontend `/admin/free-keys` đã chuyển sang gọi Edge Function `free-admin-test` (thuộc nhóm `free-*`) và luôn đính kèm `Authorization: Bearer <JWT>`.
 - Cần đảm bảo đã cấu hình secret cho Edge Functions:
   - `ADMIN_EMAILS` (danh sách email admin, phân tách dấu phẩy)
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
-- Sau khi cập nhật secret, redeploy lại các hàm `admin-free-*`, `free-start`, `free-gate`, `free-reveal`.
+- Sau khi cập nhật secret, redeploy lại các hàm `free-admin-test`, `free-start`, `free-gate`, `free-reveal`, `free-close`, `free-config`.
 
 ## Migration tổng hợp khuyến nghị
 Ngoài các migration trước đó, có thể chạy thêm file `supabase/migrations/20260206101500_free_license_system_hardening.sql` để đảm bảo đồng bộ toàn bộ object cho free-flow (rate-limit bảng/hàm, blocklist `blocked_until`, session columns, admin logs, compat view).
+
+
+## CORS/Origin allowlist
+- Các Edge Functions `free-*` đã được chuẩn hoá allowlist origin cho:
+  - `https://mityangho.id.vn`
+  - `https://www.mityangho.id.vn`
+- Nếu dùng custom domain khác, cần cập nhật `PUBLIC_BASE_URL` và redeploy để origin được chấp nhận.
