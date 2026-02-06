@@ -1,31 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
-
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "www.mityangho.id.vn", "sunnypanel.lovable.app"]);
-
-function isAllowedOrigin(origin: string, publicBaseUrl: string) {
-  if (!origin) return false;
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-    if (KNOWN_HOSTS.has(host)) return true;
-    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
-    if (publicBaseUrl) {
-      const pb = new URL(publicBaseUrl);
-      const pbHost = pb.hostname;
-      return host === pbHost || host.endsWith(`.${pbHost}`);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
-  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
-  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
-  return "https://mityangho.id.vn";
-}
+import { resolveCorsOrigin } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))

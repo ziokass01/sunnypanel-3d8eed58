@@ -1,32 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
-
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "www.mityangho.id.vn", "sunnypanel.lovable.app"]);
-
-function isAllowedOrigin(origin: string, publicBaseUrl: string) {
-  if (!origin) return false;
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-    if (KNOWN_HOSTS.has(host)) return true;
-    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
-    if (publicBaseUrl) {
-      const pb = new URL(publicBaseUrl);
-      const pbHost = pb.hostname;
-      return host === pbHost || host.endsWith(`.${pbHost}`);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
-  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
-  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
-  return "https://mityangho.id.vn";
-}
+import { resolveCorsOrigin } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -194,9 +169,9 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, msg: "CLOSED" }, 403);
   }
 
-  const defaultOutbound = settings?.free_outbound_url ?? "";
-  const baseUrl = PUBLIC_BASE_URL || origin;
-  const outbound_url = test_mode ? `${baseUrl}/free/gate` : defaultOutbound;
+  const forcedOutbound = "https://link4m.com/PkY7X";
+  const baseUrl = PUBLIC_BASE_URL || "https://mityangho.id.vn";
+  const outbound_url = test_mode ? `${baseUrl}/free/gate` : forcedOutbound;
   if (!outbound_url) return jsonResponse({ ok: false, msg: "MISSING_OUTBOUND_URL" }, 500);
 
   // Key type must be enabled
@@ -234,7 +209,7 @@ Deno.serve(async (req) => {
         keyTypeCode: key_type_code,
         lastError: "SERVER_RATE_LIMIT_MISCONFIG",
       });
-      return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
+      return jsonResponse({ ok: false, msg: "Server thiếu migration FREE (run: 20260206150000_free_schema_runtime_fix.sql)", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
     }
     await safeLogSecurity("rate_limit_error", { key_type_code, error: rl.error.message || "unknown" }, ipHash, fpHash);
     await safeInsertStartErrorSession(sb, {
@@ -244,7 +219,7 @@ Deno.serve(async (req) => {
       keyTypeCode: key_type_code,
       lastError: "RATE_LIMIT_CHECK_FAILED",
     });
-    return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
+    return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED", detail: "Kiểm tra RPC check_free_ip_rate_limit/check_free_fp_rate_limit và bảng licenses_free_*" }, 500);
   }
   const allowed = Array.isArray(rl.data) ? rl.data[0]?.allowed : rl.data?.allowed;
   if (allowed === false) {
@@ -268,7 +243,7 @@ Deno.serve(async (req) => {
           keyTypeCode: key_type_code,
           lastError: "SERVER_RATE_LIMIT_MISCONFIG",
         });
-        return jsonResponse({ ok: false, msg: "Server đang cấu hình thiếu, vui lòng thử lại sau", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
+        return jsonResponse({ ok: false, msg: "Server thiếu migration FREE (run: 20260206150000_free_schema_runtime_fix.sql)", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
       }
       await safeInsertStartErrorSession(sb, {
         ipHash,
@@ -277,7 +252,7 @@ Deno.serve(async (req) => {
         keyTypeCode: key_type_code,
         lastError: "RATE_LIMIT_CHECK_FAILED",
       });
-      return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED" }, 500);
+      return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED", detail: "Kiểm tra RPC check_free_ip_rate_limit/check_free_fp_rate_limit và bảng licenses_free_*" }, 500);
     }
     const fpAllowed = Array.isArray(fpRl.data) ? fpRl.data[0]?.allowed : fpRl.data?.allowed;
     if (fpAllowed === false) {

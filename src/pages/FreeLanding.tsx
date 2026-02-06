@@ -178,7 +178,12 @@ export function FreeLandingPage() {
                   );
 
                   if (!res.ok) {
-                    setErr((res as StartErr).msg || "Start failed");
+                    const r = res as StartErr;
+                    if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
+                      setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
+                    } else {
+                      setErr(r.msg || "Start failed");
+                    }
                     return;
                   }
 
