@@ -1,32 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
-
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "www.mityangho.id.vn", "sunnypanel.lovable.app"]);
-
-function isAllowedOrigin(origin: string, publicBaseUrl: string) {
-  if (!origin) return false;
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-    if (KNOWN_HOSTS.has(host)) return true;
-    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
-    if (publicBaseUrl) {
-      const pb = new URL(publicBaseUrl);
-      const pbHost = pb.hostname;
-      return host === pbHost || host.endsWith(`.${pbHost}`);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
-  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
-  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
-  return "https://mityangho.id.vn";
-}
+import { resolveCorsOrigin } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -53,9 +28,20 @@ function makeKey() {
   return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
+function extractErrorMessage(err: unknown) {
+  if (!err || typeof err !== "object") return "unknown";
+  const anyErr = err as Record<string, unknown>;
+  return String(anyErr.message ?? anyErr.details ?? anyErr.hint ?? "unknown");
+}
+
 function maskKey(key: string) {
   if (key.length <= 10) return "***";
   return `${key.slice(0, 9)}…${key.slice(-4)}`;
+}
+
+function isFreeSchemaMissing(err: unknown) {
+  const txt = extractErrorMessage(err).toLowerCase();
+  return txt.includes("does not exist") || txt.includes("undefined column") || txt.includes("could not find");
 }
 
 function getClientIp(req: Request) {
@@ -159,7 +145,7 @@ Deno.serve(async (req) => {
     .single();
 
   if (sessionInsert.error || !sessionInsert.data?.session_id) {
-    return json({ ok: false, message: "SESSION_INSERT_FAILED", ip_hash: ipHash, fp_hash: fpHash }, 500);
+    return json({ ok: false, message: "SESSION_INSERT_FAILED", ip_hash: ipHash, fp_hash: fpHash, detail: isFreeSchemaMissing(sessionInsert.error) ? "Thiếu migration: 20260206150000_free_schema_runtime_fix.sql" : undefined }, 500);
   }
 
   const sessionId = sessionInsert.data.session_id;
@@ -199,7 +185,7 @@ Deno.serve(async (req) => {
 
   if (licenseIns.error || !licenseIns.data?.id) {
     await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "ADMIN_TEST_INSERT_FAILED" }).eq("session_id", sessionId);
-    return json({ ok: false, message: "LICENSE_INSERT_FAILED", ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId }, 500);
+    return json({ ok: false, message: "LICENSE_INSERT_FAILED", ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, detail: isFreeSchemaMissing(licenseIns.error) ? "Thiếu migration: 20260206150000_free_schema_runtime_fix.sql" : undefined }, 500);
   }
 
   await sb.from("licenses_free_issues").insert({

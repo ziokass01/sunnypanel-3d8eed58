@@ -1,30 +1,5 @@
+import { resolveCorsOrigin } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "www.mityangho.id.vn", "sunnypanel.lovable.app"]);
-
-function isAllowedOrigin(origin: string, publicBaseUrl: string) {
-  if (!origin) return false;
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-    if (KNOWN_HOSTS.has(host)) return true;
-    if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
-    if (publicBaseUrl) {
-      const pb = new URL(publicBaseUrl);
-      const pbHost = pb.hostname;
-      return host === pbHost || host.endsWith(`.${pbHost}`);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
-  if (isAllowedOrigin(origin, publicBaseUrl)) return origin;
-  if (publicBaseUrl && isAllowedOrigin(publicBaseUrl, publicBaseUrl)) return publicBaseUrl;
-  return "https://mityangho.id.vn";
-}
 
 function inferBaseUrl(req: Request) {
   const origin = req.headers.get("origin");
@@ -83,7 +58,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: sErr.message }, 500);
   }
 
-  const free_outbound_url = settings?.free_outbound_url ?? null;
+  const free_outbound_url = settings?.free_outbound_url ?? "https://link4m.com/PkY7X";
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
   const free_min_delay_seconds = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
@@ -113,7 +88,7 @@ Deno.serve(async (req) => {
   if (!keyTypes?.length) missing.push("no_key_types_enabled");
   if (!baseUrl) missing.push("public_base_url");
 
-  const destination_gate_url = `${baseUrl}/free/gate`;
+  const destination_gate_url = "https://mityangho.id.vn/free/gate";
 
   const body = {
     public_base_url: baseUrl || null,

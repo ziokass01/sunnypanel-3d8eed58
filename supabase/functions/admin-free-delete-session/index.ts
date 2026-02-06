@@ -1,12 +1,15 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
+import { resolveCorsOrigin } from "../_shared/cors.ts";
 
 const BodySchema = z.object({ session_id: z.string().uuid() });
 
 Deno.serve(async (req) => {
-  const origin = req.headers.get("origin") ?? "*";
-  const headers = { "Access-Control-Allow-Origin": origin, Vary: "Origin", "Access-Control-Allow-Methods": "POST,OPTIONS", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
+  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
+  const origin = req.headers.get("origin") ?? "";
+  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
+  const headers = { "Access-Control-Allow-Origin": allowOrigin, Vary: "Origin", "Access-Control-Allow-Methods": "POST,OPTIONS", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...headers, "Content-Type": "application/json" } });
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers });
   if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);

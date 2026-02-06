@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
+import { resolveCorsOrigin } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -36,15 +37,22 @@ function maskKey(key: string) {
   return `${key.slice(0, 9)}…${key.slice(-4)}`;
 }
 
+function isFreeSchemaMissing(err: unknown) {
+  const txt = extractErrorMessage(err).toLowerCase();
+  return txt.includes("does not exist") || txt.includes("undefined column") || txt.includes("could not find");
+}
+
 const BodySchema = z.object({
   key_type_code: z.string().min(2).max(8),
   dry_run: z.boolean().optional().default(false),
 });
 
 Deno.serve(async (req) => {
-  const origin = req.headers.get("origin") ?? "*";
+  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
+  const origin = req.headers.get("origin") ?? "";
+  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
   const cors = {
-    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Origin": allowOrigin,
     Vary: "Origin",
     "Access-Control-Allow-Methods": "POST,OPTIONS",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -103,7 +111,7 @@ Deno.serve(async (req) => {
 
   if (insSess.error || !insSess.data?.session_id) {
     await sb.from("licenses_free_security_logs").insert({ event_type: "admin_test_error", route: "admin-free-test", ip_hash: ipHash, fingerprint_hash: fpHash, details: { reason: "SESSION_INSERT_FAILED" } });
-    return json({ ok: false, message: "SESSION_INSERT_FAILED" }, 500);
+    return json({ ok: false, message: "SESSION_INSERT_FAILED", detail: isFreeSchemaMissing(insSess.error) ? "Thiếu migration: 20260206150000_free_schema_runtime_fix.sql" : undefined }, 500);
   }
 
   const sessionId = insSess.data.session_id;
@@ -147,7 +155,7 @@ Deno.serve(async (req) => {
       fingerprint_hash: fpHash,
       details: { reason: "LICENSE_INSERT_FAILED", message: lastLicenseInsertError || "unknown" },
     });
-    return json({ ok: false, message: "LICENSE_INSERT_FAILED", session_id: sessionId, detail: lastLicenseInsertError || undefined }, 500);
+    return json({ ok: false, message: "LICENSE_INSERT_FAILED", session_id: sessionId, detail: (lastLicenseInsertError || "") + (isFreeSchemaMissing({ message: lastLicenseInsertError }) ? " | Thiếu migration: 20260206150000_free_schema_runtime_fix.sql" : "") }, 500);
   }
 
   await sb.from("licenses_free_issues").insert({
