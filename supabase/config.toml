@@ -1,1 +1,37 @@
-project_id = "cbdokxhoucczyrpcjvxf"
+project_id = "dmfcltugmfgftjqzmkes"
+
+[functions.verify-key]
+verify_jwt = false
+
+[functions.generate-license-key]
+verify_jwt = false
+
+[functions.free-config]
+verify_jwt = false
+
+[functions.free-gate]
+verify_jwt = false
+
+[functions.free-start]
+verify_jwt = false
+
+[functions.free-reveal]
+verify_jwt = false
+
+[functions.free-close]
+verify_jwt = false
+
+[functions.admin-free-test]
+verify_jwt = true
+
+[functions.free-admin-test]
+verify_jwt = true
+
+[functions.admin-free-block]
+verify_jwt = true
+
+[functions.admin-free-delete-session]
+verify_jwt = true
+
+[functions.admin-free-delete-issued]
+verify_jwt = true

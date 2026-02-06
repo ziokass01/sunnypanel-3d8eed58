@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -79,9 +79,22 @@ export function FreeClaimPage() {
     }
   }, [queryClaimRaw]);
 
-  // IMPORTANT: Do NOT persist the revealed key across reloads.
-  // Requirement: after reload, user must click "Verify" again, but the server must
-  // return the same key (idempotent) if it was already revealed for this session.
+  const revealedStoreKey = useMemo(() => {
+    if (!outToken) return "";
+    return `free_revealed_v1:${outToken}`;
+  }, [outToken]);
+
+  useEffect(() => {
+    if (!revealedStoreKey) return;
+    try {
+      const raw = sessionStorage.getItem(revealedStoreKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as RevealedState;
+      if (parsed?.key && parsed?.expiresAt) setRevealed(parsed);
+    } catch {
+      // ignore
+    }
+  }, [revealedStoreKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +153,13 @@ export function FreeClaimPage() {
       // Clear local flow storage so reload cannot mint again
       clearFreeFlowStorage();
       try { localStorage.removeItem("free_claim_token"); } catch { /* ignore */ }
+      if (revealedStoreKey) {
+        try {
+          sessionStorage.removeItem(revealedStoreKey);
+        } catch {
+          // ignore
+        }
+      }
       nav("/free", { replace: true });
     }
   }
@@ -228,7 +248,13 @@ export function FreeClaimPage() {
                       };
 
                       setRevealed(st);
-                      // Do not cache revealed state in storage (see note near top of file).
+                      if (revealedStoreKey) {
+                        try {
+                          sessionStorage.setItem(revealedStoreKey, JSON.stringify(st));
+                        } catch {
+                          // ignore
+                        }
+                      }
 
                       try {
                         const okRes = res as RevealOk;
