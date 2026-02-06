@@ -2,18 +2,25 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
 
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
+// Keep this list tight: only your production host(s) + local dev.
+// NOTE: hostname only (no ports). `new URL(origin).hostname` is compared.
+const KNOWN_HOSTS = new Set([
+  "mityangho.id.vn",
+  "www.mityangho.id.vn",
+  "localhost",
+  "127.0.0.1",
+]);
 
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
     const u = new URL(origin);
-    const host = u.host;
+    const host = u.hostname;
     if (KNOWN_HOSTS.has(host)) return true;
     if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
     if (publicBaseUrl) {
       const pb = new URL(publicBaseUrl);
-      const pbHost = pb.host;
+      const pbHost = pb.hostname;
       return host === pbHost || host.endsWith(`.${pbHost}`);
     }
     return false;
