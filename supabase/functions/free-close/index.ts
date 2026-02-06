@@ -68,16 +68,36 @@ Deno.serve(async (req) => {
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
   const outHash = await sha256Hex(parsed.data.out_token);
 
-  await sb
+  // Close session.
+  // Some deployments may not have newer optional columns yet (e.g. claim_token_plain),
+  // so we try the full update first, then fall back to a minimal update if needed.
+  const fullUpd = await sb
     .from("licenses_free_sessions")
     .update({
       status: "closed",
       claim_token_hash: null,
       claim_expires_at: null,
+      // Optional column (introduced later)
       claim_token_plain: null,
       out_expires_at: new Date().toISOString(),
     })
     .eq("out_token_hash", outHash);
+
+  if (fullUpd.error) {
+    const msg = String(fullUpd.error.message || "");
+    // Missing-column errors vary; check for the column name to be safe.
+    if (msg.toLowerCase().includes("claim_token_plain")) {
+      await sb
+        .from("licenses_free_sessions")
+        .update({
+          status: "closed",
+          claim_token_hash: null,
+          claim_expires_at: null,
+          out_expires_at: new Date().toISOString(),
+        })
+        .eq("out_token_hash", outHash);
+    }
+  }
 
   return jsonResponse({ ok: true }, 200);
 });

@@ -356,12 +356,7 @@ Deno.serve(async (req) => {
         is_active: true,
         max_devices: 1,
         expires_at,
-        start_on_first_use: false,
-        starts_on_first_use: false,
-        duration_days: null,
-        duration_seconds: dur,
-        activated_at: null,
-        first_used_at: null,
+        // Keep schema minimal: public.licenses only has (key, expires_at, max_devices, is_active, note)
         note: sess.key_type_code ? `FREE_${sess.key_type_code.toUpperCase()}` : "FREE",
       })
       .select("id,key")
@@ -392,6 +387,8 @@ Deno.serve(async (req) => {
       status: "revealed",
       last_error: null,
       revealed_at: new Date().toISOString(),
+      revealed_license_id: inserted.id,
+      reveal_count: 1,
     })
     .eq("session_id", sessionId);
 

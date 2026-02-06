@@ -126,17 +126,13 @@ Deno.serve(async (req) => {
   let lastLicenseInsertError = "";
   for (let attempt = 0; attempt < 12; attempt++) {
     key = makeKey();
+    // licenses table schema in this project is minimal: (id, key, created_at, expires_at, max_devices, is_active, note)
+    // Keep insert payload compatible to avoid ADMIN_TEST_INSERT_FAILED due to missing columns.
     const insLic = await sb.from("licenses").insert({
       key,
       is_active: true,
       max_devices: 1,
       expires_at: expiresAt,
-      start_on_first_use: false,
-      starts_on_first_use: false,
-      duration_days: null,
-      duration_seconds: Number(keyType.duration_seconds ?? 3600),
-      activated_at: null,
-      first_used_at: null,
       note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()}`,
     }).select("id").single();
     if (!insLic.error && insLic.data?.id) {
@@ -169,7 +165,7 @@ Deno.serve(async (req) => {
     ua_hash: uaHash,
   });
 
-  await sb.from("licenses_free_sessions").update({ status: "revealed", reveal_count: 1, revealed_at: now.toISOString() }).eq("session_id", sessionId);
+  await sb.from("licenses_free_sessions").update({ status: "revealed", reveal_count: 1, revealed_at: now.toISOString(), revealed_license_id: licenseId }).eq("session_id", sessionId);
 
   return json({ ok: true, message: "ADMIN_TEST_OK", key, expires_at: expiresAt, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
 });
