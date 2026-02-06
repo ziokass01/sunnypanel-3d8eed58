@@ -16,13 +16,21 @@ export async function assertAdmin(req: Request): Promise<{ ok: true } | { ok: fa
   const authHeader = req.headers.get("Authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
 
-  if (!supabaseUrl || !token) {
+  if (!supabaseUrl) {
     return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
   }
 
   const apiKey = anonKey || serviceRoleKey;
   if (!apiKey) {
     return { ok: false, status: 500, body: { ok: false, code: "SERVER_MISCONFIG_MISSING_SECRET", msg: "Admin verifier not configured" } };
+  }
+
+  if (token && serviceRoleKey && token === serviceRoleKey) {
+    return { ok: true };
+  }
+
+  if (!token) {
+    return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
   }
 
   const authed = createClient(supabaseUrl, apiKey, {

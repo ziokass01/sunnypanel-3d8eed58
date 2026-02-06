@@ -395,7 +395,7 @@ const disableAllKeyTypes = useMutation({
       if (!token) throw new Error("Bạn cần đăng nhập admin");
 
       const data = await postFunction(
-        "/free-admin-test",
+        "/admin-free-test",
         { key_type_code: testKeyTypeCode, dry_run: testDryRun },
         { authToken: token },
       );
