@@ -114,8 +114,10 @@ export function FreeLandingPage() {
 
             {missingText ? (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Missing configuration</div>
-                <div className="text-muted-foreground">{missingText}</div>
+                <div className="font-medium">Cần apply migration FREE</div>
+                <div className="text-muted-foreground">
+                  Hệ thống FREE chưa đủ object trong database. Vui lòng báo owner chạy migration FREE mới nhất. ({missingText})
+                </div>
               </div>
             ) : null}
 
@@ -202,8 +204,8 @@ export function FreeLandingPage() {
                   if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
                     setErr(
                       debugMode
-                        ? "Server đang cấu hình thiếu, vui lòng thử lại sau. (Owner: chạy migration FREE_RATE_LIMIT fix trong Supabase SQL Editor.)"
-                        : "Server đang cấu hình thiếu, vui lòng thử lại sau.",
+                        ? "Hệ thống FREE chưa đủ migration. Owner cần chạy migration FREE mới nhất trong Supabase SQL Editor."
+                        : "Hệ thống FREE chưa sẵn sàng. Vui lòng thử lại sau.",
                     );
                   } else {
                     setErr(e?.message ?? "Start failed");
