@@ -1,17 +1,17 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const KNOWN_HOSTS = new Set(["mityangho.id.vn", "sunnypanel.lovable.app"]);
+const KNOWN_HOSTS = new Set(["mityangho.id.vn", "www.mityangho.id.vn", "sunnypanel.lovable.app"]);
 
 function isAllowedOrigin(origin: string, publicBaseUrl: string) {
   if (!origin) return false;
   try {
     const u = new URL(origin);
-    const host = u.host;
+    const host = u.hostname;
     if (KNOWN_HOSTS.has(host)) return true;
     if (host === "lovable.dev" || host.endsWith(".lovable.dev") || host.endsWith(".lovable.app")) return true;
     if (publicBaseUrl) {
       const pb = new URL(publicBaseUrl);
-      const pbHost = pb.host;
+      const pbHost = pb.hostname;
       return host === pbHost || host.endsWith(`.${pbHost}`);
     }
     return false;

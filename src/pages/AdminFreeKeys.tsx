@@ -139,6 +139,20 @@ function toLinksText(value: any): string {
     .join("\n");
 }
 
+
+
+function isFreeSchemaMissingError(message: string) {
+  const msg = String(message || "").toLowerCase();
+  return (
+    msg.includes("does not exist")
+    || msg.includes("could not find the function")
+    || msg.includes("check_free_ip_rate_limit")
+    || msg.includes("check_free_fp_rate_limit")
+    || msg.includes("licenses_free_")
+    || msg.includes("relation")
+  );
+}
+
 function parseLinksText(text: string): PublicLink[] {
   const lines = (text || "")
     .split(/\r?\n/)
@@ -381,7 +395,7 @@ const disableAllKeyTypes = useMutation({
       if (!token) throw new Error("Bạn cần đăng nhập admin");
 
       const data = await postFunction(
-        "/admin-free-test",
+        "/free-admin-test",
         { key_type_code: testKeyTypeCode, dry_run: testDryRun },
         { authToken: token },
       );
@@ -450,6 +464,19 @@ const disableAllKeyTypes = useMutation({
       return (data ?? []) as any as IssueRow[];
     },
   });
+
+  const freeSchemaHint = useMemo(() => {
+    const errs = [
+      settingsQuery.error,
+      keyTypesQuery.error,
+      sessionsQuery.error,
+      issuesQuery.error,
+    ]
+      .map((e: any) => String(e?.message ?? ""))
+      .filter(Boolean);
+    const hit = errs.find((m) => isFreeSchemaMissingError(m));
+    return hit ?? null;
+  }, [settingsQuery.error, keyTypesQuery.error, sessionsQuery.error, issuesQuery.error]);
 
   const revokeLicense = useMutation({
     mutationFn: async (args: { issueId: string; licenseId: string }) => {
@@ -542,6 +569,19 @@ const disableAllKeyTypes = useMutation({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {freeSchemaHint ? (
+            <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
+              <div className="font-medium text-destructive">Thiếu cấu hình Free DB/RPC</div>
+              <div className="mt-1 text-muted-foreground">
+                Hãy apply các migration Free trong <span className="font-mono">supabase/migrations/*free*.sql</span>
+                (đặc biệt RPC <span className="font-mono">check_free_ip_rate_limit</span>,
+                <span className="font-mono">check_free_fp_rate_limit</span> và các bảng
+                <span className="font-mono"> licenses_free_*</span>) rồi reload trang này.
+              </div>
+              <div className="mt-2 break-all font-mono text-xs">{freeSchemaHint}</div>
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div>
               <div className="font-medium">Bật/tắt trang GetKey</div>
