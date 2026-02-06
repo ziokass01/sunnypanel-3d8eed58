@@ -22,6 +22,9 @@ jobs:
 
       - name: Link project
         run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+        env:
+          SUPABASE_DB_PASSWORD: "${{ secrets.SUPABASE_DB_PASSWORD }}"
+
 
       - name: Push migrations
         run: supabase db push
