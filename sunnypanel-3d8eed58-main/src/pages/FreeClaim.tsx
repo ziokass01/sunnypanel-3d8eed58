@@ -248,7 +248,7 @@ export function FreeClaimPage() {
                     }
                   }}
                 >
-                  {loading ? "Đang xác minh…" : "Verify"}
+                  {loading ? "Đang xác minh…" : "Xác minh"}
                 </Button>
 
                 <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />

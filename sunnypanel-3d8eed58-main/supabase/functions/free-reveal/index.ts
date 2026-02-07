@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_daily_limit_per_fingerprint")
+    .select("free_enabled,free_disabled_message,free_daily_limit_per_fingerprint,free_return_seconds")
     .eq("id", 1)
     .maybeSingle();
 
@@ -143,6 +143,8 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
     });
   }
+
+  const freeReturnSeconds = Math.max(10, Number(settings?.free_return_seconds ?? 60));
 
   // Optional Turnstile (enabled only if BOTH env keys exist)
   const TURNSTILE_SITE_KEY = Deno.env.get("TURNSTILE_SITE_KEY") ?? "";
@@ -189,7 +191,7 @@ Deno.serve(async (req) => {
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds",
+      "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at",
     )
     .eq("out_token_hash", outHash)
     .maybeSingle();
@@ -213,7 +215,33 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Device binding
+  
+  // If user already copied OR session was closed/expired by client timeout, do not reveal again.
+  if (sess.status === "closed" || Boolean(sess.copied_at)) {
+    return new Response(JSON.stringify({ ok: false, msg: "SESSION_CLOSED" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
+    });
+  }
+  const closeDeadlineMs = sess.close_deadline_at ? Date.parse(sess.close_deadline_at) : 0;
+  if (closeDeadlineMs && isFinite(closeDeadlineMs) && closeDeadlineMs < now) {
+    // Hard-close server-side after deadline to prevent "treo tab" abuse
+    await sb
+      .from("licenses_free_sessions")
+      .update({
+        status: "closed",
+        out_expires_at: new Date().toISOString(),
+        claim_token_hash: null,
+        claim_expires_at: null,
+      })
+      .eq("session_id", sessionId);
+    return new Response(JSON.stringify({ ok: false, msg: "SESSION_CLOSED" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
+    });
+  }
+
+// Device binding
   if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
     return new Response(JSON.stringify({ ok: false, msg: "SESSION_BIND_MISMATCH" }), {
       status: 200,
@@ -228,6 +256,14 @@ Deno.serve(async (req) => {
   }
 
   async function findExistingIssuedKey() {
+    const directId = (sess.revealed_license_id as string | null) ?? null;
+    if (directId) {
+      const lic = await sb.from("licenses").select("key,expires_at").eq("id", directId).maybeSingle();
+      if (lic.data?.key) {
+        return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? null) as string };
+      }
+    }
+
     const issue = await sb
       .from("licenses_free_issues")
       .select("license_id,expires_at")
@@ -389,6 +425,8 @@ Deno.serve(async (req) => {
       revealed_at: new Date().toISOString(),
       revealed_license_id: inserted.id,
       reveal_count: 1,
+      close_deadline_at: new Date(Date.now() + freeReturnSeconds * 1000).toISOString(),
+      copied_at: null,
     })
     .eq("session_id", sessionId);
 
