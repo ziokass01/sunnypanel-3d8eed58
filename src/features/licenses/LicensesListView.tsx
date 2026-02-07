@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import {
 import { NavLink } from "@/components/NavLink";
 import { toast } from "@/hooks/use-toast";
 import { useNow } from "@/hooks/use-now";
-import { fetchLicenses, softDeleteLicense } from "@/features/licenses/licenses-api";
+import { fetchLicenses, generateLicenseKey, softDeleteLicense } from "@/features/licenses/licenses-api";
 import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
 
 type FilterMode = "all" | "start_on_first_use";
@@ -71,6 +72,7 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
   const [type, setType] = useState<"all" | "fixed" | "first_use">(props.filterMode === "start_on_first_use" ? "first_use" : "all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Live countdown (list can be less frequent than detail)
   const nowMs = useNow(10_000);
@@ -98,6 +100,17 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
     },
   });
 
+  const generateKeyMutation = useMutation({
+    mutationFn: generateLicenseKey,
+    onSuccess: (key) => {
+      const target = props.filterMode === "start_on_first_use" ? "/licenses2/new" : "/licenses/new";
+      navigate(`${target}?key=${encodeURIComponent(key)}`);
+    },
+    onError: (e: any) => {
+      toast({ title: "Generate failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
   return (
     <section className="space-y-4">
       <header className="flex items-center justify-between gap-3">
@@ -106,8 +119,12 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
           <Button variant="soft" asChild>
             <NavLink to="/licenses/trash">View Trash</NavLink>
           </Button>
-          <Button variant="soft" asChild>
-            <a href="/free" target="_blank" rel="noreferrer">Open GetKey</a>
+          <Button
+            variant="soft"
+            onClick={() => generateKeyMutation.mutate()}
+            disabled={generateKeyMutation.isPending}
+          >
+            {generateKeyMutation.isPending ? "Generating…" : "Generate"}
           </Button>
           <Button asChild>
             <NavLink to={props.filterMode === "start_on_first_use" ? "/licenses2/new" : "/licenses/new"}>

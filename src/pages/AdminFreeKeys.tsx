@@ -567,6 +567,14 @@ const disableAllKeyTypes = useMutation({
           <CardDescription>
             Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint.
           </CardDescription>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
+              Open GetKey
+            </Button>
+            <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
+              Copy GetKey URL
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {freeSchemaHint ? (
@@ -588,7 +596,7 @@ const disableAllKeyTypes = useMutation({
               <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
             </div>
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-</div>
+          </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
