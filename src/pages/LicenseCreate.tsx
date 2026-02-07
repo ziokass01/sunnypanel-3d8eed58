@@ -1,4 +1,5 @@
-import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -50,6 +51,7 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
 
 export function LicenseCreatePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Allow /licenses2/new to default to countdown keys without adding new wrapper components.
   const initialLicenseType: FormValues["license_type"] =
@@ -70,6 +72,14 @@ export function LicenseCreatePage() {
       note: "",
     },
   });
+
+  useEffect(() => {
+    const keyParam = searchParams.get("key");
+    if (!keyParam) return;
+    const trimmed = keyParam.trim();
+    if (!trimmed) return;
+    form.setValue("key", trimmed.toUpperCase(), { shouldDirty: true, shouldValidate: true });
+  }, [form, searchParams]);
 
   const genMutation = useMutation({
     mutationFn: generateLicenseKey,
