@@ -1,6 +1,9 @@
 -- Compatibility objects for operators/runbooks expecting free_ip_rate_limits naming
 
-CREATE OR REPLACE VIEW public.free_ip_rate_limits AS
+DROP TABLE IF EXISTS public.free_ip_rate_limits CASCADE;
+
+CREATE VIEW public.free_ip_rate_limits AS
+
 SELECT
   ip_hash,
   window_start,
