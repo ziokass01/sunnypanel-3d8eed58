@@ -56,7 +56,7 @@ BEGIN
   END LOOP;
 
   FOR i IN 1..30 LOOP
-    code := 'd' || lpad(i::text, 2, '0');
+    v_code := 'd' || lpad(i::text, 2, '0');
     lbl := i::text || ' ngày';
     INSERT INTO public.licenses_free_key_types(code,label,duration_seconds,kind,value,sort_order,enabled)
     VALUES (v_code, lbl, i*86400, 'day', i, 100 + i, (i=1))
