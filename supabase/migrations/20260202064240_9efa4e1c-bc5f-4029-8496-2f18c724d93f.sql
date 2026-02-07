@@ -37,6 +37,22 @@ create index if not exists idx_lfi_fp_hash on public.licenses_free_issues (finge
 create index if not exists idx_lfi_ip_hash on public.licenses_free_issues (ip_hash);
 
 -- Rate limit table for free endpoints
+-- Safety: if a compatibility VIEW with the same name exists, drop it so CREATE TABLE won't fail.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'free_ip_rate_limits'
+      and c.relkind = 'v'
+  ) then
+    execute 'drop view public.free_ip_rate_limits';
+    raise notice 'Dropped existing view public.free_ip_rate_limits to allow legacy table creation';
+  end if;
+end $$;
+
 create table if not exists public.free_ip_rate_limits (
   id uuid primary key default gen_random_uuid(),
   ip_hash text not null,
