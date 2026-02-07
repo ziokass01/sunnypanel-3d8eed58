@@ -83,6 +83,19 @@ BEGIN
     CREATE POLICY service_role_all ON public.licenses_free_security_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
   END IF;
 END $$;
+-- Force drop any existing versions (any signature) before re-create
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname='public' AND p.proname='check_free_ip_rate_limit'
+  LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.sig || ' CASCADE';
+  END LOOP;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.check_free_ip_rate_limit(
   p_ip_hash text,
