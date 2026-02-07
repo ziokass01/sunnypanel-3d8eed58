@@ -44,22 +44,22 @@ EXECUTE FUNCTION public.set_updated_at();
 DO $$
 DECLARE
   i int;
-  v_code text;
+  code text;
   lbl text;
 BEGIN
   FOR i IN 1..24 LOOP
-    v_code := 'h' || lpad(i::text, 2, '0');
+    code := 'h' || lpad(i::text, 2, '0');
     lbl := i::text || ' giờ';
     INSERT INTO public.licenses_free_key_types(code,label,duration_seconds,kind,value,sort_order,enabled)
-    VALUES (v_code, lbl, i*3600, 'hour', i, i, (i=1))
+    VALUES (code, lbl, i*3600, 'hour', i, i, (i=1))
     ON CONFLICT (code) DO NOTHING;
   END LOOP;
 
   FOR i IN 1..30 LOOP
-    v_code := 'd' || lpad(i::text, 2, '0');
+    code := 'd' || lpad(i::text, 2, '0');
     lbl := i::text || ' ngày';
     INSERT INTO public.licenses_free_key_types(code,label,duration_seconds,kind,value,sort_order,enabled)
-    VALUES (v_code, lbl, i*86400, 'day', i, 100 + i, (i=1))
+    VALUES (code, lbl, i*86400, 'day', i, 100 + i, (i=1))
     ON CONFLICT (code) DO NOTHING;
   END LOOP;
 END $$;
