@@ -21,11 +21,19 @@ function parseAllowedOrigins(): string[] {
 }
 
 function isOriginAllowed(origin: string, extraAllowed: string[]) {
-  // Default allowlist for Lovable preview/published + local dev
+  // Default allowlist for Lovable preview/published + local dev + production domains
   const o = origin.toLowerCase();
   if (o.startsWith("http://localhost:")) return true;
   if (o === "http://localhost") return true;
   if (o.endsWith(".lovable.app")) return true;
+
+  const exactAllowed = new Set([
+    "https://mityangho.id.vn",
+    "https://www.mityangho.id.vn",
+    "https://sunnypanel.lovable.app",
+  ]);
+  if (exactAllowed.has(o)) return true;
+
   return extraAllowed.some((x) => x.toLowerCase() === o);
 }
 

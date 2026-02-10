@@ -4,15 +4,26 @@ export function getFunctionsBaseUrl() {
   return `${base}/functions/v1`;
 }
 
+function getAnonKey() {
+  return (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ??
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ??
+    undefined;
+}
+
 export async function getFunction<T>(
   path: string,
   opts?: { authToken?: string | null },
 ): Promise<T> {
   const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const anonKey = getAnonKey();
+  if (!anonKey) throw new Error("Missing backend anon key");
+
   const res = await fetch(url, {
     method: "GET",
     headers: {
-      ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
+      apikey: anonKey,
+      Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
     },
     credentials: "omit",
   });
@@ -31,11 +42,16 @@ export async function postFunction<T>(
   opts?: { authToken?: string | null; headers?: Record<string, string> },
 ): Promise<T> {
   const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const anonKey = getAnonKey();
+  if (!anonKey) throw new Error("Missing backend anon key");
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(opts?.authToken ? { Authorization: `Bearer ${opts.authToken}` } : {}),
+      apikey: anonKey,
+      Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
       ...(opts?.headers ?? {}),
     },
     credentials: "omit",
