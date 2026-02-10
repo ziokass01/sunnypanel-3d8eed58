@@ -1,6 +1,7 @@
 const BASE_ALLOWED_HOSTS = new Set([
   "mityangho.id.vn",
   "www.mityangho.id.vn",
+  "sunnypanel.lovable.app",
   "localhost",
   "127.0.0.1",
 ]);

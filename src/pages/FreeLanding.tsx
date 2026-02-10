@@ -14,7 +14,14 @@ import {
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
 
-type StartOk = { ok: true; out_token: string; outbound_url: string; min_delay_seconds: number };
+type StartOk = {
+  ok: true;
+  out_token: string;
+  outbound_url: string;
+  gate_url: string;
+  claim_base_url: string;
+  min_delay_seconds: number;
+};
 type StartErr = { ok: false; msg: string; code?: string };
 type LastFreeKey = {
   key: string;
@@ -194,7 +201,19 @@ export function FreeLandingPage() {
                     startedAtMs: Date.now(),
                     minDelaySeconds: Math.max(5, Number(res.min_delay_seconds ?? 25)),
                   });
-                  try { localStorage.removeItem("free_claim_token"); } catch { /* ignore */ }
+                  try {
+                    localStorage.setItem("free_out_token", String(res.out_token));
+                    localStorage.setItem("free_started_at_ms", String(Date.now()));
+                    localStorage.setItem("free_min_delay_seconds", String(Math.max(5, Number(res.min_delay_seconds ?? 25))));
+                    localStorage.setItem("free_key_type_code", String(selected));
+                  } catch {
+                    // ignore
+                  }
+                  try {
+                    localStorage.removeItem("free_claim_token");
+                  } catch {
+                    /* ignore */
+                  }
                   setSelectedKeyTypeCode(selected);
 
                   // Redirect to Link4M outbound
