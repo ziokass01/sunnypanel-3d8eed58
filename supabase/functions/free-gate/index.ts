@@ -287,4 +287,12 @@ Deno.serve(async (req) => {
   const claim_url = `${baseUrl}/free/claim?claim=${encodeURIComponent(claim_token)}`;
 
   return new Response(JSON.stringify({ ok: true, claim_token, claim_url }), {
+    status: 200,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+  });
 });
+
