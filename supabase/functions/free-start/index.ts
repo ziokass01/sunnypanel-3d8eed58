@@ -201,11 +201,23 @@ Deno.serve(async (req) => {
     const uaHash = await sha256Hex(ua);
     const ipHash = await sha256Hex(ip);
 
-    const rl = await sb.rpc("check_free_ip_rate_limit", {
-      p_ip_hash: ipHash,
-      p_limit: 25,
-      p_window_sec: 60,
-    });
+    const rl = await (async () => {
+      // Support both newer signature (p_route, p_window_seconds) and legacy (p_window_sec, no p_route)
+      const primary = await sb.rpc("check_free_ip_rate_limit", {
+        p_ip_hash: ipHash,
+        p_route: "free-start",
+        p_limit: 25,
+        p_window_seconds: 60,
+      });
+      if (!primary.error) return primary;
+
+      const legacy = await sb.rpc("check_free_ip_rate_limit", {
+        p_ip_hash: ipHash,
+        p_limit: 25,
+        p_window_sec: 60,
+      });
+      return legacy;
+    })();
     if (rl.error) {
       if (isMissingRateLimitSetup(rl.error)) {
         await safeInsertStartErrorSession(sb, {
@@ -234,12 +246,23 @@ Deno.serve(async (req) => {
     }
 
     if (fingerprint) {
-      const fpRl = await sb.rpc("check_free_fp_rate_limit", {
-        p_fp_hash: fpHash,
-        p_route: "free-start",
-        p_limit: 12,
-        p_window_seconds: 60,
-      });
+       const fpRl = await (async () => {
+         const primary = await sb.rpc("check_free_fp_rate_limit", {
+           p_fp_hash: fpHash,
+           p_route: "free-start",
+           p_limit: 12,
+           p_window_seconds: 60,
+         });
+         if (!primary.error) return primary;
+
+         const legacy = await sb.rpc("check_free_fp_rate_limit", {
+           p_fp_hash: fpHash,
+           p_route: "free-start",
+           p_limit: 12,
+           p_window_sec: 60,
+         });
+         return legacy;
+       })();
       if (fpRl.error) {
         if (isMissingRateLimitSetup(fpRl.error)) {
           await safeInsertStartErrorSession(sb, {
