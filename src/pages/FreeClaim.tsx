@@ -205,8 +205,8 @@ export function FreeClaimPage() {
           <CardContent className="space-y-4">
             {!claimToken ? (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Thiếu claim token</div>
-                <div className="text-muted-foreground">Hãy quay lại /free và làm lại flow.</div>
+                <div className="font-medium"> Xác thực không thành công hoặc lỗi </div>
+                <div className="text-muted-foreground">Hãy quay lại trang Getkey và làm lại.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
                     Quay lại Get Key
@@ -218,7 +218,7 @@ export function FreeClaimPage() {
             {claimToken && !outToken ? (
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium">Thiếu session</div>
-                <div className="text-muted-foreground">Hãy quay lại /free và làm lại flow.</div>
+                <div className="text-muted-foreground">Hãy quay lại trang Getkey và làm lại.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
                     Quay lại Get Key
