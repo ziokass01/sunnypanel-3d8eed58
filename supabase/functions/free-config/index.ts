@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
     "Access-Control-Allow-Origin": allowOrigin,
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
     "Access-Control-Max-Age": "86400",
   };
   const jsonResponse = (data: unknown, status = 200) =>
@@ -58,7 +58,8 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: sErr.message }, 500);
   }
 
-  const free_outbound_url = settings?.free_outbound_url ?? "https://link4m.com/PkY7X";
+  const rawOutbound = settings?.free_outbound_url;
+  const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
   const free_min_delay_seconds = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));

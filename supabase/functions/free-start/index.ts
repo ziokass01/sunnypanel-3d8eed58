@@ -170,9 +170,14 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, msg: "CLOSED" }, 403);
     }
 
-    const forcedOutbound = "https://link4m.com/PkY7X";
+    const rawOutbound = String(settings?.free_outbound_url ?? "").trim();
+    const fallbackOutbound = "https://link4m.com/PkY7X";
+
     const baseUrl = PUBLIC_BASE_URL || "https://mityangho.id.vn";
-    const outbound_url = test_mode ? `${baseUrl}/free/gate` : forcedOutbound;
+    const gate_url = `${baseUrl}/free/gate`;
+    const claim_base_url = `${baseUrl}/free/claim`;
+
+    const outbound_url = test_mode ? gate_url : (rawOutbound || fallbackOutbound);
     if (!outbound_url) return jsonResponse({ ok: false, msg: "MISSING_OUTBOUND_URL" }, 500);
 
     // Key type must be enabled
@@ -305,7 +310,7 @@ Deno.serve(async (req) => {
 
     const min_delay_seconds = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
 
-    return jsonResponse({ ok: true, out_token, outbound_url, min_delay_seconds }, 200);
+    return jsonResponse({ ok: true, out_token, outbound_url, gate_url, claim_base_url, min_delay_seconds }, 200);
   } catch (error) {
     console.error("free-start error", error);
     return jsonResponse({

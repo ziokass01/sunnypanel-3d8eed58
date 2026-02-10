@@ -45,34 +45,36 @@ Deno.serve(async (req) => {
   const origin = req.headers.get("origin") ?? "";
   const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
 
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
+    "Access-Control-Max-Age": "86400",
+  };
+
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
       headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin",
-      "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-        "Access-Control-Max-Age": "86400",
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
       },
     });
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders, status: 204 });
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return new Response(JSON.stringify({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "MISSING_SUPABASE_SECRETS" }, 500);
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -86,11 +88,7 @@ Deno.serve(async (req) => {
 
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ ok: false, msg: "BAD_REQUEST" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "BAD_REQUEST" }, 400);
   }
 
   const { out_token, fingerprint, referrer } = parsed.data;
@@ -103,19 +101,11 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (sErr) {
-    return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: sErr.message }, 500);
   }
 
   if (!Boolean(settings?.free_enabled ?? true)) {
-    return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "CLOSED" }, 403);
   }
 
   const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
@@ -251,7 +241,7 @@ Deno.serve(async (req) => {
       // ignore
     }
 
-    return new Response(JSON.stringify({ ok: false, msg: "VERIFY_FAILED" }), {
+    return new Response(JSON.stringify({ ok: false, msg: "TOO_FAST" }), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
@@ -293,9 +283,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  return new Response(JSON.stringify({ ok: true, claim_token }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin,
-      "Vary": "Origin" },
-  });
+  const baseUrl = PUBLIC_BASE_URL || "https://mityangho.id.vn";
+  const claim_url = `${baseUrl}/free/claim?claim=${encodeURIComponent(claim_token)}`;
+
+  return new Response(JSON.stringify({ ok: true, claim_token, claim_url }), {
 });

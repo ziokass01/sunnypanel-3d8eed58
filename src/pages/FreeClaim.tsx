@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
-import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
-import { PublicInfo } from "@/features/free/PublicInfo";
-import { TurnstileWidget } from "@/features/free/TurnstileWidget";
-import { clearFreeFlowStorage, getOrCreateFingerprint, getOutToken, getSelectedKeyTypeCode } from "@/features/free/fingerprint";
+import {
+  clearFreeFlowStorage,
+  getOrCreateFingerprint,
+  getOutToken,
+  getSelectedKeyTypeCode,
+} from "@/features/free/fingerprint";
 
 type RevealOk = {
   ok: true;
@@ -49,7 +51,7 @@ export function FreeClaimPage() {
 
   // IMPORTANT: do NOT memo claimToken from a URLSearchParams object reference
   // (some browsers / router transitions may keep object identity, causing stale empty token).
-  const queryClaimRaw = (sp.get("claim") || sp.get("c") || "").trim();
+  const queryClaimRaw = (sp.get("claim") || sp.get("c") || sp.get("token") || "").trim();
   const claimToken = (() => {
     if (isValidClaimToken(queryClaimRaw)) return queryClaimRaw;
     try {
@@ -61,9 +63,6 @@ export function FreeClaimPage() {
   })();
 
   const outToken = (getOutToken() || "").trim();
-
-  const [cfg, setCfg] = useState<FreeConfig | null>(null);
-  const [turnToken, setTurnToken] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,21 +80,6 @@ export function FreeClaimPage() {
 
 
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchFreeConfig()
-      .then((c) => {
-        if (cancelled) return;
-        setCfg(c);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCfg(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     // noindex for claim page
@@ -108,24 +92,75 @@ export function FreeClaimPage() {
     };
   }, []);
 
-  const returnSeconds = useMemo(() => {
-    const v = Number(cfg?.free_return_seconds ?? 10);
-    return Math.max(10, isFinite(v) ? v : 10);
-  }, [cfg?.free_return_seconds]);
+  const returnSeconds = 10;
 
   const selectedLabel = useMemo(() => {
-    const code = getSelectedKeyTypeCode();
-    const map = new Map((cfg?.key_types ?? []).map((k) => [k.code, k.label]));
-    return map.get(code) ?? "Key free";
-  }, [cfg]);
+    const code = (getSelectedKeyTypeCode() || "").trim();
+    return code ? `Key free (${code})` : "Key free";
+  }, []);
 
   const canVerify = useMemo(() => {
     if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
-    if (!cfg?.turnstile_enabled) return true;
-    return Boolean(turnToken);
-  }, [claimToken, outToken, cfg?.turnstile_enabled, turnToken, revealed]);
+    return !loading;
+  }, [claimToken, outToken, revealed, loading]);
+
+  async function revealOnce() {
+    if (!claimToken || !outToken) return;
+    if (loading || revealed) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const fp = getOrCreateFingerprint();
+      const res = await postFunction<RevealOk | RevealErr>("/free-reveal", {
+        claim_token: claimToken,
+        out_token: outToken,
+        fingerprint: fp,
+        turnstile_token: null,
+      });
+
+      if (!res.ok) {
+        setError(friendlyRevealError((res as RevealErr).msg || "UNAUTHORIZED"));
+        return;
+      }
+
+      const st: RevealedState = {
+        key: (res as RevealOk).key,
+        expiresAt: (res as RevealOk).expires_at,
+        label: (res as RevealOk).key_type_label || selectedLabel,
+      };
+
+      setRevealed(st);
+
+      try {
+        const okRes = res as RevealOk;
+        const payload = {
+          key: okRes.key,
+          key_type: okRes.key_type_label || okRes.key_type_code || selectedLabel,
+          created_at: okRes.created_at || new Date().toISOString(),
+          expires_at: okRes.expires_at,
+          ip_hash: okRes.ip_hash || null,
+          session_id: okRes.session_id || null,
+        };
+        localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setError(friendlyRevealError(e?.message ?? "UNAUTHORIZED"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!claimToken || !outToken) return;
+    if (revealed) return;
+    void revealOnce();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimToken, outToken]);
 
   async function closeAndReturn() {
     try {
@@ -135,14 +170,17 @@ export function FreeClaimPage() {
     } catch {
       // ignore
     } finally {
-      // Clear local flow storage so reload cannot mint again
       clearFreeFlowStorage();
-      try { localStorage.removeItem("free_claim_token"); } catch { /* ignore */ }
+      try {
+        localStorage.removeItem("free_claim_token");
+      } catch {
+        /* ignore */
+      }
       nav("/free", { replace: true });
     }
   }
 
-  // Start countdown ONLY AFTER key is revealed (per requirement).
+  // Auto return ONLY AFTER key is revealed.
   useEffect(() => {
     if (!revealed) return;
     const t = window.setTimeout(() => {
@@ -161,7 +199,6 @@ export function FreeClaimPage() {
               <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
               <div>
                 <CardTitle>Nhận key</CardTitle>
-                <CardDescription>Nhấn Verify để hiện key. Sau khi có key, reload sẽ KHÔNG tạo key mới.</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -194,64 +231,14 @@ export function FreeClaimPage() {
 
             {!revealed ? (
               <div className="space-y-3">
-                {cfg?.turnstile_enabled && cfg.turnstile_site_key ? (
-                  <TurnstileWidget siteKey={cfg.turnstile_site_key} onToken={setTurnToken} />
-                ) : null}
 
                 <Button
                   className="w-full"
                   disabled={!canVerify || loading}
-                  onClick={async () => {
-                    if (!claimToken || !outToken) return;
-                    setLoading(true);
-                    setError(null);
-                    try {
-                      const fp = getOrCreateFingerprint();
-                      const res = await postFunction<RevealOk | RevealErr>("/free-reveal", {
-                        claim_token: claimToken,
-                        out_token: outToken,
-                        fingerprint: fp,
-                        turnstile_token: cfg?.turnstile_enabled ? turnToken : null,
-                      });
-
-                      if (!res.ok) {
-                        setError(friendlyRevealError((res as RevealErr).msg || "UNAUTHORIZED"));
-                        return;
-                      }
-
-                      const st: RevealedState = {
-                        key: (res as RevealOk).key,
-                        expiresAt: (res as RevealOk).expires_at,
-                        label: (res as RevealOk).key_type_label || selectedLabel,
-                      };
-
-                      setRevealed(st);
-
-                      try {
-                        const okRes = res as RevealOk;
-                        const payload = {
-                          key: okRes.key,
-                          key_type: okRes.key_type_label || okRes.key_type_code || selectedLabel,
-                          created_at: okRes.created_at || new Date().toISOString(),
-                          expires_at: okRes.expires_at,
-                          ip_hash: okRes.ip_hash || null,
-                          session_id: okRes.session_id || null,
-                        };
-                        localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
-                      } catch {
-                        // ignore
-                      }
-                    } catch (e: any) {
-                      setError(friendlyRevealError(e?.message ?? "UNAUTHORIZED"));
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
+                  onClick={revealOnce}
                 >
                   {loading ? "Đang xác minh…" : "Xác minh"}
                 </Button>
-
-                <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
               </div>
             ) : (
               <div className="space-y-3">
@@ -274,8 +261,6 @@ export function FreeClaimPage() {
                 >
                   Copy
                 </Button>
-
-                <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
                 <div className="text-center text-xs text-muted-foreground">
                   Tự động quay lại sau {returnSeconds}s nếu không bấm Copy.
