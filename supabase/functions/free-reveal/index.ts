@@ -205,6 +205,7 @@ Deno.serve(async (req) => {
 
   // TS: capture stable, non-null values for nested helpers
   const sessionId = sess.session_id;
+  const revealedLicenseId = (sess as any).revealed_license_id as string | null;
 
   const now = Date.now();
   const expMs = Date.parse(sess.expires_at);
@@ -256,7 +257,7 @@ Deno.serve(async (req) => {
   }
 
   async function findExistingIssuedKey() {
-    const directId = (sess.revealed_license_id as string | null) ?? null;
+    const directId = revealedLicenseId ?? null;
     if (directId) {
       const lic = await sb.from("licenses").select("key,expires_at").eq("id", directId).maybeSingle();
       if (lic.data?.key) {
