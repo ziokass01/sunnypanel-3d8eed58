@@ -98,7 +98,7 @@ export function FreeGatePage() {
     const meta = getFreeStartMeta();
     if (!outToken || !meta?.startedAtMs) {
       setStatus("error");
-      setMessage("Bạn chưa bấm Get Key. Hãy quay lại trang Get Key và làm lại.");
+      setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
       return;
     }
 
