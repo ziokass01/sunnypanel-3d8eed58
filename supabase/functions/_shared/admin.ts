@@ -35,6 +35,7 @@ export async function assertAdmin(req: Request): Promise<{ ok: true } | { ok: fa
 
   const authed = createClient(supabaseUrl, apiKey, {
     auth: { persistSession: false },
+    global: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
   });
 
   const { data: userData, error: userErr } = await authed.auth.getUser(token);
