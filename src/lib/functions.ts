@@ -19,15 +19,25 @@ export async function getFunction<T>(
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      apikey: anonKey,
-      Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
-    },
-    // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+      },
+      // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
+      credentials: "include",
+    });
+  } catch (e: any) {
+    // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
+    const err = new Error(
+      "Failed to fetch. Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS Allowed Origins đã thêm https://mityangho.id.vn, (3) function đã deploy đúng project.",
+    ) as Error & { code?: string };
+    err.code = "FETCH_FAILED";
+    throw err;
+  }
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
@@ -50,18 +60,27 @@ export async function postFunction<T>(
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: anonKey,
-      Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
-      ...(opts?.headers ?? {}),
-    },
-    // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
-    credentials: "include",
-    body: JSON.stringify(body ?? {}),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+        ...(opts?.headers ?? {}),
+      },
+      // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
+      credentials: "include",
+      body: JSON.stringify(body ?? {}),
+    });
+  } catch {
+    const err = new Error(
+      "Failed to fetch. Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS Allowed Origins đã thêm https://mityangho.id.vn, (3) function đã deploy đúng project.",
+    ) as Error & { code?: string };
+    err.code = "FETCH_FAILED";
+    throw err;
+  }
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {

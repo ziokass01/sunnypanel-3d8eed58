@@ -409,9 +409,14 @@ const disableAllKeyTypes = useMutation({
     },
     onError: (e: any) => {
       const msg = String(e?.message ?? "Error");
+      const isFetch = msg.toLowerCase().includes("failed to fetch");
       toast({
         title: "Test failed",
-        description: msg.includes("MISCONFIG") ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)` : msg,
+        description: isFetch
+          ? `${msg}. Gợi ý: kiểm tra CORS Allowed Origins + backend URL/project có đồng bộ và function admin-free-test đã deploy đúng project.`
+          : msg.includes("MISCONFIG")
+            ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)`
+            : msg,
         variant: "destructive",
       });
     },
