@@ -45,6 +45,14 @@ export async function assertAdmin(req: Request): Promise<{ ok: true } | { ok: fa
   }
 
   const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS"));
+  if (!adminEmails.size) {
+    return {
+      ok: false,
+      status: 500,
+      body: { ok: false, code: "SERVER_MISCONFIG_MISSING_ADMIN_EMAILS", msg: "Missing ADMIN_EMAILS secret" },
+    };
+  }
+
   const userEmail = String(user.email ?? "").toLowerCase();
   const emailAllowed = userEmail ? adminEmails.has(userEmail) : false;
 

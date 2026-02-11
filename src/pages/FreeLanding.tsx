@@ -83,8 +83,13 @@ export function FreeLandingPage() {
         const first = c.key_types?.[0]?.code ?? "";
         setSelected(first);
       })
-      .catch((e) => {
+      .catch((e: any) => {
         if (cancelled) return;
+        const code = String(e?.code ?? "").trim();
+        if (code === "FREE_NOT_READY") {
+          setErr("Hệ thống FREE chưa cấu hình xong backend (FREE_NOT_READY). Owner cần set secrets + chạy migration FREE.");
+          return;
+        }
         setErr(e?.message ?? "Failed to load config");
       });
     return () => {
@@ -222,13 +227,19 @@ export function FreeLandingPage() {
                   const code = String(e?.code ?? "").trim();
                   if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
                     setErr(
-                      debugMode
-                        ? "Hệ thống FREE chưa đủ migration. Owner cần chạy migration FREE mới nhất trong Supabase SQL Editor."
-                        : "Hệ thống FREE chưa sẵn sàng. Vui lòng thử lại sau.",
+                      "SERVER_RATE_LIMIT_MISCONFIG: Database thiếu RPC/bảng rate-limit cho FREE. Owner cần chạy migration FREE (đặc biệt: 20260206150000_free_schema_runtime_fix.sql + các migration free_rate_limit_*).",
                     );
-                  } else {
-                    setErr(e?.message ?? "Start failed");
+                    return;
                   }
+                  if (code === "FREE_NOT_READY") {
+                    setErr("FREE_NOT_READY: Backend FREE chưa sẵn sàng (thiếu secrets hoặc thiếu bảng cấu hình). Owner cần kiểm tra secrets + migration.");
+                    return;
+                  }
+                  if (code === "UNAUTHORIZED") {
+                    setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
+                    return;
+                  }
+                  setErr(e?.message ?? "Start failed");
                 } finally {
                   setLoading(false);
                 }
