@@ -32,6 +32,9 @@ function isValidClaimToken(tok: string) {
 function friendlyRevealError(msg: string) {
   const m = String(msg || "").trim();
   if (!m) return "Xác thực không thành công. Vui lòng làm lại.";
+  if (m === "Failed to fetch" || m.toLowerCase().includes("failed to fetch")) {
+    return "Không gọi được backend (Failed to fetch). Gợi ý: kiểm tra CORS Allowed Origins + backend URL/project có đồng bộ.";
+  }
   if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại Get Key và vượt link lại.";
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong 24 giờ. Vui lòng thử lại sau.";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
