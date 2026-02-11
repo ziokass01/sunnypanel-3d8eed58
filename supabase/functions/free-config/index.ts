@@ -40,7 +40,15 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return jsonResponse({ error: "Missing SUPABASE secrets" }, 500);
+    return jsonResponse(
+      {
+        ok: false,
+        code: "FREE_NOT_READY",
+        msg: "Missing backend secret SUPABASE_SERVICE_ROLE_KEY",
+        missing: [!supabaseUrl ? "SUPABASE_URL" : null, !serviceRole ? "SUPABASE_SERVICE_ROLE_KEY" : null].filter(Boolean),
+      },
+      503,
+    );
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -55,7 +63,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (sErr) {
-    return jsonResponse({ error: sErr.message }, 500);
+    return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: sErr.message }, 503);
   }
 
   const rawOutbound = settings?.free_outbound_url;
@@ -77,7 +85,7 @@ Deno.serve(async (req) => {
     .order("sort_order", { ascending: true });
 
   if (kErr) {
-    return jsonResponse({ error: kErr.message }, 500);
+    return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: kErr.message }, 503);
   }
 
   const TURNSTILE_SITE_KEY = Deno.env.get("TURNSTILE_SITE_KEY") ?? "";
@@ -92,6 +100,7 @@ Deno.serve(async (req) => {
   const destination_gate_url = "https://mityangho.id.vn/free/gate";
 
   const body = {
+    ok: true,
     public_base_url: baseUrl || null,
     destination_gate_url,
 

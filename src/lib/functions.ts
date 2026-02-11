@@ -25,13 +25,17 @@ export async function getFunction<T>(
       apikey: anonKey,
       Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
     },
-    credentials: "omit",
+    // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
+    credentials: "include",
   });
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const msg = (data && (data.msg || data.error)) || `Request failed (${res.status})`;
-    throw new Error(msg);
+    const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
+    const err = new Error(String(msg)) as Error & { code?: string; status?: number };
+    if (data?.code) err.code = String(data.code);
+    err.status = res.status;
+    throw err;
   }
   return data as T;
 }
@@ -54,14 +58,15 @@ export async function postFunction<T>(
       Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
       ...(opts?.headers ?? {}),
     },
-    credentials: "omit",
+    // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
+    credentials: "include",
     body: JSON.stringify(body ?? {}),
   });
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const msg = (data && (data.msg || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(msg) as Error & { code?: string; status?: number };
+    const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
+    const err = new Error(String(msg)) as Error & { code?: string; status?: number };
     if (data?.code) err.code = String(data.code);
     err.status = res.status;
     throw err;

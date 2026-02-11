@@ -2,6 +2,9 @@ const BASE_ALLOWED_HOSTS = new Set([
   "mityangho.id.vn",
   "www.mityangho.id.vn",
   "sunnypanel.lovable.app",
+  // Lovable preview/review subdomains (stable allow-list would be too brittle)
+  "preview--sunnypanel.lovable.app",
+  "review--sunnypanel.lovable.app",
   "localhost",
   "127.0.0.1",
 ]);
@@ -18,6 +21,12 @@ function toHostname(raw: string): string | null {
 export function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
   const originHost = toHostname(origin);
   const publicHost = toHostname(publicBaseUrl);
+
+  // Allow any Lovable preview subdomain (e.g. id-preview--...lovable.app)
+  // Security note: admin endpoints are still protected by auth in-code.
+  if (originHost && originHost.endsWith(".lovable.app")) {
+    return origin;
+  }
 
   const allowedHosts = new Set(BASE_ALLOWED_HOSTS);
   if (publicHost) allowedHosts.add(publicHost);
