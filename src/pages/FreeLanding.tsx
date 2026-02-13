@@ -87,7 +87,13 @@ export function FreeLandingPage() {
         if (cancelled) return;
         const code = String(e?.code ?? "").trim();
         if (code === "FREE_NOT_READY") {
-          setErr("Hệ thống FREE chưa cấu hình xong backend (FREE_NOT_READY). Owner cần set secrets + chạy migration FREE.");
+          setErr("FREE_NOT_READY: Backend FREE chưa sẵn sàng (thiếu secrets hoặc thiếu bảng cấu hình). Owner cần set SUPABASE_SERVICE_ROLE_KEY + chạy migrations FREE.");
+          return;
+        }
+        if (code === "FETCH_FAILED") {
+          setErr(
+            "Failed to fetch: Không gọi được backend. Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.",
+          );
           return;
         }
         setErr(e?.message ?? "Failed to load config");

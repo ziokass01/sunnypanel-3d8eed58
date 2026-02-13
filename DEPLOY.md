@@ -7,11 +7,12 @@
 ---
 
 ## 0) Chốt 1 backend project duy nhất (tránh “Failed to fetch”)
-Hiện repo có **nguy cơ lệch project**:
-- Frontend đang gọi theo `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`).
-- File `supabase/config.toml` có `project_id` khác → khi dùng CLI/deploy có thể đẩy migrations/functions sang project khác.
+Nếu **project mismatch** (frontend gọi 1 project, backend functions/migrations lại ở project khác) thì browser sẽ báo **Failed to fetch**.
 
-✅ Yêu cầu: đảm bảo **.env và backend deploy** cùng 1 project.
+✅ Checklist:
+- Frontend dùng `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PROJECT_ID`).
+- Backend CLI phải `link` đúng **cùng project ref** trước khi `db push`/deploy functions.
+- Không sửa tay `supabase/config.toml` trong môi trường Lovable Cloud; hãy đảm bảo CLI đang link đúng project ref.
 
 ---
 

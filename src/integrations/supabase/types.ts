@@ -65,6 +65,36 @@ export type Database = {
         }
         Relationships: []
       }
+      free_fp_rate_limits: {
+        Row: {
+          count: number
+          created_at: string
+          fp_hash: string
+          id: string
+          route: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          fp_hash: string
+          id?: string
+          route: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          fp_hash?: string
+          id?: string
+          route?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       free_ip_rate_limits: {
         Row: {
           count: number
@@ -533,6 +563,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_free_fp_rate_limit: {
+        Args: {
+          p_fp_hash: string
+          p_limit?: number
+          p_route: string
+          p_window_seconds?: number
+        }
+        Returns: {
+          allowed: boolean
+          current_count: number
+          window_start: string
+        }[]
+      }
       check_free_ip_rate_limit: {
         Args: {
           p_ip_hash: string

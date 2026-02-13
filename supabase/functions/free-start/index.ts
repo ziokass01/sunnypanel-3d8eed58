@@ -87,6 +87,7 @@ Deno.serve(async (req) => {
     "Access-Control-Allow-Origin": allowOrigin,
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
     "Access-Control-Max-Age": "86400",
   };
@@ -227,7 +228,14 @@ Deno.serve(async (req) => {
           keyTypeCode: key_type_code,
           lastError: "SERVER_RATE_LIMIT_MISCONFIG",
         });
-        return jsonResponse({ ok: false, msg: "Server thiếu migration FREE (run: 20260206150000_free_schema_runtime_fix.sql)", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
+         return jsonResponse(
+           {
+             ok: false,
+             code: "SERVER_RATE_LIMIT_MISCONFIG",
+             msg: "Server thiếu migration FREE (thiếu RPC/bảng rate-limit). Cần chạy: 20260205101000_free_schema.sql, 20260205170000_free_rate_limit_and_admin_controls.sql, 20260206150000_free_schema_runtime_fix.sql",
+           },
+           503,
+         );
       }
       await safeLogSecurity("rate_limit_error", { key_type_code, error: rl.error.message || "unknown" }, ipHash, fpHash);
       await safeInsertStartErrorSession(sb, {
@@ -272,7 +280,14 @@ Deno.serve(async (req) => {
             keyTypeCode: key_type_code,
             lastError: "SERVER_RATE_LIMIT_MISCONFIG",
           });
-          return jsonResponse({ ok: false, msg: "Server thiếu migration FREE (run: 20260206150000_free_schema_runtime_fix.sql)", code: "SERVER_RATE_LIMIT_MISCONFIG" }, 503);
+           return jsonResponse(
+             {
+               ok: false,
+               code: "SERVER_RATE_LIMIT_MISCONFIG",
+               msg: "Server thiếu migration FREE (thiếu RPC/bảng rate-limit). Cần chạy: 20260205101000_free_schema.sql, 20260205170000_free_rate_limit_and_admin_controls.sql, 20260206150000_free_schema_runtime_fix.sql",
+             },
+             503,
+           );
         }
         await safeInsertStartErrorSession(sb, {
           ipHash,
