@@ -13,7 +13,7 @@ function friendlyGateError(msg: string) {
   const m = String(msg || "").trim();
   if (!m) return "Xác thực không thành công. Vui lòng vượt link lại.";
   if (m === "Failed to fetch" || m.toLowerCase().includes("failed to fetch")) {
-    return "Không gọi được backend (Failed to fetch). Gợi ý: kiểm tra CORS Allowed Origins đã thêm domain hiện tại và backend URL/project không bị lệch.";
+    return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
   }
   if (m === "TOO_FAST" || m.startsWith("TOO_FAST") || m === "VERIFY_FAILED") {
     return "Xác thực không thành công. Vui lòng vượt link lại rồi thử lại.";
