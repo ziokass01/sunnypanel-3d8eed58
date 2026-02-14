@@ -10,9 +10,12 @@
 Nếu **project mismatch** (frontend gọi 1 project, backend functions/migrations lại ở project khác) thì browser sẽ báo **Failed to fetch**.
 
 ✅ Checklist:
-- Frontend dùng `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PROJECT_ID`).
-- Backend CLI phải `link` đúng **cùng project ref** trước khi `db push`/deploy functions.
-- Không sửa tay `supabase/config.toml` trong môi trường Lovable Cloud; hãy đảm bảo CLI đang link đúng project ref.
+- Project ref chuẩn (đang dùng): `cbdokxhoucczyrpcjvxf`.
+- Frontend `.env` phải trùng: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PROJECT_ID` (và `VITE_SUPABASE_ANON_KEY` nếu có; hiện đang dùng `VITE_SUPABASE_PUBLISHABLE_KEY`).
+- CI/CLI phải `link` đúng **cùng project ref** trước khi `db push`/deploy functions.
+- Nếu bạn deploy qua GitHub Actions: đảm bảo secrets `SUPABASE_PROJECT_REF=cbdokxhoucczyrpcjvxf` và workflow log ra project ref đang deploy.
+
+> Gặp “Failed to fetch”: 90% do **CORS** hoặc **deploy nhầm project**.
 
 ---
 
