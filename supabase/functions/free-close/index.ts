@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
-import { resolveCorsOrigin } from "../_shared/cors.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -21,26 +21,19 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Vary": "Origin",
-    "Access-Control-Allow-Methods": "POST,OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Max-Age": "86400",
-  };
+  const cors = corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS");
   const jsonResponse = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), {
       status,
       headers: {
-        ...corsHeaders,
+        ...cors,
         "Content-Type": "application/json",
         "Cache-Control": "no-store",
       },
     });
 
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    return new Response(null, { status: 204, headers: cors });
   }
 
   if (req.method !== "POST") {

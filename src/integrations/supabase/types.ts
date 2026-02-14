@@ -211,6 +211,66 @@ export type Database = {
         }
         Relationships: []
       }
+      licenses_free_fp_rate_limits: {
+        Row: {
+          count: number
+          created_at: string
+          fp_hash: string
+          id: string
+          route: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          fp_hash: string
+          id?: string
+          route: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          fp_hash?: string
+          id?: string
+          route?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      licenses_free_ip_rate_limits: {
+        Row: {
+          count: number
+          created_at: string
+          id: string
+          ip_hash: string
+          route: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          id?: string
+          ip_hash: string
+          route: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          id?: string
+          ip_hash?: string
+          route?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       licenses_free_issues: {
         Row: {
           created_at: string

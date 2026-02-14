@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
-import { resolveCorsOrigin } from "../_shared/cors.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -69,18 +69,12 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
+  const allowOrigin = corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS")["Access-Control-Allow-Origin"];
 
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": allowOrigin,
-        "Vary": "Origin",
-        "Access-Control-Allow-Methods": "POST,OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
-        "Access-Control-Max-Age": "86400",
-      },
+      headers: corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS"),
     });
   }
 
