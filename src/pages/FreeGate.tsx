@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
-import { getFreeStartMeta, getOrCreateFingerprint, getOutToken } from "@/features/free/fingerprint";
+import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setOutToken } from "@/features/free/fingerprint";
 
 type GateOk = { ok: true; claim_token: string };
 type GateErr = { ok: false; msg: string };
@@ -14,6 +14,9 @@ function friendlyGateError(msg: string) {
   if (!m) return "Xác thực không thành công. Vui lòng vượt link lại.";
   if (m === "Failed to fetch" || m.toLowerCase().includes("failed to fetch")) {
     return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
+  }
+  if (m === "REFERRER_REQUIRED") {
+    return "REFERRER_REQUIRED: Bạn phải đi qua Link4M để referrer hợp lệ. Một số trình duyệt/shortlink có thể chặn referrer.";
   }
   if (m === "TOO_FAST" || m.startsWith("TOO_FAST") || m === "VERIFY_FAILED") {
     return "Xác thực không thành công. Vui lòng vượt link lại rồi thử lại.";
@@ -28,11 +31,33 @@ function friendlyGateError(msg: string) {
 
 export function FreeGatePage() {
   const nav = useNavigate();
+  const [sp] = useSearchParams();
   const [cfgReturn, setCfgReturn] = useState<number>(10);
   const [status, setStatus] = useState<"working" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
 
-  const outToken = useMemo(() => getOutToken(), []);
+  const outToken = useMemo(() => {
+    const t = (sp.get("t") || "").trim();
+    if (t) return t;
+
+    const fromPrimary = (getOutToken() || "").trim();
+    if (fromPrimary) return fromPrimary;
+
+    // Fallbacks for older keys / cross-browser flows
+    try {
+      const fb1 = (localStorage.getItem("free_out_token_v1") || "").trim();
+      if (fb1) return fb1;
+      const fb2 = (localStorage.getItem("free_out_token") || "").trim();
+      if (fb2) return fb2;
+      const fb3 = (localStorage.getItem("free_out_token") || "").trim();
+      if (fb3) return fb3;
+    } catch {
+      // ignore
+    }
+
+    return "";
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp.toString()]);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,16 +84,26 @@ export function FreeGatePage() {
       return;
     }
 
+    // Persist token for claim/reload flows
+    setOutToken(tok);
+    try {
+      localStorage.setItem("free_out_token_v1", tok);
+    } catch {
+      // ignore
+    }
+
     setStatus("working");
     setMessage("Đang xác thực…");
 
     try {
       const fp = getOrCreateFingerprint();
       const referrer = document.referrer || "";
+      const current_url = window.location.href;
       const res = await postFunction<GateOk | GateErr>("/free-gate", {
         out_token: tok,
         fingerprint: fp,
         referrer,
+        current_url,
       });
 
       if ((res as GateOk).ok) {

@@ -613,7 +613,12 @@ const disableAllKeyTypes = useMutation({
                 inputMode="url"
               />
               <div className="text-xs text-muted-foreground">
-                Đây là link bạn đã rút gọn (Link4M) để dẫn người dùng sang /free/gate.
+                Đây là link Link4M outbound. Hệ thống sẽ tự build URL dẫn về Gate bằng template:
+                <div className="mt-1 font-mono text-xs">
+                  • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
+                </div>
+                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.com/PkY7X?url={"{GATE_URL_ENC}"}</div>
+                <div className="mt-1">Nếu không có placeholder, hệ thống sẽ tự append <span className="font-mono">?url=&lt;gate_url&gt;</span>.</div>
               </div>
             </div>
 
@@ -669,9 +674,10 @@ const disableAllKeyTypes = useMutation({
             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
               <div>
                 <div className="font-medium">Yêu cầu referrer Link4M</div>
-                <div className="text-xs text-muted-foreground">
-                  Nếu bật: gate sẽ kiểm tra document.referrer (có thể bị spoof, nhưng tăng độ khó).
-                </div>
+                 <div className="text-xs text-muted-foreground">
+                   Nếu bật: gate sẽ yêu cầu <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>.
+                   Referrer có thể bị browser/shortlink chặn (policy/redirect), nên chỉ bật khi bạn chắc user bắt buộc đi qua Link4M.
+                 </div>
               </div>
               <Switch checked={requireRef} onCheckedChange={setRequireRef} />
             </div>

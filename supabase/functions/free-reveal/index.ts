@@ -69,47 +69,42 @@ const BodySchema = z.object({
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS")["Access-Control-Allow-Origin"];
+  const cors = corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS");
+
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
 
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS"),
-    });
+    return new Response(null, { status: 204, headers: cors });
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ ok: false, msg: "METHOD_NOT_ALLOWED" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "INVALID_INPUT" }, 200);
   }
 
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ ok: false, msg: "INVALID_INPUT" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "INVALID_INPUT" }, 200);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
-    return new Response(JSON.stringify({ ok: false, msg: "SERVER_MISCONFIG" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "SERVER_MISCONFIG" }, 500);
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -124,18 +119,10 @@ Deno.serve(async (req) => {
     .eq("id", 1)
     .maybeSingle();
 
-  if (sErr) {
-    return new Response(JSON.stringify({ ok: false, msg: sErr.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
-  }
+  if (sErr) return json({ ok: false, msg: sErr.message }, 500);
 
   if (!Boolean(settings?.free_enabled ?? true)) {
-    return new Response(JSON.stringify({ ok: false, msg: "CLOSED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "CLOSED" }, 200);
   }
 
   const freeReturnSeconds = Math.max(10, Number(settings?.free_return_seconds ?? 60));
@@ -146,19 +133,9 @@ Deno.serve(async (req) => {
   const turnstile_enabled = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
   if (turnstile_enabled) {
     const token = (parsed.data.turnstile_token ?? "")?.trim();
-    if (!token) {
-      return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-      });
-    }
+    if (!token) return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
     const ok = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
-    if (!ok) {
-      return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-      });
-    }
+    if (!ok) return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
   const claimHash = await sha256Hex(parsed.data.claim_token);
@@ -175,10 +152,7 @@ Deno.serve(async (req) => {
     .limit(1)
     .maybeSingle();
   if (blocked.data?.id && isActiveBlockUntil((blocked.data as any).blocked_until)) {
-    return new Response(JSON.stringify({ ok: false, msg: "BLOCKED" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "BLOCKED" }, 403);
   }
 
   // Load session by out_token_hash FIRST (so we can handle already-revealed idempotently).
@@ -190,37 +164,21 @@ Deno.serve(async (req) => {
     .eq("out_token_hash", outHash)
     .maybeSingle();
 
-  if (qErr || !sess) {
-    return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
-  }
+  if (qErr || !sess) return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
 
-  // TS: capture stable, non-null values for nested helpers
   const sessionId = sess.session_id;
   const revealedLicenseId = (sess as any).revealed_license_id as string | null;
 
   const now = Date.now();
   const expMs = Date.parse(sess.expires_at);
-  if (!isFinite(expMs) || expMs < now) {
-    return new Response(JSON.stringify({ ok: false, msg: "SESSION_EXPIRED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+  if (!isFinite(expMs) || expMs < now) return json({ ok: false, msg: "SESSION_EXPIRED" }, 200);
+
+  if (sess.status === "closed" || Boolean((sess as any).copied_at)) {
+    return json({ ok: false, msg: "SESSION_CLOSED" }, 200);
   }
 
-  
-  // If user already copied OR session was closed/expired by client timeout, do not reveal again.
-  if (sess.status === "closed" || Boolean(sess.copied_at)) {
-    return new Response(JSON.stringify({ ok: false, msg: "SESSION_CLOSED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
-  }
-  const closeDeadlineMs = sess.close_deadline_at ? Date.parse(sess.close_deadline_at) : 0;
+  const closeDeadlineMs = (sess as any).close_deadline_at ? Date.parse((sess as any).close_deadline_at) : 0;
   if (closeDeadlineMs && isFinite(closeDeadlineMs) && closeDeadlineMs < now) {
-    // Hard-close server-side after deadline to prevent "treo tab" abuse
     await sb
       .from("licenses_free_sessions")
       .update({
@@ -230,18 +188,12 @@ Deno.serve(async (req) => {
         claim_expires_at: null,
       })
       .eq("session_id", sessionId);
-    return new Response(JSON.stringify({ ok: false, msg: "SESSION_CLOSED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "SESSION_CLOSED" }, 200);
   }
 
-// Device binding
+  // Device binding
   if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
-    return new Response(JSON.stringify({ ok: false, msg: "SESSION_BIND_MISMATCH" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "SESSION_BIND_MISMATCH" }, 200);
   }
 
   async function getKeyTypeLabel(code: string | null) {
@@ -254,9 +206,7 @@ Deno.serve(async (req) => {
     const directId = revealedLicenseId ?? null;
     if (directId) {
       const lic = await sb.from("licenses").select("key,expires_at").eq("id", directId).maybeSingle();
-      if (lic.data?.key) {
-        return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? null) as string };
-      }
+      if (lic.data?.key) return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? null) as string };
     }
 
     const issue = await sb
@@ -276,32 +226,17 @@ Deno.serve(async (req) => {
     return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? issue.data?.expires_at) as string };
   }
 
-  // If already revealed, return the SAME key (idempotent; prevents infinite key minting by reload/spam).
+  // Already revealed => return same key.
   if (Number(sess.reveal_count ?? 0) > 0 || sess.status === "revealed" || sess.status === "revealing") {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
     if (existing) {
-      return new Response(JSON.stringify({
-        ok: true,
-        key: existing.key,
-        expires_at: existing.expires_at,
-        key_type_label,
-        key_type_code: sess.key_type_code ?? null,
-        created_at: new Date().toISOString(),
-        session_id: sessionId,
-        ip_hash: ipHash,
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-      });
+      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }, 200);
     }
-    return new Response(JSON.stringify({ ok: false, msg: "ALREADY_REVEALED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "ALREADY_REVEALED" }, 200);
   }
 
-  // Require a valid claim token when NOT yet revealed.
+  // Require valid claim token when NOT yet revealed.
   const claimExpMs = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
   if (
     sess.status !== "gate_ok" ||
@@ -310,11 +245,8 @@ Deno.serve(async (req) => {
     !claimExpMs ||
     claimExpMs < now
   ) {
-    await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sess.session_id);
-    return new Response(JSON.stringify({ ok: false, msg: claimExpMs && claimExpMs < now ? "CLAIM_EXPIRED" : "UNAUTHORIZED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sessionId);
+    return json({ ok: false, msg: claimExpMs && claimExpMs < now ? "CLAIM_EXPIRED" : "UNAUTHORIZED" }, 200);
   }
 
   // Daily limit per fingerprint (admin-config)
@@ -328,11 +260,8 @@ Deno.serve(async (req) => {
 
   const used = quota.count ?? 0;
   if (used >= dailyLimit) {
-    await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA" }).eq("session_id", sess.session_id);
-    return new Response(JSON.stringify({ ok: false, msg: "RATE_LIMIT" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA" }).eq("session_id", sessionId);
+    return json({ ok: false, msg: "RATE_LIMIT" }, 200);
   }
 
   // Acquire lock BEFORE inserting license (prevents multi-mint bug).
@@ -344,7 +273,6 @@ Deno.serve(async (req) => {
       reveal_count: 1,
       revealed_at: lockIso,
       last_error: null,
-      // burn claim token to prevent reuse
       claim_token_hash: null,
       claim_expires_at: null,
     })
@@ -356,27 +284,17 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (!lock.data) {
-    // Someone else already revealed/locked; return existing key (idempotent).
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
-    if (existing) {
-      return new Response(JSON.stringify({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-      });
-    }
-    return new Response(JSON.stringify({ ok: false, msg: "UNAUTHORIZED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }, 200);
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
-  // Compute expiration based on selected key type (seconds)
   const dur = Math.max(60, Number(sess.duration_seconds ?? 0));
   const expires_at = new Date(Date.now() + dur * 1000).toISOString();
   const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
 
-  // Mint a license row compatible with verify-key (lookup = public.licenses)
+  // Mint license
   let inserted: { id: string; key: string } | null = null;
   for (let attempt = 0; attempt < 12; attempt++) {
     const key = makeKey();
@@ -387,8 +305,7 @@ Deno.serve(async (req) => {
         is_active: true,
         max_devices: 1,
         expires_at,
-        // Keep schema minimal: public.licenses only has (key, expires_at, max_devices, is_active, note)
-        note: sess.key_type_code ? `FREE_${sess.key_type_code.toUpperCase()}` : "FREE",
+        note: sess.key_type_code ? `FREE_${String(sess.key_type_code).toUpperCase()}` : "FREE",
       })
       .select("id,key")
       .single();
@@ -399,19 +316,13 @@ Deno.serve(async (req) => {
   }
 
   if (!inserted) {
-    // Roll back lock so user can retry (but do not allow double-mint)
     await sb
       .from("licenses_free_sessions")
       .update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "INSERT_FAILED" })
       .eq("session_id", sessionId);
-
-    return new Response(JSON.stringify({ ok: false, msg: "SERVER_ERROR" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 500);
   }
 
-  // Mark session revealed
   await sb
     .from("licenses_free_sessions")
     .update({
@@ -425,7 +336,6 @@ Deno.serve(async (req) => {
     })
     .eq("session_id", sessionId);
 
-  // Log issue (mask only)
   await sb.from("licenses_free_issues").insert({
     license_id: inserted.id,
     key_mask: maskKey(inserted.key),
@@ -436,17 +346,17 @@ Deno.serve(async (req) => {
     ua_hash: uaHash,
   });
 
-  return new Response(JSON.stringify({
-    ok: true,
-    key: inserted.key,
-    expires_at,
-    key_type_label,
-    key_type_code: sess.key_type_code ?? null,
-    created_at: new Date().toISOString(),
-    session_id: sessionId,
-    ip_hash: ipHash,
-  }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": allowOrigin, "Vary": "Origin" },
-  });
+  return json(
+    {
+      ok: true,
+      key: inserted.key,
+      expires_at,
+      key_type_label,
+      key_type_code: sess.key_type_code ?? null,
+      created_at: new Date().toISOString(),
+      session_id: sessionId,
+      ip_hash: ipHash,
+    },
+    200,
+  );
 });

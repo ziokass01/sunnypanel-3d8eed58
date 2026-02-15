@@ -112,7 +112,8 @@ export function FreeLandingPage() {
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
-  const canGet = Boolean(cfg?.free_outbound_url) && hasTypes && !isClosed && !loading && !missingText;
+  // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
+  const canGet = hasTypes && !isClosed && !loading && !missingText;
 
   return (
     <div className="min-h-svh bg-background">
@@ -169,7 +170,6 @@ export function FreeLandingPage() {
               size="lg"
               disabled={!canGet}
               onClick={async () => {
-                if (!cfg?.free_outbound_url) return;
                 if (!selected) return;
 
                 setLoading(true);

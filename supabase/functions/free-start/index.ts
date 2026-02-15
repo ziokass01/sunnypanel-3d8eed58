@@ -175,12 +175,37 @@ Deno.serve(async (req) => {
     const fallbackOutbound = "https://link4m.com/PkY7X";
 
     const baseUrl = PUBLIC_BASE_URL || "https://mityangho.id.vn";
-    const gate_url = `${baseUrl}/free/gate`;
     const claim_base_url = `${baseUrl}/free/claim`;
 
-    const outbound_url = test_mode ? gate_url : (rawOutbound || fallbackOutbound);
-    if (!outbound_url) return jsonResponse({ ok: false, msg: "MISSING_OUTBOUND_URL" }, 500);
+    // Create a token-based session (expires quickly)
+    const out_token = base64url(32);
+    const out_token_hash = await sha256Hex(out_token);
 
+    // Gate URL MUST include token to survive cross-browser/shortener flows.
+    const gate_url = `${baseUrl}/free/gate?t=${encodeURIComponent(out_token)}`;
+
+    function buildOutboundUrl(outboundBase: string, gateUrl: string) {
+      const tpl = String(outboundBase || "").trim();
+      const g = String(gateUrl || "").trim();
+      if (!tpl) return "";
+
+      if (tpl.includes("{GATE_URL_ENC}")) return tpl.replaceAll("{GATE_URL_ENC}", encodeURIComponent(g));
+      if (tpl.includes("{GATE_URL}")) return tpl.replaceAll("{GATE_URL}", g);
+
+      // Default: append ?url=<encoded gate>
+      try {
+        const u = new URL(tpl);
+        u.searchParams.append("url", g);
+        return u.toString();
+      } catch {
+        // Fallback: naive append
+        return tpl + (tpl.includes("?") ? "&" : "?") + `url=${encodeURIComponent(g)}`;
+      }
+    }
+
+    const outboundBase = rawOutbound || fallbackOutbound;
+    const outbound_url = test_mode ? gate_url : buildOutboundUrl(outboundBase, gate_url);
+    if (!outbound_url) return jsonResponse({ ok: false, msg: "MISSING_OUTBOUND_URL" }, 500);
     // Key type must be enabled
     const { data: kt, error: kErr } = await sb
       .from("licenses_free_key_types")
@@ -317,9 +342,9 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
     }
 
-    // Create a token-based session (expires quickly)
-    const out_token = base64url(32);
-    const out_token_hash = await sha256Hex(out_token);
+    // out_token generated above (must be included in gate_url + stored hashed in session)
+    // const out_token = base64url(32);
+    // const out_token_hash = await sha256Hex(out_token);
 
     const now = new Date();
     const started_at = now.toISOString();
