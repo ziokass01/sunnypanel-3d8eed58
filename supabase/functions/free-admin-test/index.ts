@@ -63,7 +63,9 @@ Deno.serve(async (req) => {
     "Access-Control-Allow-Origin": allowOrigin,
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST,OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
+    "Access-Control-Max-Age": "86400",
   };
   const json = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), {
