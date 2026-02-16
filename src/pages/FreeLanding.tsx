@@ -176,17 +176,21 @@ export function FreeLandingPage() {
                 setErr(null);
                 try {
                   const fp = getOrCreateFingerprint();
-                  const testMode = getFreeTestMode();
+                  // IMPORTANT: test_mode is ONLY for explicit debug flows.
+                  // If someone accidentally left it enabled in localStorage, it would bypass Link4M.
+                  const testMode = debugMode && getFreeTestMode();
                   const session = testMode ? await supabase.auth.getSession() : null;
                   if (testMode && !session?.data?.session?.access_token) {
                     setErr("Test mode yêu cầu đăng nhập admin.");
                     return;
                   }
+
                   const res = await postFunction<StartOk | StartErr>(
                     "/free-start",
                     {
                       key_type_code: selected,
                       fingerprint: fp,
+                      // Only send when debugMode explicitly enabled
                       test_mode: testMode,
                     },
                     {
@@ -213,6 +217,8 @@ export function FreeLandingPage() {
                     minDelaySeconds: Math.max(5, Number(res.min_delay_seconds ?? 25)),
                   });
                   try {
+                    // Keep backward compat, but ensure current key is used by FreeGate fallbacks.
+                    localStorage.setItem("free_out_token_v1", String(res.out_token));
                     localStorage.setItem("free_out_token", String(res.out_token));
                     localStorage.setItem("free_started_at_ms", String(Date.now()));
                     localStorage.setItem("free_min_delay_seconds", String(Math.max(5, Number(res.min_delay_seconds ?? 25))));
