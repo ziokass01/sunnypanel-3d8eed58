@@ -35,7 +35,9 @@ function isActiveBlockUntil(blockedUntil?: string | null) {
 }
 
 const BodySchema = z.object({
-  out_token: z.string().min(8).max(256),
+  // Either provide session_id, or provide out_token (to resolve session)
+  session_id: z.string().uuid().optional(),
+  out_token: z.string().min(8).max(512).optional(),
   fingerprint: z.string().min(6).max(128),
   referrer: z.string().optional().default(""),
   current_url: z.string().optional().default(""),
@@ -94,12 +96,12 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "BAD_REQUEST", msg: "BAD_REQUEST" } satisfies JsonErr, 400);
   }
 
-  const { out_token, fingerprint, referrer, current_url } = parsed.data;
+  const { session_id: bodySid, out_token, fingerprint, referrer, current_url } = parsed.data;
 
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_min_delay_seconds,free_require_link4m_referrer")
+    .select("free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_require_link4m_referrer")
     .eq("id", 1)
     .maybeSingle();
 
@@ -111,40 +113,13 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "CLOSED", msg: "CLOSED" } satisfies JsonErr, 403);
   }
 
-  const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
-  if (requireRef) {
-    const r = String(referrer ?? "").trim();
-    if (!r) {
-      return json(
-        {
-          ok: false,
-          code: "REFERRER_REQUIRED",
-          msg: "REFERRER_REQUIRED",
-          detail: {
-            hint: "Bạn phải đi qua Link4M để document.referrer có giá trị. Một số trình duyệt/shortlink có thể chặn referrer.",
-            current_url,
-          },
-        } satisfies JsonErr,
-        400,
-      );
-    }
-
-    try {
-      const u = new URL(r);
-      const host = (u.hostname || "").toLowerCase();
-      if (!host.includes("link4m")) {
-        return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
-      }
-    } catch {
-      return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
-    }
-  }
-
-  const outHash = await sha256Hex(out_token);
+  // Compute hashes (out_token is optional)
+  const outHash = out_token ? await sha256Hex(out_token) : null;
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
   const ipHash = await sha256Hex(getClientIp(req));
 
+  // Blocklist checks can run before session lookup
   const blocked = await sb
     .from("licenses_free_blocklist")
     .select("id,blocked_until")
@@ -156,14 +131,33 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "BLOCKED", msg: "BLOCKED" } satisfies JsonErr, 403);
   }
 
-  // Find session
-  const { data: sess, error: qErr } = await sb
-    .from("licenses_free_sessions")
-    .select(
-      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at",
-    )
-    .eq("out_token_hash", outHash)
-    .maybeSingle();
+  // Find session (prefer session_id; fallback to out_token)
+  let sess: any = null;
+  let qErr: any = null;
+
+  if (bodySid) {
+    const q = await sb
+      .from("licenses_free_sessions")
+      .select(
+        "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash",
+      )
+      .eq("session_id", bodySid)
+      .maybeSingle();
+    sess = q.data;
+    qErr = q.error;
+  } else if (outHash) {
+    const q = await sb
+      .from("licenses_free_sessions")
+      .select(
+        "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash",
+      )
+      .eq("out_token_hash", outHash)
+      .maybeSingle();
+    sess = q.data;
+    qErr = q.error;
+  } else {
+    return json({ ok: false, code: "BAD_REQUEST", msg: "MISSING_SESSION" } satisfies JsonErr, 400);
+  }
 
   if (qErr) {
     return json({ ok: false, code: "SERVER_ERROR", msg: qErr.message } satisfies JsonErr, 500);
@@ -172,6 +166,13 @@ Deno.serve(async (req) => {
   if (!sess) {
     return json({ ok: false, code: "INVALID_SESSION", msg: "INVALID_SESSION" } satisfies JsonErr, 400);
   }
+
+  // If both provided: enforce that out_token matches session
+  if (outHash && sess.out_token_hash && outHash !== sess.out_token_hash) {
+    return json({ ok: false, code: "INVALID_SESSION", msg: "OUT_TOKEN_MISMATCH" } satisfies JsonErr, 403);
+  }
+
+  const tokenVerified = Boolean(outHash && sess.out_token_hash && outHash === sess.out_token_hash);
 
   // Expired?
   const now = Date.now();
@@ -184,15 +185,52 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "DEVICE_MISMATCH", msg: "DEVICE_MISMATCH" } satisfies JsonErr, 403);
   }
 
+  // Referrer policy (after token verification)
+  const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
+  if (requireRef) {
+    const r = String(referrer ?? "").trim();
+    let hostOk = false;
+    if (r) {
+      try {
+        const u = new URL(r);
+        const host = (u.hostname || "").toLowerCase();
+        hostOk = host.includes("link4m");
+      } catch {
+        hostOk = false;
+      }
+    }
+
+    // If referrer is blocked/empty but gate URL has a valid token for this session => allow.
+    if (!hostOk && !tokenVerified) {
+      if (!r) {
+        return json(
+          {
+            ok: false,
+            code: "REFERRER_REQUIRED",
+            msg: "REFERRER_REQUIRED",
+            detail: {
+              hint:
+                "Referrer bị trống. Bạn cần đi qua Link4M hoặc referrer bị chặn bởi trình duyệt/shortlink. Nếu bạn đi đúng Link4M, hãy thử mở lại bằng cùng 1 trình duyệt.",
+              current_url,
+            },
+          } satisfies JsonErr,
+          400,
+        );
+      }
+      return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
+    }
+  }
+
   if (sess.reveal_count && sess.reveal_count > 0) {
     return json({ ok: false, code: "ALREADY_REVEALED", msg: "ALREADY_REVEALED" } satisfies JsonErr, 200);
   }
 
-  const minDelay = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+  const minDelayRaw = Number((settings as any)?.free_min_delay_enabled === false ? 0 : (settings as any)?.free_min_delay_seconds ?? 0);
+  const minDelay = Math.max(0, minDelayRaw);
   const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
   const startedAtMs = Date.parse(startedAtIso);
   const mustWaitUntil = startedAtMs + minDelay * 1000;
-  if (isFinite(startedAtMs) && now < mustWaitUntil) {
+  if (minDelay > 0 && isFinite(startedAtMs) && now < mustWaitUntil) {
     // Too fast => do NOT allow retry-by-reload.
     const nowIso = new Date().toISOString();
 

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { PublicInfo } from "@/features/free/PublicInfo";
-import { postFunction } from "@/lib/functions";
+import { getFunction, postFunction } from "@/lib/functions";
 import {
   getFreeTestMode,
   getOrCreateFingerprint,
@@ -17,12 +17,13 @@ import { supabase } from "@/integrations/supabase/client";
 type StartOk = {
   ok: true;
   out_token: string;
+  session_id?: string;
   outbound_url: string;
   gate_url: string;
   claim_base_url: string;
   min_delay_seconds: number;
 };
-type StartErr = { ok: false; msg: string; code?: string };
+type StartErr = { ok: false; msg: string; code?: string; detail?: any };
 type LastFreeKey = {
   key: string;
   key_type: string;
@@ -61,6 +62,8 @@ export function FreeLandingPage() {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
+  const [debugStart, setDebugStart] = useState<any>(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   useEffect(() => {
     try {
@@ -203,6 +206,10 @@ export function FreeLandingPage() {
 
                   if (!res.ok) {
                     const r = res as StartErr;
+                    if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
+                      setErr(`${r.code}: ${r.msg}`);
+                      return;
+                    }
                     if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
                       setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
                     } else {
@@ -214,14 +221,22 @@ export function FreeLandingPage() {
                   setOutToken(res.out_token);
                   setFreeStartMeta({
                     startedAtMs: Date.now(),
-                    minDelaySeconds: Math.max(5, Number(res.min_delay_seconds ?? 25)),
+                    minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
                   });
+                  setDebugStart({
+                    session_id: (res as any).session_id ?? null,
+                    gate_url: res.gate_url,
+                    outbound_url: res.outbound_url,
+                    min_delay_seconds: res.min_delay_seconds,
+                    started_at_ms: Date.now(),
+                  });
+
                   try {
                     // Keep backward compat, but ensure current key is used by FreeGate fallbacks.
                     localStorage.setItem("free_out_token_v1", String(res.out_token));
                     localStorage.setItem("free_out_token", String(res.out_token));
                     localStorage.setItem("free_started_at_ms", String(Date.now()));
-                    localStorage.setItem("free_min_delay_seconds", String(Math.max(5, Number(res.min_delay_seconds ?? 25))));
+                    localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
                     localStorage.setItem("free_key_type_code", String(selected));
                   } catch {
                     // ignore
@@ -233,8 +248,18 @@ export function FreeLandingPage() {
                   }
                   setSelectedKeyTypeCode(selected);
 
+                  const outbound = String(res.outbound_url ?? "").trim();
+                  if (!outbound) {
+                    if (testMode) {
+                      window.location.assign(res.gate_url);
+                      return;
+                    }
+                    setErr("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M outbound đúng. Vui lòng báo admin kiểm tra free_outbound_url.");
+                    return;
+                  }
+
                   // Redirect to Link4M outbound
-                  window.location.href = res.outbound_url;
+                  window.location.assign(outbound);
                 } catch (e: any) {
                   const code = String(e?.code ?? "").trim();
                   if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
@@ -282,6 +307,22 @@ export function FreeLandingPage() {
                 <div className="text-xs text-muted-foreground">Hết hạn: {formatVnDateTime(lastFreeKey.expires_at)}</div>
                 <div className="text-xs text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
                 <div className="text-xs text-muted-foreground">Session: {shortHash(lastFreeKey.session_id, 12)}</div>
+              </div>
+            ) : null}
+
+            {debugMode ? (
+              <div className="rounded-md border p-3 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">Advanced / Debug</div>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowDebug((v) => !v)}>
+                    {showDebug ? "Hide" : "Show"}
+                  </Button>
+                </div>
+                {showDebug ? (
+                  <pre className="whitespace-pre-wrap break-words">{JSON.stringify(debugStart, null, 2)}</pre>
+                ) : (
+                  <div className="text-muted-foreground">(Bật để xem session_id / gate_url / outbound_url)</div>
+                )}
               </div>
             ) : null}
           </CardContent>

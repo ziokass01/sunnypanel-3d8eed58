@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
   const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
-  const free_min_delay_seconds = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+  const free_min_delay_seconds = Math.max(0, Number(settings?.free_min_delay_seconds ?? 0));
   const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
   const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
   if (!keyTypes?.length) missing.push("no_key_types_enabled");
   if (!baseUrl) missing.push("public_base_url");
 
-  const destination_gate_url = "https://mityangho.id.vn/free/gate";
+  const destination_gate_url = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
 
   const body = {
     ok: true,
