@@ -7,7 +7,7 @@ import { fetchFreeConfig } from "@/features/free/free-config";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setOutToken } from "@/features/free/fingerprint";
 
 type GateOk = { ok: true; claim_token: string };
-type GateErr = { ok: false; msg: string };
+type GateErr = { ok: false; msg: string; code?: string; detail?: any };
 
 function friendlyGateError(msg: string) {
   const m = String(msg || "").trim();
@@ -16,12 +16,12 @@ function friendlyGateError(msg: string) {
     return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
   }
   if (m === "REFERRER_REQUIRED") {
-    return "REFERRER_REQUIRED: Bạn phải đi qua Link4M để referrer hợp lệ. Một số trình duyệt/shortlink có thể chặn referrer.";
+    return "REFERRER_REQUIRED: Bạn cần đi qua Link4M hoặc trình duyệt đang chặn referrer. Hãy thử mở lại Link4M bằng cùng 1 trình duyệt.";
   }
   if (m === "TOO_FAST" || m.startsWith("TOO_FAST") || m === "VERIFY_FAILED") {
     return "Xác thực không thành công. Vui lòng vượt link lại rồi thử lại.";
   }
-  if (m === "BAD_REFERRER") return "Xác thực không thành công. Bạn chưa vượt link (Link4M).";
+  if (m === "BAD_REFERRER") return "BAD_REFERRER: Referrer không phải Link4M. Nếu bạn đã đi Link4M nhưng bị chặn referrer, hãy thử trình duyệt khác.";
   if (m === "SESSION_EXPIRED") return "Phiên đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
   if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session. Vui lòng quay lại Get Key và làm lại.";
   if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
@@ -36,9 +36,13 @@ export function FreeGatePage() {
   const [status, setStatus] = useState<"working" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
 
+  const query = useMemo(() => sp.toString(), [sp]);
+
+  const sidFromQuery = useMemo(() => (sp.get("sid") || "").trim(), [query]);
+  const tFromQuery = useMemo(() => (sp.get("t") || "").trim(), [query]);
+
   const outToken = useMemo(() => {
-    const t = (sp.get("t") || "").trim();
-    if (t) return t;
+    if (tFromQuery) return tFromQuery;
 
     const fromPrimary = (getOutToken() || "").trim();
     if (fromPrimary) return fromPrimary;
@@ -49,15 +53,14 @@ export function FreeGatePage() {
       if (fb1) return fb1;
       const fb2 = (localStorage.getItem("free_out_token") || "").trim();
       if (fb2) return fb2;
-      const fb3 = (localStorage.getItem("free_out_token") || "").trim();
-      if (fb3) return fb3;
     } catch {
       // ignore
     }
 
     return "";
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp.toString()]);
+  }, [tFromQuery, query]);
+
+  const initialSid = useMemo(() => sidFromQuery, [sidFromQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +80,9 @@ export function FreeGatePage() {
 
   async function gateOnce() {
     const tok = outToken;
-    if (!tok) {
+    let sid = initialSid;
+
+    if (!tok && !sid) {
       setStatus("error");
       setMessage("Thiếu session. Hãy quay lại trang Get Key và làm lại.");
       window.setTimeout(() => nav("/free", { replace: true }), 1200);
@@ -85,22 +90,35 @@ export function FreeGatePage() {
     }
 
     // Persist token for claim/reload flows
-    setOutToken(tok);
-    try {
-      localStorage.setItem("free_out_token_v1", tok);
-    } catch {
-      // ignore
+    if (tok) {
+      setOutToken(tok);
+      try {
+        localStorage.setItem("free_out_token_v1", tok);
+      } catch {
+        // ignore
+      }
     }
 
     setStatus("working");
     setMessage("Đang xác thực…");
 
     try {
+      // If missing sid but have token, resolve via backend (survive cross-browser flows)
+      if (!sid && tok) {
+        const resolved = await postFunction<{ ok: true; session_id: string } | { ok: false; msg: string; code?: string }>(
+          "/free-resolve",
+          { out_token: tok },
+        );
+        if ((resolved as any).ok) sid = String((resolved as any).session_id || "");
+      }
+
       const fp = getOrCreateFingerprint();
       const referrer = document.referrer || "";
       const current_url = window.location.href;
+
       const res = await postFunction<GateOk | GateErr>("/free-gate", {
-        out_token: tok,
+        session_id: sid || undefined,
+        out_token: tok || undefined,
         fingerprint: fp,
         referrer,
         current_url,
@@ -119,7 +137,8 @@ export function FreeGatePage() {
         return;
       }
 
-      const msg = (res as GateErr).msg || "VERIFY_FAILED";
+      const err = res as GateErr;
+      const msg = err.code || err.msg || "VERIFY_FAILED";
       setStatus("error");
       setMessage(friendlyGateError(msg));
 
@@ -127,20 +146,24 @@ export function FreeGatePage() {
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
     } catch (e: any) {
       setStatus("error");
-      setMessage(friendlyGateError(e?.message ?? "VERIFY_FAILED"));
+      setMessage(friendlyGateError(e?.code ?? e?.message ?? "VERIFY_FAILED"));
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
     }
   }
 
   useEffect(() => {
     const meta = getFreeStartMeta();
-    if (!outToken || !meta?.startedAtMs) {
-      setStatus("error");
-      setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
-      return;
+    if ((!outToken && !initialSid) || !meta?.startedAtMs) {
+      // Allow direct gate access if sid/t present (e.g. opened in another browser), but we still need startedAtMs for TOO_FAST UX.
+      // If no startedAtMs, we let backend decide; user will get proper error.
+      if (!outToken && !initialSid) {
+        setStatus("error");
+        setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
+        return;
+      }
     }
 
-    // Gọi backend NGAY LẬP TỨC. Backend sẽ tự kiểm tra delay và đóng session nếu TOO_FAST.
+    // Gọi backend NGAY LẬP TỨC. Backend sẽ tự kiểm tra delay.
     void gateOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

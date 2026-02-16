@@ -3,6 +3,15 @@ import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
 import { resolveCorsOrigin } from "../_shared/cors.ts";
 
+function inferBaseUrl(req: Request) {
+  const origin = req.headers.get("origin");
+  if (origin) return origin;
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  if (host) return `${proto}://${host}`;
+  return "";
+}
+
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -158,7 +167,7 @@ Deno.serve(async (req) => {
     // Settings
     const { data: settings, error: sErr } = await sb
       .from("licenses_free_settings")
-      .select("free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds")
+      .select("free_outbound_url,free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds")
       .eq("id", 1)
       .maybeSingle();
 
@@ -174,25 +183,40 @@ Deno.serve(async (req) => {
     const rawOutbound = String(settings?.free_outbound_url ?? "").trim();
     const fallbackOutbound = "https://link4m.com/PkY7X";
 
-    const baseUrl = PUBLIC_BASE_URL || "https://mityangho.id.vn";
+    const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
+    if (!baseUrl) {
+      return jsonResponse({ ok: false, code: "SERVER_MISCONFIG", msg: "Missing PUBLIC_BASE_URL" }, 500);
+    }
+
     const claim_base_url = `${baseUrl}/free/claim`;
 
     // Create a token-based session (expires quickly)
     const out_token = base64url(32);
     const out_token_hash = await sha256Hex(out_token);
 
-    // Gate URL MUST include token to survive cross-browser/shortener flows.
-    const gate_url = `${baseUrl}/free/gate?t=${encodeURIComponent(out_token)}`;
-
     function buildOutboundUrl(outboundBase: string, gateUrl: string) {
       const tpl = String(outboundBase || "").trim();
       const g = String(gateUrl || "").trim();
       if (!tpl) return "";
 
+      const hasPlaceholder = tpl.includes("{GATE_URL_ENC}") || tpl.includes("{GATE_URL}");
+
+      // IMPORTANT: do NOT guess param names for Link4M.
+      // If admin provides a Link4M URL but forgets placeholder, return explicit error.
+      try {
+        const u = new URL(tpl);
+        const host = (u.hostname || "").toLowerCase();
+        if (host.includes("link4m") && !hasPlaceholder) {
+          return "__TEMPLATE_INVALID__";
+        }
+      } catch {
+        // ignore
+      }
+
       if (tpl.includes("{GATE_URL_ENC}")) return tpl.replaceAll("{GATE_URL_ENC}", encodeURIComponent(g));
       if (tpl.includes("{GATE_URL}")) return tpl.replaceAll("{GATE_URL}", g);
 
-      // Default: append ?url=<encoded gate>
+      // For non-Link4M URLs, we keep a safe default of appending url=<gate>.
       try {
         const u = new URL(tpl);
         u.searchParams.append("url", g);
@@ -204,9 +228,9 @@ Deno.serve(async (req) => {
     }
 
     const outboundBase = rawOutbound || fallbackOutbound;
-    const outbound_url = test_mode ? gate_url : buildOutboundUrl(outboundBase, gate_url);
-    if (!outbound_url) return jsonResponse({ ok: false, msg: "MISSING_OUTBOUND_URL" }, 500);
-    // Key type must be enabled
+
+    // Key type must be enabled (keep this before session insert)
+    // We'll build gate_url AFTER we have session_id.
     const { data: kt, error: kErr } = await sb
       .from("licenses_free_key_types")
       .select("code,label,duration_seconds,enabled")
@@ -353,7 +377,7 @@ Deno.serve(async (req) => {
 
     const duration_seconds = Number(kt.duration_seconds ?? 0);
 
-    const { error: insErr } = await sb.from("licenses_free_sessions").insert({
+    const { data: insData, error: insErr } = await sb.from("licenses_free_sessions").insert({
       status: "started",
       reveal_count: 0,
       ip_hash: ipHash,
@@ -365,15 +389,37 @@ Deno.serve(async (req) => {
       out_expires_at,
       key_type_code,
       duration_seconds,
-    });
+    }).select("session_id").single();
 
-    if (insErr) {
-      return jsonResponse({ ok: false, msg: insErr.message }, 500);
+    if (insErr || !insData?.session_id) {
+      return jsonResponse({ ok: false, code: "SERVER_ERROR", msg: insErr?.message ?? "SESSION_INSERT_FAILED" }, 500);
     }
 
-    const min_delay_seconds = Math.max(5, Number(settings?.free_min_delay_seconds ?? 25));
+    const session_id = insData.session_id as string;
 
-    return jsonResponse({ ok: true, out_token, outbound_url, gate_url, claim_base_url, min_delay_seconds }, 200);
+    // gate_url MUST include session_id to avoid FE mismatch; keep out_token as well.
+    const gate_url = `${baseUrl}/free/gate?sid=${encodeURIComponent(session_id)}&t=${encodeURIComponent(out_token)}`;
+
+    const builtOutbound = test_mode ? gate_url : buildOutboundUrl(outboundBase, gate_url);
+    if (!builtOutbound) return jsonResponse({ ok: false, code: "MISSING_OUTBOUND_URL", msg: "MISSING_OUTBOUND_URL" }, 500);
+    if (builtOutbound === "__TEMPLATE_INVALID__") {
+      return jsonResponse(
+        {
+          ok: false,
+          code: "OUTBOUND_URL_TEMPLATE_INVALID",
+          msg:
+            "Link4M outbound template thiếu placeholder. Hãy dùng {GATE_URL_ENC} hoặc {GATE_URL}. Ví dụ: https://link4m.com/PkY7X?redirect={GATE_URL_ENC}",
+        },
+        400,
+      );
+    }
+
+    const outbound_url = builtOutbound;
+
+    const minDelayRaw = Number((settings as any)?.free_min_delay_enabled === false ? 0 : (settings as any)?.free_min_delay_seconds ?? 25);
+    const min_delay_seconds = Math.max(0, minDelayRaw); // allow 0 to disable
+
+    return jsonResponse({ ok: true, out_token, session_id, outbound_url, gate_url, claim_base_url, min_delay_seconds }, 200);
   } catch (error) {
     console.error("free-start error", error);
     return jsonResponse({

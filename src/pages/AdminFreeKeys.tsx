@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2 } from "lucide-react";
-import { postFunction } from "@/lib/functions";
+import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -244,7 +244,8 @@ export function AdminFreeKeysPage() {
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
         free_min_delay_enabled: Boolean(minDelayEnabled),
-        free_min_delay_seconds: Math.max(5, Math.floor(Number(minDelay) || 25)),
+        // IMPORTANT: when delay is disabled, force seconds = 0 (not 5/25)
+        free_min_delay_seconds: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelay) || 25)) : 0,
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
         free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
         free_require_link4m_referrer: Boolean(requireRef),
@@ -381,6 +382,10 @@ const disableAllKeyTypes = useMutation({
   const [testKeyTypeCode, setTestKeyTypeCode] = useState<string>("h01");
   const [testDryRun, setTestDryRun] = useState(false);
   const [adminTestResult, setAdminTestResult] = useState<AdminTestResult | null>(null);
+  const [adminTestDebug, setAdminTestDebug] = useState<{ payload: any; response?: any; error?: string } | null>(null);
+
+  const [pingResult, setPingResult] = useState<any>(null);
+  const [pingError, setPingError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!keyTypesQuery.data?.length) return;
@@ -394,11 +399,11 @@ const disableAllKeyTypes = useMutation({
       const token = sess.data.session?.access_token;
       if (!token) throw new Error("Bạn cần đăng nhập admin");
 
-      const data = await postFunction(
-        "/admin-free-test",
-        { key_type_code: testKeyTypeCode, dry_run: testDryRun },
-        { authToken: token },
-      );
+      const payload = { key_type_code: testKeyTypeCode, dry_run: testDryRun };
+      setAdminTestDebug({ payload });
+
+      const data = await postFunction("/admin-free-test", payload, { authToken: token });
+      setAdminTestDebug({ payload, response: data });
       return (data ?? { ok: false, message: "NO_RESPONSE" }) as AdminTestResult;
     },
     onSuccess: (data) => {
@@ -409,11 +414,12 @@ const disableAllKeyTypes = useMutation({
     },
     onError: (e: any) => {
       const msg = String(e?.message ?? "Error");
+      setAdminTestDebug((prev) => (prev ? { ...prev, error: msg } : { payload: null, error: msg }));
       const isFetch = msg.toLowerCase().includes("failed to fetch");
       toast({
         title: "Test failed",
         description: isFetch
-          ? `${msg}. Gợi ý: kiểm tra CORS Allowed Origins + backend URL/project có đồng bộ và function admin-free-test đã deploy đúng project.`
+          ? `${msg}. Gợi ý: (1) CORS allow origin, (2) backend URL/project mismatch, (3) function chưa deploy đúng môi trường.`
           : msg.includes("MISCONFIG")
             ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)`
             : msg,
@@ -618,7 +624,7 @@ const disableAllKeyTypes = useMutation({
                   • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
                 </div>
                 <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.com/PkY7X?url={"{GATE_URL_ENC}"}</div>
-                <div className="mt-1">Nếu không có placeholder, hệ thống sẽ tự append <span className="font-mono">?url=&lt;gate_url&gt;</span>.</div>
+                <div className="mt-1">Nếu là Link4M mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span> để bạn sửa template.</div>
               </div>
             </div>
 
@@ -671,16 +677,16 @@ const disableAllKeyTypes = useMutation({
               <div className="text-xs text-muted-foreground">Chặn spam tạo key vô hạn trên 1 thiết bị.</div>
             </div>
 
-            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-              <div>
-                <div className="font-medium">Yêu cầu referrer Link4M</div>
+             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+               <div>
+                 <div className="font-medium">Yêu cầu referrer Link4M</div>
                  <div className="text-xs text-muted-foreground">
-                   Nếu bật: gate sẽ yêu cầu <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>.
-                   Referrer có thể bị browser/shortlink chặn (policy/redirect), nên chỉ bật khi bạn chắc user bắt buộc đi qua Link4M.
+                   Nếu bật: gate sẽ ưu tiên kiểm tra <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>.
+                   Lưu ý: referrer có thể bị browser/shortlink chặn (policy/redirect). Hệ thống sẽ fallback cho qua nếu URL gate có token hợp lệ.
                  </div>
-              </div>
-              <Switch checked={requireRef} onCheckedChange={setRequireRef} />
-            </div>
+               </div>
+               <Switch checked={requireRef} onCheckedChange={setRequireRef} />
+             </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -929,9 +935,38 @@ const disableAllKeyTypes = useMutation({
       <Card>
         <CardHeader>
           <CardTitle>🧪 Admin Test GetKey</CardTitle>
-          <CardDescription>Chạy test server-side để kiểm tra flow phát key (không cần vượt gate như user).</CardDescription>
+          <CardDescription>
+            Chạy test server-side để kiểm tra flow phát key. Dùng thêm “Ping backend” để xem backend có phản hồi / CORS có ổn.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={async () => {
+                setPingError(null);
+                setPingResult(null);
+                try {
+                  const data = await getFunction("/free-config");
+                  setPingResult(data);
+                } catch (e: any) {
+                  setPingError(String(e?.message ?? "PING_FAILED"));
+                }
+              }}
+            >
+              Ping backend (free-config)
+            </Button>
+          </div>
+
+          {pingError ? <div className="text-sm text-destructive">{pingError}</div> : null}
+          {pingResult ? (
+            <div className="rounded-md border p-3 text-xs space-y-1">
+              <div className="font-medium">Ping response</div>
+              <pre className="whitespace-pre-wrap break-words">{JSON.stringify(pingResult, null, 2)}</pre>
+            </div>
+          ) : null}
+
           <div className="grid gap-3 md:grid-cols-3">
             <div className="space-y-2">
               <div className="text-sm font-medium">Key type</div>
@@ -959,15 +994,40 @@ const disableAllKeyTypes = useMutation({
             </div>
           </div>
 
+          {adminTestDebug ? (
+            <div className="rounded-md border p-3 text-xs space-y-2">
+              <div className="font-medium">Debug</div>
+              <div>
+                <div className="text-muted-foreground">Request payload</div>
+                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(adminTestDebug.payload, null, 2)}</pre>
+              </div>
+              {adminTestDebug.response ? (
+                <div>
+                  <div className="text-muted-foreground">Response JSON</div>
+                  <pre className="whitespace-pre-wrap break-words">{JSON.stringify(adminTestDebug.response, null, 2)}</pre>
+                </div>
+              ) : null}
+              {adminTestDebug.error ? (
+                <div className="text-destructive">Error: {adminTestDebug.error}</div>
+              ) : null}
+            </div>
+          ) : null}
+
           {adminTestResult ? (
             <div className="rounded-md border p-3 text-sm space-y-1">
               <div>Result: {adminTestResult.ok ? "OK" : "FAILED"}</div>
               <div>Message: {adminTestResult.message || "-"}</div>
               <div>Key: {adminTestResult.key || "-"}</div>
               <div>Expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
-              <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>
-              <div>FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span></div>
-              <div>Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span></div>
+              <div>
+                IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span>
+              </div>
+              <div>
+                FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span>
+              </div>
+              <div>
+                Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span>
+              </div>
             </div>
           ) : null}
         </CardContent>
