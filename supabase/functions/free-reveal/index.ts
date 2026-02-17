@@ -62,6 +62,7 @@ async function verifyTurnstile(secret: string, token: string, remoteIp?: string)
 const BodySchema = z.object({
   claim_token: z.string().min(8).max(512),
   out_token: z.string().min(8).max(256),
+  session_id: z.string().uuid().optional(),
   fingerprint: z.string().min(6).max(128),
   turnstile_token: z.string().min(10).max(4096).nullable().optional(),
 });
@@ -139,7 +140,7 @@ Deno.serve(async (req) => {
   }
 
   const claimHash = await sha256Hex(parsed.data.claim_token);
-  const outHash = await sha256Hex(parsed.data.out_token);
+  const outHash = parsed.data.out_token ? await sha256Hex(parsed.data.out_token) : "";
   const fpHash = await sha256Hex(parsed.data.fingerprint);
   const uaHash = await sha256Hex(ua);
   const ipHash = await sha256Hex(ip);
@@ -155,16 +156,45 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "BLOCKED" }, 403);
   }
 
-  // Load session by out_token_hash FIRST (so we can handle already-revealed idempotently).
-  const { data: sess, error: qErr } = await sb
-    .from("licenses_free_sessions")
-    .select(
-      "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at",
-    )
-    .eq("out_token_hash", outHash)
-    .maybeSingle();
+  // Session lookup: prefer explicit session_id, then claim_token_hash, then out_token_hash.
+  const requestedSessionId = (parsed.data.session_id ?? "").trim();
 
-  if (qErr || !sess) return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  let sess: any = null;
+
+  if (requestedSessionId) {
+    const q = await sb
+      .from("licenses_free_sessions")
+      .select(
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+      )
+      .eq("session_id", requestedSessionId)
+      .maybeSingle();
+    if (!q.error && q.data) sess = q.data;
+  }
+
+  if (!sess && claimHash) {
+    const q = await sb
+      .from("licenses_free_sessions")
+      .select(
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+      )
+      .eq("claim_token_hash", claimHash)
+      .maybeSingle();
+    if (!q.error && q.data) sess = q.data;
+  }
+
+  if (!sess && outHash) {
+    const q = await sb
+      .from("licenses_free_sessions")
+      .select(
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+      )
+      .eq("out_token_hash", outHash)
+      .maybeSingle();
+    if (!q.error && q.data) sess = q.data;
+  }
+
+  if (!sess) return json({ ok: false, msg: "SESSION_NOT_FOUND" }, 200);
 
   const sessionId = sess.session_id;
   const revealedLicenseId = (sess as any).revealed_license_id as string | null;
@@ -238,15 +268,26 @@ Deno.serve(async (req) => {
 
   // Require valid claim token when NOT yet revealed.
   const claimExpMs = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
-  if (
-    sess.status !== "gate_ok" ||
-    !sess.claim_token_hash ||
-    sess.claim_token_hash !== claimHash ||
-    !claimExpMs ||
-    claimExpMs < now
-  ) {
+
+  if (!claimHash || !sess.claim_token_hash || sess.claim_token_hash !== claimHash) {
     await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sessionId);
-    return json({ ok: false, msg: claimExpMs && claimExpMs < now ? "CLAIM_EXPIRED" : "UNAUTHORIZED" }, 200);
+    return json({ ok: false, msg: "CLAIM_INVALID" }, 200);
+  }
+
+  if (!claimExpMs || claimExpMs < now) {
+    await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_EXPIRED" }).eq("session_id", sessionId);
+    return json({ ok: false, msg: "CLAIM_EXPIRED" }, 200);
+  }
+
+  if (sess.status !== "gate_ok") {
+    await sb.from("licenses_free_sessions").update({ last_error: "GATE_STATUS_INVALID" }).eq("session_id", sessionId);
+    return json({ ok: false, msg: "GATE_STATUS_INVALID" }, 200);
+  }
+
+  // If session has out_token_hash, require a matching out_token.
+  if (sess.out_token_hash) {
+    if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED" }, 200);
+    if (sess.out_token_hash !== outHash) return json({ ok: false, msg: "OUT_TOKEN_MISMATCH" }, 200);
   }
 
   // Daily limit per fingerprint (admin-config)

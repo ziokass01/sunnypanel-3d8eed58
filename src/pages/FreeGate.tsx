@@ -132,8 +132,15 @@ export function FreeGatePage() {
         } catch {
           // ignore
         }
-        // IMPORTANT: use claim= (not c=) to avoid conflict with other params (e.g. c=E5).
-        nav(`/free/claim?claim=${encodeURIComponent(claim)}`, { replace: true });
+
+        const nextSid = (sid || "").trim();
+        const nextTok = (tok || "").trim();
+
+        // IMPORTANT: propagate sid+t to Claim so Claim does not rely on localStorage.
+        nav(
+          `/free/claim?claim=${encodeURIComponent(claim)}&sid=${encodeURIComponent(nextSid)}&t=${encodeURIComponent(nextTok)}`,
+          { replace: true },
+        );
         return;
       }
 
