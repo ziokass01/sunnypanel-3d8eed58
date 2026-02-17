@@ -32,8 +32,10 @@ export async function getFunction<T>(
     });
   } catch (e: any) {
     // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const err = new Error(
-      "Failed to fetch. Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
+      `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${url}). ` +
+        "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
     ) as Error & { code?: string };
     err.code = "FETCH_FAILED";
     throw err;
@@ -74,9 +76,11 @@ export async function postFunction<T>(
       credentials: "include",
       body: JSON.stringify(body ?? {}),
     });
-  } catch {
+  } catch (e: any) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const err = new Error(
-      "Failed to fetch. Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
+      `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${url}). ` +
+        "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
     ) as Error & { code?: string };
     err.code = "FETCH_FAILED";
     throw err;

@@ -6,7 +6,7 @@ import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setOutToken } from "@/features/free/fingerprint";
 
-type GateOk = { ok: true; claim_token: string };
+type GateOk = { ok: true; claim_token: string; claim_url?: string | null };
 type GateErr = { ok: false; msg: string; code?: string; detail?: any };
 
 function friendlyGateError(msg: string) {
@@ -137,10 +137,16 @@ export function FreeGatePage() {
         const nextTok = (tok || "").trim();
 
         // IMPORTANT: propagate sid+t to Claim so Claim does not rely on localStorage.
-        nav(
-          `/free/claim?claim=${encodeURIComponent(claim)}&sid=${encodeURIComponent(nextSid)}&t=${encodeURIComponent(nextTok)}`,
-          { replace: true },
-        );
+        // IMPORTANT: never build URL via string concat (avoid malformed '?claim?sid' on some mobile browsers/redirects).
+        const base = String((res as GateOk).claim_url || `${window.location.origin}/free/claim`);
+        const url = new URL(base, window.location.origin);
+        url.searchParams.set("claim", String(claim));
+        url.searchParams.set("sid", nextSid);
+        url.searchParams.set("t", nextTok);
+        if ((sp.get("debug") || "").trim() === "1") url.searchParams.set("debug", "1");
+
+        // Navigate as in-app route (avoid full reload)
+        nav(`${url.pathname}${url.search}${url.hash}`, { replace: true });
         return;
       }
 
