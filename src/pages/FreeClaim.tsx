@@ -21,7 +21,7 @@ type RevealOk = {
   session_id?: string | null;
   ip_hash?: string | null;
 };
-type RevealErr = { ok: false; msg: string };
+type RevealErr = { ok: false; msg: string; code?: string };
 
 function isValidClaimToken(tok: string) {
   const t = String(tok || "").trim();
@@ -58,12 +58,27 @@ export function FreeClaimPage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
 
-  // IMPORTANT: do NOT memo claimToken from a URLSearchParams object reference
-  // (some browsers / router transitions may keep object identity, causing stale empty token).
-  const queryClaimRaw = (sp.get("claim") || sp.get("c") || sp.get("token") || "").trim();
-  const tFromQuery = (sp.get("t") || "").trim();
-  const sidFromQuery = (sp.get("sid") || "").trim();
-  const debugMode = (sp.get("debug") || "").trim() === "1";
+  // NOTE: do NOT rely solely on router parsing; some redirect/shortener flows can produce malformed URLs with multiple '?'.
+  // We robustly normalize the query from the real window.location.search.
+  const robustParams = useMemo(() => {
+    const raw = String(window.location.search || "");
+    // remove leading '?', then replace any remaining '?' with '&'
+    const normalized = raw.startsWith("?") ? raw.slice(1).replace(/\?/g, "&") : raw.replace(/\?/g, "&");
+    return new URLSearchParams(normalized);
+  }, []);
+
+  const getParam = (keys: string[]) => {
+    for (const k of keys) {
+      const v = (robustParams.get(k) || "").trim();
+      if (v) return v;
+    }
+    return "";
+  };
+
+  const queryClaimRaw = getParam(["claim", "claim_token", "claimToken", "c", "token"]);
+  const tFromQuery = getParam(["t", "outToken", "out_token"]);
+  const sidFromQuery = getParam(["sid", "session_id"]);
+  const debugMode = getParam(["debug"]) === "1";
 
   const claimToken = (() => {
     if (isValidClaimToken(queryClaimRaw)) return queryClaimRaw;
@@ -165,7 +180,10 @@ export function FreeClaimPage() {
       });
 
       if (!res.ok) {
-        setError(friendlyRevealError((res as RevealErr).msg || "UNAUTHORIZED"));
+        const err = res as RevealErr;
+        const code = String(err.code || "").trim();
+        const msg = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
+        setError(code ? `${msg} (${code})` : msg);
         return;
       }
 
