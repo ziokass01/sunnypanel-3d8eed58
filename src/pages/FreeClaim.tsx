@@ -8,6 +8,7 @@ import {
   getOrCreateFingerprint,
   getOutToken,
   getSelectedKeyTypeCode,
+  setOutToken,
 } from "@/features/free/fingerprint";
 
 type RevealOk = {
@@ -36,6 +37,11 @@ function friendlyRevealError(msg: string) {
     return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
   }
   if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại Get Key và vượt link lại.";
+  if (m === "SESSION_NOT_FOUND") return "Không tìm thấy phiên. Hãy quay lại Get Key và đi đúng flow Link4M → Gate.";
+  if (m === "OUT_TOKEN_REQUIRED") return "Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.";
+  if (m === "OUT_TOKEN_MISMATCH") return "Token (t) không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "CLAIM_INVALID") return "Token xác minh không hợp lệ. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "GATE_STATUS_INVALID") return "Gate chưa hợp lệ hoặc phiên chưa qua Gate. Vui lòng quay lại Get Key và làm lại.";
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong 24 giờ. Vui lòng thử lại sau.";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
   if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
@@ -55,6 +61,10 @@ export function FreeClaimPage() {
   // IMPORTANT: do NOT memo claimToken from a URLSearchParams object reference
   // (some browsers / router transitions may keep object identity, causing stale empty token).
   const queryClaimRaw = (sp.get("claim") || sp.get("c") || sp.get("token") || "").trim();
+  const tFromQuery = (sp.get("t") || "").trim();
+  const sidFromQuery = (sp.get("sid") || "").trim();
+  const debugMode = (sp.get("debug") || "").trim() === "1";
+
   const claimToken = (() => {
     if (isValidClaimToken(queryClaimRaw)) return queryClaimRaw;
     try {
@@ -65,7 +75,14 @@ export function FreeClaimPage() {
     }
   })();
 
-  const outToken = (getOutToken() || "").trim();
+  const outToken = useMemo(() => {
+    if (tFromQuery) return tFromQuery;
+    return (getOutToken() || "").trim();
+  }, [tFromQuery]);
+
+  const sessionId = useMemo(() => {
+    return sidFromQuery;
+  }, [sidFromQuery]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +97,24 @@ export function FreeClaimPage() {
       // ignore
     }
   }, [queryClaimRaw]);
+
+  // Persist out token from query so reloads don't lose it.
+  useEffect(() => {
+    if (!tFromQuery) return;
+    setOutToken(tFromQuery);
+    try {
+      localStorage.setItem("free_out_token_v1", tFromQuery);
+    } catch {
+      // ignore
+    }
+  }, [tFromQuery]);
+
+  useEffect(() => {
+    if (!claimToken) return;
+    if (!outToken) {
+      setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
+    }
+  }, [claimToken, outToken]);
 
 
 
@@ -110,7 +145,11 @@ export function FreeClaimPage() {
   }, [claimToken, outToken, revealed, loading]);
 
   async function revealOnce() {
-    if (!claimToken || !outToken) return;
+    if (!claimToken) return;
+    if (!outToken) {
+      setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
+      return;
+    }
     if (loading || revealed) return;
 
     setLoading(true);
@@ -120,6 +159,7 @@ export function FreeClaimPage() {
       const res = await postFunction<RevealOk | RevealErr>("/free-reveal", {
         claim_token: claimToken,
         out_token: outToken,
+        session_id: sessionId || undefined,
         fingerprint: fp,
         turnstile_token: null,
       });
@@ -163,7 +203,7 @@ export function FreeClaimPage() {
     if (revealed) return;
     void revealOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claimToken, outToken]);
+  }, [claimToken, outToken, sessionId]);
 
   async function closeAndReturn() {
     try {
@@ -220,8 +260,8 @@ export function FreeClaimPage() {
 
             {claimToken && !outToken ? (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Thiếu session</div>
-                <div className="text-muted-foreground">Hãy quay lại trang Getkey và làm lại.</div>
+                <div className="font-medium">Thiếu token (t)</div>
+                <div className="text-muted-foreground">Hãy quay lại Get Key và đi đúng flow Link4M → Gate.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
                     Quay lại Get Key
@@ -232,14 +272,21 @@ export function FreeClaimPage() {
 
             {error ? <div className="text-sm text-destructive">{error}</div> : null}
 
+            {debugMode ? (
+              <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
+                <div>debug=1</div>
+                <div>claim_token_len: {claimToken ? claimToken.length : 0}</div>
+                <div>sid: {sessionId || ""}</div>
+                <div>t_len: {outToken ? outToken.length : 0}</div>
+                <div>
+                  t_mask: {outToken ? `${outToken.slice(0, 6)}…${outToken.slice(-4)}` : ""}
+                </div>
+              </div>
+            ) : null}
+
             {!revealed ? (
               <div className="space-y-3">
-
-                <Button
-                  className="w-full"
-                  disabled={!canVerify || loading}
-                  onClick={revealOnce}
-                >
+                <Button className="w-full" disabled={!canVerify || loading} onClick={revealOnce}>
                   {loading ? "Đang xác minh…" : "Xác minh"}
                 </Button>
               </div>
