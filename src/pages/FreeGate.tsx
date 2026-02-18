@@ -140,6 +140,10 @@ export function FreeGatePage() {
         // IMPORTANT: never build URL via string concat (avoid malformed '?claim?sid' on some mobile browsers/redirects).
         const base = String((res as GateOk).claim_url || `${window.location.origin}/free/claim`);
         const url = new URL(base, window.location.origin);
+
+        // Force a clean query string we control (avoid any malformed '?claim?claim' coming from upstream URLs)
+        url.search = "";
+
         url.searchParams.set("claim", String(claim));
         url.searchParams.set("sid", nextSid);
         url.searchParams.set("t", nextTok);

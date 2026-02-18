@@ -61,9 +61,11 @@ export function FreeClaimPage() {
   // NOTE: do NOT rely solely on router parsing; some redirect/shortener flows can produce malformed URLs with multiple '?'.
   // We robustly normalize the query from the real window.location.search.
   const robustParams = useMemo(() => {
+    // Normalize malformed queries like: /free/claim?claim=<TOKEN>?sid=<SID>&t=<T>
+    // Rule: remove leading '?', then replace any remaining '?' with '&' before parsing.
     const raw = String(window.location.search || "");
-    // remove leading '?', then replace any remaining '?' with '&'
-    const normalized = raw.startsWith("?") ? raw.slice(1).replace(/\?/g, "&") : raw.replace(/\?/g, "&");
+    const withoutLeading = raw.startsWith("?") ? raw.slice(1) : raw;
+    const normalized = withoutLeading.replace(/\?/g, "&");
     return new URLSearchParams(normalized);
   }, []);
 
@@ -182,8 +184,11 @@ export function FreeClaimPage() {
       if (!res.ok) {
         const err = res as RevealErr;
         const code = String(err.code || "").trim();
-        const msg = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
-        setError(code ? `${msg} (${code})` : msg);
+
+        // Requirement: show backend msg clearly and append (CODE) when present.
+        // Prefer backend msg; fall back to our friendly mapper for known codes.
+        const baseMsg = String(err.msg || "").trim() || friendlyRevealError(code || "UNAUTHORIZED");
+        setError(code ? `${baseMsg} (${code})` : baseMsg);
         return;
       }
 
@@ -210,7 +215,9 @@ export function FreeClaimPage() {
         // ignore
       }
     } catch (e: any) {
-      setError(friendlyRevealError(e?.message ?? "UNAUTHORIZED"));
+      const code = String(e?.code || "").trim();
+      const baseMsg = String(e?.message || "").trim() || friendlyRevealError(code || "UNAUTHORIZED");
+      setError(code ? `${baseMsg} (${code})` : baseMsg);
     } finally {
       setLoading(false);
     }
