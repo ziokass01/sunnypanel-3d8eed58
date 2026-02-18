@@ -58,14 +58,21 @@ export async function postFunction<T>(
   body: unknown,
   opts?: { authToken?: string | null; headers?: Record<string, string> },
 ): Promise<T> {
-  const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const makeUrl = (p: string) => `${getFunctionsBaseUrl()}${p.startsWith("/") ? p : `/${p}`}`;
+  const primaryUrl = makeUrl(path);
 
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  // Some repos historically used both /admin-free-test and /free-admin-test.
+  // If the primary one fails at the network layer (CORS / wrong deploy / wrong function name), retry once.
+  const fallbackPath = path === "/admin-free-test" ? "/free-admin-test" : null;
+
+  const triedUrls: string[] = [];
+
+  const doFetch = async (u: string) => {
+    triedUrls.push(u);
+    return await fetch(u, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -77,15 +84,38 @@ export async function postFunction<T>(
       credentials: "include",
       body: JSON.stringify(body ?? {}),
     });
+  };
+
+  let res: Response;
+  try {
+    res = await doFetch(primaryUrl);
   } catch (e: any) {
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const err = new Error(
-      `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${url}). ` +
-        "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
-    ) as Error & { code?: string; meta?: Record<string, unknown> };
-    err.code = "FETCH_FAILED";
-    err.meta = { path, origin, url };
-    throw err;
+    // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
+    if (fallbackPath) {
+      try {
+        res = await doFetch(makeUrl(fallbackPath));
+      } catch {
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const err = new Error(
+          `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${primaryUrl}). ` +
+            `Tried URLs: ${triedUrls.join(", ")}. ` +
+            "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project.",
+        ) as Error & { code?: string; meta?: Record<string, unknown> };
+        err.code = "FETCH_FAILED";
+        err.meta = { path, origin, url: primaryUrl, triedUrls };
+        throw err;
+      }
+    } else {
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const err = new Error(
+        `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${primaryUrl}). ` +
+          `Tried URLs: ${triedUrls.join(", ") || primaryUrl}. ` +
+          "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project.",
+      ) as Error & { code?: string; meta?: Record<string, unknown> };
+      err.code = "FETCH_FAILED";
+      err.meta = { path, origin, url: primaryUrl, triedUrls };
+      throw err;
+    }
   }
 
   const data = await res.json().catch(() => null);

@@ -112,6 +112,17 @@ export function FreeGatePage() {
         if ((resolved as any).ok) sid = String((resolved as any).session_id || "");
       }
 
+      // Persist sid so Claim can recover even if query gets mangled/stripped.
+      try {
+        const sidTrim = String(sid || "").trim();
+        if (sidTrim) {
+          localStorage.setItem("free_session_id_v1", sidTrim);
+          localStorage.setItem("free_session_id", sidTrim);
+        }
+      } catch {
+        // ignore
+      }
+
       const fp = getOrCreateFingerprint();
       const referrer = document.referrer || "";
       const current_url = window.location.href;
