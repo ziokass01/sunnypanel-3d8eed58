@@ -36,8 +36,9 @@ export async function getFunction<T>(
     const err = new Error(
       `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${url}). ` +
         "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
-    ) as Error & { code?: string };
+    ) as Error & { code?: string; meta?: Record<string, unknown> };
     err.code = "FETCH_FAILED";
+    err.meta = { path, origin, url };
     throw err;
   }
 
@@ -81,8 +82,9 @@ export async function postFunction<T>(
     const err = new Error(
       `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${url}). ` +
         "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
-    ) as Error & { code?: string };
+    ) as Error & { code?: string; meta?: Record<string, unknown> };
     err.code = "FETCH_FAILED";
+    err.meta = { path, origin, url };
     throw err;
   }
 
