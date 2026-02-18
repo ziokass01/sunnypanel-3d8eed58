@@ -65,6 +65,7 @@ const BodySchema = z.object({
   session_id: z.string().uuid().optional(),
   fingerprint: z.string().min(6).max(128),
   turnstile_token: z.string().min(10).max(4096).nullable().optional(),
+  debug: z.union([z.boolean(), z.literal(1), z.literal("1")]).optional(),
 });
 
 Deno.serve(async (req) => {
@@ -139,9 +140,19 @@ Deno.serve(async (req) => {
     if (!ok) return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
-  const claimHash = await sha256Hex(parsed.data.claim_token);
-  const outHash = parsed.data.out_token ? await sha256Hex(parsed.data.out_token) : "";
-  const fpHash = await sha256Hex(parsed.data.fingerprint);
+  const debugEnabled =
+    (req.headers.get("x-debug") ?? "").trim() === "1" ||
+    (parsed.data as any).debug === true ||
+    (parsed.data as any).debug === 1 ||
+    (parsed.data as any).debug === "1";
+
+  const claimTokenTrim = String(parsed.data.claim_token ?? "").trim();
+  const outTokenTrim = String(parsed.data.out_token ?? "").trim();
+  const sessionIdTrim = String(parsed.data.session_id ?? "").trim();
+
+  const claimHash = await sha256Hex(claimTokenTrim);
+  const outHash = outTokenTrim ? await sha256Hex(outTokenTrim) : "";
+  const fpHash = await sha256Hex(String(parsed.data.fingerprint ?? "").trim());
   const uaHash = await sha256Hex(ua);
   const ipHash = await sha256Hex(ip);
 
@@ -157,9 +168,17 @@ Deno.serve(async (req) => {
   }
 
   // Session lookup: prefer explicit session_id, then claim_token_hash, then out_token_hash.
-  const requestedSessionId = (parsed.data.session_id ?? "").trim();
+  const requestedSessionId = sessionIdTrim;
 
   let sess: any = null;
+  let debugLookup: Record<string, unknown> | null = debugEnabled
+    ? {
+      session_id_provided: Boolean(requestedSessionId),
+      claim_token_len: claimTokenTrim.length,
+      out_token_len: outTokenTrim.length,
+      looked_up_by: null,
+    }
+    : null;
 
   if (requestedSessionId) {
     const q = await sb
@@ -170,6 +189,7 @@ Deno.serve(async (req) => {
       .eq("session_id", requestedSessionId)
       .maybeSingle();
     if (!q.error && q.data) sess = q.data;
+    if (debugLookup) debugLookup.looked_up_by = "session_id";
   }
 
   if (!sess && claimHash) {
@@ -181,6 +201,7 @@ Deno.serve(async (req) => {
       .eq("claim_token_hash", claimHash)
       .maybeSingle();
     if (!q.error && q.data) sess = q.data;
+    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "claim_token_hash";
   }
 
   if (!sess && outHash) {
@@ -192,9 +213,12 @@ Deno.serve(async (req) => {
       .eq("out_token_hash", outHash)
       .maybeSingle();
     if (!q.error && q.data) sess = q.data;
+    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "out_token_hash";
   }
 
-  if (!sess) return json({ ok: false, msg: "SESSION_NOT_FOUND" }, 200);
+  if (!sess) {
+    return json({ ok: false, msg: "SESSION_NOT_FOUND", code: "SESSION_NOT_FOUND", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+  }
 
   const sessionId = sess.session_id;
   const revealedLicenseId = (sess as any).revealed_license_id as string | null;
@@ -271,23 +295,25 @@ Deno.serve(async (req) => {
 
   if (!claimHash || !sess.claim_token_hash || sess.claim_token_hash !== claimHash) {
     await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sessionId);
-    return json({ ok: false, msg: "CLAIM_INVALID" }, 200);
+    return json({ ok: false, msg: "CLAIM_INVALID", code: "CLAIM_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   if (!claimExpMs || claimExpMs < now) {
     await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_EXPIRED" }).eq("session_id", sessionId);
-    return json({ ok: false, msg: "CLAIM_EXPIRED" }, 200);
+    return json({ ok: false, msg: "CLAIM_EXPIRED", code: "CLAIM_EXPIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   if (sess.status !== "gate_ok") {
     await sb.from("licenses_free_sessions").update({ last_error: "GATE_STATUS_INVALID" }).eq("session_id", sessionId);
-    return json({ ok: false, msg: "GATE_STATUS_INVALID" }, 200);
+    return json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   // If session has out_token_hash, require a matching out_token.
   if (sess.out_token_hash) {
-    if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED" }, 200);
-    if (sess.out_token_hash !== outHash) return json({ ok: false, msg: "OUT_TOKEN_MISMATCH" }, 200);
+    if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+    if (sess.out_token_hash !== outHash) {
+      return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+    }
   }
 
   // Daily limit per fingerprint (admin-config)
@@ -302,7 +328,7 @@ Deno.serve(async (req) => {
   const used = quota.count ?? 0;
   if (used >= dailyLimit) {
     await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA" }).eq("session_id", sessionId);
-    return json({ ok: false, msg: "RATE_LIMIT" }, 200);
+    return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   // Acquire lock BEFORE inserting license (prevents multi-mint bug).

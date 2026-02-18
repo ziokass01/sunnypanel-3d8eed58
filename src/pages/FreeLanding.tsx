@@ -235,6 +235,14 @@ export function FreeLandingPage() {
                     // Keep backward compat, but ensure current key is used by FreeGate fallbacks.
                     localStorage.setItem("free_out_token_v1", String(res.out_token));
                     localStorage.setItem("free_out_token", String(res.out_token));
+
+                    // Persist session_id to survive Link4M/mobile flows.
+                    const sid = String((res as any).session_id ?? "").trim();
+                    if (sid) {
+                      localStorage.setItem("free_session_id_v1", sid);
+                      localStorage.setItem("free_session_id", sid);
+                    }
+
                     localStorage.setItem("free_started_at_ms", String(Date.now()));
                     localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
                     localStorage.setItem("free_key_type_code", String(selected));

@@ -98,7 +98,16 @@ export function FreeClaimPage() {
   }, [tFromQuery]);
 
   const sessionId = useMemo(() => {
-    return sidFromQuery;
+    if (sidFromQuery) return sidFromQuery;
+    try {
+      const a = (localStorage.getItem("free_session_id_v1") || "").trim();
+      if (a) return a;
+      const b = (localStorage.getItem("free_session_id") || "").trim();
+      if (b) return b;
+    } catch {
+      // ignore
+    }
+    return "";
   }, [sidFromQuery]);
 
   const [loading, setLoading] = useState(false);
@@ -125,6 +134,17 @@ export function FreeClaimPage() {
       // ignore
     }
   }, [tFromQuery]);
+
+  // Persist session_id from query for robustness.
+  useEffect(() => {
+    if (!sidFromQuery) return;
+    try {
+      localStorage.setItem("free_session_id_v1", sidFromQuery);
+      localStorage.setItem("free_session_id", sidFromQuery);
+    } catch {
+      // ignore
+    }
+  }, [sidFromQuery]);
 
   useEffect(() => {
     if (!claimToken) return;
@@ -179,6 +199,7 @@ export function FreeClaimPage() {
         session_id: sessionId || undefined,
         fingerprint: fp,
         turnstile_token: null,
+        debug: debugMode ? 1 : undefined,
       });
 
       if (!res.ok) {
