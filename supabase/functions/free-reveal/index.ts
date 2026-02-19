@@ -413,6 +413,18 @@ Deno.serve(async (req) => {
     ua_hash: uaHash,
   });
 
+  const debugOut = debugEnabled
+    ? {
+      lookup: debugLookup,
+      lens: {
+        claim_token: claimTokenTrim.length,
+        out_token: outTokenTrim.length,
+        session_id: sessionIdTrim.length,
+        fingerprint: String(parsed.data.fingerprint ?? "").trim().length,
+      },
+    }
+    : undefined;
+
   return json(
     {
       ok: true,
@@ -423,6 +435,7 @@ Deno.serve(async (req) => {
       created_at: new Date().toISOString(),
       session_id: sessionId,
       ip_hash: ipHash,
+      debug: debugOut,
     },
     200,
   );
