@@ -322,7 +322,13 @@ export function FreeClaimPage() {
               <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
                 <div>debug=1</div>
                 <div>claim_token_len: {claimToken ? claimToken.length : 0}</div>
-                <div>sid: {sessionId || ""}</div>
+                <div>
+                  claim_mask: {claimToken ? `${claimToken.slice(0, 6)}…${claimToken.slice(-4)}` : ""}
+                </div>
+                <div>sid_len: {sessionId ? sessionId.length : 0}</div>
+                <div>
+                  sid_mask: {sessionId ? `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}` : ""}
+                </div>
                 <div>t_len: {outToken ? outToken.length : 0}</div>
                 <div>
                   t_mask: {outToken ? `${outToken.slice(0, 6)}…${outToken.slice(-4)}` : ""}
