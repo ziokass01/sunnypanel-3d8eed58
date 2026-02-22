@@ -21,7 +21,8 @@ Deno.serve(async (req) => {
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
+    // Include x-debug to allow troubleshooting calls from browsers.
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp, x-debug",
     "Access-Control-Max-Age": "86400",
   };
   const jsonResponse = (data: unknown, status = 200) =>
@@ -102,6 +103,11 @@ Deno.serve(async (req) => {
 
   const body = {
     ok: true,
+
+    // Diagnostics for browser CORS / project mismatch debugging
+    request_origin: origin || null,
+    allow_origin: allowOrigin || null,
+
     public_base_url: baseUrl || null,
     destination_gate_url,
 

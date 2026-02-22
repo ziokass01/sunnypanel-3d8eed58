@@ -113,6 +113,7 @@ export function FreeClaimPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<RevealedState | null>(null);
+  const [serverDebug, setServerDebug] = useState<any>(null);
 
   // Persist query claim token as a fallback (some redirect/shortener flows can strip params).
   useEffect(() => {
@@ -191,6 +192,7 @@ export function FreeClaimPage() {
 
     setLoading(true);
     setError(null);
+    setServerDebug(null);
     try {
       const fp = getOrCreateFingerprint();
       const res = await postFunction<RevealOk | RevealErr>("/free-reveal", {
@@ -202,12 +204,13 @@ export function FreeClaimPage() {
         debug: debugMode ? 1 : undefined,
       });
 
+      if ((res as any)?.debug) setServerDebug((res as any).debug);
+      if ((res as any)?.warnings) setServerDebug((prev: any) => ({ ...(prev ?? {}), warnings: (res as any).warnings }));
+
       if (!res.ok) {
         const err = res as RevealErr;
         const code = String(err.code || "").trim();
 
-        // Requirement: show backend msg clearly and append (CODE) when present.
-        // Prefer backend msg; fall back to our friendly mapper for known codes.
         const baseMsg = String(err.msg || "").trim() || friendlyRevealError(code || "UNAUTHORIZED");
         setError(code ? `${baseMsg} (${code})` : baseMsg);
         return;
@@ -333,6 +336,12 @@ export function FreeClaimPage() {
                 <div>
                   t_mask: {outToken ? `${outToken.slice(0, 6)}…${outToken.slice(-4)}` : ""}
                 </div>
+                {serverDebug ? (
+                  <div className="pt-2">
+                    <div className="text-foreground font-medium">backend debug</div>
+                    <pre className="whitespace-pre-wrap break-words">{JSON.stringify(serverDebug, null, 2)}</pre>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
