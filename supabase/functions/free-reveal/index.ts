@@ -245,10 +245,17 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "SESSION_CLOSED" }, 200);
   }
 
-  // Device binding
-  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
-    return json({ ok: false, msg: "SESSION_BIND_MISMATCH" }, 200);
+  // Device binding rules (mobile-friendly):
+  // - Fingerprint mismatch => FAIL
+  // - UA / IP mismatch => WARNING only (mobile 4G IP changes frequently)
+  const warnings: string[] = [];
+
+  if (sess.fingerprint_hash !== fpHash) {
+    return json({ ok: false, msg: "FP_MISMATCH", code: "FP_MISMATCH", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
+
+  if (sess.ua_hash !== uaHash) warnings.push("UA_MISMATCH");
+  if ((sess as any).ip_hash !== ipHash) warnings.push("IP_MISMATCH");
 
   async function getKeyTypeLabel(code: string | null) {
     if (!code) return null;
@@ -280,14 +287,31 @@ Deno.serve(async (req) => {
     return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? issue.data?.expires_at) as string };
   }
 
-  // Already revealed => return same key.
+  // Already revealed (or in-progress) => return same key if present; otherwise auto-repair inconsistent state.
   if (Number(sess.reveal_count ?? 0) > 0 || sess.status === "revealed" || sess.status === "revealing") {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
     if (existing) {
-      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }, 200);
+      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, warnings: warnings.length ? warnings : undefined }, 200);
     }
-    return json({ ok: false, msg: "ALREADY_REVEALED" }, 200);
+
+    // Inconsistent: session says revealed/revealing but no issued key row exists.
+    // Auto-repair: reset to gate_ok and allow user to retry.
+    await sb
+      .from("licenses_free_sessions")
+      .update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "INCONSISTENT_STATE_REPAIRED" })
+      .eq("session_id", sessionId);
+
+    return json(
+      {
+        ok: false,
+        msg: "INCONSISTENT_STATE_REPAIRED_TRY_AGAIN",
+        code: "INCONSISTENT_STATE_REPAIRED_TRY_AGAIN",
+        warnings: warnings.length ? warnings : undefined,
+        debug: debugLookup ? { lookup: debugLookup } : undefined,
+      },
+      200,
+    );
   }
 
   // Require valid claim token when NOT yet revealed.
@@ -332,6 +356,7 @@ Deno.serve(async (req) => {
   }
 
   // Acquire lock BEFORE inserting license (prevents multi-mint bug).
+  // IMPORTANT: do NOT clear claim_token_hash here; only rely on status/reveal_count as the mint-lock.
   const lockIso = new Date().toISOString();
   const lock = await sb
     .from("licenses_free_sessions")
@@ -340,21 +365,24 @@ Deno.serve(async (req) => {
       reveal_count: 1,
       revealed_at: lockIso,
       last_error: null,
-      claim_token_hash: null,
-      claim_expires_at: null,
     })
     .eq("session_id", sessionId)
     .eq("status", "gate_ok")
     .eq("reveal_count", 0)
     .eq("claim_token_hash", claimHash)
-    .select("session_id")
+    .select("session_id,status")
     .maybeSingle();
 
   if (!lock.data) {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
-    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label }, 200);
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, warnings: warnings.length ? warnings : undefined }, 200);
+
+    // If someone else locked it, signal in-progress; otherwise report lock failure clearly.
+    if (sess.status === "revealing") {
+      return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
+    }
+    return json({ ok: false, msg: "SESSION_LOCK_FAILED", code: "SESSION_LOCK_FAILED", warnings: warnings.length ? warnings : undefined }, 200);
   }
 
   const dur = Math.max(60, Number(sess.duration_seconds ?? 0));
@@ -422,6 +450,7 @@ Deno.serve(async (req) => {
         session_id: sessionIdTrim.length,
         fingerprint: String(parsed.data.fingerprint ?? "").trim().length,
       },
+      warnings,
     }
     : undefined;
 
@@ -435,6 +464,7 @@ Deno.serve(async (req) => {
       created_at: new Date().toISOString(),
       session_id: sessionId,
       ip_hash: ipHash,
+      warnings: warnings.length ? warnings : undefined,
       debug: debugOut,
     },
     200,

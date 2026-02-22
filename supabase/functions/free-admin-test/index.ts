@@ -64,7 +64,8 @@ Deno.serve(async (req) => {
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST,OPTIONS",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
+    // Include x-debug so browser can enable debug traces without CORS-blocking.
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp, x-debug",
     "Access-Control-Max-Age": "86400",
   };
   const json = (data: unknown, status = 200) =>

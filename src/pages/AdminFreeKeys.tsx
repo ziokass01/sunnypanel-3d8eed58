@@ -397,7 +397,11 @@ const disableAllKeyTypes = useMutation({
     mutationFn: async () => {
       const sess = await supabase.auth.getSession();
       const token = sess.data.session?.access_token;
-      if (!token) throw new Error("Bạn cần đăng nhập admin");
+      if (!token) {
+        const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
+        err.code = "ADMIN_AUTH_REQUIRED";
+        throw err;
+      }
 
       const payload = { key_type_code: testKeyTypeCode, dry_run: testDryRun };
       setAdminTestDebug({ payload });
@@ -413,13 +417,24 @@ const disableAllKeyTypes = useMutation({
       issuesQuery.refetch();
     },
     onError: (e: any) => {
+      const code = String(e?.code ?? "").trim();
       const msg = String(e?.message ?? "Error");
       setAdminTestDebug((prev) => (prev ? { ...prev, error: msg } : { payload: null, error: msg }));
+
+      if (code === "ADMIN_AUTH_REQUIRED" || msg === "ADMIN_AUTH_REQUIRED") {
+        toast({
+          title: "Test failed",
+          description: "ADMIN_AUTH_REQUIRED: Bạn cần đăng nhập và có quyền admin để chạy test.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const isFetch = msg.toLowerCase().includes("failed to fetch");
       toast({
         title: "Test failed",
         description: isFetch
-          ? `${msg}. Gợi ý: (1) CORS allow origin, (2) backend URL/project mismatch, (3) function chưa deploy đúng môi trường.`
+          ? `${msg}. Gợi ý: (1) CORS/OPTIONS bị chặn, (2) deploy sai tên function (/admin-free-test vs /free-admin-test), (3) backend URL/project mismatch. (tried URLs thường nằm trong message)`
           : msg.includes("MISCONFIG")
             ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)`
             : msg,

@@ -62,13 +62,19 @@ Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
   const cors = corsHeaders(origin, PUBLIC_BASE_URL, "POST,OPTIONS");
+  const corsWithDebug = {
+    ...cors,
+    // Allow debug header for browser troubleshooting.
+    "Access-Control-Allow-Headers": `${cors["Access-Control-Allow-Headers"]}, x-debug`,
+  } as Record<string, string>;
+
   const json = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), {
       status,
-      headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
+      headers: { ...corsWithDebug, "Content-Type": "application/json", "Cache-Control": "no-store" },
     });
 
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsWithDebug });
   if (req.method !== "POST") return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405);
 
   const admin = await assertAdmin(req);
