@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
-import { resolveCorsOrigin } from "../_shared/cors.ts";
+import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -57,24 +57,14 @@ const BodySchema = z.object({
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
-  const origin = req.headers.get("origin") ?? "";
-  const allowOrigin = resolveCorsOrigin(origin, PUBLIC_BASE_URL);
-  const cors = {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Vary": "Origin",
-    "Access-Control-Allow-Methods": "POST,OPTIONS",
-    "Access-Control-Allow-Credentials": "true",
-    // Include x-debug so browser can enable debug traces without CORS-blocking.
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp, x-debug",
-    "Access-Control-Max-Age": "86400",
-  };
+  const cors = buildCorsHeaders(req, PUBLIC_BASE_URL, "POST,OPTIONS");
   const json = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), {
       status,
       headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
     });
 
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  if (req.method === "OPTIONS") return handleOptions(req, PUBLIC_BASE_URL, "POST,OPTIONS");
   if (req.method !== "POST") return json({ ok: false, message: "METHOD_NOT_ALLOWED" }, 405);
 
   const admin = await assertAdmin(req);

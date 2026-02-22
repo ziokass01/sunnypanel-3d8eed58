@@ -69,6 +69,24 @@ export function FreeClaimPage() {
     return new URLSearchParams(normalized);
   }, []);
 
+  // Fallback: recover claim token when URL is like "/free/claim?claim<TOKEN>&sid=..." (missing '=')
+  const recoveredClaimRaw = useMemo(() => {
+    const raw = String(window.location.search || "");
+    const withoutLeading = raw.startsWith("?") ? raw.slice(1) : raw;
+    const normalized = withoutLeading.replace(/\?/g, "&");
+    const first = (normalized.split("&")[0] || "").trim();
+
+    const prefixes = ["claim_token", "claimToken", "claim", "token", "c"];
+    for (const p of prefixes) {
+      if (!first.toLowerCase().startsWith(p.toLowerCase())) continue;
+      // If it already has '=', normal parser should have caught it.
+      if (first.slice(0, p.length + 1).toLowerCase() === `${p.toLowerCase()}=`) return "";
+      const recovered = first.slice(p.length).trim();
+      if (recovered) return recovered;
+    }
+    return "";
+  }, []);
+
   const getParam = (keys: string[]) => {
     for (const k of keys) {
       const v = (robustParams.get(k) || "").trim();
@@ -84,6 +102,7 @@ export function FreeClaimPage() {
 
   const claimToken = (() => {
     if (isValidClaimToken(queryClaimRaw)) return queryClaimRaw;
+    if (isValidClaimToken(recoveredClaimRaw)) return recoveredClaimRaw;
     try {
       const fb = (localStorage.getItem("free_claim_token") ?? "").trim();
       return isValidClaimToken(fb) ? fb : "";
@@ -115,15 +134,16 @@ export function FreeClaimPage() {
   const [revealed, setRevealed] = useState<RevealedState | null>(null);
   const [serverDebug, setServerDebug] = useState<any>(null);
 
-  // Persist query claim token as a fallback (some redirect/shortener flows can strip params).
+  // Persist claim token as a fallback (some redirect/shortener flows can strip params).
   useEffect(() => {
-    if (!isValidClaimToken(queryClaimRaw)) return;
+    const candidate = isValidClaimToken(queryClaimRaw) ? queryClaimRaw : (isValidClaimToken(recoveredClaimRaw) ? recoveredClaimRaw : "");
+    if (!candidate) return;
     try {
-      localStorage.setItem("free_claim_token", queryClaimRaw);
+      localStorage.setItem("free_claim_token", candidate);
     } catch {
       // ignore
     }
-  }, [queryClaimRaw]);
+  }, [queryClaimRaw, recoveredClaimRaw]);
 
   // Persist out token from query so reloads don't lose it.
   useEffect(() => {
