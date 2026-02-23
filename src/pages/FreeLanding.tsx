@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { getFunction, postFunction } from "@/lib/functions";
+import { clearBundle, writeBundle } from "@/lib/freeFlow";
 import {
   getFreeTestMode,
   getOrCreateFingerprint,
@@ -175,6 +176,9 @@ export function FreeLandingPage() {
               onClick={async () => {
                 if (!selected) return;
 
+                // Start a new flow atomically: clear old bundle first (avoid mixing tokens across sessions)
+                clearBundle();
+
                 setLoading(true);
                 setErr(null);
                 try {
@@ -219,6 +223,17 @@ export function FreeLandingPage() {
                   }
 
                   setOutToken(res.out_token);
+
+                  // Persist bundle as the single source of truth for this flow (session_id + out_token)
+                  try {
+                    const sid = String((res as any).session_id ?? "").trim();
+                    if (sid) {
+                      writeBundle({ session_id: sid, out_token: String(res.out_token) });
+                    }
+                  } catch {
+                    // ignore
+                  }
+
                   setFreeStartMeta({
                     startedAtMs: Date.now(),
                     minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
