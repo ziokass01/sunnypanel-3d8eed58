@@ -188,7 +188,11 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "BLOCKED" }, 403);
   }
 
-  // Session lookup: prefer explicit session_id, then claim_token_hash, then out_token_hash.
+  // Session lookup:
+  // - If claimHash && outHash both present: prefer lookup by BOTH (prevents "half-mixed" tokens)
+  // - Then fallback to explicit session_id
+  // - Then fallback to claim_token_hash
+  // - Then fallback to out_token_hash
   const requestedSessionId = sessionIdTrim;
 
   let sess: any = null;
@@ -201,7 +205,20 @@ Deno.serve(async (req) => {
     }
     : null;
 
-  if (requestedSessionId) {
+  if (claimHash && outHash) {
+    const q = await sb
+      .from("licenses_free_sessions")
+      .select(
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+      )
+      .eq("claim_token_hash", claimHash)
+      .eq("out_token_hash", outHash)
+      .maybeSingle();
+    if (!q.error && q.data) sess = q.data;
+    if (debugLookup) debugLookup.looked_up_by = "claim+out";
+  }
+
+  if (!sess && requestedSessionId) {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
@@ -210,7 +227,7 @@ Deno.serve(async (req) => {
       .eq("session_id", requestedSessionId)
       .maybeSingle();
     if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = "session_id";
+    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "session_id";
   }
 
   if (!sess && claimHash) {

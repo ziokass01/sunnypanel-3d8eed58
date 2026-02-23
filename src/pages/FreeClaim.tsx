@@ -5,13 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
-import {
-  clearFreeFlowStorage,
-  getOrCreateFingerprint,
-  getOutToken,
-  getSelectedKeyTypeCode,
-  setOutToken,
-} from "@/features/free/fingerprint";
+import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
+import { clearFreeFlowStorage, getOrCreateFingerprint, getSelectedKeyTypeCode, setOutToken } from "@/features/free/fingerprint";
 
 type RevealOk = {
   ok: true;
@@ -102,34 +97,55 @@ export function FreeClaimPage() {
   const sidFromQuery = getParam(["sid", "session_id"]);
   const debugMode = getParam(["debug"]) === "1";
 
-  const claimToken = (() => {
-    if (isValidClaimToken(queryClaimRaw)) return queryClaimRaw;
-    if (isValidClaimToken(recoveredClaimRaw)) return recoveredClaimRaw;
-    try {
-      const fb = (localStorage.getItem("free_claim_token") ?? "").trim();
-      return isValidClaimToken(fb) ? fb : "";
-    } catch {
-      return "";
-    }
-  })();
+  // ---- Token source rules (NO MIX):
+  // A) URL mode: valid only when claim + out_token are present in URL
+  // B) Storage mode: only when URL mode invalid, use a fresh bundle with full tokens
+  const bundle = useMemo(() => readBundle(), []);
+  const bundleFresh = useMemo(() => (bundle ? isFresh(bundle) : false), [bundle]);
 
-  const outToken = useMemo(() => {
-    if (tFromQuery) return tFromQuery;
-    return (getOutToken() || "").trim();
-  }, [tFromQuery]);
+  const claimFromUrl = useMemo(() => {
+    const c1 = isValidClaimToken(queryClaimRaw) ? queryClaimRaw : "";
+    if (c1) return c1;
+    const c2 = isValidClaimToken(recoveredClaimRaw) ? recoveredClaimRaw : "";
+    return c2;
+  }, [queryClaimRaw, recoveredClaimRaw]);
 
-  const sessionId = useMemo(() => {
-    if (sidFromQuery) return sidFromQuery;
-    try {
-      const a = (localStorage.getItem("free_session_id_v1") || "").trim();
-      if (a) return a;
-      const b = (localStorage.getItem("free_session_id") || "").trim();
-      if (b) return b;
-    } catch {
-      // ignore
+  const urlModeValid = useMemo(() => {
+    return Boolean(claimFromUrl && String(tFromQuery || "").trim());
+  }, [claimFromUrl, tFromQuery]);
+
+  const { claimToken, outToken, sessionId, tokenSource } = useMemo(() => {
+    if (urlModeValid) {
+      const claim = claimFromUrl;
+      const out = String(tFromQuery || "").trim();
+      const sidUrl = String(sidFromQuery || "").trim();
+
+      // If URL has no sid, only borrow sid from bundle when bundle matches claim+out (and is fresh)
+      let sid = sidUrl;
+      if (!sid && bundleFresh && bundle?.claim_token === claim && bundle?.out_token === out) {
+        sid = String(bundle.session_id || "").trim();
+      }
+
+      return {
+        claimToken: claim,
+        outToken: out,
+        sessionId: sid,
+        tokenSource: "url" as const,
+      };
     }
-    return "";
-  }, [sidFromQuery]);
+
+    // Storage mode (bundle must be fresh and complete)
+    if (bundleFresh && bundle?.claim_token && bundle?.out_token && bundle?.session_id) {
+      return {
+        claimToken: String(bundle.claim_token).trim(),
+        outToken: String(bundle.out_token).trim(),
+        sessionId: String(bundle.session_id).trim(),
+        tokenSource: "bundle" as const,
+      };
+    }
+
+    return { claimToken: "", outToken: "", sessionId: "", tokenSource: "none" as const };
+  }, [bundle, bundleFresh, claimFromUrl, sidFromQuery, tFromQuery, urlModeValid]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,18 +156,25 @@ export function FreeClaimPage() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
 
-  // Persist claim token as a fallback (some redirect/shortener flows can strip params).
+  // If URL mode is active, persist the atomic bundle for reload/multi-tab robustness.
   useEffect(() => {
-    const candidate = isValidClaimToken(queryClaimRaw) ? queryClaimRaw : (isValidClaimToken(recoveredClaimRaw) ? recoveredClaimRaw : "");
-    if (!candidate) return;
+    if (tokenSource !== "url") return;
+    if (!claimToken || !outToken) return;
+
+    // If we have a sid (either from URL or a verified matching bundle), we can write the full bundle.
+    if (sessionId) {
+      writeBundle({ session_id: sessionId, out_token: outToken, claim_token: claimToken });
+    }
+
+    // Backward-compat storage (does not affect token selection logic)
     try {
-      localStorage.setItem("free_claim_token", candidate);
+      localStorage.setItem("free_claim_token", claimToken);
     } catch {
       // ignore
     }
-  }, [queryClaimRaw, recoveredClaimRaw]);
+  }, [tokenSource, claimToken, outToken, sessionId]);
 
-  // Persist out token from query so reloads don't lose it.
+  // Backward-compat: persist out token from query so reloads don't lose it.
   useEffect(() => {
     if (!tFromQuery) return;
     setOutToken(tFromQuery);
@@ -162,7 +185,7 @@ export function FreeClaimPage() {
     }
   }, [tFromQuery]);
 
-  // Persist session_id from query for robustness.
+  // Backward-compat: persist session_id from query for robustness.
   useEffect(() => {
     if (!sidFromQuery) return;
     try {
@@ -256,8 +279,9 @@ export function FreeClaimPage() {
         const err = res as RevealErr;
         const code = String(err.code || "").trim();
 
-        const baseMsg = String(err.msg || "").trim() || friendlyRevealError(code || "UNAUTHORIZED");
-        setError(code ? `${baseMsg} (${code})` : baseMsg);
+        // Friendly message for users; keep raw code only when debug=1.
+        const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
+        setError(debugMode && code ? `${friendly} (${code})` : friendly);
         return;
       }
 
@@ -285,8 +309,8 @@ export function FreeClaimPage() {
       }
     } catch (e: any) {
       const code = String(e?.code || "").trim();
-      const baseMsg = String(e?.message || "").trim() || friendlyRevealError(code || "UNAUTHORIZED");
-      setError(code ? `${baseMsg} (${code})` : baseMsg);
+      const friendly = friendlyRevealError(code || e?.message || "UNAUTHORIZED");
+      setError(debugMode && code ? `${friendly} (${code})` : friendly);
     } finally {
       setLoading(false);
     }
@@ -308,6 +332,7 @@ export function FreeClaimPage() {
       // ignore
     } finally {
       clearFreeFlowStorage();
+      clearBundle();
       try {
         localStorage.removeItem("free_claim_token");
       } catch {

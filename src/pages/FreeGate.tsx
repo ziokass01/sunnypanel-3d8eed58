@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
+import { writeBundle } from "@/lib/freeFlow";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setOutToken } from "@/features/free/fingerprint";
 
 type GateOk = { ok: true; claim_token: string; claim_url?: string | null };
@@ -146,6 +147,11 @@ export function FreeGatePage() {
 
         const nextSid = (sid || "").trim();
         const nextTok = (tok || "").trim();
+
+        // Persist an atomic bundle for Claim (avoid mixing tokens across sessions)
+        if (nextSid && nextTok) {
+          writeBundle({ session_id: nextSid, out_token: nextTok, claim_token: String(claim) });
+        }
 
         // IMPORTANT: propagate sid+t to Claim so Claim does not rely on localStorage.
         // IMPORTANT: never build URL via string concat (avoid malformed '?claim?sid' on some mobile browsers/redirects).
