@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
+import { fetchFreeConfig } from "@/features/free/free-config";
+import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import {
   clearFreeFlowStorage,
   getOrCreateFingerprint,
@@ -134,6 +136,10 @@ export function FreeClaimPage() {
   const [revealed, setRevealed] = useState<RevealedState | null>(null);
   const [serverDebug, setServerDebug] = useState<any>(null);
 
+  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState("");
+
   // Persist claim token as a fallback (some redirect/shortener flows can strip params).
   useEffect(() => {
     const candidate = isValidClaimToken(queryClaimRaw) ? queryClaimRaw : (isValidClaimToken(recoveredClaimRaw) ? recoveredClaimRaw : "");
@@ -188,6 +194,24 @@ export function FreeClaimPage() {
     };
   }, []);
 
+  // Fetch backend config to determine Turnstile requirements.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const cfg = await fetchFreeConfig();
+        const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
+        setTurnstileEnabled(enabled);
+        setTurnstileSiteKey(cfg.turnstile_site_key ?? null);
+        if (!enabled) setTurnstileToken("");
+      } catch {
+        // If config cannot be fetched, fail open (do not block claim UI).
+        setTurnstileEnabled(false);
+        setTurnstileSiteKey(null);
+        setTurnstileToken("");
+      }
+    })();
+  }, []);
+
   const returnSeconds = 10;
 
   const selectedLabel = useMemo(() => {
@@ -199,8 +223,9 @@ export function FreeClaimPage() {
     if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
+    if (turnstileEnabled && !turnstileToken) return false;
     return !loading;
-  }, [claimToken, outToken, revealed, loading]);
+  }, [claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
 
   async function revealOnce() {
     if (!claimToken) return;
@@ -220,7 +245,7 @@ export function FreeClaimPage() {
         out_token: outToken,
         session_id: sessionId || undefined,
         fingerprint: fp,
-        turnstile_token: null,
+        cf_turnstile_response: turnstileEnabled ? turnstileToken : undefined,
         debug: debugMode ? 1 : undefined,
       });
 
@@ -365,13 +390,23 @@ export function FreeClaimPage() {
               </div>
             ) : null}
 
-            {!revealed ? (
-              <div className="space-y-3">
-                <Button className="w-full" disabled={!canVerify || loading} onClick={revealOnce}>
-                  {loading ? "Đang xác minh…" : "Xác minh"}
-                </Button>
-              </div>
-            ) : (
+             {!revealed ? (
+               <div className="space-y-3">
+                 {turnstileEnabled && turnstileSiteKey ? (
+                   <div className="rounded-md border p-3">
+                     <TurnstileWidget
+                       siteKey={turnstileSiteKey}
+                       onToken={setTurnstileToken}
+                       onError={(m) => setError(m)}
+                     />
+                   </div>
+                 ) : null}
+
+                 <Button className="w-full" disabled={!canVerify || loading} onClick={revealOnce}>
+                   {loading ? "Đang xác minh…" : "Xác minh"}
+                 </Button>
+               </div>
+             ) : (
               <div className="space-y-3">
                 <div className="rounded-md border p-3">
                   <div className="text-sm text-muted-foreground">{revealed.label}</div>
