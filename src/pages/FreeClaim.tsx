@@ -20,6 +20,9 @@ type RevealOk = {
 };
 type RevealErr = { ok: false; msg: string; code?: string };
 
+type ResolveOk = { ok: true; session_id: string };
+type ResolveErr = { ok: false; code?: string; msg: string };
+
 function isValidClaimToken(tok: string) {
   const t = String(tok || "").trim();
   if (t.length < 16 || t.length > 512) return false;
@@ -34,7 +37,7 @@ function friendlyRevealError(msg: string) {
     return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
   }
   if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại Get Key và vượt link lại.";
-  if (m === "SESSION_NOT_FOUND") return "Không tìm thấy phiên. Hãy quay lại Get Key và đi đúng flow Link4M → Gate.";
+  if (m === "SESSION_NOT_FOUND") return "Không tìm thấy phiên (session). Hãy quay lại /free và bấm Xác minh lại.";
   if (m === "OUT_TOKEN_REQUIRED") return "Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.";
   if (m === "OUT_TOKEN_MISMATCH") return "Token (t) không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
   if (m === "CLAIM_INVALID") return "Token xác minh không hợp lệ. Vui lòng quay lại Get Key và làm lại.";
@@ -147,6 +150,9 @@ export function FreeClaimPage() {
     return { claimToken: "", outToken: "", sessionId: "", tokenSource: "none" as const };
   }, [bundle, bundleFresh, claimFromUrl, sidFromQuery, tFromQuery, urlModeValid]);
 
+  const [resolvedSessionId, setResolvedSessionId] = useState<string>("");
+  const effectiveSessionId = resolvedSessionId || sessionId || "";
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<RevealedState | null>(null);
@@ -156,14 +162,46 @@ export function FreeClaimPage() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
 
+  async function resolveByOutToken(outTok: string, debug: boolean): Promise<string | null> {
+    const tok = String(outTok || "").trim();
+    if (!tok) return null;
+
+    try {
+      const res = await postFunction<ResolveOk | ResolveErr>("/free-resolve", {
+        out_token: tok,
+        debug: debug ? 1 : undefined,
+      });
+
+      if ((res as ResolveOk).ok) {
+        const sid = String((res as ResolveOk).session_id || "").trim();
+        if (!sid) return null;
+
+        try {
+          localStorage.setItem("free_session_id_v1", sid);
+          localStorage.setItem("free_session_id", sid);
+          localStorage.setItem("session_id", sid);
+        } catch {
+          // ignore
+        }
+
+        setResolvedSessionId(sid);
+        return sid;
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   // If URL mode is active, persist the atomic bundle for reload/multi-tab robustness.
   useEffect(() => {
     if (tokenSource !== "url") return;
     if (!claimToken || !outToken) return;
 
     // If we have a sid (either from URL or a verified matching bundle), we can write the full bundle.
-    if (sessionId) {
-      writeBundle({ session_id: sessionId, out_token: outToken, claim_token: claimToken });
+    if (effectiveSessionId) {
+      writeBundle({ session_id: effectiveSessionId, out_token: outToken, claim_token: claimToken });
     }
 
     // Backward-compat storage (does not affect token selection logic)
@@ -172,7 +210,7 @@ export function FreeClaimPage() {
     } catch {
       // ignore
     }
-  }, [tokenSource, claimToken, outToken, sessionId]);
+  }, [tokenSource, claimToken, outToken, effectiveSessionId]);
 
   // Backward-compat: persist out token from query so reloads don't lose it.
   useEffect(() => {
@@ -202,9 +240,6 @@ export function FreeClaimPage() {
       setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
     }
   }, [claimToken, outToken]);
-
-
-
 
   useEffect(() => {
     // noindex for claim page
@@ -250,7 +285,7 @@ export function FreeClaimPage() {
     return !loading;
   }, [claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
 
-  async function revealOnce() {
+  async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
     if (!outToken) {
       setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
@@ -261,12 +296,20 @@ export function FreeClaimPage() {
     setLoading(true);
     setError(null);
     setServerDebug(null);
+
     try {
       const fp = getOrCreateFingerprint();
+
+      let sid = String(opts?.forceSid ?? "").trim() || effectiveSessionId;
+      if (!sid) {
+        const resolved = await resolveByOutToken(outToken, debugMode);
+        if (resolved) sid = resolved;
+      }
+
       const res = await postFunction<RevealOk | RevealErr>("/free-reveal", {
         claim_token: claimToken,
         out_token: outToken,
-        session_id: sessionId || undefined,
+        session_id: sid || undefined,
         fingerprint: fp,
         cf_turnstile_response: turnstileEnabled ? turnstileToken : undefined,
         debug: debugMode ? 1 : undefined,
@@ -277,9 +320,19 @@ export function FreeClaimPage() {
 
       if (!res.ok) {
         const err = res as RevealErr;
-        const code = String(err.code || "").trim();
+        const code = String(err.code || err.msg || "").trim();
 
-        // Friendly message for users; keep raw code only when debug=1.
+        // If session not found, try to resolve session_id again and retry ONCE with the new sid.
+        if (code === "SESSION_NOT_FOUND") {
+          const currentSid = sid;
+          const nextSid = await resolveByOutToken(outToken, debugMode);
+          if (nextSid && nextSid !== currentSid) {
+            setLoading(false);
+            await revealOnce({ forceSid: nextSid });
+            return;
+          }
+        }
+
         const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
         setError(debugMode && code ? `${friendly} (${code})` : friendly);
         return;
@@ -321,7 +374,7 @@ export function FreeClaimPage() {
     if (revealed) return;
     void revealOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claimToken, outToken, sessionId]);
+  }, [claimToken, outToken, effectiveSessionId]);
 
   async function closeAndReturn() {
     try {
@@ -427,9 +480,9 @@ export function FreeClaimPage() {
                    </div>
                  ) : null}
 
-                 <Button className="w-full" disabled={!canVerify || loading} onClick={revealOnce}>
-                   {loading ? "Đang xác minh…" : "Xác minh"}
-                 </Button>
+                  <Button className="w-full" disabled={!canVerify || loading} onClick={() => void revealOnce()}>
+                    {loading ? "Đang xác minh…" : "Xác minh"}
+                  </Button>
                </div>
              ) : (
               <div className="space-y-3">
