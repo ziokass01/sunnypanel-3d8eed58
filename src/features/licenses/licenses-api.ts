@@ -49,9 +49,14 @@ async function logAudit(action: string, licenseKey: string, detail: unknown = {}
   if (error) throw error;
 }
 
-export async function fetchLicenses(params: { q?: string; status?: "all" | "active" | "expired" | "blocked" }) {
+export async function fetchLicenses(params: {
+  q?: string;
+  status?: "all" | "active" | "expired" | "blocked";
+  free_note?: "all" | "exclude" | "only";
+}) {
   const q = params.q?.trim();
   const status = params.status ?? "all";
+  const freeNote = params.free_note ?? "all";
 
   let query = (supabase.from(licensesTable) as any)
     .select(
@@ -62,6 +67,13 @@ export async function fetchLicenses(params: { q?: string; status?: "all" | "acti
     )
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
+
+  if (freeNote === "exclude") {
+    // Keep NULL notes, exclude FREE% notes
+    query = query.or("note.is.null,note.not.ilike.FREE%");
+  } else if (freeNote === "only") {
+    query = query.ilike("note", "FREE%");
+  }
 
   if (q) {
     const escaped = escapeILike(q);

@@ -13,6 +13,7 @@ import { AdminShell } from "@/shell/AdminShell";
 import { DashboardPage } from "@/pages/Dashboard";
 import { LicensesListPage } from "@/pages/LicensesList";
 import { Licenses2Page } from "@/pages/Licenses2";
+import { FreeLicensesPage } from "@/pages/FreeLicenses";
 import { LicenseCreatePage } from "@/pages/LicenseCreate";
 import { LicenseDetailPage } from "@/pages/LicenseDetail";
 import { LicenseEditPage } from "@/pages/LicenseEdit";
@@ -55,6 +56,7 @@ const App = () => (
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/licenses" element={<LicensesListPage />} />
               <Route path="/licenses2" element={<Licenses2Page />} />
+              <Route path="/free-licenses" element={<FreeLicensesPage />} />
               <Route path="/licenses/trash" element={<LicensesTrashPage />} />
               <Route path="/licenses/new" element={<LicenseCreatePage />} />
               <Route path="/licenses2/new" element={<LicenseCreatePage />} />

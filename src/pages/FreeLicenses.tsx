@@ -65,30 +65,26 @@ function computeExpiresLabel(row: any) {
   return new Date(row.expires_at).toLocaleString();
 }
 
-export function LicensesListView(props: { filterMode: FilterMode; title: string }) {
+export function FreeLicensesPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "expired" | "blocked">("all");
-  const [type, setType] = useState<"all" | "fixed" | "first_use">(props.filterMode === "start_on_first_use" ? "first_use" : "all");
+  const [type, setType] = useState<"all" | "fixed" | "first_use">("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
 
-  // Live countdown (list can be less frequent than detail)
   const nowMs = useNow(10_000);
 
-  const queryKey = useMemo(() => ["licenses", { q, status }] as const, [q, status]);
+  const queryKey = useMemo(() => ["licenses", "free", { q, status }] as const, [q, status]);
   const { data = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => fetchLicenses({ q, status, free_note: "exclude" }),
+    queryFn: () => fetchLicenses({ q, status, free_note: "only" }),
   });
 
   const filteredData = useMemo(() => {
-    const base = props.filterMode === "start_on_first_use"
-      ? data.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use))
-      : data;
-    if (type === "all") return base;
+    if (type === "all") return data;
     const wantFirstUse = type === "first_use";
-    return base.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) === wantFirstUse);
-  }, [data, props.filterMode, type]);
+    return data.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) === wantFirstUse);
+  }, [data, type]);
 
   const softDeleteMutation = useMutation({
     mutationFn: async (id: string) => softDeleteLicense(id),
@@ -101,15 +97,13 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
   return (
     <section className="space-y-4">
       <header className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">{props.title}</h1>
+        <h1 className="text-2xl font-semibold">Free Licenses</h1>
         <div className="flex gap-2">
           <Button variant="soft" asChild>
             <NavLink to="/licenses/trash">View Trash</NavLink>
           </Button>
           <Button asChild>
-            <NavLink to={props.filterMode === "start_on_first_use" ? "/licenses2/new" : "/licenses/new"}>
-              Create license
-            </NavLink>
+            <NavLink to="/licenses/new">Create license</NavLink>
           </Button>
         </div>
       </header>
@@ -119,11 +113,7 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search key/note…" />
         </div>
 
-        <Select
-          value={type}
-          onValueChange={(v) => setType(v as any)}
-          disabled={props.filterMode === "start_on_first_use"}
-        >
+        <Select value={type} onValueChange={(v) => setType(v as any)}>
           <SelectTrigger>
             <SelectValue placeholder="Type" />
           </SelectTrigger>
