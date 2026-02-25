@@ -287,7 +287,19 @@ Deno.serve(async (req) => {
   }
 
   const baseUrl = PUBLIC_BASE_URL || "";
-  const claim_url = baseUrl ? `${baseUrl}/free/claim?claim=${encodeURIComponent(claim_token)}` : "";
+
+  let claim_url = "";
+  if (baseUrl) {
+    const sidForUrl = String(bodySid ?? sess.session_id ?? "").trim();
+    const tForUrl = String(out_token ?? "").trim();
+
+    const params = new URLSearchParams();
+    params.set("claim", claim_token);
+    if (sidForUrl) params.set("sid", sidForUrl);
+    if (tForUrl) params.set("t", tForUrl);
+
+    claim_url = `${baseUrl}/free/claim?${params.toString()}`;
+  }
 
   return json({ ok: true, claim_token, claim_url }, 200);
 });

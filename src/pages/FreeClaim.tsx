@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +6,14 @@ import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
-import { clearFreeFlowStorage, getOrCreateFingerprint, getSelectedKeyTypeCode, setOutToken } from "@/features/free/fingerprint";
+import {
+  clearFreeFlowStorage,
+  getFreeStartMeta,
+  getOrCreateFingerprint,
+  getOutToken,
+  getSelectedKeyTypeCode,
+  setOutToken,
+} from "@/features/free/fingerprint";
 
 type RevealOk = {
   ok: true;
@@ -100,11 +107,19 @@ export function FreeClaimPage() {
   const sidFromQuery = getParam(["sid", "session_id"]);
   const debugMode = getParam(["debug"]) === "1";
 
-  // ---- Token source rules (NO MIX):
-  // A) URL mode: valid only when claim + out_token are present in URL
-  // B) Storage mode: only when URL mode invalid, use a fresh bundle with full tokens
+  // ---- Token source rules (NO MIX of *different* sessions):
+  // Primary: URL. If URL is incomplete, we may do HYBRID recovery for missing pieces from *fresh* storage.
+  // Fallback: Storage bundle (fresh + complete).
+
   const bundle = useMemo(() => readBundle(), []);
   const bundleFresh = useMemo(() => (bundle ? isFresh(bundle) : false), [bundle]);
+
+  const startMeta = useMemo(() => getFreeStartMeta(), []);
+  const metaFresh = useMemo(() => {
+    const startedAtMs = Number(startMeta?.startedAtMs ?? 0);
+    if (!Number.isFinite(startedAtMs) || startedAtMs <= 0) return false;
+    return Date.now() - startedAtMs <= 30 * 60 * 1000;
+  }, [startMeta]);
 
   const claimFromUrl = useMemo(() => {
     const c1 = isValidClaimToken(queryClaimRaw) ? queryClaimRaw : "";
@@ -113,19 +128,49 @@ export function FreeClaimPage() {
     return c2;
   }, [queryClaimRaw, recoveredClaimRaw]);
 
-  const urlModeValid = useMemo(() => {
-    return Boolean(claimFromUrl && String(tFromQuery || "").trim());
-  }, [claimFromUrl, tFromQuery]);
+  function readLegacyOutToken(): string {
+    // (1) fingerprint storage
+    const primary = String(getOutToken() || "").trim();
+    if (primary) return primary;
+
+    // (2) legacy LS keys
+    try {
+      const fb1 = String(localStorage.getItem("free_out_token_v1") || "").trim();
+      if (fb1) return fb1;
+      const fb2 = String(localStorage.getItem("free_out_token") || "").trim();
+      if (fb2) return fb2;
+    } catch {
+      // ignore
+    }
+
+    return "";
+  }
 
   const { claimToken, outToken, sessionId, tokenSource } = useMemo(() => {
-    if (urlModeValid) {
-      const claim = claimFromUrl;
-      const out = String(tFromQuery || "").trim();
-      const sidUrl = String(sidFromQuery || "").trim();
+    const sidUrl = String(sidFromQuery || "").trim();
+    const outUrl = String(tFromQuery || "").trim();
 
-      // If URL has no sid, only borrow sid from bundle when bundle matches claim+out (and is fresh)
+    // URL / HYBRID mode (claim is required to proceed)
+    if (claimFromUrl) {
+      const claim = claimFromUrl;
+      let out = outUrl;
+
+      // HYBRID RECOVERY: if URL has claim but missing t => try to recover t from fresh storage
+      if (!out) {
+        // Prefer bundle match first (prevents mixing)
+        if (bundleFresh && bundle?.claim_token === claim && bundle?.out_token) {
+          out = String(bundle.out_token).trim();
+        } else if (metaFresh) {
+          out = readLegacyOutToken();
+        }
+      }
+
+      // If URL has sid but missing t: still allow (out may be recovered above)
+      // If URL has t but missing sid: keep sid empty and force canonical resolve by out_token later.
       let sid = sidUrl;
-      if (!sid && bundleFresh && bundle?.claim_token === claim && bundle?.out_token === out) {
+
+      // Borrow sid from bundle ONLY when bundle matches claim+out (and is fresh)
+      if (!sid && out && bundleFresh && bundle?.claim_token === claim && bundle?.out_token === out) {
         sid = String(bundle.session_id || "").trim();
       }
 
@@ -133,11 +178,11 @@ export function FreeClaimPage() {
         claimToken: claim,
         outToken: out,
         sessionId: sid,
-        tokenSource: "url" as const,
+        tokenSource: outUrl ? ("url" as const) : out ? ("hybrid" as const) : ("url" as const),
       };
     }
 
-    // Storage mode (bundle must be fresh and complete)
+    // Storage bundle mode (must be fresh + complete)
     if (bundleFresh && bundle?.claim_token && bundle?.out_token && bundle?.session_id) {
       return {
         claimToken: String(bundle.claim_token).trim(),
@@ -148,10 +193,34 @@ export function FreeClaimPage() {
     }
 
     return { claimToken: "", outToken: "", sessionId: "", tokenSource: "none" as const };
-  }, [bundle, bundleFresh, claimFromUrl, sidFromQuery, tFromQuery, urlModeValid]);
+  }, [bundle, bundleFresh, claimFromUrl, metaFresh, sidFromQuery, tFromQuery]);
 
   const [resolvedSessionId, setResolvedSessionId] = useState<string>("");
   const effectiveSessionId = resolvedSessionId || sessionId || "";
+
+  const didRetryRef = useRef(false);
+
+  // Reset the one-time retry guard when tokens change.
+  useEffect(() => {
+    didRetryRef.current = false;
+  }, [claimToken, outToken]);
+
+  // Canonical session_id: whenever we have out_token, resolve sid from backend.
+  // This repairs missing/incorrect sid due to URL mangling/copy.
+  useEffect(() => {
+    if (!outToken) return;
+    let cancelled = false;
+    void (async () => {
+      const sid = await resolveByOutToken(outToken, debugMode);
+      if (cancelled) return;
+      // resolveByOutToken already sets state + storage; no-op here.
+      void sid;
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outToken, debugMode]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,9 +263,9 @@ export function FreeClaimPage() {
     }
   }
 
-  // If URL mode is active, persist the atomic bundle for reload/multi-tab robustness.
+  // If URL/hybrid mode is active, persist the atomic bundle for reload/multi-tab robustness.
   useEffect(() => {
-    if (tokenSource !== "url") return;
+    if (tokenSource !== "url" && tokenSource !== "hybrid") return;
     if (!claimToken || !outToken) return;
 
     // If we have a sid (either from URL or a verified matching bundle), we can write the full bundle.
@@ -326,7 +395,16 @@ export function FreeClaimPage() {
         if (code === "SESSION_NOT_FOUND") {
           const currentSid = sid;
           const nextSid = await resolveByOutToken(outToken, debugMode);
-          if (nextSid && nextSid !== currentSid) {
+
+          if (!nextSid) {
+            const friendly =
+              "Phiên không tồn tại hoặc token bị sai/thiếu. Hãy quay lại /free tạo phiên mới.";
+            setError(debugMode && code ? `${friendly} (${code})` : friendly);
+            return;
+          }
+
+          if (!didRetryRef.current && nextSid !== currentSid) {
+            didRetryRef.current = true;
             setLoading(false);
             await revealOnce({ forceSid: nextSid });
             return;
@@ -447,6 +525,7 @@ export function FreeClaimPage() {
             {debugMode ? (
               <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
                 <div>debug=1</div>
+                <div>tokenSource: {tokenSource}</div>
                 <div>claim_token_len: {claimToken ? claimToken.length : 0}</div>
                 <div>
                   claim_mask: {claimToken ? `${claimToken.slice(0, 6)}…${claimToken.slice(-4)}` : ""}
@@ -454,6 +533,14 @@ export function FreeClaimPage() {
                 <div>sid_len: {sessionId ? sessionId.length : 0}</div>
                 <div>
                   sid_mask: {sessionId ? `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}` : ""}
+                </div>
+                <div>resolved_sid_len: {resolvedSessionId ? resolvedSessionId.length : 0}</div>
+                <div>
+                  resolved_sid_mask: {resolvedSessionId ? `${resolvedSessionId.slice(0, 6)}…${resolvedSessionId.slice(-4)}` : ""}
+                </div>
+                <div>effective_sid_len: {effectiveSessionId ? effectiveSessionId.length : 0}</div>
+                <div>
+                  effective_sid_mask: {effectiveSessionId ? `${effectiveSessionId.slice(0, 6)}…${effectiveSessionId.slice(-4)}` : ""}
                 </div>
                 <div>t_len: {outToken ? outToken.length : 0}</div>
                 <div>
