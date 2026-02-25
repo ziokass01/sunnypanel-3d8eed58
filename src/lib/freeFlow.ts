@@ -40,12 +40,22 @@ export function writeBundle(
 ): void {
   try {
     const prev = readBundle();
-    const created_at = prev?.created_at ?? Date.now();
+
+    const nextSessionId = String(partial.session_id).trim();
+    const nextOutToken = String(partial.out_token).trim();
+
+    const shouldRefreshCreatedAt =
+      !prev ||
+      String(prev.session_id || "").trim() !== nextSessionId ||
+      String(prev.out_token || "").trim() !== nextOutToken;
+
+    const created_at = shouldRefreshCreatedAt ? Date.now() : prev.created_at;
+
     const next: FreeFlowBundle = {
       version: 1,
       created_at,
-      session_id: String(partial.session_id).trim(),
-      out_token: String(partial.out_token).trim(),
+      session_id: nextSessionId,
+      out_token: nextOutToken,
       claim_token: isNonEmptyString(partial.claim_token)
         ? String(partial.claim_token).trim()
         : prev?.claim_token,

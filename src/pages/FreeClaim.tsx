@@ -67,20 +67,21 @@ export function FreeClaimPage() {
 
   // NOTE: do NOT rely solely on router parsing; some redirect/shortener flows can produce malformed URLs with multiple '?'.
   // We robustly normalize the query from the real window.location.search.
-  const robustParams = useMemo(() => {
+  const normalizedQuery = useMemo(() => {
     // Normalize malformed queries like: /free/claim?claim=<TOKEN>?sid=<SID>&t=<T>
     // Rule: remove leading '?', then replace any remaining '?' with '&' before parsing.
     const raw = String(window.location.search || "");
     const withoutLeading = raw.startsWith("?") ? raw.slice(1) : raw;
-    const normalized = withoutLeading.replace(/\?/g, "&");
-    return new URLSearchParams(normalized);
+    return withoutLeading.replace(/\?/g, "&");
   }, []);
+
+  const robustParams = useMemo(() => {
+    return new URLSearchParams(normalizedQuery);
+  }, [normalizedQuery]);
 
   // Fallback: recover claim token when URL is like "/free/claim?claim<TOKEN>&sid=..." (missing '=')
   const recoveredClaimRaw = useMemo(() => {
-    const raw = String(window.location.search || "");
-    const withoutLeading = raw.startsWith("?") ? raw.slice(1) : raw;
-    const normalized = withoutLeading.replace(/\?/g, "&");
+    const normalized = normalizedQuery;
     const first = (normalized.split("&")[0] || "").trim();
 
     const prefixes = ["claim_token", "claimToken", "claim", "token", "c"];
@@ -92,7 +93,7 @@ export function FreeClaimPage() {
       if (recovered) return recovered;
     }
     return "";
-  }, []);
+  }, [normalizedQuery]);
 
   const getParam = (keys: string[]) => {
     for (const k of keys) {
@@ -200,6 +201,28 @@ export function FreeClaimPage() {
 
   const didRetryRef = useRef(false);
 
+  function clearLegacyFreeKeys() {
+    try {
+      const keys = [
+        "free_out_token_v1",
+        "free_out_token",
+        "free_session_id_v1",
+        "free_session_id",
+        "free_claim_token",
+        "session_id",
+      ];
+      for (const k of keys) localStorage.removeItem(k);
+    } catch {
+      // ignore
+    }
+  }
+
+  function clearAllFreeStorage() {
+    clearBundle();
+    clearFreeFlowStorage();
+    clearLegacyFreeKeys();
+  }
+
   // Reset the one-time retry guard when tokens change.
   useEffect(() => {
     didRetryRef.current = false;
@@ -303,6 +326,38 @@ export function FreeClaimPage() {
     }
   }, [sidFromQuery]);
 
+  const hasBareClaimKey = useMemo(() => {
+    const q = `&${normalizedQuery}&`;
+    const keys = ["claim", "claim_token", "claimToken", "token", "c"];
+
+    for (const k of keys) {
+      const keyEq = `&${k}=`.toLowerCase();
+      const keyBare = `&${k}`.toLowerCase();
+
+      const qLower = q.toLowerCase();
+      const hasEq = qLower.includes(keyEq);
+      const hasBare = qLower.includes(keyBare);
+
+      // Bare key present but no '=' form anywhere => malformed shortener like '?claim'
+      if (hasBare && !hasEq) return true;
+    }
+
+    return false;
+  }, [normalizedQuery]);
+
+  useEffect(() => {
+    // Fail-fast: URL contains claim key but no value (e.g. /free/claim?claim)
+    // If we are NOT in fresh+complete bundle mode, we must clear FREE storage and stop.
+    if (!hasBareClaimKey) return;
+    if (claimFromUrl) return;
+
+    const inBundleMode = tokenSource === "bundle";
+    if (inBundleMode) return;
+
+    clearAllFreeStorage();
+    setError("Link nhận key không hợp lệ hoặc đã bị rút gọn sai. Hãy quay lại /free và bấm Get Key lại.");
+  }, [hasBareClaimKey, claimFromUrl, tokenSource]);
+
   useEffect(() => {
     if (!claimToken) return;
     if (!outToken) {
@@ -397,8 +452,9 @@ export function FreeClaimPage() {
           const nextSid = await resolveByOutToken(outToken, debugMode);
 
           if (!nextSid) {
-            const friendly =
-              "Phiên không tồn tại hoặc token bị sai/thiếu. Hãy quay lại /free tạo phiên mới.";
+            // Hard stop: clear stale FREE storage so user won't get stuck in a loop.
+            clearAllFreeStorage();
+            const friendly = "Phiên không tồn tại hoặc token bị sai/thiếu. Hãy quay lại /free tạo phiên mới.";
             setError(debugMode && code ? `${friendly} (${code})` : friendly);
             return;
           }
