@@ -60,6 +60,7 @@ function shortHash(v?: string | null, n = 10) {
 export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [errMeta, setErrMeta] = useState<{ url?: string; origin?: string } | null>(null);
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
@@ -133,7 +134,22 @@ export function FreeLandingPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {err ? <div className="text-sm text-destructive">{err}</div> : null}
+            {err ? (
+              <div className="space-y-2">
+                <div className="text-sm text-destructive">{err}</div>
+                {errMeta?.url ? (
+                  <div className="text-xs text-muted-foreground break-all">
+                    Backend: <span className="font-mono">{errMeta.url}</span>
+                    {errMeta.origin ? (
+                      <>
+                        <br />
+                        Origin: <span className="font-mono">{errMeta.origin}</span>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {missingText ? (
               <div className="rounded-md border p-3 text-sm">

@@ -28,7 +28,7 @@ export async function getFunction<T>(
         Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
-      credentials: "include",
+      credentials: opts?.withCredentials ? "include" : "omit",
     });
   } catch (e: any) {
     // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
@@ -91,7 +91,7 @@ export async function postFunction<T>(
         ...(opts?.headers ?? {}),
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
-      credentials: "include",
+      credentials: opts?.withCredentials ? "include" : "omit",
       body: JSON.stringify(body ?? {}),
     });
   };

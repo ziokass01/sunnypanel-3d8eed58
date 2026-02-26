@@ -39,6 +39,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders, status: 204 });
   }
 
+  try {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
@@ -147,4 +148,12 @@ Deno.serve(async (req) => {
   };
 
   return jsonResponse(body, 200);
+  } catch (e) {
+    console.error("free-config unexpected error", e);
+    return jsonResponse(
+      { ok: false, code: "INTERNAL", error: "Internal server error" },
+      { status: 500, headers: corsHeaders },
+    );
+  }
+
 });
