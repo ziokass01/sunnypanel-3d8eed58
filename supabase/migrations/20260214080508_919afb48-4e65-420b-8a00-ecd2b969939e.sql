@@ -158,7 +158,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.check_free_ip_rate_limit(
   p_ip_hash text,
-  p_route text,
+  p_route text DEFAULT 'free-start',
   p_limit integer DEFAULT 60,
   p_window_seconds integer DEFAULT 60
 )
@@ -206,7 +206,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.check_free_fp_rate_limit(
   p_fp_hash text,
-  p_route text,
+  p_route text DEFAULT 'free-start',
   p_limit integer DEFAULT 60,
   p_window_seconds integer DEFAULT 60
 )
