@@ -33,18 +33,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_licenses_free_fp_rate_limits
 
 -- Keep compatibility with existing installations that already have free_ip_rate_limits/free_fp_rate_limits
 -- by creating them if missing.
-CREATE TABLE IF NOT EXISTS public.free_ip_rate_limits (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ip_hash text NOT NULL,
-  route text NOT NULL,
-  window_start timestamptz NOT NULL,
-  count integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
+-- LEGACY VIEW GUARD: drop legacy views before creating TABLEs / indexes
 DO $$
 BEGIN
-  -- If legacy objects are VIEWS, drop them so we can create TABLEs + indexes
   IF EXISTS (
     SELECT 1
     FROM pg_class c
@@ -64,6 +55,15 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS public.free_ip_rate_limits (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ip_hash text NOT NULL,
+  route text NOT NULL,
+  window_start timestamptz NOT NULL,
+  count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_free_ip_rate_limits
   ON public.free_ip_rate_limits (ip_hash, route, window_start);
 
