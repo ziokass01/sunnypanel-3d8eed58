@@ -42,6 +42,28 @@ CREATE TABLE IF NOT EXISTS public.free_ip_rate_limits (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+DO $$
+BEGIN
+  -- If legacy objects are VIEWS, drop them so we can create TABLEs + indexes
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'free_ip_rate_limits' AND c.relkind IN ('v','m')
+  ) THEN
+    EXECUTE 'DROP VIEW public.free_ip_rate_limits CASCADE';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'free_fp_rate_limits' AND c.relkind IN ('v','m')
+  ) THEN
+    EXECUTE 'DROP VIEW public.free_fp_rate_limits CASCADE';
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_free_ip_rate_limits
   ON public.free_ip_rate_limits (ip_hash, route, window_start);
 
