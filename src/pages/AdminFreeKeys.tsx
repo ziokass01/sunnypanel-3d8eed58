@@ -630,7 +630,7 @@ const disableAllKeyTypes = useMutation({
               <Input
                 value={outboundUrl}
                 onChange={(e) => setOutboundUrl(e.target.value)}
-                placeholder="https://link4m.com/xxxx"
+                placeholder="https://link4m.co/st?api=YOUR_TOKEN&url=..."
                 inputMode="url"
               />
               <div className="text-xs text-muted-foreground">
@@ -638,8 +638,8 @@ const disableAllKeyTypes = useMutation({
                 <div className="mt-1 font-mono text-xs">
                   • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
                 </div>
-                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.com/PkY7X?url={"{GATE_URL_ENC}"}</div>
-                <div className="mt-1">Nếu là Link4M mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span> để bạn sửa template.</div>
+                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
+                <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> (hoặc api-shorten) thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL. Nếu Link4M khác mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span>.</div>
               </div>
             </div>
 

@@ -207,6 +207,18 @@ Deno.serve(async (req) => {
         const u = new URL(tpl);
         const host = (u.hostname || "").toLowerCase();
         if (host.includes("link4m") && !hasPlaceholder) {
+          // Allow Link4M "quick link" formats (no placeholder required):
+          // - https://link4m.co/st?api=TOKEN&url=...
+          // - https://link4m.co/api-shorten/v2?api=TOKEN&url=...
+          // In these cases we overwrite the `url` param with the current gateUrl.
+          const path = (u.pathname || "").replace(/\/+$/, "");
+          const hasApi = u.searchParams.has("api") || u.searchParams.has("apikey") || u.searchParams.has("token");
+          const looksQuick = (path.endsWith("/st") || path.includes("api-shorten")) && hasApi;
+          const hasUrl = u.searchParams.has("url");
+          if (looksQuick || hasUrl) {
+            u.searchParams.set("url", g);
+            return u.toString();
+          }
           return "__TEMPLATE_INVALID__";
         }
       } catch {

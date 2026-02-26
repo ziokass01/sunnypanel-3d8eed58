@@ -4,6 +4,33 @@
 -- 1) Extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- 1.5) Drop legacy views that used these table names (from older migrations)
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN
+    SELECT c.relname, c.relkind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname IN (
+        'licenses_free_ip_rate_limits',
+        'licenses_free_fp_rate_limits',
+        'free_ip_rate_limits',
+        'free_fp_rate_limits'
+      )
+      AND c.relkind IN ('v','m')
+  LOOP
+    IF r.relkind = 'm' THEN
+      EXECUTE format('DROP MATERIALIZED VIEW IF EXISTS public.%I CASCADE', r.relname);
+    ELSE
+      EXECUTE format('DROP VIEW IF EXISTS public.%I CASCADE', r.relname);
+    END IF;
+  END LOOP;
+END $$;
+
+
 -- 2) Tables (preferred names requested)
 CREATE TABLE IF NOT EXISTS public.licenses_free_ip_rate_limits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
