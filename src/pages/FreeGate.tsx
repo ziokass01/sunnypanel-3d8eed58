@@ -29,7 +29,7 @@ function friendlyGateError(msg: string) {
   if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session. Vui lòng quay lại Get Key và làm lại.";
   if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
   if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi. Nếu muốn lấy key mới, hãy quay lại Get Key.";
-  if (m === "PASS2_NOT_READY") return "PASS2 chưa sẵn sàng. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng. Vui lòng quay lại Get Key và làm lại.";
   return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
 }
 
@@ -123,7 +123,7 @@ export function FreeGatePage() {
     }
 
     setStatus("working");
-    setMessage(pass === 2 ? "Đang xác thực Pass2…" : "Đang xác thực Pass1…");
+    setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP…" : "Đang xác thực key 🔑…");
 
     try {
       const fp = getOrCreateFingerprint();
@@ -153,7 +153,7 @@ export function FreeGatePage() {
           const outbound = String(ok.outbound_url || "").trim();
           if (!outbound) {
             setStatus("error");
-            setMessage("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M Pass2.");
+            setMessage("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M Key 🔑 VIP.");
             window.setTimeout(() => nav("/free", { replace: true }), 1500);
             return;
           }
@@ -220,7 +220,7 @@ export function FreeGatePage() {
         return false;
       }
       setStatus("countdown");
-      setMessage(pass === 2 ? "Đang đợi Pass2…" : "Đang đợi Pass1…");
+      setMessage(pass === 2 ? "Đang đợi key 🔑 VIP…" : "Đang đợi key 🔑…");
       return true;
     };
 
@@ -238,7 +238,7 @@ export function FreeGatePage() {
       <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
         <Card className="w-full">
           <CardHeader>
-            <CardTitle>{pass === 2 ? "Gate Pass2" : "Gate Pass1"}</CardTitle>
+            <CardTitle>{pass === 2 ? "Đang xác thực key 🔑 VIP" : "Đang xác thực 🔑 "}</CardTitle>
             <CardDescription>Hệ thống đang xác thực bước vượt link.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
