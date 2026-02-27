@@ -422,16 +422,14 @@ function applyTemplateApiToken(tpl: string, token: string) {
       passes_completed: 0,
       current_pass: 1,
       rotate_bucket,
-    })\.select("session_id").single();
+    }).select("session_id").single();
 
     if (insErr || !insData?.session_id) {
       return jsonResponse({ ok: false, code: "SERVER_ERROR", msg: insErr?.message ?? "SESSION_INSERT_FAILED" }, 500);
     }
 
     const session_id = insData.session_id as string;
-
     
-const session_id = insData.session_id as string;
 
 const gate_url_pass1 = `${baseUrl}/free/gate?p=1&b=${encodeURIComponent(rotate_bucket)}`;
 const gate_url_pass2 = `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotate_bucket)}`;
