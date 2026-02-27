@@ -59,12 +59,20 @@ Deno.serve(async (req) => {
   // Load settings row id=1
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select(
-      "free_outbound_url,free_outbound_url_pass2,free_enabled,free_disabled_message,free_min_delay_seconds,
-    free_min_delay_seconds_pass2,
-    free_link4m_rotate_days,
-    free_outbound_url_pass2,free_min_delay_seconds_pass2,free_link4m_rotate_days,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links",
-    )
+    .select(`
+  free_outbound_url,
+  free_outbound_url_pass2,
+  free_enabled,
+  free_disabled_message,
+  free_min_delay_seconds,
+  free_min_delay_seconds_pass2,
+  free_link4m_rotate_days,
+  free_return_seconds,
+  free_daily_limit_per_fingerprint,
+  free_require_link4m_referrer,
+  free_public_note,
+  free_public_links
+`)
     .eq("id", 1)
     .maybeSingle();
 
