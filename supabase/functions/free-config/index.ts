@@ -60,7 +60,10 @@ Deno.serve(async (req) => {
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
     .select(
-      "free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links",
+      "free_outbound_url,free_outbound_url_pass2,free_enabled,free_disabled_message,free_min_delay_seconds,
+    free_min_delay_seconds_pass2,
+    free_link4m_rotate_days,
+    free_outbound_url_pass2,free_min_delay_seconds_pass2,free_link4m_rotate_days,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -71,6 +74,11 @@ Deno.serve(async (req) => {
 
   const rawOutbound = settings?.free_outbound_url;
   const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
+  const rawOutboundPass2 = (settings as any)?.free_outbound_url_pass2;
+  const free_outbound_url_pass2 = String(rawOutboundPass2 ?? "").trim() || free_outbound_url;
+  const free_min_delay_seconds_pass2 = Math.max(0, Number((settings as any)?.free_min_delay_seconds_pass2 ?? free_min_delay_seconds));
+  const free_link4m_rotate_days = Math.max(1, Number((settings as any)?.free_link4m_rotate_days ?? 7));
+
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
   const free_min_delay_seconds = Math.max(0, Number(settings?.free_min_delay_seconds ?? 0));
@@ -83,7 +91,7 @@ Deno.serve(async (req) => {
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,kind,value,duration_seconds,sort_order,enabled")
+    .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate")
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
@@ -126,6 +134,9 @@ Deno.serve(async (req) => {
     free_disabled_message,
     free_outbound_url,
     free_min_delay_seconds,
+    free_min_delay_seconds_pass2,
+    free_link4m_rotate_days,
+    free_outbound_url_pass2,
     free_return_seconds,
     free_daily_limit_per_fingerprint,
     free_require_link4m_referrer,
@@ -139,7 +150,8 @@ Deno.serve(async (req) => {
       kind: k.kind,
       value: k.value,
       duration_seconds: k.duration_seconds,
-    })),
+      requires_double_gate: Boolean((k as any).requires_double_gate ?? false),
+    }})),
 
     turnstile_enabled,
     turnstile_site_key: turnstile_enabled ? TURNSTILE_SITE_KEY_RAW : null,

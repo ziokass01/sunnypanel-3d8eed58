@@ -6,6 +6,7 @@ export type FreeKeyType = {
   kind: "hour" | "day";
   value: number;
   duration_seconds: number;
+  requires_double_gate?: boolean;
 };
 
 export type PublicLink = {
@@ -22,7 +23,10 @@ export type FreeConfig = {
   free_enabled: boolean;
   free_disabled_message: string;
   free_outbound_url: string | null;
+  free_outbound_url_pass2?: string | null;
+  free_link4m_rotate_days?: number;
   free_min_delay_seconds: number;
+  free_min_delay_seconds_pass2?: number;
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
   free_require_link4m_referrer: boolean;

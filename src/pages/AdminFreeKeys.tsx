@@ -23,6 +23,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type SettingsRow = {
   id: number;
   free_outbound_url: string | null;
+  free_outbound_url_pass2?: string | null;
+  free_min_delay_seconds_pass2?: number;
+  free_link4m_rotate_days?: number;
   free_enabled: boolean;
   free_disabled_message: string;
   free_min_delay_seconds: number;
@@ -44,6 +47,7 @@ type KeyTypeRow = {
   duration_seconds: number;
   sort_order: number;
   enabled: boolean;
+  requires_double_gate?: boolean;
   updated_at: string;
 };
 
@@ -202,7 +206,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
+          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_min_delay_seconds,free_min_delay_seconds_pass2,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -212,10 +216,14 @@ export function AdminFreeKeysPage() {
   });
 
   const [outboundUrl, setOutboundUrl] = useState("");
+  const [outboundUrlPass2, setOutboundUrlPass2] = useState("");
+  const [rotateDays, setRotateDays] = useState(7);
+
   const [freeEnabled, setFreeEnabled] = useState(true);
   const [disabledMessage, setDisabledMessage] = useState("Trang GetKey đang tạm đóng.");
   const [minDelayEnabled, setMinDelayEnabled] = useState(true);
   const [minDelay, setMinDelay] = useState(25);
+  const [minDelayPass2, setMinDelayPass2] = useState(25);
   const [returnSeconds, setReturnSeconds] = useState(10);
   const [dailyLimit, setDailyLimit] = useState(1);
   const [requireRef, setRequireRef] = useState(false);
@@ -226,10 +234,13 @@ export function AdminFreeKeysPage() {
     const s = settingsQuery.data;
     if (!s) return;
     setOutboundUrl(s.free_outbound_url ?? "");
+    setOutboundUrlPass2((s as any).free_outbound_url_pass2 ?? "");
+    setRotateDays(Number((s as any).free_link4m_rotate_days ?? 7));
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
     setMinDelayEnabled(Boolean((s as any).free_min_delay_enabled ?? true));
     setMinDelay(Number(s.free_min_delay_seconds ?? 25));
+    setMinDelayPass2(Number((s as any).free_min_delay_seconds_pass2 ?? s.free_min_delay_seconds ?? 25));
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
     setRequireRef(Boolean(s.free_require_link4m_referrer));
@@ -241,11 +252,14 @@ export function AdminFreeKeysPage() {
     mutationFn: async () => {
       const patch = {
         free_outbound_url: outboundUrl.trim() || null,
+        free_outbound_url_pass2: outboundUrlPass2.trim() || null,
+        free_link4m_rotate_days: Math.max(1, Math.floor(Number(rotateDays) || 7)),
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
         free_min_delay_enabled: Boolean(minDelayEnabled),
         // IMPORTANT: when delay is disabled, force seconds = 0 (not 5/25)
         free_min_delay_seconds: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelay) || 25)) : 0,
+        free_min_delay_seconds_pass2: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelayPass2) || 25)) : 0,
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
         free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
         free_require_link4m_referrer: Boolean(requireRef),
@@ -277,7 +291,7 @@ export function AdminFreeKeysPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("licenses_free_key_types")
-        .select("code,label,kind,value,duration_seconds,sort_order,enabled,updated_at")
+        .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate,updated_at")
         .order("sort_order", { ascending: true });
       if (error) throw error;
       return (data ?? []) as any as KeyTypeRow[];
@@ -301,7 +315,23 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  
+  const toggleVipKeyType = useMutation({
+    mutationFn: async (args: { code: string; requires_double_gate: boolean }) => {
+      const { error } = await supabase
+        .from("licenses_free_key_types")
+        .update({ requires_double_gate: args.requires_double_gate })
+        .eq("code", args.code);
+      if (error) throw error;
+      return true;
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+    onSuccess: async () => {
+      await keyTypesQuery.refetch();
+    },
+  });
+
   const deleteKeyType = useMutation({
     mutationFn: async (code: string) => {
       const { error } = await supabase.from("licenses_free_key_types").delete().eq("code", code);
@@ -641,7 +671,34 @@ const disableAllKeyTypes = useMutation({
                 <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
                 <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> (hoặc api-shorten) thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL. Nếu Link4M khác mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span>.</div>
               </div>
-            </div>
+            
+
+<div className="space-y-2">
+  <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
+  <Input
+    value={outboundUrlPass2}
+    onChange={(e) => setOutboundUrlPass2(e.target.value)}
+    placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..."
+    inputMode="url"
+  />
+  <div className="text-xs text-muted-foreground">
+    Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Nên dùng placeholder <span className="font-mono">{'{GATE_URL_ENC}'}</span>.
+  </div>
+</div>
+
+<div className="space-y-2">
+  <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
+  <Input
+    type="number"
+    value={rotateDays}
+    onChange={(e) => setRotateDays(Number(e.target.value))}
+    min={1}
+  />
+  <div className="text-xs text-muted-foreground">
+    Trong cùng 1 bucket, Gate URL giữ ổn định để tránh spam tạo link mới. (Ví dụ: 7 ngày)
+  </div>
+</div>
+</div>
 
             <div className="space-y-2">
               <div className="text-sm font-medium">Thông báo khi tắt</div>
@@ -650,7 +707,7 @@ const disableAllKeyTypes = useMutation({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-4">
-                <div className="text-sm font-medium">Delay tối thiểu (giây)</div>
+                <div className="text-sm font-medium">Delay tối thiểu Pass1 (giây)</div>
                 <div className="flex items-center gap-2">
                   <div className="text-xs text-muted-foreground">Bật</div>
                   <Switch checked={minDelayEnabled} onCheckedChange={setMinDelayEnabled} />
@@ -669,6 +726,20 @@ const disableAllKeyTypes = useMutation({
                   : "Đang tắt: không kiểm tra delay ở /free/gate."}
               </div>
             </div>
+
+<div className="space-y-2">
+  <div className="text-sm font-medium">Delay tối thiểu Pass2 (giây)</div>
+  <Input
+    type="number"
+    value={minDelayPass2}
+    onChange={(e) => setMinDelayPass2(Number(e.target.value))}
+    min={5}
+    disabled={!minDelayEnabled}
+  />
+  <div className="text-xs text-muted-foreground">
+    VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này (tính từ lúc Pass1 OK).
+  </div>
+</div>
 
             <div className="space-y-2">
               <div className="text-sm font-medium">Tự quay lại /free (giây)</div>
@@ -867,6 +938,7 @@ const disableAllKeyTypes = useMutation({
                 <TableHead>Kind</TableHead>
                 <TableHead>Value</TableHead>
                 <TableHead>Seconds</TableHead>
+                <TableHead>VIP 2-pass</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -884,6 +956,12 @@ const disableAllKeyTypes = useMutation({
                   <TableCell>{k.kind}</TableCell>
                   <TableCell>{k.value}</TableCell>
                   <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                  <TableCell className="w-24">
+                    <Switch
+                      checked={Boolean((k as any).requires_double_gate ?? false)}
+                      onCheckedChange={(v) => toggleVipKeyType.mutate({ code: k.code, requires_double_gate: Boolean(v) })}
+                    />
+                  </TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"

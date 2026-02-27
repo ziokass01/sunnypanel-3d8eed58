@@ -4,10 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
-import { writeBundle } from "@/lib/freeFlow";
-import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setOutToken } from "@/features/free/fingerprint";
+import { readBundle, writeBundle } from "@/lib/freeFlow";
+import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
-type GateOk = { ok: true; claim_token: string; claim_url?: string | null };
+type GateNextPass2 = { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number };
+type GateNextClaim = { ok: true; next: "CLAIM"; claim_token: string; claim_url?: string | null };
+type GateOk = GateNextPass2 | GateNextClaim;
 type GateErr = { ok: false; msg: string; code?: string; detail?: any };
 
 function friendlyGateError(msg: string) {
@@ -27,28 +29,35 @@ function friendlyGateError(msg: string) {
   if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session. Vui lòng quay lại Get Key và làm lại.";
   if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
   if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi. Nếu muốn lấy key mới, hãy quay lại Get Key.";
+  if (m === "PASS2_NOT_READY") return "PASS2 chưa sẵn sàng. Vui lòng quay lại Get Key và làm lại.";
   return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
+}
+
+function pad2(n: number) {
+  return String(Math.max(0, Math.floor(n))).padStart(2, "0");
 }
 
 export function FreeGatePage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
   const [cfgReturn, setCfgReturn] = useState<number>(10);
-  const [status, setStatus] = useState<"working" | "error">("working");
+  const [status, setStatus] = useState<"countdown" | "working" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
+  const [remaining, setRemaining] = useState<number>(0);
 
   const query = useMemo(() => sp.toString(), [sp]);
+  const pass = useMemo(() => {
+    const v = Number(sp.get("p") || 1);
+    return v === 2 ? 2 : 1;
+  }, [query]);
 
   const sidFromQuery = useMemo(() => (sp.get("sid") || "").trim(), [query]);
   const tFromQuery = useMemo(() => (sp.get("t") || "").trim(), [query]);
 
   const outToken = useMemo(() => {
     if (tFromQuery) return tFromQuery;
-
     const fromPrimary = (getOutToken() || "").trim();
     if (fromPrimary) return fromPrimary;
-
-    // Fallbacks for older keys / cross-browser flows
     try {
       const fb1 = (localStorage.getItem("free_out_token_v1") || "").trim();
       if (fb1) return fb1;
@@ -57,11 +66,23 @@ export function FreeGatePage() {
     } catch {
       // ignore
     }
-
     return "";
   }, [tFromQuery, query]);
 
-  const initialSid = useMemo(() => sidFromQuery, [sidFromQuery]);
+  const sessionId = useMemo(() => {
+    if (sidFromQuery) return sidFromQuery;
+    const b = readBundle();
+    if (b?.session_id) return b.session_id;
+    try {
+      const s1 = (localStorage.getItem("free_session_id_v1") || "").trim();
+      if (s1) return s1;
+      const s2 = (localStorage.getItem("free_session_id") || "").trim();
+      if (s2) return s2;
+    } catch {
+      // ignore
+    }
+    return "";
+  }, [sidFromQuery, query]);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,7 +93,7 @@ export function FreeGatePage() {
         setCfgReturn(r);
       })
       .catch(() => {
-        // ignore; keep default
+        // ignore
       });
     return () => {
       cancelled = true;
@@ -81,92 +102,82 @@ export function FreeGatePage() {
 
   async function gateOnce() {
     const tok = outToken;
-    let sid = initialSid;
+    const sid = sessionId;
 
-    if (!tok && !sid) {
+    if (!tok || !sid) {
       setStatus("error");
-      setMessage("Thiếu session. Hãy quay lại trang Get Key và làm lại.");
+      setMessage("Thiếu phiên. Hãy quay lại trang Get Key và làm lại.");
       window.setTimeout(() => nav("/free", { replace: true }), 1200);
       return;
     }
 
-    // Persist token for claim/reload flows
-    if (tok) {
+    // Persist token/sid for reload flows
+    try {
       setOutToken(tok);
-      try {
-        localStorage.setItem("free_out_token_v1", tok);
-      } catch {
-        // ignore
-      }
+      localStorage.setItem("free_out_token_v1", tok);
+      localStorage.setItem("free_out_token", tok);
+      localStorage.setItem("free_session_id_v1", sid);
+      localStorage.setItem("free_session_id", sid);
+    } catch {
+      // ignore
     }
 
     setStatus("working");
-    setMessage("Đang xác thực…");
+    setMessage(pass === 2 ? "Đang xác thực Pass2…" : "Đang xác thực Pass1…");
 
     try {
-      // If missing sid but have token, resolve via backend (survive cross-browser flows)
-      if (!sid && tok) {
-        const resolved = await postFunction<{ ok: true; session_id: string } | { ok: false; msg: string; code?: string }>(
-          "/free-resolve",
-          { out_token: tok },
-        );
-        if ((resolved as any).ok) sid = String((resolved as any).session_id || "");
-      }
-
-      // Persist sid so Claim can recover even if query gets mangled/stripped.
-      try {
-        const sidTrim = String(sid || "").trim();
-        if (sidTrim) {
-          localStorage.setItem("free_session_id_v1", sidTrim);
-          localStorage.setItem("free_session_id", sidTrim);
-        }
-      } catch {
-        // ignore
-      }
-
       const fp = getOrCreateFingerprint();
       const referrer = document.referrer || "";
       const current_url = window.location.href;
 
       const res = await postFunction<GateOk | GateErr>("/free-gate", {
-        session_id: sid || undefined,
-        out_token: tok || undefined,
+        pass,
+        session_id: sid,
+        out_token: tok,
         fingerprint: fp,
         referrer,
         current_url,
       });
 
-      if ((res as GateOk).ok) {
-        const claim = (res as GateOk).claim_token;
-        // Fallback for edge-cases where query params are stripped by a redirect/shortener.
+      if ((res as any).ok) {
+        const ok = res as GateOk;
+
+        if (ok.next === "PASS2") {
+          // Transition to Pass2
+          const nextTok = String(ok.out_token || "").trim();
+          if (nextTok) {
+            setOutToken(nextTok);
+            writeBundle({ session_id: sid, out_token: nextTok });
+            setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
+          }
+          const outbound = String(ok.outbound_url || "").trim();
+          if (!outbound) {
+            setStatus("error");
+            setMessage("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M Pass2.");
+            window.setTimeout(() => nav("/free", { replace: true }), 1500);
+            return;
+          }
+          window.location.assign(outbound);
+          return;
+        }
+
+        // CLAIM
+        const claim = String(ok.claim_token || "").trim();
         try {
-          localStorage.setItem("free_claim_token", String(claim));
+          localStorage.setItem("free_claim_token", claim);
         } catch {
           // ignore
         }
+        writeBundle({ session_id: sid, out_token: tok, claim_token: claim });
 
-        const nextSid = (sid || "").trim();
-        const nextTok = (tok || "").trim();
-
-        // Persist an atomic bundle for Claim (avoid mixing tokens across sessions)
-        if (nextSid && nextTok) {
-          writeBundle({ session_id: nextSid, out_token: nextTok, claim_token: String(claim) });
-        }
-
-        // IMPORTANT: propagate sid+t to Claim so Claim does not rely on localStorage.
-        // IMPORTANT: never build URL via string concat (avoid malformed '?claim?sid' on some mobile browsers/redirects).
-        const base = String((res as GateOk).claim_url || `${window.location.origin}/free/claim`);
+        const base = String(ok.claim_url || `${window.location.origin}/free/claim`);
         const url = new URL(base, window.location.origin);
-
-        // Force a clean query string we control (avoid any malformed '?claim?claim' coming from upstream URLs)
         url.search = "";
-
-        url.searchParams.set("claim", String(claim));
-        url.searchParams.set("sid", nextSid);
-        url.searchParams.set("t", nextTok);
+        url.searchParams.set("claim", claim);
+        url.searchParams.set("sid", sid);
+        url.searchParams.set("t", tok);
         if ((sp.get("debug") || "").trim() === "1") url.searchParams.set("debug", "1");
 
-        // Navigate as in-app route (avoid full reload)
         nav(`${url.pathname}${url.search}${url.hash}`, { replace: true });
         return;
       }
@@ -175,8 +186,6 @@ export function FreeGatePage() {
       const msg = err.code || err.msg || "VERIFY_FAILED";
       setStatus("error");
       setMessage(friendlyGateError(msg));
-
-      // fail-safe: never let user stuck here
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
     } catch (e: any) {
       setStatus("error");
@@ -186,37 +195,65 @@ export function FreeGatePage() {
   }
 
   useEffect(() => {
-    const meta = getFreeStartMeta();
-    if ((!outToken && !initialSid) || !meta?.startedAtMs) {
-      // Allow direct gate access if sid/t present (e.g. opened in another browser), but we still need startedAtMs for TOO_FAST UX.
-      // If no startedAtMs, we let backend decide; user will get proper error.
-      if (!outToken && !initialSid) {
-        setStatus("error");
-        setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
-        return;
-      }
+    const sid = sessionId;
+    const tok = outToken;
+
+    if (!sid || !tok) {
+      setStatus("error");
+      setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
+      return;
     }
 
-    // Gọi backend NGAY LẬP TỨC. Backend sẽ tự kiểm tra delay.
-    void gateOnce();
+    // Countdown UX (backend vẫn kiểm tra thật)
+    const meta = getFreeStartMeta();
+    const startedAtMs = Number(meta?.startedAtMs ?? 0);
+    const minDelay = Math.max(0, Number(meta?.minDelaySeconds ?? 0));
+
+    // For pass2, startedAtMs is updated when PASS2 issued.
+    const waitUntil = startedAtMs > 0 ? startedAtMs + minDelay * 1000 : 0;
+    const tick = () => {
+      const r = waitUntil > 0 ? Math.max(0, Math.ceil((waitUntil - Date.now()) / 1000)) : 0;
+      setRemaining(r);
+      if (r <= 0) {
+        setStatus("working");
+        void gateOnce();
+        return false;
+      }
+      setStatus("countdown");
+      setMessage(pass === 2 ? "Đang đợi Pass2…" : "Đang đợi Pass1…");
+      return true;
+    };
+
+    if (!tick()) return;
+    const id = window.setInterval(() => {
+      if (!tick()) window.clearInterval(id);
+    }, 250);
+
+    return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-
 
   return (
     <div className="min-h-svh bg-background">
       <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
         <Card className="w-full">
           <CardHeader>
-            <CardTitle>Đang kiểm tra…</CardTitle>
+            <CardTitle>{pass === 2 ? "Gate Pass2" : "Gate Pass1"}</CardTitle>
             <CardDescription>Hệ thống đang xác thực bước vượt link.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-md border p-3 text-sm">
               <div className="font-medium">{message}</div>
               <div className="mt-1 text-muted-foreground">
-                {status === "working" ? "Vui lòng không tắt trang." : "Bạn sẽ được đưa về trang Get Key."}
+                {status === "countdown" ? (
+                  <span>
+                    Countdown: <span className="font-mono">00:{pad2(remaining)}</span>
+                  </span>
+                ) : status === "working" ? (
+                  "Vui lòng không tắt trang."
+                ) : (
+                  "Bạn sẽ được đưa về trang Get Key."
+                )}
               </div>
             </div>
 
