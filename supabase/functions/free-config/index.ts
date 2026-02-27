@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
       value: k.value,
       duration_seconds: k.duration_seconds,
       requires_double_gate: Boolean((k as any).requires_double_gate ?? false),
-    }})),
+    })),
 
     turnstile_enabled,
     turnstile_site_key: turnstile_enabled ? TURNSTILE_SITE_KEY_RAW : null,
