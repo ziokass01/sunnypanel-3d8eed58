@@ -207,6 +207,10 @@ function applyTemplateApiToken(tpl: string, token: string) {
   return v;
 }
 
+const rotateDays = Number((settings as any)?.free_link4m_rotate_days ?? 7);
+const rotate_bucket = computeRotateBucket(rotateDays);
+
+
     // Create a token-based session (expires quickly)
     const out_token = base64url(32);
     const out_token_hash = await sha256Hex(out_token);
