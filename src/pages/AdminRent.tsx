@@ -66,16 +66,40 @@ export default function AdminRentPage() {
     if (authHandlingRef.current) return true;
     authHandlingRef.current = true;
 
-    // Try to refresh silently once. If it still fails, force re-login.
+    // Try to refresh silently once.
     try {
       await supabase.auth.refreshSession();
     } catch {
       // ignore
     }
 
-    await signOut();
-    // Avoid noisy toast spam here (redirect is enough).
-    navigate("/login", { replace: true });
+    // If we truly have no session anymore -> sign out (clears storage) and let AuthGate redirect to /login (with toast).
+    let hasSession = false;
+    try {
+      const { data } = await supabase.auth.getSession();
+      hasSession = !!data.session;
+    } catch {
+      hasSession = false;
+    }
+
+    if (!hasSession) {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignore
+      }
+      return true;
+    }
+
+    // Still have a session but backend keeps returning 401.
+    // This usually means: (1) role/admin config is missing, or (2) frontend points to a different Supabase project than the deployed Edge Functions.
+    toast({
+      title: "Không thể xác thực quyền truy cập",
+      description:
+        "Backend trả về 401 dù bạn vẫn còn session. Hãy kiểm tra quyền admin/role và đảm bảo VITE_SUPABASE_URL + ANON_KEY đúng cùng 1 project với Edge Functions (admin-*).",
+      variant: "destructive",
+    });
+
     return true;
   };
 

@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 
 type Props = {
   children: React.ReactNode;
@@ -9,15 +10,36 @@ type Props = {
 
 /**
  * Ensures we only redirect to /login AFTER the initial session check resolves.
+ * Also shows a single "session expired" toast (no spam) when a protected page redirects.
  */
 export function AuthGate({ children }: Props) {
   const { user, loading } = useAuth();
   const location = useLocation();
+  const { toast } = useToast();
 
   const redirectTo = useMemo(
     () => `/login?next=${encodeURIComponent(location.pathname + location.search)}`,
     [location.pathname, location.search],
   );
+
+  useEffect(() => {
+    if (loading) return;
+    if (user) return;
+
+    // Avoid toast spam when multiple components/routes trigger redirects.
+    if (typeof window === "undefined") return;
+    const key = "sp_auth_redirect_toast_ts";
+    const now = Date.now();
+    const last = Number(window.sessionStorage.getItem(key) ?? "0");
+    if (!Number.isFinite(last) || now - last > 8000) {
+      window.sessionStorage.setItem(key, String(now));
+      toast({
+        title: "Phiên đăng nhập hết hạn",
+        description: "Vui lòng đăng nhập lại.",
+        variant: "destructive",
+      });
+    }
+  }, [loading, user, toast]);
 
   if (loading) {
     return (
