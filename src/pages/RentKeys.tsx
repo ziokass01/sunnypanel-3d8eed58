@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { getFunction, postFunction } from "@/lib/functions";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/auth/AuthProvider";
 
 type KeyRow = {
   id: string;
@@ -21,6 +21,8 @@ type KeyRow = {
 
 export default function RentKeysPage() {
   const { toast } = useToast();
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
 
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,8 +35,6 @@ export default function RentKeysPage() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? null;
       const res = await getFunction<{ ok: true; keys: KeyRow[] }>("rent-list-keys", { authToken: token });
       setKeys(res.keys ?? []);
     } catch (err: any) {
@@ -45,9 +45,9 @@ export default function RentKeysPage() {
   };
 
   useEffect(() => {
-    refresh();
+    if (token) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
   const now = Date.now();
 
@@ -58,8 +58,10 @@ export default function RentKeysPage() {
 
     setCreating(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? null;
+      if (!token) {
+        toast({ title: "Chưa đăng nhập", description: "Vui lòng đăng nhập lại." });
+        return;
+      }
       const res = await postFunction<{ ok: boolean; key?: string; expires_at?: string; msg?: string; code?: string }>(
         "rent-generate-key",
         { duration_seconds, max_devices: md, note: note.trim() ? note.trim() : undefined },
@@ -90,8 +92,10 @@ export default function RentKeysPage() {
 
   const onRevoke = async (id: string) => {
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? null;
+      if (!token) {
+        toast({ title: "Chưa đăng nhập", description: "Vui lòng đăng nhập lại." });
+        return;
+      }
       const res = await postFunction<{ ok: boolean; msg?: string; code?: string }>("rent-revoke-key", { id }, { authToken: token });
       if (!res.ok) {
         toast({ title: "Thu hồi thất bại", description: res.msg ?? res.code ?? "Lỗi" });

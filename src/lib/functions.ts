@@ -1,3 +1,5 @@
+import { supabase } from "@/integrations/supabase/client";
+
 export function getFunctionsBaseUrl() {
   const base = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   if (!base) throw new Error("Missing backend URL");
@@ -10,6 +12,78 @@ function getAnonKey() {
     undefined;
 }
 
+function getProjectRef(): string | null {
+  const base = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  if (!base) return null;
+  try {
+    const host = new URL(base).hostname;
+    const ref = host.split(".")[0];
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
+
+function getAuthStorageKey(): string | null {
+  const ref = getProjectRef();
+  return ref ? `sb-${ref}-auth-token` : null;
+}
+
+function getStoredAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const key = getAuthStorageKey();
+  if (!key) return null;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    const parsed: any = JSON.parse(raw);
+    const sess = parsed?.currentSession ?? parsed?.session ?? parsed;
+    const token = sess?.access_token;
+    return typeof token === "string" && token.length ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readBody(res: Response): Promise<{ json: any | null; text: string | null }> {
+  const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+  try {
+    if (ct.includes("application/json")) {
+      return { json: await res.json(), text: null };
+    }
+    const text = await res.text();
+    // Some upstream errors return plain text.
+    try {
+      return { json: JSON.parse(text), text };
+    } catch {
+      return { json: null, text };
+    }
+  } catch {
+    return { json: null, text: null };
+  }
+}
+
+function isInvalidJwt(status: number, msg: string) {
+  return status === 401 && /invalid\s+jwt/i.test(msg);
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error) return null;
+    return data.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function makeAuthError(message: string, status?: number, code?: string) {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  if (code) err.code = code;
+  if (typeof status === "number") err.status = status;
+  return err;
+}
+
 export async function getFunction<T>(
   path: string,
   opts?: { authToken?: string | null; withCredentials?: boolean },
@@ -19,25 +93,31 @@ export async function getFunction<T>(
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  const fn = path.startsWith("/") ? path.slice(1) : path;
-  if (fn.startsWith("admin-") && !opts?.authToken) {
-    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string; status?: number };
-    err.code = "ADMIN_AUTH_REQUIRED";
-    err.status = 401;
-    throw err;
+  const fn = (path.startsWith("/") ? path.slice(1) : path).trim();
+  const isAdminFn = fn.startsWith("admin-");
+  const tokenFromCaller = opts?.authToken ?? null;
+  const tokenFromStorage = getStoredAccessToken();
+  const initialToken = tokenFromCaller || tokenFromStorage;
+
+  if (isAdminFn && !initialToken) {
+    throw makeAuthError("ADMIN_AUTH_REQUIRED", 401, "ADMIN_AUTH_REQUIRED");
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  const doFetch = async (token: string | null) => {
+    return await fetch(url, {
       method: "GET",
       headers: {
         apikey: anonKey,
-        Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+        Authorization: `Bearer ${token ? token : anonKey}`,
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
       credentials: opts?.withCredentials ? "include" : "omit",
     });
+  };
+
+  let res: Response;
+  try {
+    res = await doFetch(initialToken);
   } catch (e: any) {
     // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
     const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -50,13 +130,29 @@ export async function getFunction<T>(
     throw err;
   }
 
-  const data = await res.json().catch(() => null);
+  // Auto refresh + retry once on Invalid JWT (common when access_token expires).
   if (!res.ok) {
-    const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(String(msg)) as Error & { code?: string; status?: number };
-    if (data?.code) err.code = String(data.code);
-    err.status = res.status;
-    if (err.status === 401 && /invalid\s+jwt/i.test(err.message)) {
+    const { json: data, text } = await readBody(res);
+    const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
+    if (isInvalidJwt(res.status, String(msg))) {
+      const nextToken = (await refreshAccessToken()) || getStoredAccessToken();
+      if (nextToken) {
+        const retryRes = await doFetch(nextToken);
+        if (retryRes.ok) {
+          const okJson = await retryRes.json().catch(() => null);
+          return okJson as T;
+        }
+        // fallthrough to throw below with the retry response details
+        res = retryRes;
+      }
+    }
+  }
+
+  const { json: data, text } = await readBody(res);
+  if (!res.ok) {
+    const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
+    const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
+    if (isInvalidJwt(res.status, String(msg))) {
       err.code = "JWT_INVALID";
       err.message = "JWT_INVALID";
     }
@@ -79,11 +175,13 @@ export async function postFunction<T>(
   const normalizedPath = (path.startsWith("/") ? path.slice(1) : path).trim();
   const isAdminFn = normalizedPath.startsWith("admin-");
 
+  const tokenFromCaller = opts?.authToken ?? null;
+  const tokenFromStorage = getStoredAccessToken();
+  const initialToken = tokenFromCaller || tokenFromStorage;
+
   // Admin functions MUST be called with a real user JWT; never fall back to anon.
-  if (isAdminFn && !opts?.authToken) {
-    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
-    err.code = "ADMIN_AUTH_REQUIRED";
-    throw err;
+  if (isAdminFn && !initialToken) {
+    throw makeAuthError("ADMIN_AUTH_REQUIRED", 401, "ADMIN_AUTH_REQUIRED");
   }
 
   // Some repos historically used both /admin-free-test and /free-admin-test.
@@ -92,14 +190,14 @@ export async function postFunction<T>(
 
   const triedUrls: string[] = [];
 
-  const doFetch = async (u: string) => {
+  const doFetch = async (u: string, token: string | null) => {
     triedUrls.push(u);
     return await fetch(u, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         apikey: anonKey,
-        Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+        Authorization: `Bearer ${token ? token : anonKey}`,
         ...(opts?.headers ?? {}),
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
@@ -110,12 +208,12 @@ export async function postFunction<T>(
 
   let res: Response;
   try {
-    res = await doFetch(primaryUrl);
+    res = await doFetch(primaryUrl, initialToken);
   } catch (e: any) {
     // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
     if (fallbackPath) {
       try {
-        res = await doFetch(makeUrl(fallbackPath));
+        res = await doFetch(makeUrl(fallbackPath), initialToken);
       } catch {
         const origin = typeof window !== "undefined" ? window.location.origin : "";
         const err = new Error(
@@ -140,13 +238,28 @@ export async function postFunction<T>(
     }
   }
 
-  const data = await res.json().catch(() => null);
+  // Auto refresh + retry once on Invalid JWT (common when access_token expires).
   if (!res.ok) {
-    const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(String(msg)) as Error & { code?: string; status?: number };
-    if (data?.code) err.code = String(data.code);
-    err.status = res.status;
-    if (err.status === 401 && /invalid\s+jwt/i.test(err.message)) {
+    const { json: data, text } = await readBody(res);
+    const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
+    if (isInvalidJwt(res.status, String(msg))) {
+      const nextToken = (await refreshAccessToken()) || getStoredAccessToken();
+      if (nextToken) {
+        const retryRes = await doFetch(primaryUrl, nextToken);
+        if (retryRes.ok) {
+          const okJson = await retryRes.json().catch(() => null);
+          return okJson as T;
+        }
+        res = retryRes;
+      }
+    }
+  }
+
+  const { json: data, text } = await readBody(res);
+  if (!res.ok) {
+    const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
+    const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
+    if (isInvalidJwt(res.status, String(msg))) {
       err.code = "JWT_INVALID";
       err.message = "JWT_INVALID";
     }

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { getFunction, postFunction } from "@/lib/functions";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/auth/AuthProvider";
 
 type RentStatus = {
   ok: true;
@@ -19,6 +19,8 @@ type RentStatus = {
 
 export default function RentDashboardPage() {
   const { toast } = useToast();
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
 
   const [status, setStatus] = useState<RentStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,8 +30,6 @@ export default function RentDashboardPage() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? null;
       const res = await getFunction<RentStatus>("rent-status", { authToken: token });
       setStatus(res);
     } catch (err: any) {
@@ -40,9 +40,9 @@ export default function RentDashboardPage() {
   };
 
   useEffect(() => {
-    refresh();
+    if (token) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
   const expText = useMemo(() => {
     if (!status?.subscription_expires_at) return "Chưa kích hoạt";
@@ -63,10 +63,12 @@ export default function RentDashboardPage() {
   const onActivate = async () => {
     const c = code.trim();
     if (!c) return;
+    if (!token) {
+      toast({ title: "Chưa đăng nhập", description: "Vui lòng đăng nhập lại." });
+      return;
+    }
     setActivating(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? null;
       const res = await postFunction<{ ok: boolean; code?: string; msg?: string; subscription_expires_at?: string }>(
         "rent-activate",
         { code: c },

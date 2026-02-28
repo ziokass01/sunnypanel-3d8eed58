@@ -49,7 +49,19 @@ export default function AdminRentPage() {
 
   const handleAuthError = async (err: any) => {
     const code = err?.code ?? err?.message;
-    if (code === "JWT_INVALID" || code === "ADMIN_AUTH_REQUIRED") {
+    // JWT_INVALID often happens when the access_token expires.
+    // Don't hard sign-out: refresh the session and let the page re-fetch.
+    if (code === "JWT_INVALID") {
+      toast({ title: "Phiên đăng nhập hết hạn", description: "Đang làm mới phiên…" });
+      try {
+        await supabase.auth.refreshSession();
+      } catch {
+        // ignore, the next call will show an error if it still fails
+      }
+      return true;
+    }
+
+    if (code === "ADMIN_AUTH_REQUIRED") {
       toast({ title: "Phiên đăng nhập hết hạn", description: "Vui lòng đăng nhập lại." });
       await signOut();
       navigate("/login");

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { getFunction } from "@/lib/functions";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/auth/AuthProvider";
 
 type RentStatus = {
   ok: true;
@@ -18,6 +18,8 @@ type RentStatus = {
 
 export default function RentIntegrationPage() {
   const { toast } = useToast();
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
   const [status, setStatus] = useState<RentStatus | null>(null);
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
@@ -25,8 +27,6 @@ export default function RentIntegrationPage() {
 
   const load = async () => {
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? null;
       const res = await getFunction<RentStatus>("rent-status", { authToken: token });
       setStatus(res);
     } catch (err: any) {
@@ -35,9 +35,9 @@ export default function RentIntegrationPage() {
   };
 
   useEffect(() => {
-    load();
+    if (token) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
   const copy = async (text: string) => {
     try {
