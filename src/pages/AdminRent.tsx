@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,13 @@ type TenantRow = {
 
 export default function AdminRentPage() {
   const { toast } = useToast();
+
+  const navigate = useNavigate();
+  const location = useLocation();
+  const redirectToLogin = () => {
+    const next = `${location.pathname}${location.search}`;
+    navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+  };
 
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +61,11 @@ export default function AdminRentPage() {
       const res = await getFunction<{ ok: true; tenants: TenantRow[] }>("admin-rent-tenants", { authToken: token });
       setTenants(res.tenants ?? []);
     } catch (err: any) {
+      if (err?.code === "ADMIN_AUTH_REQUIRED") {
+        toast({ title: "Lỗi", description: "Bạn chưa đăng nhập admin (hoặc phiên đã hết hạn). Vui lòng đăng nhập lại." });
+        redirectToLogin();
+        return;
+      }
       toast({ title: "Không tải được danh sách", description: err?.message ?? String(err) });
     } finally {
       setLoading(false);

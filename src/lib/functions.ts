@@ -19,6 +19,16 @@ export async function getFunction<T>(
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
+  const normalizedPath = (path.startsWith("/") ? path.slice(1) : path).trim();
+  const isAdminFn = normalizedPath.startsWith("admin-");
+
+  // Admin functions MUST be called with a real user JWT; never fall back to anon.
+  if (isAdminFn && !opts?.authToken) {
+    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
+    err.code = "ADMIN_AUTH_REQUIRED";
+    throw err;
+  }
+
   let res: Response;
   try {
     res = await fetch(url, {
