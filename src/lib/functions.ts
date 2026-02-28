@@ -12,7 +12,7 @@ function getAnonKey() {
 
 export async function getFunction<T>(
   path: string,
-  opts?: { authToken?: string | null },
+  opts?: { authToken?: string | null; withCredentials?: boolean },
 ): Promise<T> {
   const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -56,7 +56,7 @@ export async function getFunction<T>(
 export async function postFunction<T>(
   path: string,
   body: unknown,
-  opts?: { authToken?: string | null; headers?: Record<string, string> },
+  opts?: { authToken?: string | null; headers?: Record<string, string>; withCredentials?: boolean },
 ): Promise<T> {
   const makeUrl = (p: string) => `${getFunctionsBaseUrl()}${p.startsWith("/") ? p : `/${p}`}`;
   const primaryUrl = makeUrl(path);
