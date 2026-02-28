@@ -1,5 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
 
+// NOTE: When multiple requests fail at the same time due to an expired access token,
+// we must avoid spamming refreshSession() concurrently. This mutex ensures we only
+// refresh once and all callers await the same promise.
+let refreshInFlight: Promise<string | null> | null = null;
+
 export function getFunctionsBaseUrl() {
   const base = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   if (!base) throw new Error("Missing backend URL");
@@ -64,16 +69,33 @@ async function readBody(res: Response): Promise<{ json: any | null; text: string
 }
 
 function isInvalidJwt(status: number, msg: string) {
-  return status === 401 && /invalid\s+jwt/i.test(msg);
+  if (status !== 401) return false;
+  const m = String(msg || "").toLowerCase();
+  return (
+    m.includes("invalid jwt") ||
+    m.includes("jwt expired") ||
+    m.includes("expired jwt") ||
+    m.includes("signature has expired") ||
+    m.includes("token has expired")
+  );
 }
 
 async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return await refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (error) return null;
+      return data.session?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  })();
+
   try {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error) return null;
-    return data.session?.access_token ?? null;
-  } catch {
-    return null;
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
   }
 }
 
@@ -134,7 +156,8 @@ export async function getFunction<T>(
   if (!res.ok) {
     const { json: data, text } = await readBody(res);
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
-    if (isInvalidJwt(res.status, String(msg))) {
+    const shouldTryRefresh = isInvalidJwt(res.status, String(msg)) || (isAdminFn && res.status === 401);
+    if (shouldTryRefresh) {
       const nextToken = (await refreshAccessToken()) || getStoredAccessToken();
       if (nextToken) {
         const retryRes = await doFetch(nextToken);
@@ -152,6 +175,15 @@ export async function getFunction<T>(
   if (!res.ok) {
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
     const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
+
+    // Admin endpoints: treat any 401 as needing re-auth (after the refresh+retry above).
+    // This prevents UI spam like "Request failed (401)" while redirecting to /login.
+    if (isAdminFn && res.status === 401) {
+      err.code = "ADMIN_AUTH_REQUIRED";
+      err.message = "ADMIN_AUTH_REQUIRED";
+      throw err;
+    }
+
     if (isInvalidJwt(res.status, String(msg))) {
       err.code = "JWT_INVALID";
       err.message = "JWT_INVALID";
@@ -242,7 +274,8 @@ export async function postFunction<T>(
   if (!res.ok) {
     const { json: data, text } = await readBody(res);
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
-    if (isInvalidJwt(res.status, String(msg))) {
+    const shouldTryRefresh = isInvalidJwt(res.status, String(msg)) || (isAdminFn && res.status === 401);
+    if (shouldTryRefresh) {
       const nextToken = (await refreshAccessToken()) || getStoredAccessToken();
       if (nextToken) {
         const retryRes = await doFetch(primaryUrl, nextToken);
@@ -259,6 +292,14 @@ export async function postFunction<T>(
   if (!res.ok) {
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
     const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
+
+    // Admin endpoints: treat any 401 as needing re-auth (after the refresh+retry above).
+    if (isAdminFn && res.status === 401) {
+      err.code = "ADMIN_AUTH_REQUIRED";
+      err.message = "ADMIN_AUTH_REQUIRED";
+      throw err;
+    }
+
     if (isInvalidJwt(res.status, String(msg))) {
       err.code = "JWT_INVALID";
       err.message = "JWT_INVALID";

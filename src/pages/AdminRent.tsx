@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,9 @@ type TenantRow = {
 export default function AdminRentPage() {
   const { toast } = useToast();
 
+  // Prevent auth handling from running multiple times when several requests fail concurrently.
+  const authHandlingRef = useRef(false);
+
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,26 +51,32 @@ export default function AdminRentPage() {
   const authToken = session?.access_token ?? null;
 
   const handleAuthError = async (err: any) => {
-    const code = err?.code ?? err?.message;
-    // JWT_INVALID often happens when the access_token expires.
-    // Don't hard sign-out: refresh the session and let the page re-fetch.
-    if (code === "JWT_INVALID") {
-      toast({ title: "Phiên đăng nhập hết hạn", description: "Đang làm mới phiên…" });
-      try {
-        await supabase.auth.refreshSession();
-      } catch {
-        // ignore, the next call will show an error if it still fails
-      }
-      return true;
+    const code = String(err?.code ?? "").trim();
+    const msg = String(err?.message ?? "").trim();
+    const status = typeof err?.status === "number" ? err.status : undefined;
+
+    const isAuthRelated =
+      code === "ADMIN_AUTH_REQUIRED" ||
+      msg === "ADMIN_AUTH_REQUIRED" ||
+      code === "JWT_INVALID" ||
+      msg === "JWT_INVALID" ||
+      status === 401;
+
+    if (!isAuthRelated) return false;
+    if (authHandlingRef.current) return true;
+    authHandlingRef.current = true;
+
+    // Try to refresh silently once. If it still fails, force re-login.
+    try {
+      await supabase.auth.refreshSession();
+    } catch {
+      // ignore
     }
 
-    if (code === "ADMIN_AUTH_REQUIRED") {
-      toast({ title: "Phiên đăng nhập hết hạn", description: "Vui lòng đăng nhập lại." });
-      await signOut();
-      navigate("/login");
-      return true;
-    }
-    return false;
+    await signOut();
+    // Avoid noisy toast spam here (redirect is enough).
+    navigate("/login", { replace: true });
+    return true;
   };
 
   const refresh = async () => {
