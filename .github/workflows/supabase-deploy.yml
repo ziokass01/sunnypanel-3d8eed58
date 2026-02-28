@@ -1,0 +1,39 @@
+name: Deploy Supabase (DB + Edge Functions)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Push migrations
+        run: yes | supabase db push
+
+      - name: Deploy all Edge Functions
+        run: supabase functions deploy --project-ref "$PROJECT_REF"
+
+      - name: Set function secrets
+        run: |
+          supabase secrets set \
+            ADMIN_EMAILS="${{ secrets.ADMIN_EMAILS }}" \
+            PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}" \
+            VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
+            TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
+            TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}"
