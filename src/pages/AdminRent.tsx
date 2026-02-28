@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/components/ui/use-toast";
 import { getFunction, postFunction } from "@/lib/functions";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/auth/AuthProvider";
 
 type TenantRow = {
   tenant_id: string;
@@ -23,13 +24,6 @@ type TenantRow = {
 
 export default function AdminRentPage() {
   const { toast } = useToast();
-
-  const navigate = useNavigate();
-  const location = useLocation();
-  const redirectToLogin = () => {
-    const next = `${location.pathname}${location.search}`;
-    navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true });
-  };
 
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,23 +43,29 @@ export default function AdminRentPage() {
 
   const [durationDays, setDurationDays] = useState("30");
 
-  const getToken = async () => {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
+  const navigate = useNavigate();
+  const { session, signOut } = useAuth();
+  const authToken = session?.access_token ?? null;
+
+  const handleAuthError = async (err: any) => {
+    const code = err?.code ?? err?.message;
+    if (code === "JWT_INVALID" || code === "ADMIN_AUTH_REQUIRED") {
+      toast({ title: "Phiên đăng nhập hết hạn", description: "Vui lòng đăng nhập lại." });
+      await signOut();
+      navigate("/login");
+      return true;
+    }
+    return false;
   };
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const token = await getToken();
+      const token = authToken;
       const res = await getFunction<{ ok: true; tenants: TenantRow[] }>("admin-rent-tenants", { authToken: token });
       setTenants(res.tenants ?? []);
     } catch (err: any) {
-      if (err?.code === "ADMIN_AUTH_REQUIRED") {
-        toast({ title: "Lỗi", description: "Bạn chưa đăng nhập admin (hoặc phiên đã hết hạn). Vui lòng đăng nhập lại." });
-        redirectToLogin();
-        return;
-      }
+      if (await handleAuthError(err)) return;
       toast({ title: "Không tải được danh sách", description: err?.message ?? String(err) });
     } finally {
       setLoading(false);
@@ -73,9 +73,9 @@ export default function AdminRentPage() {
   };
 
   useEffect(() => {
-    refresh();
+    if (authToken) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authToken]);
 
   const copy = async (text: string) => {
     try {
@@ -92,7 +92,7 @@ export default function AdminRentPage() {
 
     setCreating(true);
     try {
-      const token = await getToken();
+      const token = authToken;
       const res = await postFunction<{
         ok: boolean;
         code?: string;
@@ -125,6 +125,7 @@ export default function AdminRentPage() {
       setNewNote("");
       await refresh();
     } catch (err: any) {
+      if (await handleAuthError(err)) return;
       toast({ title: "Lỗi", description: err?.message ?? String(err) });
     } finally {
       setCreating(false);
@@ -141,7 +142,7 @@ export default function AdminRentPage() {
   const onIssueActivation = async (tenant: TenantRow) => {
     const days = Math.max(1, parseInt(durationDays || "0", 10));
     const duration_seconds = days * 24 * 3600;
-    const token = await getToken();
+    const token = authToken;
     const res = await postFunction<{ ok: boolean; code?: string; code_last4?: string; msg?: string; duration_seconds?: number }>(
       "admin-rent-issue-activation",
       { tenant_id: tenant.tenant_id, duration_seconds },
@@ -159,7 +160,7 @@ export default function AdminRentPage() {
   };
 
   const onRotate = async (tenant: TenantRow) => {
-    const token = await getToken();
+    const token = authToken;
     const res = await postFunction<{
       ok: boolean;
       tenant_secret?: string;
@@ -186,7 +187,7 @@ export default function AdminRentPage() {
   };
 
   const onResetCode = async (tenant: TenantRow) => {
-    const token = await getToken();
+    const token = authToken;
     const res = await postFunction<{ ok: boolean; code?: string; msg?: string }>("admin-rent-create-reset-code", { tenant_id: tenant.tenant_id }, { authToken: token });
     if (!res.ok || !res.code) {
       toast({ title: "Tạo reset code thất bại", description: res.msg ?? "Lỗi" });
@@ -198,7 +199,7 @@ export default function AdminRentPage() {
   };
 
   const onDelete = async (tenant: TenantRow) => {
-    const token = await getToken();
+    const token = authToken;
     const res = await postFunction<{ ok: boolean; msg?: string }>("admin-rent-delete-tenant", { tenant_id: tenant.tenant_id }, { authToken: token });
     if (!res.ok) {
       toast({ title: "Xoá thất bại", description: res.msg ?? "Lỗi" });

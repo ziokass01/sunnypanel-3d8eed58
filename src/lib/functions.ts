@@ -19,13 +19,11 @@ export async function getFunction<T>(
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  const normalizedPath = (path.startsWith("/") ? path.slice(1) : path).trim();
-  const isAdminFn = normalizedPath.startsWith("admin-");
-
-  // Admin functions MUST be called with a real user JWT; never fall back to anon.
-  if (isAdminFn && !opts?.authToken) {
-    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
+  const fn = path.startsWith("/") ? path.slice(1) : path;
+  if (fn.startsWith("admin-") && !opts?.authToken) {
+    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string; status?: number };
     err.code = "ADMIN_AUTH_REQUIRED";
+    err.status = 401;
     throw err;
   }
 
@@ -58,6 +56,10 @@ export async function getFunction<T>(
     const err = new Error(String(msg)) as Error & { code?: string; status?: number };
     if (data?.code) err.code = String(data.code);
     err.status = res.status;
+    if (err.status === 401 && /invalid\s+jwt/i.test(err.message)) {
+      err.code = "JWT_INVALID";
+      err.message = "JWT_INVALID";
+    }
     throw err;
   }
   return data as T;
@@ -144,6 +146,10 @@ export async function postFunction<T>(
     const err = new Error(String(msg)) as Error & { code?: string; status?: number };
     if (data?.code) err.code = String(data.code);
     err.status = res.status;
+    if (err.status === 401 && /invalid\s+jwt/i.test(err.message)) {
+      err.code = "JWT_INVALID";
+      err.message = "JWT_INVALID";
+    }
     throw err;
   }
   return data as T;
