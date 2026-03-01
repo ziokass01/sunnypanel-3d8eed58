@@ -55,12 +55,23 @@ export default function AdminRentPage() {
     const msg = String(err?.message ?? "").trim();
     const status = typeof err?.status === "number" ? err.status : undefined;
 
+    // Not an auth/session problem: user is authenticated but lacks admin rights.
+    if (code === "ADMIN_REQUIRED") {
+      toast({
+        title: "Bạn chưa có quyền admin",
+        description:
+          String(err?.backendMsg ?? "").trim() ||
+          "Hãy thêm email/UID của bạn vào ADMIN_EMAILS/ADMIN_UIDS (Edge Function Secrets), hoặc cấp role 'admin' trong public.user_roles.",
+        variant: "destructive",
+      });
+      return true;
+    }
+
     const isAuthRelated =
       code === "ADMIN_AUTH_REQUIRED" ||
       msg === "ADMIN_AUTH_REQUIRED" ||
       code === "JWT_INVALID" ||
-      msg === "JWT_INVALID" ||
-      status === 401;
+      msg === "JWT_INVALID";
 
     if (!isAuthRelated) return false;
     if (authHandlingRef.current) return true;

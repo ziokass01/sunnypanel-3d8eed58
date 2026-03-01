@@ -156,7 +156,9 @@ export async function getFunction<T>(
   if (!res.ok) {
     const { json: data, text } = await readBody(res);
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
-    const shouldTryRefresh = isInvalidJwt(res.status, String(msg)) || (isAdminFn && res.status === 401);
+    // Only refresh+retry when it's very likely the JWT is invalid/expired.
+    // A 401 from admin-* endpoints can also mean "not admin"; do NOT refresh-loop in that case.
+    const shouldTryRefresh = isInvalidJwt(res.status, String(msg));
     if (shouldTryRefresh) {
       const nextToken = (await refreshAccessToken()) || getStoredAccessToken();
       if (nextToken) {
@@ -176,11 +178,18 @@ export async function getFunction<T>(
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
     const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
 
-    // Admin endpoints: treat any 401 as needing re-auth (after the refresh+retry above).
-    // This prevents UI spam like "Request failed (401)" while redirecting to /login.
+    // Admin endpoints: distinguish between (a) session/JWT problems and (b) missing admin rights.
+    // We avoid hard-signout for (b) so the user can still stay logged in and fix allowlists.
     if (isAdminFn && res.status === 401) {
-      err.code = "ADMIN_AUTH_REQUIRED";
-      err.message = "ADMIN_AUTH_REQUIRED";
+      const backendCode = data?.code ? String(data.code) : "";
+      const backendMsg = String(msg || "").toLowerCase();
+      if (backendCode === "ADMIN_REQUIRED" || backendMsg.includes("admin required")) {
+        err.code = "ADMIN_REQUIRED";
+        err.message = "ADMIN_REQUIRED";
+      } else {
+        err.code = "ADMIN_AUTH_REQUIRED";
+        err.message = "ADMIN_AUTH_REQUIRED";
+      }
       throw err;
     }
 
@@ -274,7 +283,7 @@ export async function postFunction<T>(
   if (!res.ok) {
     const { json: data, text } = await readBody(res);
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
-    const shouldTryRefresh = isInvalidJwt(res.status, String(msg)) || (isAdminFn && res.status === 401);
+    const shouldTryRefresh = isInvalidJwt(res.status, String(msg));
     if (shouldTryRefresh) {
       const nextToken = (await refreshAccessToken()) || getStoredAccessToken();
       if (nextToken) {
@@ -293,8 +302,28 @@ export async function postFunction<T>(
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
     const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
 
-    // Admin endpoints: treat any 401 as needing re-auth (after the refresh+retry above).
+    // Admin endpoints: distinguish "not admin" vs "need re-auth".
     if (isAdminFn && res.status === 401) {
+      const backendCode = String((data as any)?.code ?? "").toUpperCase();
+      const backendMsg = String(msg ?? "");
+
+      const looksLikeAdminRequired = backendCode === "ADMIN_REQUIRED" || /admin required/i.test(backendMsg);
+      const looksLikeMissingToken = backendCode === "MISSING_TOKEN" || /missing bearer token/i.test(backendMsg);
+      const looksLikeInvalidJwt = backendCode === "INVALID_JWT" || isInvalidJwt(res.status, backendMsg);
+
+      if (looksLikeAdminRequired) {
+        err.code = "ADMIN_FORBIDDEN";
+        err.message = "Bạn chưa được cấp quyền admin (ADMIN_EMAILS / ADMIN_UIDS / role admin).";
+        throw err;
+      }
+
+      if (looksLikeMissingToken || looksLikeInvalidJwt) {
+        err.code = "ADMIN_AUTH_REQUIRED";
+        err.message = "ADMIN_AUTH_REQUIRED";
+        throw err;
+      }
+
+      // Fallback: treat as re-auth required.
       err.code = "ADMIN_AUTH_REQUIRED";
       err.message = "ADMIN_AUTH_REQUIRED";
       throw err;
