@@ -12,8 +12,34 @@ type AdminFail = {
 
 function parseBearer(req: Request): string {
   const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  const token = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!m) throw new Error("Missing Bearer token.");
+  const token = m[1]?.trim();
+  if (!token) throw new Error("Missing Bearer token.");
   return token;
+}
+
+function looksLikeJwt(key: string): boolean {
+  // Legacy anon key looks like a JWT (three dot-separated segments)
+  return /^eyJ[\w-]*\.[\w-]*\.[\w-]*$/.test(key);
+}
+
+function looksLikePublishable(key: string): boolean {
+  // Newer publishable keys are prefixed (sb_publishable_) and should be reasonably long
+  return key.startsWith("sb_publishable_") && key.length >= 40;
+}
+
+function pickSupabaseKey(opts: { legacyAnon?: string | null; publishable?: string | null }): string | null {
+  const legacy = (opts.legacyAnon || "").trim();
+  const pub = (opts.publishable || "").trim();
+
+  if (legacy && looksLikeJwt(legacy)) return legacy;
+  if (pub && looksLikePublishable(pub)) return pub;
+
+  // If values exist but don't match heuristics, still try legacy first (less brittle)
+  if (legacy) return legacy;
+  if (pub) return pub;
+  return null;
 }
 
 function parseList(raw: string | undefined | null): string[] {
@@ -32,21 +58,26 @@ function projectRefFromUrl(url: string): string {
 
 export async function assertAdmin(req: Request): Promise<AdminCtx | AdminFail> {
   const supabaseUrl =
-    Deno.env.get("SUPABASE_URL") ||
-    Deno.env.get("VITE_SUPABASE_URL") ||
-    Deno.env.get("ADMIN_SUPABASE_URL") ||
-    "";
+  Deno.env.get("SUPABASE_URL") ||
+  Deno.env.get("VITE_SUPABASE_URL") ||
+  Deno.env.get("ADMIN_SUPABASE_URL") ||
+  "";
 
-  // Prefer the newer publishable key when present.
-  // (Legacy anon keys still work for many projects, but some setups may disable them.)
-  const anonKey =
-    Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
-    Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY") ||
-    Deno.env.get("SUPABASE_ANON_KEY") ||
-    Deno.env.get("VITE_SUPABASE_ANON_KEY") ||
-    "";
+// Prefer legacy JWT-style anon key (most compatible) and fall back to publishable key.
+const legacyAnon =
+  Deno.env.get("SUPABASE_ANON_KEY") ||
+  Deno.env.get("VITE_SUPABASE_ANON_KEY") ||
+  Deno.env.get("SUPABASE_ANON_KEY_LEGACY") ||
+  "";
 
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const publishable =
+  Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+  Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY") ||
+  "";
+
+const anonKey = pickSupabaseKey({ legacyAnon, publishable }) || "";
+
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
   if (!supabaseUrl || !anonKey) {
     return {
