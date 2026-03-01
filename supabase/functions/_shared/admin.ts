@@ -1,128 +1,150 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-function parseList(raw: string | undefined | null, opts?: { lower?: boolean }): Set<string> {
-  const lower = Boolean(opts?.lower);
-  const items = String(raw ?? "")
-    .replace(/\r/g, "")
-    // allow comma, semicolon, or newline separated values
-    .split(/[,;\n]+/g)
+type AdminCtx = {
+  ok: true;
+  user: { id: string; email?: string | null };
+};
+type AdminFail = {
+  ok: false;
+  status: number;
+  body: { ok: false; code: string; msg: string; details?: any };
+};
+
+function parseBearer(req: Request): string {
+  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  const token = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+  return token;
+}
+
+function parseList(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[\n,;]/g)
     .map((s) => s.trim())
-    .filter(Boolean)
-    // strip common copy/paste wrappers: quotes, braces
-    .map((s) => s.replace(/^[\s'"{(\[]+/, "").replace(/[\s'"})\]]+$/, ""))
-    .filter(Boolean)
-    .map((s) => (lower ? s.toLowerCase() : s));
-
-  return new Set(items);
+    .filter(Boolean);
 }
 
-function parseAdminEmails(raw: string | undefined | null): Set<string> {
-  return parseList(raw, { lower: true });
+function projectRefFromUrl(url: string): string {
+  // https://xxxx.supabase.co -> xxxx
+  const m = url.match(/^https?:\/\/([a-z0-9-]+)\.supabase\.co\b/i);
+  return m?.[1] ?? "";
 }
 
-function parseAdminUids(raw: string | undefined | null): Set<string> {
-  // UUIDs: normalize to lowercase to avoid case-copy issues.
-  return parseList(raw, { lower: true });
-}
+export async function assertAdmin(req: Request): Promise<AdminCtx | AdminFail> {
+  const supabaseUrl =
+    Deno.env.get("SUPABASE_URL") ||
+    Deno.env.get("VITE_SUPABASE_URL") ||
+    Deno.env.get("ADMIN_SUPABASE_URL") ||
+    "";
 
-function decodeJwtPayload(token: string): any | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
-    const json = atob(b64 + pad);
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+  const anonKey =
+    Deno.env.get("SUPABASE_ANON_KEY") ||
+    Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+    Deno.env.get("VITE_SUPABASE_ANON_KEY") ||
+    Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY") ||
+    "";
 
-export async function assertAdmin(req: Request): Promise<{ ok: true } | { ok: false; status: number; body: { ok: false; code: string; msg: string } }> {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-  if (!supabaseUrl) {
-    return { ok: false, status: 500, body: { ok: false, code: "SERVER_MISCONFIG", msg: "Admin verifier not configured" } };
-  }
-
-  const apiKey = anonKey || serviceRoleKey;
-  if (!apiKey) {
-    return { ok: false, status: 500, body: { ok: false, code: "SERVER_MISCONFIG_MISSING_SECRET", msg: "Admin verifier not configured" } };
+  if (!supabaseUrl || !anonKey) {
+    return {
+      ok: false,
+      status: 500,
+      body: {
+        ok: false,
+        code: "SERVER_MISCONFIG",
+        msg: "Missing SUPABASE_URL / SUPABASE_ANON_KEY in Edge Functions environment.",
+        details: { projectRef: projectRefFromUrl(supabaseUrl) },
+      },
+    };
   }
 
-  if (token && serviceRoleKey && token === serviceRoleKey) {
-    return { ok: true };
-  }
-
+  const token = parseBearer(req);
   if (!token) {
-    return { ok: false, status: 401, body: { ok: false, code: "MISSING_TOKEN", msg: "Missing bearer token" } };
+    return {
+      ok: false,
+      status: 401,
+      body: { ok: false, code: "ADMIN_AUTH_REQUIRED", msg: "Missing Bearer token." },
+    };
   }
 
-  const authed = createClient(supabaseUrl, apiKey, {
+  // 1) Validate JWT and get user (always do this with anon key; service role also works but anon is enough)
+  const authed = createClient(supabaseUrl, anonKey, {
     auth: { persistSession: false },
-    global: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: anonKey,
+      },
+    },
   });
 
   const { data: userData, error: userErr } = await authed.auth.getUser(token);
   const user = userData?.user;
+
   if (userErr || !user) {
-    return { ok: false, status: 401, body: { ok: false, code: "INVALID_JWT", msg: "Invalid JWT" } };
-  }
-
-  const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS"));
-  const adminUids = parseAdminUids(Deno.env.get("ADMIN_UIDS") ?? Deno.env.get("ADMIN_USER_IDS"));
-  if (!adminEmails.size && !adminUids.size) {
-    return {
-      ok: false,
-      status: 500,
-      body: { ok: false, code: "SERVER_MISCONFIG_MISSING_ADMIN", msg: "Missing ADMIN_EMAILS or ADMIN_UIDS secret" },
-    };
-  }
-
-  const uid = String(user.id ?? "").toLowerCase();
-  const uidAllowed = adminUids.size ? adminUids.has(uid) : false;
-
-  const userEmail = String(user.email ?? "").toLowerCase();
-  const emailAllowed = userEmail ? adminEmails.has(userEmail) : false;
-
-  const metadataAdmin = user.user_metadata?.is_admin === true || user.app_metadata?.is_admin === true;
-
-  // Role check: prefer direct table lookup (users can read their own roles by policy).
-  // Fallback to RPC if needed.
-  let roleAllowed = false;
-  try {
-    const { data, error } = await authed
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
-      .limit(1)
-      .maybeSingle();
-    roleAllowed = !error && data?.role === "admin";
-
-    if (!roleAllowed) {
-      const roleCheck = await authed.rpc("has_role", { user_id: user.id, role: "admin" });
-      roleAllowed = !roleCheck.error && roleCheck.data === true;
-    }
-  } catch {
-    // ignore
-  }
-
-  if (!uidAllowed && !emailAllowed && !metadataAdmin && !roleAllowed) {
     return {
       ok: false,
       status: 401,
       body: {
         ok: false,
-        code: "ADMIN_REQUIRED",
-        msg: `Admin required (uid=${uid.slice(0, 8)}...)`,
+        code: "JWT_INVALID",
+        msg: "JWT invalid/expired (or Supabase project mismatch between frontend and Edge Functions).",
+        details: { projectRef: projectRefFromUrl(supabaseUrl) },
       },
     };
   }
 
-  return { ok: true };
+  // 2) Allowlist via env
+  const adminUids = parseList(Deno.env.get("ADMIN_UIDS"));
+  const adminEmails = parseList(Deno.env.get("ADMIN_EMAILS")).map((s) => s.toLowerCase());
+
+  const uidAllowed = adminUids.includes(user.id);
+  const emailAllowed = !!user.email && adminEmails.includes(user.email.toLowerCase());
+
+  if (uidAllowed || emailAllowed) {
+    return { ok: true, user: { id: user.id, email: user.email } };
+  }
+
+  // 3) Role check in DB
+  // Prefer RPC has_role (security definer) if available
+  try {
+    const { data: isAdmin, error: rpcErr } = await authed.rpc("has_role", {
+      _user_id: user.id,
+      _role: "admin",
+    });
+    if (!rpcErr && isAdmin === true) {
+      return { ok: true, user: { id: user.id, email: user.email } };
+    }
+  } catch (_e) {
+    // ignore and fallback below
+  }
+
+  // Fallback: direct table lookup (prefer service role to avoid RLS issues)
+  const dbClient = serviceRoleKey
+    ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+    : authed;
+
+  const { data: roleRow, error: roleErr } = await dbClient
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .maybeSingle();
+
+  if (!roleErr && roleRow?.role === "admin") {
+    return { ok: true, user: { id: user.id, email: user.email } };
+  }
+
+  return {
+    ok: false,
+    status: 401,
+    body: {
+      ok: false,
+      code: "ADMIN_AUTH_REQUIRED",
+      msg:
+        "Admin permission required. Add your email/uid to ADMIN_EMAILS/ADMIN_UIDS, or insert role 'admin' into public.user_roles (and make sure migrations/policies are applied).",
+      details: { uid: user.id, email: user.email, projectRef: projectRefFromUrl(supabaseUrl) },
+    },
+  };
 }

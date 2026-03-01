@@ -71,7 +71,11 @@ export default function AdminRentPage() {
       code === "ADMIN_AUTH_REQUIRED" ||
       msg === "ADMIN_AUTH_REQUIRED" ||
       code === "JWT_INVALID" ||
-      msg === "JWT_INVALID";
+      msg === "JWT_INVALID" ||
+      code === "INVALID_JWT" ||
+      msg === "INVALID_JWT" ||
+      code === "ADMIN_REQUIRED" ||
+      msg === "ADMIN_REQUIRED";
 
     if (!isAuthRelated) return false;
     if (authHandlingRef.current) return true;
