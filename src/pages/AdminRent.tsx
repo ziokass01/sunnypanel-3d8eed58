@@ -111,7 +111,7 @@ export default function AdminRentPage() {
     toast({
       title: "Không thể xác thực quyền truy cập",
       description:
-        "Backend trả về 401 dù bạn vẫn còn session. Hãy kiểm tra quyền admin/role và đảm bảo VITE_SUPABASE_URL + ANON_KEY đúng cùng 1 project với Edge Functions (admin-*).",
+        `Backend trả về 401 (code: ${String(err.code || "UNKNOWN")}). Nếu bạn vẫn còn session, hãy kiểm tra quyền admin/role và đảm bảo VITE_SUPABASE_URL + (PUBLISHABLE/ANON) KEY đúng cùng 1 project với Edge Functions (admin-*).`,
       variant: "destructive",
     });
 

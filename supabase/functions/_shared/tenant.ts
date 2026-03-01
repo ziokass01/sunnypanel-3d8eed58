@@ -10,12 +10,18 @@ function parseBearer(req: Request): string {
 }
 
 export async function assertTenant(req: Request): Promise<AuthResult> {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("VITE_SUPABASE_URL") ?? "";
+  // Prefer publishable key when present; allow legacy anon key as fallback.
+  const anonKey =
+    Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ??
+    Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY") ??
+    Deno.env.get("SUPABASE_ANON_KEY") ??
+    Deno.env.get("VITE_SUPABASE_ANON_KEY") ??
+    "";
   const token = parseBearer(req);
 
   if (!supabaseUrl || !anonKey) {
-    return { ok: false, status: 500, body: { ok: false, code: "SERVER_MISCONFIG", msg: "Missing SUPABASE_URL / SUPABASE_ANON_KEY" } };
+    return { ok: false, status: 500, body: { ok: false, code: "SERVER_MISCONFIG", msg: "Missing SUPABASE_URL / SUPABASE_KEY" } };
   }
 
   if (!token) {

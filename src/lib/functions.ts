@@ -12,8 +12,9 @@ export function getFunctionsBaseUrl() {
 }
 
 function getAnonKey() {
-  return (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ??
-    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ??
+  // Prefer publishable key when available (legacy anon key is supported as fallback).
+  return (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ??
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ??
     undefined;
 }
 
@@ -177,13 +178,21 @@ export async function getFunction<T>(
   if (!res.ok) {
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
     const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
-
-    // Admin endpoints: distinguish between (a) session/JWT problems and (b) missing admin rights.
+  // Admin endpoints: distinguish between (a) session/JWT problems and (b) missing admin rights.
     // We avoid hard-signout for (b) so the user can still stay logged in and fix allowlists.
     if (isAdminFn && res.status === 401) {
       const backendCode = data?.code ? String(data.code) : "";
       const backendMsg = String(msg || "").toLowerCase();
-      if (backendCode === "ADMIN_REQUIRED" || backendMsg.includes("admin required")) {
+
+      // If backend provided a structured code (JWT_INVALID, ADMIN_REQUIRED, NOT_AUTHENTICATED, ...), keep it.
+      if (backendCode) {
+        err.code = backendCode;
+        err.message = backendCode;
+        throw err;
+      }
+
+      // Fallback heuristics when backend didn't send a code.
+      if (backendMsg.includes("admin required")) {
         err.code = "ADMIN_REQUIRED";
         err.message = "ADMIN_REQUIRED";
       } else {
@@ -301,21 +310,29 @@ export async function postFunction<T>(
   if (!res.ok) {
     const msg = (data && (data.msg || data.message || data.error)) || text || `Request failed (${res.status})`;
     const err = makeAuthError(String(msg), res.status, data?.code ? String(data.code) : undefined);
-
-    // Admin endpoints: distinguish "not admin" vs "need re-auth".
+  // Admin endpoints: distinguish between (a) session/JWT problems and (b) missing admin rights.
+    // We avoid hard-signout for (b) so the user can still stay logged in and fix allowlists.
     if (isAdminFn && res.status === 401) {
-      const backendCode = String((data as any)?.code ?? "").toUpperCase();
-      const backendMsg = String(msg ?? "");
+      const backendCode = data?.code ? String(data.code) : "";
+      const backendMsg = String(msg || "").toLowerCase();
 
-      const looksLikeAdminRequired = backendCode === "ADMIN_REQUIRED" || /admin required/i.test(backendMsg);
-      const looksLikeMissingToken = backendCode === "MISSING_TOKEN" || /missing bearer token/i.test(backendMsg);
-      const looksLikeInvalidJwt = backendCode === "INVALID_JWT" || isInvalidJwt(res.status, backendMsg);
-
-      if (looksLikeAdminRequired) {
-        err.code = "ADMIN_FORBIDDEN";
-        err.message = "Bạn chưa được cấp quyền admin (ADMIN_EMAILS / ADMIN_UIDS / role admin).";
+      // If backend provided a structured code (JWT_INVALID, ADMIN_REQUIRED, NOT_AUTHENTICATED, ...), keep it.
+      if (backendCode) {
+        err.code = backendCode;
+        err.message = backendCode;
         throw err;
       }
+
+      // Fallback heuristics when backend didn't send a code.
+      if (backendMsg.includes("admin required")) {
+        err.code = "ADMIN_REQUIRED";
+        err.message = "ADMIN_REQUIRED";
+      } else {
+        err.code = "ADMIN_AUTH_REQUIRED";
+        err.message = "ADMIN_AUTH_REQUIRED";
+      }
+      throw err;
+    }
 
       if (looksLikeMissingToken || looksLikeInvalidJwt) {
         err.code = "ADMIN_AUTH_REQUIRED";

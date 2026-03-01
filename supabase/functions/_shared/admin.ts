@@ -37,11 +37,13 @@ export async function assertAdmin(req: Request): Promise<AdminCtx | AdminFail> {
     Deno.env.get("ADMIN_SUPABASE_URL") ||
     "";
 
+  // Prefer the newer publishable key when present.
+  // (Legacy anon keys still work for many projects, but some setups may disable them.)
   const anonKey =
-    Deno.env.get("SUPABASE_ANON_KEY") ||
     Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
-    Deno.env.get("VITE_SUPABASE_ANON_KEY") ||
     Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY") ||
+    Deno.env.get("SUPABASE_ANON_KEY") ||
+    Deno.env.get("VITE_SUPABASE_ANON_KEY") ||
     "";
 
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -53,7 +55,7 @@ export async function assertAdmin(req: Request): Promise<AdminCtx | AdminFail> {
       body: {
         ok: false,
         code: "SERVER_MISCONFIG",
-        msg: "Missing SUPABASE_URL / SUPABASE_ANON_KEY in Edge Functions environment.",
+        msg: "Missing SUPABASE_URL / SUPABASE_KEY in Edge Functions environment.",
         details: { projectRef: projectRefFromUrl(supabaseUrl) },
       },
     };
