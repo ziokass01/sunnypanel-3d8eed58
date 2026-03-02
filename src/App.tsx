@@ -3,7 +3,6 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { LoginPage } from "@/pages/Login";
@@ -26,7 +25,11 @@ import { AdminFreeKeysPage } from "@/pages/AdminFreeKeys";
 
 const queryClient = new QueryClient();
 
-const App = () => (
+const App = () => {
+  const host = typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
+  const isAdminHost = host.startsWith("admin.");
+
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -34,17 +37,12 @@ const App = () => (
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/login" element={<LoginPage />} />
+            {isAdminHost ? (
+              <>
+                <Route path="/" element={<Navigate to="/login" replace />} />
+                <Route path="/login" element={<LoginPage />} />
 
-            {/* Public free-key flow (add-only) */}
-            <Route path="/free" element={<FreeLandingPage />} />
-            <Route path="/free/gate" element={<FreeGatePage />} />
-            {/* Safety alias for common typo */}
-            <Route path="/free/gat" element={<Navigate to="/free/gate" replace />} />
-            <Route path="/free/claim" element={<FreeClaimPage />} />
-
-            <Route
+                <Route
               element={
                 <AuthGate>
                   <AdminRoute>
@@ -66,13 +64,30 @@ const App = () => (
               <Route path="/admin/free-keys" element={<AdminFreeKeysPage />} />
             </Route>
 
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
+                <Route path="*" element={<NotFound />} />
+              </>
+            ) : (
+              <>
+                <Route path="/" element={<Navigate to="/free" replace />} />
+                {/* Don't expose admin login on the user host */}
+                <Route path="/login" element={<Navigate to="/free" replace />} />
+
+                {/* Public free-key flow (add-only) */}
+                <Route path="/free" element={<FreeLandingPage />} />
+                <Route path="/free/gate" element={<FreeGatePage />} />
+                {/* Safety alias for common typo */}
+                <Route path="/free/gat" element={<Navigate to="/free/gate" replace />} />
+                <Route path="/free/claim" element={<FreeClaimPage />} />
+
+                <Route path="*" element={<NotFound />} />
+              </>
+            )}
           </Routes>
         </BrowserRouter>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
+};
 
 export default App;

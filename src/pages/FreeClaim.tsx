@@ -43,18 +43,18 @@ function friendlyRevealError(msg: string) {
   if (m === "Failed to fetch" || m.toLowerCase().includes("failed to fetch")) {
     return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
   }
-  if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại Get Key và vượt link lại.";
-  if (m === "SESSION_NOT_FOUND") return "Không tìm thấy phiên (session). Hãy quay lại /free và bấm Xác minh lại.";
-  if (m === "OUT_TOKEN_REQUIRED") return "Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.";
-  if (m === "OUT_TOKEN_MISMATCH") return "Token (t) không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "CLAIM_INVALID") return "Token xác minh không hợp lệ. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "GATE_STATUS_INVALID") return "Gate chưa hợp lệ hoặc phiên chưa qua Gate. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại trang Get Key 🔑 và vượt link lại.";
+  if (m === "SESSION_NOT_FOUND") return "Lỗi không tìm thấy yêu cầu. Hãy quay lại trang Get Key để Xác minh lại.";
+  if (m === "OUT_TOKEN_REQUIRED") return "Thiếu xác thực. Hãy quay lại trang Get Key 🔑 rồi vượt lại.";
+  if (m === "OUT_TOKEN_MISMATCH") return "Xác thực không đúng . Vui lòng quay lại trang Get Key 🔑 và làm lại.";
+  if (m === "CLAIM_INVALID") return "Lỗi xác minh không hợp lệ. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
+  if (m === "GATE_STATUS_INVALID") return "Xác thực chưa hợp lệ hoặc chưa xác thực. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong 24 giờ. Vui lòng thử lại sau.";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
-  if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "SESSION_BIND_MISMATCH") return "Phiên không khớp thiết bị/IP. Vui lòng bắt đầu lại từ trang Get Key.";
+  if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
+  if (m === "SESSION_BIND_MISMATCH") return "Phiên không khớp thiết bị/IP. Vui lòng bắt đầu lại từ trang Get Key 🔑.";
   if (m === "BLOCKED") return "Thiết bị hoặc IP của bạn đã bị chặn.";
-  if (m === "ALREADY_REVEALED") return "Key đã được phát. Hãy copy key bên dưới.";
+  if (m === "ALREADY_REVEALED") return "Key 🔑 đã được tạo. Vui lòng copy Key 🔑 bên dưới.";
   return `Xác thực không thành công (${m}).`;
 }
 
@@ -355,13 +355,13 @@ export function FreeClaimPage() {
     if (inBundleMode) return;
 
     clearAllFreeStorage();
-    setError("Link nhận key không hợp lệ hoặc đã bị rút gọn sai. Hãy quay lại /free và bấm Get Key lại.");
+    setError("Link nhận key không hợp lệ hoặc đã bị rút gọn sai. Hãy quay lại trang Get Key 🔑 và bấm Get Key 🔑 lại.");
   }, [hasBareClaimKey, claimFromUrl, tokenSource]);
 
   useEffect(() => {
     if (!claimToken) return;
     if (!outToken) {
-      setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
+      setError("Lỗi thiếu xác thực. Hãy quay lại Get Key 🔑 rồi vượt lại.");
     }
   }, [claimToken, outToken]);
 
@@ -454,7 +454,7 @@ export function FreeClaimPage() {
           if (!nextSid) {
             // Hard stop: clear stale FREE storage so user won't get stuck in a loop.
             clearAllFreeStorage();
-            const friendly = "Phiên không tồn tại hoặc token bị sai/thiếu. Hãy quay lại /free tạo phiên mới.";
+            const friendly = "Lỗi xác thực không tồn tại hoặc bị sai. Hãy quay lại trang Get Key 🔑 vượt lại.";
             setError(debugMode && code ? `${friendly} (${code})` : friendly);
             return;
           }
@@ -567,7 +567,7 @@ export function FreeClaimPage() {
             {claimToken && !outToken ? (
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium">Thiếu token (t)</div>
-                <div className="text-muted-foreground">Hãy quay lại Get Key và đi đúng flow Link4M → Gate.</div>
+                <div className="text-muted-foreground">Hãy quay lại trang Get Key 🔑 rồi vượt lại.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
                     Quay lại Get Key

@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
   const { data: sess, error } = await sb
     .from("licenses_free_sessions")
     .select("session_id,expires_at")
-    .eq("out_token_hash", outHash)
+    .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
     .maybeSingle();
 
   if (error) {

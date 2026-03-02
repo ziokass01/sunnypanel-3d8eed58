@@ -91,8 +91,16 @@ CREATE TABLE IF NOT EXISTS public.free_ip_rate_limits (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_free_ip_rate_limits
-  ON public.free_ip_rate_limits (ip_hash, route, window_start);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname='public' AND c.relname='free_ip_rate_limits' AND c.relkind IN ('r','p')
+  ) THEN
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS ux_free_ip_rate_limits ON public.free_ip_rate_limits (ip_hash, route, window_start)';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.free_fp_rate_limits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,8 +111,16 @@ CREATE TABLE IF NOT EXISTS public.free_fp_rate_limits (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_free_fp_rate_limits
-  ON public.free_fp_rate_limits (fp_hash, route, window_start);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname='public' AND c.relname='free_fp_rate_limits' AND c.relkind IN ('r','p')
+  ) THEN
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS ux_free_fp_rate_limits ON public.free_fp_rate_limits (fp_hash, route, window_start)';
+  END IF;
+END $$;
 
 -- 3) RLS (deny-by-default; RPCs are SECURITY DEFINER)
 ALTER TABLE public.licenses_free_ip_rate_limits ENABLE ROW LEVEL SECURITY;

@@ -28,22 +28,79 @@ function getClientIp(req: Request) {
   return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
 }
 
+function inferBaseUrl(req: Request) {
+  const origin = req.headers.get("origin");
+  if (origin) return origin;
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  if (host) return `${proto}://${host}`;
+  return "";
+}
+
 function isActiveBlockUntil(blockedUntil?: string | null) {
   if (!blockedUntil) return true;
   const t = Date.parse(blockedUntil);
   return Number.isFinite(t) && t > Date.now();
 }
 
+function applyTemplateApiToken(tpl: string, token: string) {
+  const v = String(tpl || "");
+  if (!token) return v;
+  if (v.includes("{LINK4M_API_TOKEN}")) return v.replaceAll("{LINK4M_API_TOKEN}", token);
+  return v;
+}
+
+function buildOutboundUrl(outboundBase: string, gateUrl: string) {
+  const tpl = String(outboundBase || "").trim();
+  const g = String(gateUrl || "").trim();
+  if (!tpl) return "";
+
+  const hasPlaceholder = tpl.includes("{GATE_URL_ENC}") || tpl.includes("{GATE_URL}");
+
+  try {
+    const u = new URL(tpl);
+    const host = (u.hostname || "").toLowerCase();
+    if (host.includes("link4m") && !hasPlaceholder) {
+      const path = (u.pathname || "").replace(/\/+$/, "");
+      const hasApi = u.searchParams.has("api") || u.searchParams.has("apikey") || u.searchParams.has("token");
+      const looksQuick = (path.endsWith("/st") || path.includes("api-shorten")) && hasApi;
+      const hasUrl = u.searchParams.has("url");
+      if (looksQuick || hasUrl) {
+        u.searchParams.set("url", g);
+        return u.toString();
+      }
+      return "__TEMPLATE_INVALID__";
+    }
+  } catch {
+    // ignore
+  }
+
+  if (tpl.includes("{GATE_URL_ENC}")) return tpl.replaceAll("{GATE_URL_ENC}", encodeURIComponent(g));
+  if (tpl.includes("{GATE_URL}")) return tpl.replaceAll("{GATE_URL}", g);
+
+  try {
+    const u = new URL(tpl);
+    u.searchParams.append("url", g);
+    return u.toString();
+  } catch {
+    return tpl + (tpl.includes("?") ? "&" : "?") + `url=${encodeURIComponent(g)}`;
+  }
+}
+
 const BodySchema = z.object({
-  // Either provide session_id, or provide out_token (to resolve session)
+  pass: z.number().int().min(1).max(2).optional().default(1),
   session_id: z.string().uuid().optional(),
-  out_token: z.string().min(8).max(512).optional(),
+  out_token: z.string().min(8).max(512),
   fingerprint: z.string().min(6).max(128),
   referrer: z.string().optional().default(""),
   current_url: z.string().optional().default(""),
 });
 
 type JsonErr = { ok: false; code?: string; msg: string; detail?: unknown };
+
+type NextOk =
+  | { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number }
+  | { ok: true; next: "CLAIM"; claim_token: string; claim_url: string };
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
@@ -96,12 +153,14 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "BAD_REQUEST", msg: "BAD_REQUEST" } satisfies JsonErr, 400);
   }
 
-  const { session_id: bodySid, out_token, fingerprint, referrer, current_url } = parsed.data;
+  const { pass, session_id: bodySid, out_token, fingerprint, referrer, current_url } = parsed.data;
 
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_require_link4m_referrer")
+    .select(
+      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
+    )
     .eq("id", 1)
     .maybeSingle();
 
@@ -113,13 +172,15 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "CLOSED", msg: "CLOSED" } satisfies JsonErr, 403);
   }
 
-  // Compute hashes (out_token is optional)
-  const outHash = out_token ? await sha256Hex(out_token) : null;
+  const LINK4M_API_TOKEN_PASS1 = (Deno.env.get("LINK4M_API_TOKEN_PASS1") ?? "").trim();
+  const LINK4M_API_TOKEN_PASS2 = (Deno.env.get("LINK4M_API_TOKEN_PASS2") ?? "").trim();
+
+  const outHash = await sha256Hex(out_token);
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
   const ipHash = await sha256Hex(getClientIp(req));
 
-  // Blocklist checks can run before session lookup
+  // Blocklist
   const blocked = await sb
     .from("licenses_free_blocklist")
     .select("id,blocked_until")
@@ -131,175 +192,223 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "BLOCKED", msg: "BLOCKED" } satisfies JsonErr, 403);
   }
 
-  // Find session (prefer session_id; fallback to out_token)
-  let sess: any = null;
-  let qErr: any = null;
-
-  if (bodySid) {
-    const q = await sb
-      .from("licenses_free_sessions")
-      .select(
-        "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash",
-      )
-      .eq("session_id", bodySid)
-      .maybeSingle();
-    sess = q.data;
-    qErr = q.error;
-  } else if (outHash) {
-    const q = await sb
-      .from("licenses_free_sessions")
-      .select(
-        "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash",
-      )
-      .eq("out_token_hash", outHash)
-      .maybeSingle();
-    sess = q.data;
-    qErr = q.error;
-  } else {
+  // Load session
+  if (!bodySid) {
     return json({ ok: false, code: "BAD_REQUEST", msg: "MISSING_SESSION" } satisfies JsonErr, 400);
   }
 
-  if (qErr) {
-    return json({ ok: false, code: "SERVER_ERROR", msg: qErr.message } satisfies JsonErr, 500);
-  }
+  const { data: sess, error: qErr } = await sb
+    .from("licenses_free_sessions")
+    .select(
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash,out_token_hash_pass2,key_type_code,passes_required,passes_completed,current_pass,rotate_bucket,pass2_started_at",
+    )
+    .eq("session_id", bodySid)
+    .maybeSingle();
 
-  if (!sess) {
-    return json({ ok: false, code: "INVALID_SESSION", msg: "INVALID_SESSION" } satisfies JsonErr, 400);
-  }
-
-  // If both provided: enforce that out_token matches session
-  if (outHash && sess.out_token_hash && outHash !== sess.out_token_hash) {
-    return json({ ok: false, code: "INVALID_SESSION", msg: "OUT_TOKEN_MISMATCH" } satisfies JsonErr, 403);
-  }
-
-  const tokenVerified = Boolean(outHash && sess.out_token_hash && outHash === sess.out_token_hash);
+  if (qErr) return json({ ok: false, code: "SERVER_ERROR", msg: qErr.message } satisfies JsonErr, 500);
+  if (!sess) return json({ ok: false, code: "INVALID_SESSION", msg: "INVALID_SESSION" } satisfies JsonErr, 400);
 
   // Expired?
-  const now = Date.now();
-  const expiresAt = Date.parse(sess.expires_at);
-  if (!isFinite(expiresAt) || expiresAt <= now) {
+  const nowMs = Date.now();
+  const expiresAt = Date.parse((sess as any).expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) {
     return json({ ok: false, code: "SESSION_EXPIRED", msg: "SESSION_EXPIRED" } satisfies JsonErr, 400);
   }
 
-  if (sess.fingerprint_hash !== fpHash || sess.ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
+  // Device match
+  if ((sess as any).fingerprint_hash !== fpHash || (sess as any).ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
     return json({ ok: false, code: "DEVICE_MISMATCH", msg: "DEVICE_MISMATCH" } satisfies JsonErr, 403);
   }
 
-  // Referrer policy (after token verification)
-  const requireRef = Boolean(settings?.free_require_link4m_referrer ?? false);
-  if (requireRef) {
-    const r = String(referrer ?? "").trim();
-    let hostOk = false;
-    if (r) {
-      try {
-        const u = new URL(r);
-        const host = (u.hostname || "").toLowerCase();
-        hostOk = host.includes("link4m");
-      } catch {
-        hostOk = false;
-      }
-    }
-
-    // If referrer is blocked/empty but gate URL has a valid token for this session => allow.
-    if (!hostOk && !tokenVerified) {
-      if (!r) {
-        return json(
-          {
-            ok: false,
-            code: "REFERRER_REQUIRED",
-            msg: "REFERRER_REQUIRED",
-            detail: {
-              hint:
-                "Referrer bị trống. Bạn cần đi qua Link4M hoặc referrer bị chặn bởi trình duyệt/shortlink. Nếu bạn đi đúng Link4M, hãy thử mở lại bằng cùng 1 trình duyệt.",
-              current_url,
-            },
-          } satisfies JsonErr,
-          400,
-        );
-      }
-      return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
+  // Referrer policy (allow if token matches the right pass)
+  const requireRef = Boolean((settings as any)?.free_require_link4m_referrer ?? false);
+  const r = String(referrer ?? "").trim();
+  let hostOk = false;
+  if (r) {
+    try {
+      const u = new URL(r);
+      const host = (u.hostname || "").toLowerCase();
+      hostOk = host.includes("link4m");
+    } catch {
+      hostOk = false;
     }
   }
 
-  if (sess.reveal_count && sess.reveal_count > 0) {
+  const expectedHash = pass === 2 ? (sess as any).out_token_hash_pass2 : (sess as any).out_token_hash;
+  const tokenVerified = Boolean(expectedHash && expectedHash === outHash);
+
+  if (requireRef && !hostOk && !tokenVerified) {
+    if (!r) {
+      return json(
+        {
+          ok: false,
+          code: "REFERRER_REQUIRED",
+          msg: "REFERRER_REQUIRED",
+          detail: { hint: "Referrer bị trống. Bạn cần đi qua Link4M.", current_url },
+        } satisfies JsonErr,
+        400,
+      );
+    }
+    return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
+  }
+
+  if (!tokenVerified) {
+    return json({ ok: false, code: "OUT_TOKEN_MISMATCH", msg: "OUT_TOKEN_MISMATCH" } satisfies JsonErr, 403);
+  }
+
+  if ((sess as any).reveal_count && (sess as any).reveal_count > 0) {
     return json({ ok: false, code: "ALREADY_REVEALED", msg: "ALREADY_REVEALED" } satisfies JsonErr, 200);
   }
 
-  const minDelayRaw = Number((settings as any)?.free_min_delay_enabled === false ? 0 : (settings as any)?.free_min_delay_seconds ?? 0);
-  const minDelay = Math.max(0, minDelayRaw);
-  const startedAtIso = sess.started_at ?? (sess as any).created_at ?? new Date(now).toISOString();
+  const minDelayEnabled = Boolean((settings as any)?.free_min_delay_enabled ?? true);
+  const minDelay1 = Math.max(0, Number(minDelayEnabled ? ((settings as any)?.free_min_delay_seconds ?? 0) : 0));
+  const minDelay2 = Math.max(0, Number(minDelayEnabled ? ((settings as any)?.free_min_delay_seconds_pass2 ?? minDelay1) : 0));
+
+  const startedAtIso = (sess as any).started_at ?? (sess as any).created_at ?? new Date(nowMs).toISOString();
   const startedAtMs = Date.parse(startedAtIso);
-  const mustWaitUntil = startedAtMs + minDelay * 1000;
-  if (minDelay > 0 && isFinite(startedAtMs) && now < mustWaitUntil) {
-    // Too fast => do NOT allow retry-by-reload.
-    const nowIso = new Date().toISOString();
 
-    try {
-      const upd = await sb
-        .from("licenses_free_sessions")
-        .update({
-          status: "gate_fail",
-          last_error: "TOO_FAST",
-          expires_at: nowIso,
-          out_expires_at: nowIso,
-          claim_token_hash: null,
-          claim_expires_at: null,
-        })
-        .eq("session_id", sess.session_id);
+  const pass2StartedIso = (sess as any).pass2_started_at ?? null;
+  const pass2StartedMs = pass2StartedIso ? Date.parse(pass2StartedIso) : NaN;
 
-      if (upd.error) {
+  const required = Math.max(1, Math.min(2, Number((sess as any).passes_required ?? 1)));
+  const completed = Math.max(0, Math.min(2, Number((sess as any).passes_completed ?? 0)));
+
+  // Delay enforcement
+  if (pass === 1) {
+    const mustWaitUntil = startedAtMs + minDelay1 * 1000;
+    if (minDelay1 > 0 && Number.isFinite(startedAtMs) && nowMs < mustWaitUntil) {
+      const nowIso = new Date().toISOString();
+      try {
         await sb
           .from("licenses_free_sessions")
           .update({
             status: "gate_fail",
             last_error: "TOO_FAST",
             expires_at: nowIso,
+            out_expires_at: nowIso,
             claim_token_hash: null,
             claim_expires_at: null,
           })
-          .eq("session_id", sess.session_id);
+          .eq("session_id", (sess as any).session_id);
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
+      return json({ ok: false, code: "TOO_FAST", msg: "TOO_FAST" } satisfies JsonErr, 200);
     }
-
-    return json({ ok: false, code: "TOO_FAST", msg: "TOO_FAST" } satisfies JsonErr, 200);
+  } else {
+    // pass 2
+    if (!Number.isFinite(pass2StartedMs)) {
+      return json({ ok: false, code: "PASS2_NOT_READY", msg: "PASS2_NOT_READY" } satisfies JsonErr, 400);
+    }
+    const mustWaitUntil = pass2StartedMs + minDelay2 * 1000;
+    if (minDelay2 > 0 && nowMs < mustWaitUntil) {
+      const nowIso = new Date().toISOString();
+      try {
+        await sb
+          .from("licenses_free_sessions")
+          .update({
+            status: "gate_fail",
+            last_error: "TOO_FAST_PASS2",
+            expires_at: nowIso,
+            out_expires_at: nowIso,
+            claim_token_hash: null,
+            claim_expires_at: null,
+          })
+          .eq("session_id", (sess as any).session_id);
+      } catch {
+        // ignore
+      }
+      return json({ ok: false, code: "TOO_FAST", msg: "TOO_FAST" } satisfies JsonErr, 200);
+    }
   }
 
-  // Generate claim token
+  // If VIP needs pass2 and we're on pass1
+  if (required === 2 && pass === 1) {
+    // Only allow transition once
+    if (completed >= 1) {
+      return json({ ok: false, code: "PASS1_ALREADY_OK", msg: "PASS1_ALREADY_OK" } satisfies JsonErr, 200);
+    }
+
+    const tokenPass2 = base64url(32);
+    const tokenPass2Hash = await sha256Hex(tokenPass2);
+    const nowIso = new Date().toISOString();
+
+    const rotateBucket = String((sess as any).rotate_bucket ?? "").trim();
+    const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
+    const gateUrlPass2 = baseUrl ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}` : "/free/gate";
+
+    const outboundBase1 = String((settings as any)?.free_outbound_url ?? "").trim() || "https://link4m.com/PkY7X";
+    const outboundBase2 = String((settings as any)?.free_outbound_url_pass2 ?? "").trim() || outboundBase1;
+
+    const tpl2 = applyTemplateApiToken(outboundBase2, (LINK4M_API_TOKEN_PASS2 || LINK4M_API_TOKEN_PASS1));
+
+    const outbound2 = buildOutboundUrl(tpl2, gateUrlPass2);
+    if (!outbound2 || outbound2 === "__TEMPLATE_INVALID__") {
+      return json(
+        {
+          ok: false,
+          code: "OUTBOUND_URL_TEMPLATE_INVALID",
+          msg: "Link4M Pass2 template thiếu placeholder {GATE_URL_ENC}/{GATE_URL} hoặc thiếu param url=...",
+        } satisfies JsonErr,
+        400,
+      );
+    }
+
+    const { error: updErr } = await sb
+      .from("licenses_free_sessions")
+      .update({
+        status: "pass1_ok",
+        pass1_ok_at: nowIso,
+        passes_completed: 1,
+        current_pass: 2,
+        out_token_hash_pass2: tokenPass2Hash,
+        pass2_started_at: nowIso,
+        last_error: null,
+        // ensure claim token not set yet
+        claim_token_hash: null,
+        claim_expires_at: null,
+      })
+      .eq("session_id", (sess as any).session_id);
+
+    if (updErr) return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
+
+    const result: NextOk = { ok: true, next: "PASS2", out_token: tokenPass2, outbound_url: outbound2, min_delay_seconds: minDelay2 };
+    return json(result, 200);
+  }
+
+  // Final pass -> generate claim token
   const claim_token = base64url(20);
   const claim_token_hash = await sha256Hex(claim_token);
-  const claim_expires_at = new Date(Date.now() + 3 * 60 * 1000).toISOString(); // 3 minutes
+  const claim_expires_at = new Date(Date.now() + 3 * 60 * 1000).toISOString();
+
+  const nowIso = new Date().toISOString();
 
   const { error: updErr } = await sb
     .from("licenses_free_sessions")
     .update({
       status: "gate_ok",
-      gate_ok_at: new Date().toISOString(),
+      gate_ok_at: nowIso,
       claim_token_hash,
       claim_expires_at,
       last_error: null,
+      passes_completed: required,
+      current_pass: required,
+      pass2_ok_at: pass === 2 ? nowIso : null,
+      pass1_ok_at: pass === 1 ? nowIso : (sess as any).pass1_ok_at ?? null,
     })
-    .eq("session_id", sess.session_id);
+    .eq("session_id", (sess as any).session_id);
 
-  if (updErr) {
-    return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
-  }
+  if (updErr) return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
 
-  const baseUrl = PUBLIC_BASE_URL || "";
-
+  const baseUrl = PUBLIC_BASE_URL || inferBaseUrl(req) || "";
   let claim_url = "";
   if (baseUrl) {
-    const sidForUrl = String(bodySid ?? sess.session_id ?? "").trim();
-    const tForUrl = String(out_token ?? "").trim();
-
     const params = new URLSearchParams();
     params.set("claim", claim_token);
-    if (sidForUrl) params.set("sid", sidForUrl);
-    if (tForUrl) params.set("t", tForUrl);
-
+    params.set("sid", String((sess as any).session_id));
     claim_url = `${baseUrl}/free/claim?${params.toString()}`;
   }
 
-  return json({ ok: true, claim_token, claim_url }, 200);
+  const result: NextOk = { ok: true, next: "CLAIM", claim_token, claim_url };
+  return json(result, 200);
 });
