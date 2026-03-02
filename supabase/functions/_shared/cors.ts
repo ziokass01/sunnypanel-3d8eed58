@@ -1,11 +1,6 @@
 const BASE_ALLOWED_HOSTS = new Set([
   "mityangho.id.vn",
   "www.mityangho.id.vn",
-  // Admin on .id.vn (Cloudflare Pages custom domain)
-  "admin.mityangho.id.vn",
-  "www.admin.mityangho.id.vn",
-  "admin.mityangho.id",
-  "www.admin.mityangho.id",
   "sunnypanel.lovable.app",
   // Lovable preview/review subdomains (stable allow-list would be too brittle)
   "preview--sunnypanel.lovable.app",

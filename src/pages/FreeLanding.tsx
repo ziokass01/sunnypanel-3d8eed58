@@ -128,7 +128,7 @@ export function FreeLandingPage() {
             <div className="flex items-center gap-3">
               <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
               <div>
-                <CardTitle>Get Key 🔑</CardTitle>
+                <CardTitle>Get key free</CardTitle>
               </div>
             </div>
           </CardHeader>
@@ -321,12 +321,12 @@ export function FreeLandingPage() {
                 }
               }}
             >
-              {loading ? "Đang chuyển hướng…" : "Get Key 🔑"}
+              {loading ? "Đang chuyển hướng…" : "Get Key"}
             </Button>
 
             {lastFreeKey ? (
               <div className="rounded-md border p-3 space-y-2">
-                <div className="text-sm font-semibold">Key 🔑 vừa nhận</div>
+                <div className="text-sm font-semibold">Key vừa nhận</div>
                 <div className="break-all font-mono text-sm">{lastFreeKey.key}</div>
                 <Button
                   type="button"

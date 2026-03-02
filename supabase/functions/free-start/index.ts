@@ -70,7 +70,7 @@ async function safeInsertStartErrorSession(
   },
 ) {
   try {
-const now = new Date();
+    const now = new Date();
     await sb.from("licenses_free_sessions").insert({
       status: "start_error",
       reveal_count: 0,
@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
     // Settings
     const { data: settings, error: sErr } = await sb
       .from("licenses_free_settings")
-      .select("free_outbound_url,free_outbound_url_pass2,free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_link4m_rotate_days")
+      .select("free_outbound_url,free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds")
       .eq("id", 1)
       .maybeSingle();
 
@@ -189,27 +189,6 @@ Deno.serve(async (req) => {
     }
 
     const claim_base_url = `${baseUrl}/free/claim`;
-
-const LINK4M_API_TOKEN_PASS1 = (Deno.env.get("LINK4M_API_TOKEN_PASS1") ?? "").trim();
-const LINK4M_API_TOKEN_PASS2 = (Deno.env.get("LINK4M_API_TOKEN_PASS2") ?? "").trim();
-
-function computeRotateBucket(rotateDays: number) {
-  const days = Math.max(1, Math.floor(Number(rotateDays) || 7));
-  const epochDays = Math.floor(Date.now() / 86400000); // UTC-ish
-  const bucket = Math.floor(epochDays / days);
-  return String(bucket);
-}
-
-function applyTemplateApiToken(tpl: string, token: string) {
-  const v = String(tpl || "");
-  if (!token) return v;
-  if (v.includes("{LINK4M_API_TOKEN}")) return v.replaceAll("{LINK4M_API_TOKEN}", token);
-  return v;
-}
-
-const rotateDays = Number((settings as any)?.free_link4m_rotate_days ?? 7);
-const rotate_bucket = computeRotateBucket(rotateDays);
-
 
     // Create a token-based session (expires quickly)
     const out_token = base64url(32);
@@ -266,7 +245,7 @@ const rotate_bucket = computeRotateBucket(rotateDays);
     // We'll build gate_url AFTER we have session_id.
     const { data: kt, error: kErr } = await sb
       .from("licenses_free_key_types")
-      .select("code,label,duration_seconds,enabled,requires_double_gate")
+      .select("code,label,duration_seconds,enabled")
       .eq("code", key_type_code)
       .maybeSingle();
 
@@ -422,10 +401,6 @@ const rotate_bucket = computeRotateBucket(rotateDays);
       out_expires_at,
       key_type_code,
       duration_seconds,
-      passes_required: Boolean((kt as any).requires_double_gate) ? 2 : 1,
-      passes_completed: 0,
-      current_pass: 1,
-      rotate_bucket,
     }).select("session_id").single();
 
     if (insErr || !insData?.session_id) {
@@ -433,24 +408,11 @@ const rotate_bucket = computeRotateBucket(rotateDays);
     }
 
     const session_id = insData.session_id as string;
-    
 
-const gate_url_pass1 = `${baseUrl}/free/gate?p=1&b=${encodeURIComponent(rotate_bucket)}`;
-const gate_url_pass2 = `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotate_bucket)}`;
+    // gate_url MUST include session_id to avoid FE mismatch; keep out_token as well.
+    const gate_url = `${baseUrl}/free/gate?sid=${encodeURIComponent(session_id)}&t=${encodeURIComponent(out_token)}`;
 
-// Outbound templates
-const outboundBasePass1 = rawOutbound || fallbackOutbound;
-const rawOutboundPass2 = String((settings as any)?.free_outbound_url_pass2 ?? "").trim();
-const outboundBasePass2 = rawOutboundPass2 || outboundBasePass1;
-
-const token1 = LINK4M_API_TOKEN_PASS1;
-const token2 = LINK4M_API_TOKEN_PASS2 || LINK4M_API_TOKEN_PASS1;
-
-const tpl1 = applyTemplateApiToken(outboundBasePass1, token1);
-const tpl2 = applyTemplateApiToken(outboundBasePass2, token2);
-
-const builtOutbound = test_mode ? gate_url_pass1 : buildOutboundUrl(tpl1, gate_url_pass1);
-const builtOutboundPass2 = test_mode ? gate_url_pass2 : buildOutboundUrl(tpl2, gate_url_pass2);
+    const builtOutbound = test_mode ? gate_url : buildOutboundUrl(outboundBase, gate_url);
     if (!builtOutbound) return jsonResponse({ ok: false, code: "MISSING_OUTBOUND_URL", msg: "MISSING_OUTBOUND_URL" }, 500);
     if (builtOutbound === "__TEMPLATE_INVALID__") {
       return jsonResponse(
@@ -466,14 +428,10 @@ const builtOutboundPass2 = test_mode ? gate_url_pass2 : buildOutboundUrl(tpl2, g
 
     const outbound_url = builtOutbound;
 
-    const minDelayEnabled = Boolean((settings as any)?.free_min_delay_enabled ?? true);
-    const minDelayRaw = Number(minDelayEnabled ? ((settings as any)?.free_min_delay_seconds ?? 25) : 0);
+    const minDelayRaw = Number((settings as any)?.free_min_delay_enabled === false ? 0 : (settings as any)?.free_min_delay_seconds ?? 25);
     const min_delay_seconds = Math.max(0, minDelayRaw); // allow 0 to disable
 
-    const minDelayPass2Raw = Number((settings as any)?.free_min_delay_seconds_pass2 ?? min_delay_seconds);
-    const min_delay_seconds_pass2 = Math.max(0, minDelayEnabled ? (Math.floor(minDelayPass2Raw) || min_delay_seconds) : 0);
-
-    return jsonResponse({ ok: true, out_token, session_id, outbound_url, outbound_url_pass2: builtOutboundPass2, gate_url: gate_url_pass1, gate_url_pass2, claim_base_url, min_delay_seconds, min_delay_seconds_pass2, passes_required: Boolean((kt as any).requires_double_gate) ? 2 : 1, rotate_bucket }, 200);
+    return jsonResponse({ ok: true, out_token, session_id, outbound_url, gate_url, claim_base_url, min_delay_seconds }, 200);
   } catch (error) {
     console.error("free-start error", error);
     return jsonResponse({

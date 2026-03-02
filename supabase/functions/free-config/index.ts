@@ -59,20 +59,9 @@ Deno.serve(async (req) => {
   // Load settings row id=1
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select(`
-  free_outbound_url,
-  free_outbound_url_pass2,
-  free_enabled,
-  free_disabled_message,
-  free_min_delay_seconds,
-  free_min_delay_seconds_pass2,
-  free_link4m_rotate_days,
-  free_return_seconds,
-  free_daily_limit_per_fingerprint,
-  free_require_link4m_referrer,
-  free_public_note,
-  free_public_links
-`)
+    .select(
+      "free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links",
+    )
     .eq("id", 1)
     .maybeSingle();
 
@@ -80,26 +69,21 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: sErr.message }, 503);
   }
 
+  const rawOutbound = settings?.free_outbound_url;
+  const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
   const free_min_delay_seconds = Math.max(0, Number(settings?.free_min_delay_seconds ?? 0));
-  const free_min_delay_seconds_pass2 = Math.max(0, Number((settings as any)?.free_min_delay_seconds_pass2 ?? free_min_delay_seconds));
-  const free_link4m_rotate_days = Math.max(1, Number((settings as any)?.free_link4m_rotate_days ?? 7));
   const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
   const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
   const free_public_note = String(settings?.free_public_note ?? "");
   const free_public_links = Array.isArray(settings?.free_public_links) ? settings?.free_public_links : [];
 
-  const rawOutbound = settings?.free_outbound_url;
-  const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
-  const rawOutboundPass2 = (settings as any)?.free_outbound_url_pass2;
-  const free_outbound_url_pass2 = String(rawOutboundPass2 ?? "").trim() || free_outbound_url;
-
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate")
+    .select("code,label,kind,value,duration_seconds,sort_order,enabled")
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
@@ -142,9 +126,6 @@ Deno.serve(async (req) => {
     free_disabled_message,
     free_outbound_url,
     free_min_delay_seconds,
-    free_min_delay_seconds_pass2,
-    free_link4m_rotate_days,
-    free_outbound_url_pass2,
     free_return_seconds,
     free_daily_limit_per_fingerprint,
     free_require_link4m_referrer,
@@ -158,7 +139,6 @@ Deno.serve(async (req) => {
       kind: k.kind,
       value: k.value,
       duration_seconds: k.duration_seconds,
-      requires_double_gate: Boolean((k as any).requires_double_gate ?? false),
     })),
 
     turnstile_enabled,

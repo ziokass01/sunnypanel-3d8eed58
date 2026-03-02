@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 export function LoginPage() {
   const navigate = useNavigate();
 
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,9 +21,21 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      navigate("/dashboard", { replace: true });
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        navigate("/dashboard", { replace: true });
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: window.location.origin,
+          },
+        });
+        if (error) throw error;
+        setMode("login");
+      }
     } catch (err: any) {
       setError(err?.message ?? "Authentication failed");
     } finally {
@@ -35,8 +48,12 @@ export function LoginPage() {
       <main className="mx-auto flex min-h-svh max-w-md items-center p-4">
         <Card className="w-full">
           <CardHeader>
-            <CardTitle>Sign in</CardTitle>
-            <CardDescription>Sign in to access the admin panel.</CardDescription>
+            <CardTitle>{mode === "login" ? "Sign in" : "Create account"}</CardTitle>
+            <CardDescription>
+              {mode === "login"
+                ? "Sign in to access the admin panel."
+                : "Create an account, then an admin can assign you a role."}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={onSubmit}>
@@ -51,7 +68,6 @@ export function LoginPage() {
                   required
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input
@@ -59,7 +75,7 @@ export function LoginPage() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
                   required
                 />
               </div>
@@ -67,8 +83,22 @@ export function LoginPage() {
               {error ? <div className="text-sm text-destructive">{error}</div> : null}
 
               <Button className="w-full" type="submit" disabled={loading}>
-                {loading ? "Please wait…" : "Sign in"}
+                {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Sign up"}
               </Button>
+
+              <div className="text-center text-sm text-muted-foreground">
+                {mode === "login" ? "No account?" : "Already have an account?"}{" "}
+                <button
+                  type="button"
+                  className="text-primary underline underline-offset-4"
+                  onClick={() => {
+                    setError(null);
+                    setMode((m) => (m === "login" ? "signup" : "login"));
+                  }}
+                >
+                  {mode === "login" ? "Sign up" : "Sign in"}
+                </button>
+              </div>
             </form>
           </CardContent>
         </Card>
