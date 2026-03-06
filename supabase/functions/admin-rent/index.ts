@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
       let query = sb
         .schema("rent")
         .from("activation_keys")
-        .select("id,code,duration_seconds,created_at,claimed_by,claimed_at,revoked_at,note,target_account_id")
+        .select("id,code,duration_seconds,duration_days,created_at,claimed_by,claimed_at,revoked_at,note,target_account_id")
         .order("created_at", { ascending: false })
         .limit(parsed.limit);
 
@@ -255,7 +255,7 @@ Deno.serve(async (req) => {
       const Schema = z.object({
         action: z.literal("issue_activation"),
         account_id: z.string().uuid(),
-        days: z.number().int().min(1).max(3650),
+        days: z.number().int().min(1).max(999999),
         note: z.string().max(2000).nullable().optional(),
         custom_code: z.string().nullable().optional(),
       });
@@ -263,7 +263,8 @@ Deno.serve(async (req) => {
       const masterSecret = requireRentMasterSecret(req, publicBaseUrl);
       if (typeof masterSecret !== "string") return masterSecret;
 
-      const duration_seconds = parsed.days * 86400;
+      const duration_days = parsed.days;
+      const duration_seconds = parsed.days <= 24855 ? parsed.days * 86400 : null;
       let code = "";
       const requested = parsed.custom_code ? normalizeActivationCode(parsed.custom_code) : "";
 
@@ -295,6 +296,7 @@ Deno.serve(async (req) => {
       const { error } = await sb.schema("rent").from("activation_keys").insert({
         code,
         duration_seconds,
+        duration_days,
         created_by: null,
         note: parsed.note ?? null,
         target_account_id: parsed.account_id,
@@ -302,7 +304,7 @@ Deno.serve(async (req) => {
       });
 
       if (error) throw new Error(error.message);
-      return json(req, publicBaseUrl, { ok: true, code, duration_seconds });
+      return json(req, publicBaseUrl, { ok: true, code, duration_seconds, duration_days });
     }
 
     if (action === "create_reset_code") {

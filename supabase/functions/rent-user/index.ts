@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
       if (typeof masterSecret !== "string") return masterSecret;
 
       const { data: ak, error: akErr } = await sb.schema("rent").from("activation_keys")
-        .select("id,code,duration_seconds,claimed_by,claimed_at,revoked_at,target_account_id,server_tag")
+        .select("id,code,duration_seconds,duration_days,claimed_by,claimed_at,revoked_at,target_account_id,server_tag")
         .eq("code", code)
         .maybeSingle();
 
@@ -247,7 +247,11 @@ Deno.serve(async (req) => {
       const now = Date.now();
       const currentExp = sess.account.expires_at ? new Date(sess.account.expires_at).getTime() : 0;
       const base = currentExp > now ? currentExp : now;
-      const nextExp = new Date(base + ak.duration_seconds * 1000).toISOString();
+      const durationMs = ak.duration_days != null ? Number(ak.duration_days) * 86400 * 1000 : Number(ak.duration_seconds ?? 0) * 1000;
+      if (!Number.isFinite(durationMs) || durationMs <= 0) {
+        return json(req, publicBaseUrl, { ok: false, code: "INVALID_CODE", msg: "Thời hạn key kích hoạt không hợp lệ" }, 400);
+      }
+      const nextExp = new Date(base + durationMs).toISOString();
       const activated_at = sess.account.activated_at ?? new Date().toISOString();
 
       const { error: accErr } = await sb.schema("rent").from("accounts").update({
@@ -270,7 +274,7 @@ Deno.serve(async (req) => {
 
     if (action === "list_keys") {
       const { data, error } = await sb.schema("rent").from("keys")
-        .select("id,key,created_at,is_active,note")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at")
         .eq("account_id", sess.account.id)
         .order("created_at", { ascending: false });
       if (error) throw new Error(error.message);
@@ -336,6 +340,8 @@ Deno.serve(async (req) => {
       const Schema = z.object({
         action: z.literal("generate_key"),
         note: z.string().max(2000).nullable().optional(),
+        days: z.number().int().min(1).max(999999).default(30),
+        start_mode: z.enum(["immediate", "first_use"]).default("immediate"),
       });
       const parsed = Schema.parse(body);
       const masterSecret = requireRentMasterSecret(req, publicBaseUrl);
@@ -353,13 +359,20 @@ Deno.serve(async (req) => {
       }
       if (!key) throw new Error("FAILED_TO_GENERATE_UNIQUE_KEY");
 
+      const duration_days = parsed.days;
+      const starts_on_first_use = parsed.start_mode === "first_use";
+      const expires_at = starts_on_first_use ? null : new Date(Date.now() + duration_days * 86400 * 1000).toISOString();
       const server_tag = await hmacSha256Hex(masterSecret, `rent-key|${key}`);
       const { data, error } = await sb.schema("rent").from("keys").insert({
         account_id: sess.account.id,
         key,
         note: parsed.note ?? null,
         server_tag,
-      }).select("id,key,created_at,is_active,note").single();
+        duration_days,
+        starts_on_first_use,
+        first_used_at: null,
+        expires_at,
+      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at").single();
 
       if (error) throw new Error(error.message);
       await logKeyEvent(sb, {
@@ -367,7 +380,7 @@ Deno.serve(async (req) => {
         key_id: data?.id ?? null,
         action: "create_key_random",
         result: "ok",
-        detail: { note: parsed.note ?? null },
+        detail: { note: parsed.note ?? null, duration_days, start_mode: parsed.start_mode },
       });
       return json(req, publicBaseUrl, { ok: true, key: data });
     }
@@ -377,6 +390,8 @@ Deno.serve(async (req) => {
         action: z.literal("create_key"),
         key: z.string().min(8).max(64),
         note: z.string().max(2000).nullable().optional(),
+        days: z.number().int().min(1).max(999999).default(30),
+        start_mode: z.enum(["immediate", "first_use"]).default("immediate"),
       });
       const parsed = Schema.parse(body);
       const key = parsed.key.trim().toUpperCase();
@@ -386,13 +401,20 @@ Deno.serve(async (req) => {
       const masterSecret = requireRentMasterSecret(req, publicBaseUrl);
       if (typeof masterSecret !== "string") return masterSecret;
 
+      const duration_days = parsed.days;
+      const starts_on_first_use = parsed.start_mode === "first_use";
+      const expires_at = starts_on_first_use ? null : new Date(Date.now() + duration_days * 86400 * 1000).toISOString();
       const server_tag = await hmacSha256Hex(masterSecret, `rent-key|${key}`);
       const { data, error } = await sb.schema("rent").from("keys").insert({
         account_id: sess.account.id,
         key,
         note: parsed.note ?? null,
         server_tag,
-      }).select("id,key,created_at,is_active,note").single();
+        duration_days,
+        starts_on_first_use,
+        first_used_at: null,
+        expires_at,
+      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at").single();
 
       if (error) {
         const msg = error.message || "insert failed";
@@ -405,7 +427,57 @@ Deno.serve(async (req) => {
         key_id: data?.id ?? null,
         action: "create_key_custom",
         result: "ok",
-        detail: { note: parsed.note ?? null },
+        detail: { note: parsed.note ?? null, duration_days, start_mode: parsed.start_mode },
+      });
+      return json(req, publicBaseUrl, { ok: true, key: data });
+    }
+
+    if (action === "update_key") {
+      const Schema = z.object({
+        action: z.literal("update_key"),
+        key_id: z.string().uuid(),
+        note: z.string().max(2000).nullable().optional(),
+        days: z.number().int().min(1).max(999999),
+        start_mode: z.enum(["immediate", "first_use"]),
+      });
+      const parsed = Schema.parse(body);
+
+      const { data: ownedKey, error: ownErr } = await sb.schema("rent").from("keys")
+        .select("id,key,created_at,first_used_at")
+        .eq("id", parsed.key_id)
+        .eq("account_id", sess.account.id)
+        .maybeSingle();
+      if (ownErr) throw new Error(ownErr.message);
+      if (!ownedKey) return json(req, publicBaseUrl, { ok: false, code: "KEY_NOT_FOUND", msg: "Không tìm thấy key" }, 404);
+
+      const anchorIso = parsed.start_mode === "first_use"
+        ? (ownedKey.first_used_at ? ownedKey.first_used_at : null)
+        : ownedKey.created_at;
+      const expires_at = anchorIso
+        ? new Date(new Date(anchorIso).getTime() + parsed.days * 86400 * 1000).toISOString()
+        : null;
+
+      const patch = {
+        note: parsed.note ?? null,
+        duration_days: parsed.days,
+        starts_on_first_use: parsed.start_mode === "first_use",
+        expires_at,
+      } as const;
+
+      const { data, error } = await sb.schema("rent").from("keys")
+        .update(patch)
+        .eq("id", parsed.key_id)
+        .eq("account_id", sess.account.id)
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at")
+        .single();
+      if (error) throw new Error(error.message);
+
+      await logKeyEvent(sb, {
+        account_id: sess.account.id,
+        key_id: data?.id ?? null,
+        action: "update_key_config",
+        result: "ok",
+        detail: { duration_days: parsed.days, start_mode: parsed.start_mode, note: parsed.note ?? null },
       });
       return json(req, publicBaseUrl, { ok: true, key: data });
     }
@@ -422,7 +494,7 @@ Deno.serve(async (req) => {
         .update({ is_active: parsed.is_active })
         .eq("id", parsed.key_id)
         .eq("account_id", sess.account.id)
-        .select("id,key,created_at,is_active,note")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at")
         .single();
 
       if (error) throw new Error(error.message);

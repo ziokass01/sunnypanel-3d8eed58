@@ -44,7 +44,8 @@ type RentAccount = {
 type ActivationKeyRow = {
   id: string;
   code: string;
-  duration_seconds: number;
+  duration_seconds: number | null;
+  duration_days?: number | null;
   created_at: string;
   claimed_by: string | null;
   claimed_at: string | null;
@@ -288,8 +289,8 @@ export function RentAdminPage() {
   const issueKeyM = useMutation({
     mutationFn: async () => {
       if (!selectedUser) throw new Error("NO_SELECTED");
-      const days = Math.max(1, Math.min(3650, parseInt(issueDays || "30", 10) || 30));
-      const res = await postFunction<ApiOk<{ code: string; duration_seconds: number }>>(
+      const days = Math.max(1, Math.min(999999, parseInt(issueDays || "30", 10) || 30));
+      const res = await postFunction<ApiOk<{ code: string; duration_seconds: number | null; duration_days?: number | null }>>(
         "/admin-rent",
         {
           action: "issue_activation",
@@ -860,7 +861,7 @@ export function RentAdminPage() {
                               {row.note ? <div className="text-[11px] text-muted-foreground">{row.note}</div> : null}
                             </TableCell>
                             <TableCell>{fmtDate(row.created_at)}</TableCell>
-                            <TableCell>{Math.round((row.duration_seconds ?? 0) / 86400)}</TableCell>
+                            <TableCell>{row.duration_days ?? Math.round((row.duration_seconds ?? 0) / 86400)}</TableCell>
                             <TableCell>{status}</TableCell>
                             <TableCell>{row.claimed_at ? fmtDate(row.claimed_at) : "-"}</TableCell>
                             <TableCell className="space-x-2 text-right">
@@ -983,7 +984,7 @@ export function RentAdminPage() {
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Days</Label>
-                      <Input value={issueDays} onChange={(e) => setIssueDays(e.target.value)} />
+                      <Input value={issueDays} onChange={(e) => setIssueDays(e.target.value)} inputMode="numeric" placeholder="30" />
                     </div>
                     <div className="space-y-2">
                       <Label>Note</Label>

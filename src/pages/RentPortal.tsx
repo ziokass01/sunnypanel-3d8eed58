@@ -42,8 +42,12 @@ type RentKey = {
   id: string;
   key: string;
   created_at: string;
+  expires_at: string | null;
   is_active: boolean;
   note: string | null;
+  starts_on_first_use: boolean;
+  duration_days: number | null;
+  first_used_at: string | null;
 };
 
 type RentKeyDevice = {
@@ -71,6 +75,7 @@ type DownloadItem = {
 };
 
 type KeyStatusFilter = "all" | "on" | "off";
+type KeyStartMode = "immediate" | "first_use";
 
 const LS_TOKEN = "rent_token_v1";
 
@@ -112,6 +117,22 @@ function statusPillClass(active: boolean) {
     : "border border-muted-foreground/20 bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
 }
 
+function keyModeLabel(key: Pick<RentKey, "starts_on_first_use">) {
+  return key.starts_on_first_use ? "Dùng lần đầu mới chạy" : "Chạy ngay";
+}
+
+function keyExpiryLabel(key: Pick<RentKey, "starts_on_first_use" | "first_used_at" | "expires_at">) {
+  if (key.starts_on_first_use && !key.first_used_at) return "Chưa bắt đầu";
+  if (!key.expires_at) return "Không giới hạn";
+  return fmtDate(key.expires_at);
+}
+
+function keyDurationLabel(days: number | null | undefined) {
+  if (!days) return "-";
+  return `${days} ngày`;
+}
+
+
 export function RentPortalPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -127,6 +148,8 @@ export function RentPortalPage() {
   const [showHmac, setShowHmac] = useState(false);
   const [customKey, setCustomKey] = useState("");
   const [keyNote, setKeyNote] = useState("");
+  const [keyDays, setKeyDays] = useState("30");
+  const [keyStartMode, setKeyStartMode] = useState<KeyStartMode>("immediate");
   const [resetCode, setResetCode] = useState("");
   const [newPass, setNewPass] = useState("");
   const [lastCreatedKey, setLastCreatedKey] = useState<string | null>(null);
@@ -134,6 +157,9 @@ export function RentPortalPage() {
   const [keyStatusFilter, setKeyStatusFilter] = useState<KeyStatusFilter>("all");
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  const [editKeyDays, setEditKeyDays] = useState("30");
+  const [editKeyStartMode, setEditKeyStartMode] = useState<KeyStartMode>("immediate");
+  const [editKeyNote, setEditKeyNote] = useState("");
 
   const logout = () => {
     if (typeof window !== "undefined") {
@@ -290,12 +316,15 @@ export function RentPortalPage() {
 
   const createKeyM = useMutation({
     mutationFn: async (mode: "random" | "custom") => {
+      const days = Math.max(1, Math.min(999999, parseInt(keyDays || "30", 10) || 30));
       const res = await postFunction<ApiOk<{ key: RentKey }>>(
         "/rent-user",
         {
           action: mode === "random" ? "generate_key" : "create_key",
           key: mode === "custom" ? normalizeKeyInput(customKey) : null,
           note: keyNote.trim() || null,
+          days,
+          start_mode: keyStartMode,
         },
         { authToken: token ?? undefined },
       );
@@ -305,6 +334,8 @@ export function RentPortalPage() {
       setLastCreatedKey(createdKey.key);
       setCustomKey("");
       setKeyNote("");
+      setKeyDays("30");
+      setKeyStartMode("immediate");
       qc.invalidateQueries({ queryKey: ["rent", "keys"] });
       qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
       toast({ title: "Đã tạo key" });
@@ -312,6 +343,40 @@ export function RentPortalPage() {
     onError: (error: any) => {
       toast({
         title: "Lỗi tạo key",
+        description: String(error?.message ?? error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateKeyM = useMutation({
+    mutationFn: async () => {
+      if (!selectedKey) throw new Error("NO_SELECTED_KEY");
+      const days = Math.max(1, Math.min(999999, parseInt(editKeyDays || "30", 10) || 30));
+      const res = await postFunction<ApiOk<{ key: RentKey }>>(
+        "/rent-user",
+        {
+          action: "update_key",
+          key_id: selectedKey.id,
+          note: editKeyNote.trim() || null,
+          days,
+          start_mode: editKeyStartMode,
+        },
+        { authToken: token ?? undefined },
+      );
+      return res.key;
+    },
+    onSuccess: (updatedKey) => {
+      setEditKeyDays(String(updatedKey.duration_days ?? 30));
+      setEditKeyStartMode(updatedKey.starts_on_first_use ? "first_use" : "immediate");
+      setEditKeyNote(updatedKey.note ?? "");
+      qc.invalidateQueries({ queryKey: ["rent", "keys"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+      toast({ title: "Đã lưu cấu hình key" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Lỗi cập nhật key",
         description: String(error?.message ?? error),
         variant: "destructive",
       });
@@ -417,13 +482,16 @@ export function RentPortalPage() {
       if (keyStatusFilter === "on" && !row.is_active) return false;
       if (keyStatusFilter === "off" && row.is_active) return false;
       if (!query) return true;
-      const hay = `${row.key} ${row.note ?? ""}`.toLowerCase();
+      const hay = `${row.key} ${row.note ?? ""} ${keyModeLabel(row)} ${row.duration_days ?? ""}`.toLowerCase();
       return hay.includes(query);
     });
   }, [keysQ.data, keySearch, keyStatusFilter]);
 
   const openKeyDialog = (key: RentKey) => {
     setSelectedKeyId(key.id);
+    setEditKeyDays(String(key.duration_days ?? 30));
+    setEditKeyStartMode(key.starts_on_first_use ? "first_use" : "immediate");
+    setEditKeyNote(key.note ?? "");
     setKeyDialogOpen(true);
   };
 
@@ -538,7 +606,7 @@ export function RentPortalPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="keys" className="space-y-4">
+                    <TabsContent value="keys" className="space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle>Keys</CardTitle>
@@ -551,7 +619,7 @@ export function RentPortalPage() {
                   <div className="text-sm text-muted-foreground">Bạn cần kích hoạt trước khi tạo key.</div>
                 ) : (
                   <>
-                    <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+                    <div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr]">
                       <div className="space-y-3 rounded-lg border p-4">
                         <div className="font-medium">Tạo key mới</div>
                         <div className="grid gap-3 md:grid-cols-2">
@@ -564,6 +632,19 @@ export function RentPortalPage() {
                             <Label>Note (tuỳ chọn)</Label>
                             <Input value={keyNote} onChange={(e) => setKeyNote(e.target.value)} placeholder="Ghi chú cho key" />
                             <p className="text-xs text-muted-foreground">Để bạn tự phân biệt key nào đang dùng.</p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Số ngày chạy</Label>
+                            <Input value={keyDays} onChange={(e) => setKeyDays(e.target.value)} inputMode="numeric" placeholder="30" />
+                            <p className="text-xs text-muted-foreground">Cho phép từ 1 đến 999999 ngày.</p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Kiểu chạy</Label>
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="button" variant={keyStartMode === "immediate" ? "default" : "outline"} onClick={() => setKeyStartMode("immediate")}>Chạy ngay</Button>
+                              <Button type="button" variant={keyStartMode === "first_use" ? "default" : "outline"} onClick={() => setKeyStartMode("first_use")}>Dùng lần đầu mới chạy</Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">Giống hình thức licenses 1-2, nhưng vẫn là lõi rent key của user.</p>
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -592,8 +673,8 @@ export function RentPortalPage() {
                             <div className="mt-1 text-lg font-semibold">{(keysQ.data ?? []).filter((row) => row.is_active).length}</div>
                           </div>
                           <div className="rounded-md border p-3 text-sm">
-                            <div className="text-xs text-muted-foreground">Audit log gần đây</div>
-                            <div className="mt-1 text-lg font-semibold">{recentLogsQ.data?.length ?? 0}</div>
+                            <div className="text-xs text-muted-foreground">Dùng lần đầu mới chạy</div>
+                            <div className="mt-1 text-lg font-semibold">{(keysQ.data ?? []).filter((row) => row.starts_on_first_use).length}</div>
                           </div>
                         </div>
                       </div>
@@ -625,8 +706,8 @@ export function RentPortalPage() {
 
                     <div className="grid gap-3 md:grid-cols-[1fr,auto,auto,auto] md:items-end">
                       <div className="space-y-2">
-                        <Label>Tìm key / note</Label>
-                        <Input value={keySearch} onChange={(e) => setKeySearch(e.target.value)} placeholder="Search key/note..." />
+                        <Label>Tìm key / note / kiểu chạy</Label>
+                        <Input value={keySearch} onChange={(e) => setKeySearch(e.target.value)} placeholder="Search key/note/mode..." />
                       </div>
                       <Button variant={keyStatusFilter === "all" ? "default" : "outline"} onClick={() => setKeyStatusFilter("all")}>All</Button>
                       <Button variant={keyStatusFilter === "on" ? "default" : "outline"} onClick={() => setKeyStatusFilter("on")}>Đang bật</Button>
@@ -653,19 +734,22 @@ export function RentPortalPage() {
                             <TableRow>
                               <TableHead>Key</TableHead>
                               <TableHead className="hidden md:table-cell">Created</TableHead>
+                              <TableHead className="hidden lg:table-cell">Kiểu chạy</TableHead>
+                              <TableHead className="hidden lg:table-cell">Số ngày</TableHead>
+                              <TableHead>Hết hạn</TableHead>
                               <TableHead>Status</TableHead>
-                              <TableHead className="hidden lg:table-cell">Note</TableHead>
+                              <TableHead className="hidden xl:table-cell">Note</TableHead>
                               <TableHead className="text-right">Action</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {keysQ.isLoading ? (
                               <TableRow>
-                                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Đang tải key...</TableCell>
+                                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Đang tải key...</TableCell>
                               </TableRow>
                             ) : filteredKeys.length === 0 ? (
                               <TableRow>
-                                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Chưa có key phù hợp.</TableCell>
+                                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Chưa có key phù hợp.</TableCell>
                               </TableRow>
                             ) : (
                               filteredKeys.map((key) => (
@@ -673,16 +757,21 @@ export function RentPortalPage() {
                                   <TableCell>
                                     <div className="font-mono text-xs md:text-sm break-all">{key.key}</div>
                                     <div className="mt-1 text-xs text-muted-foreground md:hidden">{fmtDate(key.created_at)}</div>
-                                    {key.note ? <div className="mt-1 text-xs text-muted-foreground lg:hidden">{key.note}</div> : null}
+                                    <div className="mt-1 text-xs text-muted-foreground lg:hidden">{keyModeLabel(key)} · {keyDurationLabel(key.duration_days)}</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">{keyExpiryLabel(key)}</div>
+                                    {key.note ? <div className="mt-1 text-xs text-muted-foreground xl:hidden">{key.note}</div> : null}
                                   </TableCell>
                                   <TableCell className="hidden md:table-cell whitespace-nowrap">{fmtDate(key.created_at)}</TableCell>
+                                  <TableCell className="hidden lg:table-cell">{keyModeLabel(key)}</TableCell>
+                                  <TableCell className="hidden lg:table-cell">{keyDurationLabel(key.duration_days)}</TableCell>
+                                  <TableCell className="whitespace-nowrap">{keyExpiryLabel(key)}</TableCell>
                                   <TableCell>
                                     <span className={statusPillClass(key.is_active)}>{key.is_active ? "ON" : "OFF"}</span>
                                   </TableCell>
-                                  <TableCell className="hidden lg:table-cell max-w-[240px] truncate text-sm text-muted-foreground">{key.note || "-"}</TableCell>
+                                  <TableCell className="hidden xl:table-cell max-w-[240px] truncate text-sm text-muted-foreground">{key.note || "-"}</TableCell>
                                   <TableCell className="text-right">
                                     <div className="flex flex-wrap justify-end gap-2">
-                                      <Button size="sm" variant="soft" onClick={() => openKeyDialog(key)}>Xem</Button>
+                                      <Button size="sm" variant="soft" onClick={() => openKeyDialog(key)}>Xem / Sửa</Button>
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -739,22 +828,25 @@ export function RentPortalPage() {
                       <TableBody>
                         {recentLogsQ.isLoading ? (
                           <TableRow>
-                            <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Đang tải log...</TableCell>
+                            <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Đang tải audit log...</TableCell>
                           </TableRow>
                         ) : (recentLogsQ.data ?? []).length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Chưa có audit log nào.</TableCell>
+                            <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Chưa có log nào.</TableCell>
                           </TableRow>
                         ) : (
-                          (recentLogsQ.data ?? []).map((log) => (
-                            <TableRow key={log.id}>
-                              <TableCell className="whitespace-nowrap">{fmtDate(log.created_at)}</TableCell>
-                              <TableCell>{log.action}</TableCell>
-                              <TableCell>{log.result ?? "-"}</TableCell>
-                              <TableCell className="hidden md:table-cell font-mono text-xs">{shortId(log.device_id, 18)}</TableCell>
-                              <TableCell className="hidden md:table-cell font-mono text-xs">{shortId(log.key_id, 12)}</TableCell>
-                            </TableRow>
-                          ))
+                          (recentLogsQ.data ?? []).map((log) => {
+                            const keyValue = (keysQ.data ?? []).find((row) => row.id === log.key_id)?.key ?? "-";
+                            return (
+                              <TableRow key={log.id}>
+                                <TableCell className="whitespace-nowrap">{fmtDate(log.created_at)}</TableCell>
+                                <TableCell>{log.action}</TableCell>
+                                <TableCell>{log.result ?? "-"}</TableCell>
+                                <TableCell className="hidden font-mono text-xs md:table-cell">{shortId(log.device_id, 18)}</TableCell>
+                                <TableCell className="hidden font-mono text-xs md:table-cell">{shortId(keyValue, 18)}</TableCell>
+                              </TableRow>
+                            );
+                          })
                         )}
                       </TableBody>
                     </Table>
@@ -937,11 +1029,11 @@ curl_easy_setopt(curl, CURLOPT_CAINFO, caPemPath);`}</pre>
         </Tabs>
       )}
 
-      <Dialog open={keyDialogOpen} onOpenChange={(open) => {
+            <Dialog open={keyDialogOpen} onOpenChange={(open) => {
         setKeyDialogOpen(open);
         if (!open) setSelectedKeyId(null);
       }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Chi tiết key</DialogTitle>
             <DialogDescription>
@@ -953,8 +1045,8 @@ curl_easy_setopt(curl, CURLOPT_CAINFO, caPemPath);`}</pre>
             <div className="text-sm text-muted-foreground">Không có key được chọn.</div>
           ) : (
             <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border p-3 text-sm">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border p-3 text-sm xl:col-span-2">
                   <div className="text-xs text-muted-foreground">Key</div>
                   <div className="mt-1 font-mono break-all">{selectedKey.key}</div>
                 </div>
@@ -967,8 +1059,20 @@ curl_easy_setopt(curl, CURLOPT_CAINFO, caPemPath);`}</pre>
                   <div className="mt-1"><span className={statusPillClass(selectedKey.is_active)}>{selectedKey.is_active ? "ON" : "OFF"}</span></div>
                 </div>
                 <div className="rounded-lg border p-3 text-sm">
-                  <div className="text-xs text-muted-foreground">Note</div>
-                  <div className="mt-1 break-all">{selectedKey.note || "-"}</div>
+                  <div className="text-xs text-muted-foreground">Kiểu chạy</div>
+                  <div className="mt-1">{keyModeLabel(selectedKey)}</div>
+                </div>
+                <div className="rounded-lg border p-3 text-sm">
+                  <div className="text-xs text-muted-foreground">Số ngày</div>
+                  <div className="mt-1">{keyDurationLabel(selectedKey.duration_days)}</div>
+                </div>
+                <div className="rounded-lg border p-3 text-sm">
+                  <div className="text-xs text-muted-foreground">First used</div>
+                  <div className="mt-1">{fmtDate(selectedKey.first_used_at)}</div>
+                </div>
+                <div className="rounded-lg border p-3 text-sm">
+                  <div className="text-xs text-muted-foreground">Hết hạn</div>
+                  <div className="mt-1">{keyExpiryLabel(selectedKey)}</div>
                 </div>
               </div>
 
@@ -997,6 +1101,40 @@ curl_easy_setopt(curl, CURLOPT_CAINFO, caPemPath);`}</pre>
                 <Button variant="destructive" onClick={() => deleteKeyM.mutate(selectedKey.id)} disabled={deleteKeyM.isPending}>
                   Xóa key
                 </Button>
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-4">
+                <div className="font-medium">Cấu hình key</div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Số ngày</Label>
+                    <Input value={editKeyDays} onChange={(e) => setEditKeyDays(e.target.value)} inputMode="numeric" placeholder="30" />
+                    <p className="text-xs text-muted-foreground">Cho phép từ 1 đến 999999 ngày.</p>
+                  </div>
+                  <div className="space-y-2 xl:col-span-2">
+                    <Label>Kiểu chạy</Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant={editKeyStartMode === "immediate" ? "default" : "outline"} onClick={() => setEditKeyStartMode("immediate")}>Chạy ngay</Button>
+                      <Button type="button" variant={editKeyStartMode === "first_use" ? "default" : "outline"} onClick={() => setEditKeyStartMode("first_use")}>Dùng lần đầu mới chạy</Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Chuyển sang chạy ngay sẽ lấy mốc từ lúc key được tạo. Với key lần đầu mới chạy đã dùng rồi, thời gian sẽ bám theo mốc first used.</p>
+                  </div>
+                  <div className="space-y-2 md:col-span-2 xl:col-span-3">
+                    <Label>Note</Label>
+                    <Input value={editKeyNote} onChange={(e) => setEditKeyNote(e.target.value)} placeholder="Ghi chú cho key" />
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="soft" onClick={() => {
+                    if (!selectedKey) return;
+                    setEditKeyDays(String(selectedKey.duration_days ?? 30));
+                    setEditKeyStartMode(selectedKey.starts_on_first_use ? "first_use" : "immediate");
+                    setEditKeyNote(selectedKey.note ?? "");
+                  }}>Hoàn tác</Button>
+                  <Button onClick={() => updateKeyM.mutate()} disabled={updateKeyM.isPending}>
+                    {updateKeyM.isPending ? "Đang lưu..." : "Lưu cấu hình key"}
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-3 rounded-lg border p-4">

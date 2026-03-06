@@ -118,12 +118,13 @@ Deno.serve(async (req) => {
     }
 
     const { data: rk, error: keyErr } = await sb.schema("rent").from("keys")
-      .select("id,account_id,is_active,server_tag,master_sig")
+      .select("id,account_id,created_at,expires_at,is_active,server_tag,master_sig,starts_on_first_use,duration_days,first_used_at")
       .eq("key", key)
       .maybeSingle();
 
     if (keyErr || !rk || rk.account_id !== acc.id) return await invalid("KEY_NOT_FOUND", acc.id, null);
     if (!rk.is_active) return await invalid("KEY_DISABLED", acc.id, rk.id);
+    if (rk.expires_at && new Date(rk.expires_at).getTime() <= Date.now()) return await invalid("KEY_EXPIRED", acc.id, rk.id);
 
     const expectedServerTag = await hmacSha256Hex(masterSecret, `rent-key|${key}`);
     const legacyTag = await hmacSha256Hex(masterSecret, key);
@@ -169,19 +170,43 @@ Deno.serve(async (req) => {
       await sb.schema("rent").from("key_devices").update({ last_seen: new Date().toISOString() }).eq("id", existing.id);
     }
 
+    let keyExpiresAt = rk.expires_at as string | null;
+    if (rk.starts_on_first_use && !rk.first_used_at) {
+      const durationDays = Number(rk.duration_days ?? 0);
+      if (!Number.isFinite(durationDays) || durationDays < 1) {
+        return await invalid("KEY_BAD_DURATION", acc.id, rk.id);
+      }
+      const firstUsedAt = new Date().toISOString();
+      keyExpiresAt = new Date(Date.now() + durationDays * 86400 * 1000).toISOString();
+      const { error: startErr } = await sb.schema("rent").from("keys")
+        .update({ first_used_at: firstUsedAt, expires_at: keyExpiresAt })
+        .eq("id", rk.id)
+        .is("first_used_at", null);
+      if (startErr) throw new Error(startErr.message);
+      await logKeyEvent(sb, {
+        account_id: acc.id,
+        key_id: rk.id,
+        action: "start_key_first_use",
+        result: "ok",
+        device_id,
+        detail: { username, expires_at: keyExpiresAt },
+      });
+    }
+
     await logKeyEvent(sb, {
       account_id: acc.id,
       key_id: rk.id,
       action: "verify",
       result: "VALID",
       device_id,
-      detail: { username },
+      detail: { username, key_expires_at: keyExpiresAt },
     });
 
     return json(req, publicBaseUrl, {
       ok: true,
       valid: true,
       expires_at: acc.expires_at,
+      key_expires_at: keyExpiresAt,
       max_devices: acc.max_devices,
     }, 200);
   } catch (e: any) {
