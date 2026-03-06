@@ -50,6 +50,21 @@ function applyTemplateApiToken(tpl: string, token: string) {
   return v;
 }
 
+
+function parseSidAndTokenFromUrl(raw: string) {
+  const url = String(raw || "").trim();
+  if (!url) return { sid: "", token: "" };
+  try {
+    const u = new URL(url);
+    return {
+      sid: String(u.searchParams.get("sid") || "").trim(),
+      token: String(u.searchParams.get("t") || "").trim(),
+    };
+  } catch {
+    return { sid: "", token: "" };
+  }
+}
+
 function buildOutboundUrl(outboundBase: string, gateUrl: string) {
   const tpl = String(outboundBase || "").trim();
   const g = String(gateUrl || "").trim();
@@ -90,7 +105,7 @@ function buildOutboundUrl(outboundBase: string, gateUrl: string) {
 const BodySchema = z.object({
   pass: z.number().int().min(1).max(2).optional().default(1),
   session_id: z.string().uuid().optional(),
-  out_token: z.string().min(8).max(512),
+  out_token: z.string().min(8).max(512).optional(),
   fingerprint: z.string().min(6).max(128),
   referrer: z.string().optional().default(""),
   current_url: z.string().optional().default(""),
@@ -153,7 +168,10 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "BAD_REQUEST", msg: "BAD_REQUEST" } satisfies JsonErr, 400);
   }
 
-  const { pass, session_id: bodySid, out_token, fingerprint, referrer, current_url } = parsed.data;
+  const { pass, session_id: bodySid, out_token: bodyOutToken, fingerprint, referrer, current_url } = parsed.data;
+  const parsedUrlBits = parseSidAndTokenFromUrl(current_url);
+  const sid = String(bodySid || parsedUrlBits.sid || "").trim();
+  const outToken = String(bodyOutToken || parsedUrlBits.token || "").trim();
 
   // Settings
   const { data: settings, error: sErr } = await sb
@@ -175,7 +193,11 @@ Deno.serve(async (req) => {
   const LINK4M_API_TOKEN_PASS1 = (Deno.env.get("LINK4M_API_TOKEN_PASS1") ?? "").trim();
   const LINK4M_API_TOKEN_PASS2 = (Deno.env.get("LINK4M_API_TOKEN_PASS2") ?? "").trim();
 
-  const outHash = await sha256Hex(out_token);
+  if (!outToken) {
+    return json({ ok: false, code: "BAD_REQUEST", msg: "MISSING_OUT_TOKEN" } satisfies JsonErr, 400);
+  }
+
+  const outHash = await sha256Hex(outToken);
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
   const ipHash = await sha256Hex(getClientIp(req));
@@ -193,7 +215,7 @@ Deno.serve(async (req) => {
   }
 
   // Load session
-  if (!bodySid) {
+  if (!sid) {
     return json({ ok: false, code: "BAD_REQUEST", msg: "MISSING_SESSION" } satisfies JsonErr, 400);
   }
 
@@ -202,7 +224,7 @@ Deno.serve(async (req) => {
     .select(
       "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash,out_token_hash_pass2,key_type_code,passes_required,passes_completed,current_pass,rotate_bucket,pass2_started_at",
     )
-    .eq("session_id", bodySid)
+    .eq("session_id", sid)
     .maybeSingle();
 
   if (qErr) return json({ ok: false, code: "SERVER_ERROR", msg: qErr.message } satisfies JsonErr, 500);
@@ -235,7 +257,15 @@ Deno.serve(async (req) => {
   }
 
   const expectedHash = pass === 2 ? (sess as any).out_token_hash_pass2 : (sess as any).out_token_hash;
-  const tokenVerified = Boolean(expectedHash && expectedHash === outHash);
+  let tokenVerified = Boolean(expectedHash && expectedHash === outHash);
+
+  if (!tokenVerified && current_url) {
+    const currentBits = parseSidAndTokenFromUrl(current_url);
+    if (currentBits.token) {
+      const currentHash = await sha256Hex(currentBits.token);
+      tokenVerified = Boolean(expectedHash && expectedHash === currentHash);
+    }
+  }
 
   if (requireRef && !hostOk && !tokenVerified) {
     if (!r) {

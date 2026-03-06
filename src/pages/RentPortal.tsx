@@ -501,7 +501,7 @@ export function RentPortalPage() {
         <div>
           <h1 className="text-xl font-semibold">Thuê Website</h1>
           <p className="text-sm text-muted-foreground">
-            Portal người thuê. Hình thức quản lý key bám theo kiểu admin để dễ dùng, nhưng lõi quyền vẫn tách riêng cho user domain.
+            Portal người thuê. Tại đây bạn có thể xem trạng thái tài khoản, quản lý key, đổi mật khẩu và xem thông tin sử dụng.
           </p>
         </div>
         {token ? (
@@ -515,7 +515,7 @@ export function RentPortalPage() {
         <Card>
           <CardHeader>
             <CardTitle>Đăng nhập tài khoản thuê</CardTitle>
-            <CardDescription>Đây là tài khoản user domain, không phải tài khoản admin domain.</CardDescription>
+            <CardDescription>Đăng nhập để quản lý tài khoản thuê của bạn.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -571,10 +571,6 @@ export function RentPortalPage() {
                         <div className="text-xs text-muted-foreground">Expires at</div>
                         <div className="font-medium">{account.expires_at ? fmtDate(account.expires_at) : "Chưa kích hoạt"}</div>
                       </div>
-                      <div className="rounded-lg border p-3 text-sm">
-                        <div className="text-xs text-muted-foreground">Max devices</div>
-                        <div className="font-medium">{account.max_devices}</div>
-                      </div>
                       <div className="rounded-lg border p-3 text-sm md:col-span-2">
                         <div className="text-xs text-muted-foreground">Disabled</div>
                         <div className="font-medium">{account.is_disabled ? "YES" : "NO"}</div>
@@ -611,7 +607,7 @@ export function RentPortalPage() {
               <CardHeader>
                 <CardTitle>Keys</CardTitle>
                 <CardDescription>
-                  Giao diện quản lý theo kiểu admin để dễ theo dõi, nhưng chỉ thao tác trên key của chính tài khoản thuê này. Không có quyền chạm vào Free/Licenses 1-2 thật.
+                  Tạo, xem và quản lý các key đang dùng cho tài khoản của bạn.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -806,7 +802,7 @@ export function RentPortalPage() {
               <CardHeader className="flex flex-row items-center justify-between gap-2">
                 <div>
                   <CardTitle>Audit log gần đây</CardTitle>
-                  <CardDescription>Log xác thực và thao tác key của chính user này.</CardDescription>
+                  <CardDescription>Lịch sử xác thực và thao tác key gần đây.</CardDescription>
                 </div>
                 <Button variant="secondary" onClick={() => recentLogsQ.refetch()} disabled={recentLogsQ.isFetching}>
                   Refresh
@@ -911,10 +907,6 @@ export function RentPortalPage() {
                       <div className="rounded-lg border p-3 text-sm">
                         <div className="text-xs text-muted-foreground">Expires at</div>
                         <div className="font-medium">{account.expires_at ? fmtDate(account.expires_at) : "Chưa kích hoạt"}</div>
-                      </div>
-                      <div className="rounded-lg border p-3 text-sm">
-                        <div className="text-xs text-muted-foreground">Max devices</div>
-                        <div className="font-medium">{account.max_devices}</div>
                       </div>
                       <div className="rounded-lg border p-3 text-sm">
                         <div className="text-xs text-muted-foreground">Disabled</div>
