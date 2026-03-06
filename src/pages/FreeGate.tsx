@@ -1,0 +1,272 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { postFunction } from "@/lib/functions";
+import { fetchFreeConfig } from "@/features/free/free-config";
+import { readBundle, writeBundle } from "@/lib/freeFlow";
+import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
+
+type GateNextPass2 = { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number };
+type GateNextClaim = { ok: true; next: "CLAIM"; claim_token: string; claim_url?: string | null };
+type GateOk = GateNextPass2 | GateNextClaim;
+type GateErr = { ok: false; msg: string; code?: string; detail?: any };
+
+function friendlyGateError(msg: string) {
+  const m = String(msg || "").trim();
+  if (!m) return "Xác thực không thành công. Vui lòng vượt link lại.";
+  if (m === "Failed to fetch" || m.toLowerCase().includes("failed to fetch")) {
+    return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
+  }
+  if (m === "REFERRER_REQUIRED") {
+    return "REFERRER_REQUIRED: Bạn cần đi qua Link4M hoặc trình duyệt đang chặn referrer. Hãy thử mở lại Link4M bằng cùng 1 trình duyệt.";
+  }
+  if (m === "TOO_FAST" || m.startsWith("TOO_FAST") || m === "VERIFY_FAILED") {
+    return "Xác thực không thành công. Vui lòng vượt link lại rồi thử lại.";
+  }
+  if (m === "BAD_REFERRER") return "BAD_REFERRER: Referrer không phải Link4M. Nếu bạn đã đi Link4M nhưng bị chặn referrer, hãy thử trình duyệt khác.";
+  if (m === "SESSION_EXPIRED") return "Phiên đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi. Nếu muốn lấy key mới, hãy quay lại Get Key.";
+  if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng. Vui lòng quay lại Get Key và làm lại.";
+  return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
+}
+
+function pad2(n: number) {
+  return String(Math.max(0, Math.floor(n))).padStart(2, "0");
+}
+
+export function FreeGatePage() {
+  const nav = useNavigate();
+  const [sp] = useSearchParams();
+  const [cfgReturn, setCfgReturn] = useState<number>(10);
+  const [status, setStatus] = useState<"countdown" | "working" | "error">("working");
+  const [message, setMessage] = useState<string>("Đang xác thực…");
+  const [remaining, setRemaining] = useState<number>(0);
+
+  const query = useMemo(() => sp.toString(), [sp]);
+  const pass = useMemo(() => {
+    const v = Number(sp.get("p") || 1);
+    return v === 2 ? 2 : 1;
+  }, [query]);
+
+  const sidFromQuery = useMemo(() => (sp.get("sid") || "").trim(), [query]);
+  const tFromQuery = useMemo(() => (sp.get("t") || "").trim(), [query]);
+
+  const outToken = useMemo(() => {
+    if (tFromQuery) return tFromQuery;
+    const fromPrimary = (getOutToken() || "").trim();
+    if (fromPrimary) return fromPrimary;
+    try {
+      const fb1 = (localStorage.getItem("free_out_token_v1") || "").trim();
+      if (fb1) return fb1;
+      const fb2 = (localStorage.getItem("free_out_token") || "").trim();
+      if (fb2) return fb2;
+    } catch {
+      // ignore
+    }
+    return "";
+  }, [tFromQuery, query]);
+
+  const sessionId = useMemo(() => {
+    if (sidFromQuery) return sidFromQuery;
+    const b = readBundle();
+    if (b?.session_id) return b.session_id;
+    try {
+      const s1 = (localStorage.getItem("free_session_id_v1") || "").trim();
+      if (s1) return s1;
+      const s2 = (localStorage.getItem("free_session_id") || "").trim();
+      if (s2) return s2;
+    } catch {
+      // ignore
+    }
+    return "";
+  }, [sidFromQuery, query]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchFreeConfig()
+      .then((c) => {
+        if (cancelled) return;
+        const r = Math.max(10, Number(c.free_return_seconds ?? 10));
+        setCfgReturn(r);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function gateOnce() {
+    const tok = outToken;
+    const sid = sessionId;
+
+    if (!tok || !sid) {
+      setStatus("error");
+      setMessage("Thiếu phiên. Hãy quay lại trang Get Key và làm lại.");
+      window.setTimeout(() => nav("/free", { replace: true }), 1200);
+      return;
+    }
+
+    // Persist token/sid for reload flows
+    try {
+      setOutToken(tok);
+      localStorage.setItem("free_out_token_v1", tok);
+      localStorage.setItem("free_out_token", tok);
+      localStorage.setItem("free_session_id_v1", sid);
+      localStorage.setItem("free_session_id", sid);
+    } catch {
+      // ignore
+    }
+
+    setStatus("working");
+    setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP…" : "Đang xác thực key 🔑…");
+
+    try {
+      const fp = getOrCreateFingerprint();
+      const referrer = document.referrer || "";
+      const current_url = window.location.href;
+
+      const res = await postFunction<GateOk | GateErr>("/free-gate", {
+        pass,
+        session_id: sid,
+        out_token: tok,
+        fingerprint: fp,
+        referrer,
+        current_url,
+      });
+
+      if ((res as any).ok) {
+        const ok = res as GateOk;
+
+        if (ok.next === "PASS2") {
+          // Transition to Pass2
+          const nextTok = String(ok.out_token || "").trim();
+          if (nextTok) {
+            setOutToken(nextTok);
+            writeBundle({ session_id: sid, out_token: nextTok });
+            try {
+              localStorage.setItem("free_out_token_v1", nextTok);
+              localStorage.setItem("free_out_token", nextTok);
+              localStorage.setItem("free_session_id_v1", sid);
+              localStorage.setItem("free_session_id", sid);
+            } catch {
+              // ignore
+            }
+            setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
+          }
+          const outbound = String(ok.outbound_url || "").trim();
+          if (!outbound) {
+            setStatus("error");
+            setMessage("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M Key 🔑 VIP.");
+            window.setTimeout(() => nav("/free", { replace: true }), 1500);
+            return;
+          }
+          window.location.assign(outbound);
+          return;
+        }
+
+        // CLAIM
+        const claim = String(ok.claim_token || "").trim();
+        try {
+          localStorage.setItem("free_claim_token", claim);
+        } catch {
+          // ignore
+        }
+        writeBundle({ session_id: sid, out_token: tok, claim_token: claim });
+
+        const base = String(ok.claim_url || `${window.location.origin}/free/claim`);
+        const url = new URL(base, window.location.origin);
+        url.search = "";
+        url.searchParams.set("claim", claim);
+        url.searchParams.set("sid", sid);
+        url.searchParams.set("t", tok);
+        if ((sp.get("debug") || "").trim() === "1") url.searchParams.set("debug", "1");
+
+        nav(`${url.pathname}${url.search}${url.hash}`, { replace: true });
+        return;
+      }
+
+      const err = res as GateErr;
+      const msg = err.code || err.msg || "VERIFY_FAILED";
+      setStatus("error");
+      setMessage(friendlyGateError(msg));
+      window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
+    } catch (e: any) {
+      setStatus("error");
+      setMessage(friendlyGateError(e?.code ?? e?.message ?? "VERIFY_FAILED"));
+      window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
+    }
+  }
+
+  useEffect(() => {
+    const sid = sessionId;
+    const tok = outToken;
+
+    if (!sid || !tok) {
+      setStatus("error");
+      setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
+      return;
+    }
+
+    // Countdown UX (backend vẫn kiểm tra thật)
+    const meta = getFreeStartMeta();
+    const startedAtMs = Number(meta?.startedAtMs ?? 0);
+    const minDelay = Math.max(0, Number(meta?.minDelaySeconds ?? 0));
+
+    // For pass2, startedAtMs is updated when PASS2 issued.
+    const waitUntil = startedAtMs > 0 ? startedAtMs + minDelay * 1000 : 0;
+    const tick = () => {
+      const r = waitUntil > 0 ? Math.max(0, Math.ceil((waitUntil - Date.now()) / 1000)) : 0;
+      setRemaining(r);
+      if (r <= 0) {
+        setStatus("working");
+        void gateOnce();
+        return false;
+      }
+      setStatus("countdown");
+      setMessage(pass === 2 ? "Đang đợi key 🔑 VIP…" : "Đang đợi key 🔑…");
+      return true;
+    };
+
+    if (!tick()) return;
+    const id = window.setInterval(() => {
+      if (!tick()) window.clearInterval(id);
+    }, 250);
+
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="min-h-svh bg-background">
+      <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle>{pass === 2 ? "Đang xác thực key 🔑 VIP" : "Đang xác thực 🔑 "}</CardTitle>
+            <CardDescription>Hệ thống đang xác thực bước vượt link.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-md border p-3 text-sm">
+              <div className="font-medium">{message}</div>
+              <div className="mt-1 text-muted-foreground">
+                {status === "working" || status === "countdown"
+                  ? "Vui lòng không tắt trang."
+                  : "Bạn sẽ được đưa về trang Get Key."}
+              </div>
+            </div>
+
+            {status === "error" ? (
+              <Button className="w-full" variant="secondary" onClick={() => nav("/free", { replace: true })}>
+                Quay lại Get Key
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      </main>
+    </div>
+  );
+}
