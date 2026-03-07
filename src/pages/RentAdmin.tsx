@@ -379,6 +379,24 @@ export function RentAdminPage() {
     },
   });
 
+
+  const clearHmacViewPasswordM = useMutation({
+    mutationFn: async () => {
+      if (!selectedUser) throw new Error("NO_SELECTED");
+      await postFunction<ApiOk<{}>>(
+        "/admin-rent",
+        { action: "clear_hmac_view_password", account_id: selectedUser.id },
+        { authToken },
+      );
+    },
+    onSuccess: () => {
+      toast({ title: "Đã xóa mật khẩu xem HMAC" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Lỗi xóa mật khẩu xem HMAC", description: String(error?.message ?? error), variant: "destructive" });
+    },
+  });
+
   const resetDefaultM = useMutation({
     mutationFn: async () => {
       if (!selectedUser) throw new Error("NO_SELECTED");
@@ -1140,9 +1158,22 @@ export function RentAdminPage() {
 
                 <div className="space-y-3 rounded-lg border p-4">
                   <div className="font-medium">(6) Reset pass về mặc định</div>
-                  <Button variant="soft" onClick={() => resetDefaultM.mutate()} disabled={resetDefaultM.isPending}>
-                    {resetDefaultM.isPending ? "Đang reset..." : "Reset pass"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="soft" onClick={() => resetDefaultM.mutate()} disabled={resetDefaultM.isPending}>
+                      {resetDefaultM.isPending ? "Đang reset..." : "Reset pass"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        if (!selectedUser) return;
+                        if (!window.confirm(`Xóa mật khẩu xem HMAC của ${selectedUser.username}?`)) return;
+                        clearHmacViewPasswordM.mutate();
+                      }}
+                      disabled={clearHmacViewPasswordM.isPending}
+                    >
+                      {clearHmacViewPasswordM.isPending ? "Đang xóa..." : "Xóa mật khẩu xem HMAC"}
+                    </Button>
+                  </div>
                   {lastDefaultPass ? (
                     <div className="rounded-lg border p-3 text-sm">
                       <div className="text-xs text-muted-foreground">Mật khẩu mặc định</div>

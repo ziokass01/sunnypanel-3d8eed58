@@ -50,7 +50,7 @@ async function requireSession(sb: any, req: Request) {
   }
 
   const { data: acc, error: accErr } = await sb.schema("rent").from("accounts")
-    .select("id,username,activated_at,expires_at,max_devices,is_disabled,created_at,hmac_secret")
+    .select("id,username,activated_at,expires_at,max_devices,is_disabled,created_at,hmac_secret,hmac_view_password_hash,hmac_view_failed_attempts,hmac_view_locked_until")
     .eq("id", sess.account_id)
     .single();
 
@@ -90,6 +90,21 @@ async function logKeyEvent(sb: any, payload: {
   } catch {
     // audit must never break main flow
   }
+}
+
+function normalizeDurationInput(valueRaw: unknown, unitRaw: unknown) {
+  const unit = String(unitRaw ?? "day") === "hour" ? "hour" : "day";
+  const value = Math.max(1, Math.min(999999, Number.parseInt(String(valueRaw ?? "0"), 10) || 1));
+  const durationMs = unit === "hour" ? value * 3600 * 1000 : value * 86400 * 1000;
+  const expiresAtFromNow = new Date(Date.now() + durationMs).toISOString();
+  return {
+    duration_value: value,
+    duration_unit: unit,
+    duration_days: unit === "day" ? value : null,
+    duration_seconds: unit === "hour" && value <= 596523 ? value * 3600 : null,
+    duration_ms: durationMs,
+    expires_at_from_now: expiresAtFromNow,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -207,7 +222,9 @@ Deno.serve(async (req) => {
           expires_at: sess.account.expires_at,
           max_devices: sess.account.max_devices,
           is_disabled: sess.account.is_disabled,
-          hmac_secret: sess.account.hmac_secret,
+          hmac_secret: null,
+          has_hmac_view_password: !!sess.account.hmac_view_password_hash,
+          hmac_view_locked_until: sess.account.hmac_view_locked_until,
         },
       });
     }
@@ -274,7 +291,7 @@ Deno.serve(async (req) => {
 
     if (action === "list_keys") {
       const { data, error } = await sb.schema("rent").from("keys")
-        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
         .eq("account_id", sess.account.id)
         .order("created_at", { ascending: false });
       if (error) throw new Error(error.message);
@@ -340,7 +357,8 @@ Deno.serve(async (req) => {
       const Schema = z.object({
         action: z.literal("generate_key"),
         note: z.string().max(2000).nullable().optional(),
-        days: z.number().int().min(1).max(999999).default(30),
+        duration_value: z.number().int().min(1).max(999999).default(30),
+        duration_unit: z.enum(["hour", "day"]).default("day"),
         start_mode: z.enum(["immediate", "first_use"]).default("immediate"),
       });
       const parsed = Schema.parse(body);
@@ -359,20 +377,23 @@ Deno.serve(async (req) => {
       }
       if (!key) throw new Error("FAILED_TO_GENERATE_UNIQUE_KEY");
 
-      const duration_days = parsed.days;
+      const duration = normalizeDurationInput(parsed.duration_value, parsed.duration_unit);
       const starts_on_first_use = parsed.start_mode === "first_use";
-      const expires_at = starts_on_first_use ? null : new Date(Date.now() + duration_days * 86400 * 1000).toISOString();
+      const expires_at = starts_on_first_use ? null : duration.expires_at_from_now;
       const server_tag = await hmacSha256Hex(masterSecret, `rent-key|${key}`);
       const { data, error } = await sb.schema("rent").from("keys").insert({
         account_id: sess.account.id,
         key,
         note: parsed.note ?? null,
         server_tag,
-        duration_days,
+        duration_days: duration.duration_days,
+        duration_seconds: duration.duration_seconds,
+        duration_value: duration.duration_value,
+        duration_unit: duration.duration_unit,
         starts_on_first_use,
         first_used_at: null,
         expires_at,
-      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at").single();
+      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at").single();
 
       if (error) throw new Error(error.message);
       await logKeyEvent(sb, {
@@ -380,7 +401,7 @@ Deno.serve(async (req) => {
         key_id: data?.id ?? null,
         action: "create_key_random",
         result: "ok",
-        detail: { note: parsed.note ?? null, duration_days, start_mode: parsed.start_mode },
+        detail: { note: parsed.note ?? null, duration_value: duration.duration_value, duration_unit: duration.duration_unit, start_mode: parsed.start_mode },
       });
       return json(req, publicBaseUrl, { ok: true, key: data });
     }
@@ -390,7 +411,8 @@ Deno.serve(async (req) => {
         action: z.literal("create_key"),
         key: z.string().min(8).max(64),
         note: z.string().max(2000).nullable().optional(),
-        days: z.number().int().min(1).max(999999).default(30),
+        duration_value: z.number().int().min(1).max(999999).default(30),
+        duration_unit: z.enum(["hour", "day"]).default("day"),
         start_mode: z.enum(["immediate", "first_use"]).default("immediate"),
       });
       const parsed = Schema.parse(body);
@@ -401,20 +423,23 @@ Deno.serve(async (req) => {
       const masterSecret = requireRentMasterSecret(req, publicBaseUrl);
       if (typeof masterSecret !== "string") return masterSecret;
 
-      const duration_days = parsed.days;
+      const duration = normalizeDurationInput(parsed.duration_value, parsed.duration_unit);
       const starts_on_first_use = parsed.start_mode === "first_use";
-      const expires_at = starts_on_first_use ? null : new Date(Date.now() + duration_days * 86400 * 1000).toISOString();
+      const expires_at = starts_on_first_use ? null : duration.expires_at_from_now;
       const server_tag = await hmacSha256Hex(masterSecret, `rent-key|${key}`);
       const { data, error } = await sb.schema("rent").from("keys").insert({
         account_id: sess.account.id,
         key,
         note: parsed.note ?? null,
         server_tag,
-        duration_days,
+        duration_days: duration.duration_days,
+        duration_seconds: duration.duration_seconds,
+        duration_value: duration.duration_value,
+        duration_unit: duration.duration_unit,
         starts_on_first_use,
         first_used_at: null,
         expires_at,
-      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at").single();
+      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at").single();
 
       if (error) {
         const msg = error.message || "insert failed";
@@ -427,7 +452,7 @@ Deno.serve(async (req) => {
         key_id: data?.id ?? null,
         action: "create_key_custom",
         result: "ok",
-        detail: { note: parsed.note ?? null, duration_days, start_mode: parsed.start_mode },
+        detail: { note: parsed.note ?? null, duration_value: duration.duration_value, duration_unit: duration.duration_unit, start_mode: parsed.start_mode },
       });
       return json(req, publicBaseUrl, { ok: true, key: data });
     }
@@ -437,7 +462,8 @@ Deno.serve(async (req) => {
         action: z.literal("update_key"),
         key_id: z.string().uuid(),
         note: z.string().max(2000).nullable().optional(),
-        days: z.number().int().min(1).max(999999),
+        duration_value: z.number().int().min(1).max(999999),
+        duration_unit: z.enum(["hour", "day"]),
         start_mode: z.enum(["immediate", "first_use"]),
       });
       const parsed = Schema.parse(body);
@@ -450,16 +476,20 @@ Deno.serve(async (req) => {
       if (ownErr) throw new Error(ownErr.message);
       if (!ownedKey) return json(req, publicBaseUrl, { ok: false, code: "KEY_NOT_FOUND", msg: "Không tìm thấy key" }, 404);
 
+      const duration = normalizeDurationInput(parsed.duration_value, parsed.duration_unit);
       const anchorIso = parsed.start_mode === "first_use"
         ? (ownedKey.first_used_at ? ownedKey.first_used_at : null)
         : ownedKey.created_at;
       const expires_at = anchorIso
-        ? new Date(new Date(anchorIso).getTime() + parsed.days * 86400 * 1000).toISOString()
+        ? new Date(new Date(anchorIso).getTime() + duration.duration_ms).toISOString()
         : null;
 
       const patch = {
         note: parsed.note ?? null,
-        duration_days: parsed.days,
+        duration_days: duration.duration_days,
+        duration_seconds: duration.duration_seconds,
+        duration_value: duration.duration_value,
+        duration_unit: duration.duration_unit,
         starts_on_first_use: parsed.start_mode === "first_use",
         expires_at,
       } as const;
@@ -468,7 +498,7 @@ Deno.serve(async (req) => {
         .update(patch)
         .eq("id", parsed.key_id)
         .eq("account_id", sess.account.id)
-        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
         .single();
       if (error) throw new Error(error.message);
 
@@ -477,7 +507,7 @@ Deno.serve(async (req) => {
         key_id: data?.id ?? null,
         action: "update_key_config",
         result: "ok",
-        detail: { duration_days: parsed.days, start_mode: parsed.start_mode, note: parsed.note ?? null },
+        detail: { duration_value: duration.duration_value, duration_unit: duration.duration_unit, start_mode: parsed.start_mode, note: parsed.note ?? null },
       });
       return json(req, publicBaseUrl, { ok: true, key: data });
     }
@@ -494,7 +524,7 @@ Deno.serve(async (req) => {
         .update({ is_active: parsed.is_active })
         .eq("id", parsed.key_id)
         .eq("account_id", sess.account.id)
-        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,first_used_at")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
         .single();
 
       if (error) throw new Error(error.message);
@@ -531,6 +561,70 @@ Deno.serve(async (req) => {
         result: "ok",
         detail: { key: ownedKey.key },
       });
+      return json(req, publicBaseUrl, { ok: true });
+    }
+
+    if (action === "set_hmac_view_password") {
+      const Schema = z.object({
+        action: z.literal("set_hmac_view_password"),
+        password: z.string().min(4).max(128),
+      });
+      const parsed = Schema.parse(body);
+      const password = parsed.password.trim();
+      if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+        return json(req, publicBaseUrl, { ok: false, code: "INVALID_PASSWORD", msg: "Mật khẩu phải có cả chữ và số" }, 400);
+      }
+      if (sess.account.hmac_view_password_hash) {
+        return json(req, publicBaseUrl, { ok: false, code: "ALREADY_SET", msg: "Mật khẩu xem HMAC đã được đặt trước đó" }, 409);
+      }
+      const password_hash = await hashPassword(password);
+      const { error } = await sb.schema("rent").from("accounts").update({
+        hmac_view_password_hash: password_hash,
+        hmac_view_failed_attempts: 0,
+        hmac_view_locked_until: null,
+      }).eq("id", sess.account.id);
+      if (error) throw new Error(error.message);
+      await logKeyEvent(sb, { account_id: sess.account.id, action: "set_hmac_view_password", result: "ok" });
+      return json(req, publicBaseUrl, { ok: true, hmac_secret: sess.account.hmac_secret });
+    }
+
+    if (action === "unlock_hmac_view_password") {
+      const Schema = z.object({
+        action: z.literal("unlock_hmac_view_password"),
+        password: z.string().min(1).max(128),
+      });
+      const parsed = Schema.parse(body);
+      const lockedUntil = sess.account.hmac_view_locked_until ? new Date(sess.account.hmac_view_locked_until).getTime() : 0;
+      if (lockedUntil > Date.now()) {
+        const remaining_seconds = Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
+        return json(req, publicBaseUrl, { ok: false, code: "LOCKED", msg: `Đang bị khóa tạm. Thử lại sau ${remaining_seconds} giây`, remaining_seconds }, 429);
+      }
+      if (!sess.account.hmac_view_password_hash) {
+        return json(req, publicBaseUrl, { ok: false, code: "PASSWORD_NOT_SET", msg: "Bạn chưa đặt mật khẩu xem HMAC" }, 400);
+      }
+      const ok = await verifyPassword(parsed.password.trim(), sess.account.hmac_view_password_hash);
+      if (!ok) {
+        const failed = Number(sess.account.hmac_view_failed_attempts ?? 0) + 1;
+        const locked_until = failed >= 5 ? new Date(Date.now() + 60 * 1000).toISOString() : null;
+        const nextFailed = failed >= 5 ? 0 : failed;
+        await sb.schema("rent").from("accounts").update({
+          hmac_view_failed_attempts: nextFailed,
+          hmac_view_locked_until: locked_until,
+        }).eq("id", sess.account.id);
+        await logKeyEvent(sb, { account_id: sess.account.id, action: "unlock_hmac_view_password_failed", result: "BAD_PASSWORD" });
+        return json(req, publicBaseUrl, { ok: false, code: "BAD_PASSWORD", msg: locked_until ? "Sai mật khẩu quá nhiều lần. Tạm khóa 1 phút" : "Sai mật khẩu" }, 401);
+      }
+      await sb.schema("rent").from("accounts").update({
+        hmac_view_failed_attempts: 0,
+        hmac_view_locked_until: null,
+      }).eq("id", sess.account.id);
+      await logKeyEvent(sb, { account_id: sess.account.id, action: "unlock_hmac_view_password_success", result: "ok" });
+      return json(req, publicBaseUrl, { ok: true, hmac_secret: sess.account.hmac_secret });
+    }
+
+    if (action === "log_copy_hmac_secret") {
+      z.object({ action: z.literal("log_copy_hmac_secret") }).parse(body);
+      await logKeyEvent(sb, { account_id: sess.account.id, action: "copy_hmac_secret", result: "ok" });
       return json(req, publicBaseUrl, { ok: true });
     }
 

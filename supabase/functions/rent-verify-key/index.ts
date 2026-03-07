@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: rk, error: keyErr } = await sb.schema("rent").from("keys")
-      .select("id,account_id,created_at,expires_at,is_active,server_tag,master_sig,starts_on_first_use,duration_days,first_used_at")
+      .select("id,account_id,created_at,expires_at,is_active,server_tag,master_sig,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
       .eq("key", key)
       .maybeSingle();
 
@@ -172,12 +172,14 @@ Deno.serve(async (req) => {
 
     let keyExpiresAt = rk.expires_at as string | null;
     if (rk.starts_on_first_use && !rk.first_used_at) {
-      const durationDays = Number(rk.duration_days ?? 0);
-      if (!Number.isFinite(durationDays) || durationDays < 1) {
+      const durationUnit = String(rk.duration_unit ?? (rk.duration_value != null ? "day" : "")).trim() === "hour" ? "hour" : "day";
+      const durationValue = Number(rk.duration_value ?? rk.duration_days ?? 0);
+      const durationMs = durationUnit === "hour" ? durationValue * 3600 * 1000 : durationValue * 86400 * 1000;
+      if (!Number.isFinite(durationMs) || durationMs < 1) {
         return await invalid("KEY_BAD_DURATION", acc.id, rk.id);
       }
       const firstUsedAt = new Date().toISOString();
-      keyExpiresAt = new Date(Date.now() + durationDays * 86400 * 1000).toISOString();
+      keyExpiresAt = new Date(Date.now() + durationMs).toISOString();
       const { error: startErr } = await sb.schema("rent").from("keys")
         .update({ first_used_at: firstUsedAt, expires_at: keyExpiresAt })
         .eq("id", rk.id)
@@ -189,7 +191,7 @@ Deno.serve(async (req) => {
         action: "start_key_first_use",
         result: "ok",
         device_id,
-        detail: { username, expires_at: keyExpiresAt },
+        detail: { username, expires_at: keyExpiresAt, duration_value: durationValue, duration_unit: durationUnit },
       });
     }
 

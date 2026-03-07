@@ -56,6 +56,22 @@ function requireRentMasterSecret(req: Request, publicBaseUrl: string) {
   return secret;
 }
 
+
+async function logAccountEvent(sb: any, payload: { account_id: string; action: string; result?: string | null; detail?: Record<string, unknown> | null; }) {
+  try {
+    await sb.schema("rent").from("key_audit_logs").insert({
+      account_id: payload.account_id,
+      key_id: null,
+      action: payload.action,
+      result: payload.result ?? null,
+      device_id: null,
+      detail: payload.detail ?? {},
+    });
+  } catch {
+    // ignore audit errors
+  }
+}
+
 Deno.serve(async (req) => {
   const publicBaseUrl = Deno.env.get("PUBLIC_BASE_URL") ?? inferBaseUrl(req);
   if (req.method === "OPTIONS") return handleOptions(req, publicBaseUrl, "POST,OPTIONS");
@@ -403,6 +419,22 @@ Deno.serve(async (req) => {
       return json(req, publicBaseUrl, { ok: true, new_hmac_secret, new_expires_at, penalized });
     }
 
+
+    if (action === "clear_hmac_view_password") {
+      const Schema = z.object({
+        action: z.literal("clear_hmac_view_password"),
+        account_id: z.string().uuid(),
+      });
+      const parsed = Schema.parse(body);
+      const { error } = await sb.schema("rent").from("accounts").update({
+        hmac_view_password_hash: null,
+        hmac_view_failed_attempts: 0,
+        hmac_view_locked_until: null,
+      }).eq("id", parsed.account_id);
+      if (error) throw new Error(error.message);
+      await logAccountEvent(sb, { account_id: parsed.account_id, action: "admin_clear_hmac_view_password", result: "ok" });
+      return json(req, publicBaseUrl, { ok: true });
+    }
     if (action === "delete_user") {
       const Schema = z.object({
         action: z.literal("delete_user"),
