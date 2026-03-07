@@ -30,6 +30,7 @@ function friendlyGateError(msg: string) {
   if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
   if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi. Nếu muốn lấy key mới, hãy quay lại Get Key.";
   if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "GATE_TOO_EARLY") return "Bạn đã vào trang gate quá sớm so với thời gian anti bypass. Phiên đã bị hủy, vui lòng quay lại Get Key và làm lại.";
   return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
 }
 
@@ -41,6 +42,8 @@ export function FreeGatePage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
   const [cfgReturn, setCfgReturn] = useState<number>(10);
+  const [gateAntiBypassEnabled, setGateAntiBypassEnabled] = useState<boolean>(false);
+  const [configReady, setConfigReady] = useState<boolean>(false);
   const [status, setStatus] = useState<"countdown" | "working" | "error">("working");
   const [message, setMessage] = useState<string>("Đang xác thực…");
   const [remaining, setRemaining] = useState<number>(0);
@@ -103,9 +106,12 @@ export function FreeGatePage() {
         if (cancelled) return;
         const r = Math.max(10, Number(c.free_return_seconds ?? 10));
         setCfgReturn(r);
+        setGateAntiBypassEnabled(Boolean((c as any).free_gate_antibypass_enabled ?? false));
+        setConfigReady(true);
       })
       .catch(() => {
-        // ignore
+        if (cancelled) return;
+        setConfigReady(true);
       });
     return () => {
       cancelled = true;
@@ -238,12 +244,22 @@ export function FreeGatePage() {
       return;
     }
 
-    // Countdown UX (backend vẫn kiểm tra thật)
+    if (!configReady) return;
+
+    // Global anti-bypass mode: do NOT wait locally on /free/gate.
+    // Entering gate too early must fail on backend immediately for all passes.
+    if (pass === 2 || gateAntiBypassEnabled) {
+      setStatus("working");
+      setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP…" : "Đang xác thực key 🔑…");
+      void gateOnce();
+      return;
+    }
+
+    // Legacy UX when anti-bypass gate timing is disabled: pass1 may still wait locally.
     const meta = getFreeStartMeta();
     const startedAtMs = Number(meta?.startedAtMs ?? 0);
     const minDelay = Math.max(0, Number(meta?.minDelaySeconds ?? 0));
 
-    // For pass2, startedAtMs is updated when PASS2 issued.
     const waitUntil = startedAtMs > 0 ? startedAtMs + minDelay * 1000 : 0;
     const tick = () => {
       const r = waitUntil > 0 ? Math.max(0, Math.ceil((waitUntil - Date.now()) / 1000)) : 0;
@@ -254,7 +270,7 @@ export function FreeGatePage() {
         return false;
       }
       setStatus("countdown");
-      setMessage(pass === 2 ? "Đang đợi key 🔑 VIP…" : "Đang đợi key 🔑…");
+      setMessage("Đang đợi key 🔑…");
       return true;
     };
 
@@ -265,7 +281,7 @@ export function FreeGatePage() {
 
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [configReady, gateAntiBypassEnabled, pass, sessionId, outToken]);
 
   return (
     <div className="min-h-svh bg-background">

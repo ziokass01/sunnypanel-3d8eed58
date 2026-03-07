@@ -276,7 +276,7 @@ Deno.serve(async (req) => {
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
     .select(
-      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
+      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -424,6 +424,36 @@ Deno.serve(async (req) => {
 
   const pass2StartedIso = (sess as any).pass2_started_at ?? null;
   const pass2StartedMs = pass2StartedIso ? Date.parse(pass2StartedIso) : NaN;
+
+
+  const gateAntiBypassEnabled = Boolean((settings as any)?.free_gate_antibypass_enabled ?? false);
+  const gateAntiBypassSeconds = Math.max(0, Number((settings as any)?.free_gate_antibypass_seconds ?? 0));
+
+  if (gateAntiBypassEnabled && gateAntiBypassSeconds > 0) {
+    const baselineMs = resolvedPass === 2 ? pass2StartedMs : startedAtMs;
+    if (Number.isFinite(baselineMs)) {
+      const mustEnterAt = baselineMs + gateAntiBypassSeconds * 1000;
+      if (nowMs < mustEnterAt) {
+        const nowIso = new Date().toISOString();
+        try {
+          await sb
+            .from("licenses_free_sessions")
+            .update({
+              status: "gate_fail",
+              last_error: "GATE_TOO_EARLY",
+              expires_at: nowIso,
+              out_expires_at: nowIso,
+              claim_token_hash: null,
+              claim_expires_at: null,
+            })
+            .eq("session_id", (sess as any).session_id);
+        } catch {
+          // ignore
+        }
+        return json({ ok: false, code: "GATE_TOO_EARLY", msg: "GATE_TOO_EARLY", detail: { seconds_left: Math.max(1, Math.ceil((mustEnterAt - nowMs) / 1000)) } } satisfies JsonErr, 200);
+      }
+    }
+  }
 
   // Delay enforcement
   if (resolvedPass === 1) {

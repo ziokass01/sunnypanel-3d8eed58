@@ -25,6 +25,8 @@ type SettingsRow = {
   free_outbound_url: string | null;
   free_outbound_url_pass2?: string | null;
   free_min_delay_seconds_pass2?: number;
+  free_gate_antibypass_enabled?: boolean;
+  free_gate_antibypass_seconds?: number;
   free_link4m_rotate_days?: number;
   free_enabled: boolean;
   free_disabled_message: string;
@@ -206,7 +208,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_min_delay_seconds,free_min_delay_seconds_pass2,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
+          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -224,6 +226,8 @@ export function AdminFreeKeysPage() {
   const [minDelayEnabled, setMinDelayEnabled] = useState(true);
   const [minDelay, setMinDelay] = useState(25);
   const [minDelayPass2, setMinDelayPass2] = useState(25);
+  const [gateAntiBypassEnabled, setGateAntiBypassEnabled] = useState(false);
+  const [gateAntiBypassSeconds, setGateAntiBypassSeconds] = useState(0);
   const [returnSeconds, setReturnSeconds] = useState(10);
   const [dailyLimit, setDailyLimit] = useState(1);
   const [requireRef, setRequireRef] = useState(false);
@@ -241,6 +245,8 @@ export function AdminFreeKeysPage() {
     setMinDelayEnabled(Boolean((s as any).free_min_delay_enabled ?? true));
     setMinDelay(Number(s.free_min_delay_seconds ?? 25));
     setMinDelayPass2(Number((s as any).free_min_delay_seconds_pass2 ?? s.free_min_delay_seconds ?? 25));
+    setGateAntiBypassEnabled(Boolean((s as any).free_gate_antibypass_enabled ?? false));
+    setGateAntiBypassSeconds(Math.max(0, Number((s as any).free_gate_antibypass_seconds ?? 0)));
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
     setRequireRef(Boolean(s.free_require_link4m_referrer));
@@ -257,9 +263,10 @@ export function AdminFreeKeysPage() {
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
         free_min_delay_enabled: Boolean(minDelayEnabled),
-        // IMPORTANT: when delay is disabled, force seconds = 0 (not 5/25)
         free_min_delay_seconds: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelay) || 25)) : 0,
         free_min_delay_seconds_pass2: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelayPass2) || 25)) : 0,
+        free_gate_antibypass_enabled: Boolean(gateAntiBypassEnabled),
+        free_gate_antibypass_seconds: gateAntiBypassEnabled ? Math.max(0, Math.floor(Number(gateAntiBypassSeconds) || 0)) : 0,
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
         free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
         free_require_link4m_referrer: Boolean(requireRef),
@@ -727,19 +734,41 @@ const disableAllKeyTypes = useMutation({
               </div>
             </div>
 
-<div className="space-y-2">
-  <div className="text-sm font-medium">Delay tối thiểu Pass2 (giây)</div>
-  <Input
-    type="number"
-    value={minDelayPass2}
-    onChange={(e) => setMinDelayPass2(Number(e.target.value))}
-    min={5}
-    disabled={!minDelayEnabled}
-  />
-  <div className="text-xs text-muted-foreground">
-    VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này (tính từ lúc Pass1 OK).
-  </div>
-</div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Delay tối thiểu Pass2 (giây)</div>
+              <Input
+                type="number"
+                value={minDelayPass2}
+                onChange={(e) => setMinDelayPass2(Number(e.target.value))}
+                min={5}
+                disabled={!minDelayEnabled}
+              />
+              <div className="text-xs text-muted-foreground">
+                VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này (tính từ lúc Pass1 OK). Nếu vào /free/gate?p=2 quá sớm, phiên VIP sẽ bị hủy để chặn bypass chờ sẵn ở gate.
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm font-medium">Time anti bypass Gate (giây)</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-muted-foreground">Bật</div>
+                  <Switch checked={gateAntiBypassEnabled} onCheckedChange={setGateAntiBypassEnabled} />
+                </div>
+              </div>
+              <Input
+                type="number"
+                value={gateAntiBypassSeconds}
+                onChange={(e) => setGateAntiBypassSeconds(Number(e.target.value))}
+                min={0}
+                disabled={!gateAntiBypassEnabled}
+              />
+              <div className="text-xs text-muted-foreground">
+                {gateAntiBypassEnabled
+                  ? "Bộ đếm anti bypass riêng cho toàn bộ gate. Nếu người dùng mở /free/gate quá sớm so với thời gian này, phiên sẽ bị hủy ngay. Không dùng chung với Delay Pass1/Pass2 nên không bị xung đột."
+                  : "Đang tắt: không kiểm tra mốc anti bypass riêng ở /free/gate."}
+              </div>
+            </div>
 
             <div className="space-y-2">
               <div className="text-sm font-medium">Tự quay lại /free (giây)</div>

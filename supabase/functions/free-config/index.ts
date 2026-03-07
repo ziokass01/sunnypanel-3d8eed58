@@ -66,6 +66,8 @@ Deno.serve(async (req) => {
   free_disabled_message,
   free_min_delay_seconds,
   free_min_delay_seconds_pass2,
+  free_gate_antibypass_enabled,
+  free_gate_antibypass_seconds,
   free_link4m_rotate_days,
   free_return_seconds,
   free_daily_limit_per_fingerprint,
@@ -84,12 +86,13 @@ Deno.serve(async (req) => {
   const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
   const rawOutboundPass2 = (settings as any)?.free_outbound_url_pass2;
   const free_outbound_url_pass2 = String(rawOutboundPass2 ?? "").trim() || free_outbound_url;
-  const free_min_delay_seconds_pass2 = Math.max(0, Number((settings as any)?.free_min_delay_seconds_pass2 ?? free_min_delay_seconds));
-  const free_link4m_rotate_days = Math.max(1, Number((settings as any)?.free_link4m_rotate_days ?? 7));
-
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
   const free_min_delay_seconds = Math.max(0, Number(settings?.free_min_delay_seconds ?? 0));
+  const free_min_delay_seconds_pass2 = Math.max(0, Number((settings as any)?.free_min_delay_seconds_pass2 ?? free_min_delay_seconds));
+  const free_gate_antibypass_enabled = Boolean((settings as any)?.free_gate_antibypass_enabled ?? false);
+  const free_gate_antibypass_seconds = Math.max(0, Number((settings as any)?.free_gate_antibypass_seconds ?? 0));
+  const free_link4m_rotate_days = Math.max(1, Number((settings as any)?.free_link4m_rotate_days ?? 7));
   const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
   const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
@@ -145,6 +148,8 @@ Deno.serve(async (req) => {
     free_min_delay_seconds_pass2,
     free_link4m_rotate_days,
     free_outbound_url_pass2,
+    free_gate_antibypass_enabled,
+    free_gate_antibypass_seconds,
     free_return_seconds,
     free_daily_limit_per_fingerprint,
     free_require_link4m_referrer,

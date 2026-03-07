@@ -422,9 +422,13 @@ export type Database = {
           free_daily_limit_per_fingerprint: number
           free_disabled_message: string
           free_enabled: boolean
+          free_gate_antibypass_enabled: boolean
+          free_gate_antibypass_seconds: number
           free_min_delay_enabled: boolean
           free_min_delay_seconds: number
+          free_min_delay_seconds_pass2: number
           free_outbound_url: string | null
+          free_outbound_url_pass2: string | null
           free_public_links: Json
           free_public_note: string
           free_require_link4m_referrer: boolean
@@ -437,9 +441,13 @@ export type Database = {
           free_daily_limit_per_fingerprint?: number
           free_disabled_message?: string
           free_enabled?: boolean
+          free_gate_antibypass_enabled?: boolean
+          free_gate_antibypass_seconds?: number
           free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
+          free_min_delay_seconds_pass2?: number
           free_outbound_url?: string | null
+          free_outbound_url_pass2?: string | null
           free_public_links?: Json
           free_public_note?: string
           free_require_link4m_referrer?: boolean
@@ -452,9 +460,13 @@ export type Database = {
           free_daily_limit_per_fingerprint?: number
           free_disabled_message?: string
           free_enabled?: boolean
+          free_gate_antibypass_enabled?: boolean
+          free_gate_antibypass_seconds?: number
           free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
+          free_min_delay_seconds_pass2?: number
           free_outbound_url?: string | null
+          free_outbound_url_pass2?: string | null
           free_public_links?: Json
           free_public_note?: string
           free_require_link4m_referrer?: boolean

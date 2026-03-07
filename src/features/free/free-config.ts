@@ -30,6 +30,8 @@ export type FreeConfig = {
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
   free_require_link4m_referrer: boolean;
+  free_gate_antibypass_enabled?: boolean;
+  free_gate_antibypass_seconds?: number;
 
   // Public content (optional)
   free_public_note: string;
