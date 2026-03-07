@@ -547,7 +547,7 @@ export function FreeClaimPage() {
             <div className="flex items-center gap-3">
               <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
               <div>
-                <CardTitle>Nhận key</CardTitle>
+                <CardTitle>Nhận Key🔑</CardTitle>
               </div>
             </div>
           </CardHeader>
@@ -555,10 +555,10 @@ export function FreeClaimPage() {
             {!claimToken ? (
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium"> Xác thực không thành công hoặc lỗi </div>
-                <div className="text-muted-foreground">Hãy quay lại trang Getkey và làm lại.</div>
+                <div className="text-muted-foreground">Hãy quay lại trang Getkey🔑 và làm lại.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
-                    Quay lại Get Key
+                    Quay lại Get Key🔑
                   </Button>
                 </div>
               </div>
@@ -566,11 +566,11 @@ export function FreeClaimPage() {
 
             {claimToken && !outToken ? (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Thiếu token (t)</div>
+                <div className="font-medium">Thiếu hoặc xác thực sai</div>
                 <div className="text-muted-foreground">Hãy quay lại trang Get Key 🔑 rồi vượt lại.</div>
                 <div className="mt-3">
                   <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
-                    Quay lại Get Key
+                    Quay lại Get Key🔑
                   </Button>
                 </div>
               </div>
