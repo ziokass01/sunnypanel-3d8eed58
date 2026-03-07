@@ -687,7 +687,7 @@ export function RentPortalPage() {
     <div className="container space-y-6 py-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Thuê Website</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Thuê Website📡</h1>
           <p className="mt-2 text-sm text-muted-foreground">Quản lý tài khoản, key sử dụng, API xác thực và tệp tải xuống của bạn.</p>
         </div>
         <Button variant="secondary" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}>
@@ -698,14 +698,14 @@ export function RentPortalPage() {
       <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)} className="space-y-4">
         <div className="overflow-x-auto pb-1">
           <TabsList className="inline-flex h-auto min-w-max gap-2 rounded-xl p-1">
-            <TabsTrigger value="status">Trạng thái</TabsTrigger>
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="create">Tạo key</TabsTrigger>
-            <TabsTrigger value="history">Lịch sử key</TabsTrigger>
-            <TabsTrigger value="audit">Audit Log</TabsTrigger>
-            <TabsTrigger value="password">Đổi mật khẩu</TabsTrigger>
-            <TabsTrigger value="account">Thông tin tài khoản</TabsTrigger>
-            <TabsTrigger value="api">API &amp; Tải xuống</TabsTrigger>
+            <TabsTrigger value="status">Trạng thái💾</TabsTrigger>
+            <TabsTrigger value="dashboard">Dashboard📂</TabsTrigger>
+            <TabsTrigger value="create">Tạo key🔑</TabsTrigger>
+            <TabsTrigger value="history">Lịch sử key🔏</TabsTrigger>
+            <TabsTrigger value="audit">Audit Log📚</TabsTrigger>
+            <TabsTrigger value="password">Đổi mật khẩu✏️</TabsTrigger>
+            <TabsTrigger value="account">Thông tin tài khoản💳</TabsTrigger>
+            <TabsTrigger value="api">API &amp; Tải xuống📥</TabsTrigger>
           </TabsList>
         </div>
 
@@ -727,7 +727,7 @@ export function RentPortalPage() {
             <Card className="mt-4">
               <CardHeader>
                 <CardTitle>Kích hoạt tài khoản</CardTitle>
-                <CardDescription>Nhập key kích hoạt để mở khóa tài khoản thuê.</CardDescription>
+                <CardDescription>Nhập key🔑 kích hoạt để mở khóa tài khoản thuê.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -746,20 +746,20 @@ export function RentPortalPage() {
           <Card>
             <CardHeader>
               <CardTitle>Dashboard</CardTitle>
-              <CardDescription>Xem nhanh tình trạng key hiện có.</CardDescription>
+              <CardDescription>Xem nhanh tình trạng key🔑 hiện có.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Tổng số key</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Đang bật</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.enabled}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Đang tắt</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.disabled}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Dùng lần đầu mới chạy</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.firstUse}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Sắp hết hạn</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
+                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Tổng số key🔑</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
+                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Đang bật🔓</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.enabled}</div></div>
+                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Đang tắt🔒</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.disabled}</div></div>
+                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Dùng lần đầu mới chạy⏳</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.firstUse}</div></div>
+                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Sắp hết hạn⌛</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => setTab("create")}>Tạo key</Button>
-                <Button variant="secondary" onClick={() => setTab("history")}>Lịch sử key</Button>
-                <Button variant="secondary" onClick={() => setTab("audit")}>Audit Log</Button>
+                <Button variant="secondary" onClick={() => setTab("history")}>Lịch sử key🔑</Button>
+                <Button variant="secondary" onClick={() => setTab("audit")}>Audit Log📃</Button>
                 <Button variant="outline" onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
               </div>
             </CardContent>
@@ -770,11 +770,11 @@ export function RentPortalPage() {
           <Card>
             <CardHeader>
               <CardTitle>Tạo key</CardTitle>
-              <CardDescription>Tạo key mới để dùng với menu hoặc ứng dụng của bạn.</CardDescription>
+              <CardDescription>Tạo key🔑 mới để dùng với menu hoặc ứng dụng của bạn.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Key tự nhập (để trống nếu muốn random)</Label>
+                <Label>Key🔑 tự nhập (để trống nếu muốn random)</Label>
                 <Input value={customKey} onChange={(e) => setCustomKey(e.target.value)} placeholder="ABCD-EFGH-IJKL-MNOP" />
                 <p className="text-xs text-muted-foreground">4 nhóm x 4 ký tự, chỉ A-Z và 0-9.</p>
               </div>
@@ -784,22 +784,22 @@ export function RentPortalPage() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Thời lượng</Label>
+                  <Label>Thời lượng⏰</Label>
                   <Input type="number" min={1} max={999999} value={durationValue} onChange={(e) => setDurationValue(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Đơn vị</Label>
+                  <Label>Đơn vị🖍</Label>
                   <Select value={durationUnit} onValueChange={(value) => setDurationUnit(value as DurationUnit)}>
                     <SelectTrigger><SelectValue placeholder="Chọn đơn vị" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="hour">Giờ</SelectItem>
-                      <SelectItem value="day">Ngày</SelectItem>
+                      <SelectItem value="hour">Giờ🕯</SelectItem>
+                      <SelectItem value="day">Ngày🗓</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Số máy tối đa</Label>
+                <Label>Số máy tối đa📱</Label>
                 <Input
                   type="number"
                   min={1}
@@ -808,21 +808,21 @@ export function RentPortalPage() {
                   onChange={(e) => setMaxDevicesValue(e.target.value)}
                   placeholder="1"
                 />
-                <p className="text-xs text-muted-foreground">Từ 1 đến 999999 máy.</p>
+                <p className="text-xs text-muted-foreground">Mặc định một máy📱.</p>
 
-                <Label>Kiểu chạy</Label>
+                <Label>Kiểu chạy📌</Label>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant={keyStartMode === "immediate" ? "default" : "outline"} onClick={() => setKeyStartMode("immediate")}>Chạy ngay</Button>
-                  <Button variant={keyStartMode === "first_use" ? "default" : "outline"} onClick={() => setKeyStartMode("first_use")}>Dùng lần đầu mới chạy</Button>
+                  <Button variant={keyStartMode === "immediate" ? "default" : "outline"} onClick={() => setKeyStartMode("immediate")}>Chạy ngay⚡</Button>
+                  <Button variant={keyStartMode === "first_use" ? "default" : "outline"} onClick={() => setKeyStartMode("first_use")}>Dùng lần đầu mới chạy❄</Button>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => createKeyM.mutate("random")} disabled={createKeyM.isPending}>Tạo ngẫu nhiên</Button>
+                <Button onClick={() => createKeyM.mutate("random")} disabled={createKeyM.isPending}>Tạo ngẫu nhiên🎲</Button>
                 <Button variant="secondary" onClick={() => createKeyM.mutate("custom")} disabled={createKeyM.isPending || !customKey.trim()}>Tạo key tự chọn</Button>
               </div>
               {lastCreatedKey ? (
                 <div className="rounded-lg border p-3 text-sm">
-                  <div className="text-xs text-muted-foreground">Key vừa tạo</div>
+                  <div className="text-xs text-muted-foreground">Key vừa tạo📖</div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <code className="rounded bg-muted px-2 py-1 break-all">{lastCreatedKey}</code>
                     <Button size="sm" variant="soft" onClick={async () => { const ok = await copyText(lastCreatedKey); toast({ title: ok ? "Đã sao chép" : "Không sao chép được" }); }}>Sao chép</Button>
@@ -837,7 +837,7 @@ export function RentPortalPage() {
         <TabsContent value="history">
           <Card>
             <CardHeader>
-              <CardTitle>Lịch sử key</CardTitle>
+              <CardTitle>Lịch sử key🗒</CardTitle>
               <CardDescription>Tìm kiếm, xem và chỉnh sửa key của bạn.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
