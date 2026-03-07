@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
@@ -130,13 +131,28 @@ export function FreeLandingPage() {
 
   return (
     <div className="min-h-svh bg-background">
-      <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
+      <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
         <Card className="w-full">
-          <CardHeader className="space-y-3">
+          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
             <div className="flex items-center gap-3">
-              <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
-              <div>
-                <CardTitle>Get Key 🔑</CardTitle>
+              <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
+              <div className="space-y-1">
+                <CardTitle className="text-xl">Get Key 🔑</CardTitle>
+                <p className="text-sm text-muted-foreground">Giao diện gọn hơn, dễ nhìn hơn và giữ đúng flow nhận key hiện tại.</p>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-2xl border bg-background/80 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Flow</div>
+                <div className="mt-1 text-sm font-semibold">4 bước rõ ràng</div>
+              </div>
+              <div className="rounded-2xl border bg-background/80 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thiết bị</div>
+                <div className="mt-1 text-sm font-semibold">Giữ đúng một phiên</div>
+              </div>
+              <div className="rounded-2xl border bg-background/80 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                <div className="mt-1 text-sm font-semibold">Tự chuyển bước</div>
               </div>
             </div>
           </CardHeader>
@@ -144,8 +160,9 @@ export function FreeLandingPage() {
           <CardContent className="space-y-4">
             <FreeFlowSteps current={1} />
 
-            <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
-              Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.
+            <div className="rounded-2xl border bg-gradient-to-br from-muted/50 to-background p-4 text-sm text-muted-foreground shadow-sm">
+              <div className="font-semibold text-foreground">Cách dùng nhanh</div>
+              <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
             </div>
 
             {err ? (
@@ -185,8 +202,11 @@ export function FreeLandingPage() {
 
             <FreeDeviceHistoryCard history={deviceHistory} />
 
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Chọn loại key</div>
+            <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">Chọn loại key</div>
+                <Badge variant="outline" className="rounded-full">Bước 1</Badge>
+              </div>
               <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || isClosed || loading}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"} />
@@ -202,7 +222,7 @@ export function FreeLandingPage() {
             </div>
 
             <Button
-              className="w-full"
+              className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
               size="lg"
               disabled={!canGet}
               onClick={async () => {
@@ -363,12 +383,25 @@ export function FreeLandingPage() {
             </Button>
 
             {lastFreeKey ? (
-              <div className="rounded-md border p-3 space-y-2">
-                <div className="text-sm font-semibold">Key 🔑 vừa nhận</div>
-                <div className="break-all font-mono text-sm">{lastFreeKey.key}</div>
+              <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Key 🔑 vừa nhận</div>
+                    <div className="text-xs text-muted-foreground">Lưu nhanh để bạn dễ copy lại khi cần.</div>
+                  </div>
+                  <Badge className="rounded-full">Đã nhận</Badge>
+                </div>
+                <div className="rounded-xl border bg-background px-3 py-3 font-mono text-sm break-all">{lastFreeKey.key}</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Loại key: <span className="font-medium text-foreground">{lastFreeKey.key_type || "-"}</span></div>
+                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Hết hạn: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.expires_at)}</span></div>
+                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Tạo lúc: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.created_at)}</span></div>
+                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Session: <span className="font-medium text-foreground">{shortHash(lastFreeKey.session_id, 12)}</span></div>
+                </div>
                 <Button
                   type="button"
                   variant="secondary"
+                  className="rounded-2xl"
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(lastFreeKey.key);
@@ -379,11 +412,7 @@ export function FreeLandingPage() {
                 >
                   Copy key
                 </Button>
-                <div className="text-xs text-muted-foreground">Loại key: {lastFreeKey.key_type || "-"}</div>
-                <div className="text-xs text-muted-foreground">Tạo lúc: {formatVnDateTime(lastFreeKey.created_at)}</div>
-                <div className="text-xs text-muted-foreground">Hết hạn: {formatVnDateTime(lastFreeKey.expires_at)}</div>
-                <div className="text-xs text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
-                <div className="text-xs text-muted-foreground">Session: {shortHash(lastFreeKey.session_id, 12)}</div>
+                <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
               </div>
             ) : null}
 

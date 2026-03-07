@@ -27,19 +27,23 @@ export function FreeFlowSteps({ current, compact = false }: FreeFlowStepsProps) 
           <div
             key={label}
             className={cn(
-              "rounded-xl border px-3 py-2 text-left transition-colors",
-              done && "border-primary/40 bg-primary/5",
-              active && "border-primary bg-primary/10 shadow-sm",
-              !done && !active && "bg-muted/30 text-muted-foreground",
+              "relative overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all",
+              done && "border-primary/40 bg-primary/[0.07]",
+              active && "border-primary bg-primary/[0.10] shadow-sm ring-1 ring-primary/10",
+              !done && !active && "bg-muted/25 text-muted-foreground",
             )}
           >
+            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/70 via-primary/40 to-transparent" />
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium uppercase tracking-wide">Bước {step}</span>
-              <Badge variant={done || active ? "default" : "outline"} className="h-5 px-2 text-[10px]">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Bước {step}</span>
+              <Badge variant={done || active ? "default" : "outline"} className="h-5 rounded-full px-2 text-[10px]">
                 {done ? "Xong" : active ? "Đang xử lý" : "Chờ"}
               </Badge>
             </div>
-            <div className="mt-1 text-sm font-medium">{label}</div>
+            <div className="mt-2 text-sm font-semibold leading-tight text-foreground">{label}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {done ? "Hoàn tất bước này" : active ? "Bạn đang ở bước hiện tại" : "Hệ thống sẽ tự chuyển tiếp"}
+            </div>
           </div>
         );
       })}
@@ -143,25 +147,41 @@ export function formatRelativeCountdown(target?: string | null) {
   return `${Math.max(1, minutes)} phút`;
 }
 
+function friendlyFailLabel(code?: string | null) {
+  const v = String(code || "").trim();
+  if (!v) return "Chưa có lỗi gần đây";
+  return v.replaceAll("_", " ");
+}
+
 export function FreeDeviceHistoryCard({ history }: { history: FreeFlowDeviceHistory }) {
   return (
-    <Card className="border-dashed bg-muted/20">
-      <CardContent className="grid gap-3 p-4 sm:grid-cols-3">
-        <div>
-          <div className="text-xs uppercase text-muted-foreground">Thiết bị này hôm nay</div>
-          <div className="mt-1 text-2xl font-semibold">{history.successToday}</div>
-          <div className="text-xs text-muted-foreground">lượt nhận key thành công</div>
+    <Card className="overflow-hidden border-dashed bg-gradient-to-br from-background to-muted/30">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Thiết bị hiện tại</div>
+            <div className="mt-1 text-sm font-medium text-foreground">Theo dõi nhanh lượt nhận key trong hôm nay</div>
+          </div>
+          <Badge variant="outline" className="rounded-full">Hôm nay</Badge>
         </div>
-        <div>
-          <div className="text-xs uppercase text-muted-foreground">Lần gần nhất</div>
-          <div className="mt-1 text-sm font-medium">{history.lastSuccessAt ? new Date(history.lastSuccessAt).toLocaleString("vi-VN") : "Chưa có"}</div>
-          <div className="text-xs text-muted-foreground">{history.lastKeyLabel || "Chưa có key nào được lưu"}</div>
-        </div>
-        <div>
-          <div className="text-xs uppercase text-muted-foreground">Có thể thử lại</div>
-          <div className="mt-1 text-sm font-medium">{formatRelativeCountdown(history.nextEligibleAt)}</div>
-          <div className="text-xs text-muted-foreground">
-            {history.lastFailCode ? `Lỗi gần nhất: ${history.lastFailCode}` : `${history.attemptsToday} lượt bắt đầu hôm nay`}
+
+        <div className="grid gap-2 sm:grid-cols-3">
+          <div className="rounded-2xl border bg-background/80 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thành công</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{history.successToday}</div>
+            <div className="text-xs text-muted-foreground">lượt đã nhận key</div>
+          </div>
+          <div className="rounded-2xl border bg-background/80 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Lần gần nhất</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">{history.lastSuccessAt ? new Date(history.lastSuccessAt).toLocaleString("vi-VN") : "Chưa có"}</div>
+            <div className="line-clamp-1 text-xs text-muted-foreground">{history.lastKeyLabel || "Chưa lưu key gần nhất"}</div>
+          </div>
+          <div className="rounded-2xl border bg-background/80 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Có thể thử lại</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">{formatRelativeCountdown(history.nextEligibleAt)}</div>
+            <div className="line-clamp-1 text-xs text-muted-foreground">
+              {history.lastFailCode ? `Lỗi gần nhất: ${friendlyFailLabel(history.lastFailCode)}` : `${history.attemptsToday} lượt đã bắt đầu hôm nay`}
+            </div>
           </div>
         </div>
       </CardContent>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { FreeFlowSteps, markFreeAttemptFail } from "@/features/free/flow-ux";
@@ -288,30 +289,54 @@ export function FreeGatePage() {
 
   return (
     <div className="min-h-svh bg-background">
-      <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
-        <Card className="w-full">
-          <CardHeader>
-            <CardTitle>{pass === 2 ? "Đang xác thực key 🔑 VIP💰" : "Đang xác thực 🔑 "}</CardTitle>
-            <CardDescription>Hệ thống đang xác thực bước vượt link.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+        <Card className="w-full overflow-hidden border shadow-sm">
+          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1">
+                <CardTitle className="text-xl">{pass === 2 ? "Đang xác thực key 🔑 VIP💰" : "Đang xác thực key 🔑"}</CardTitle>
+                <CardDescription>Hệ thống đang kiểm tra bước vượt link trước khi chuyển sang bước nhận key.</CardDescription>
+              </div>
+              <Badge variant="outline" className="rounded-full">Bước 3 / 4</Badge>
+            </div>
             <FreeFlowSteps current={3} />
-
-            <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
-              Đây là bước xác thực cuối trước khi hiện key. Nếu phiên bị sai, quá sớm hoặc không đúng thiết bị, hệ thống sẽ tự hủy và đưa bạn về lại bước đầu.
+          </CardHeader>
+          <CardContent className="space-y-4 p-5">
+            <div className="rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
+              <div className="flex items-start gap-4">
+                <div className="mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full border bg-primary/10 text-lg font-semibold text-primary">
+                  {status === "error" ? "!" : status === "countdown" ? pad2(remaining) : "✓"}
+                </div>
+                <div className="space-y-1">
+                  <div className="text-base font-semibold text-foreground">{message}</div>
+                  <div className="text-sm leading-6 text-muted-foreground">
+                    {status === "working"
+                      ? "Vui lòng giữ nguyên trình duyệt hiện tại. Hệ thống sẽ tự kiểm tra phiên, thiết bị và trạng thái gate."
+                      : status === "countdown"
+                        ? "Hệ thống đang đợi đúng mốc thời gian trước khi hoàn tất xác thực. Đừng đổi tab hoặc đổi trình duyệt trong lúc này."
+                        : "Phiên hiện tại không còn hợp lệ hoặc đã bị hủy. Bạn nên quay lại bước đầu để tạo phiên mới sạch hơn."}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="rounded-md border p-3 text-sm">
-              <div className="font-medium">{message}</div>
-              <div className="mt-1 text-muted-foreground">
-                {status === "working" || status === "countdown"
-                  ? "Vui lòng không tắt trang hoặc đổi trình duyệt trong lúc xác thực."
-                  : "Bạn sẽ được đưa về trang Get Key."}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border bg-background/70 p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{status === "error" ? "Thất bại" : status === "countdown" ? "Đang chờ" : "Đang xử lý"}</div>
+              </div>
+              <div className="rounded-2xl border bg-background/70 p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Loại phiên</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{pass === 2 ? "VIP / Pass 2" : "Normal / Pass 1"}</div>
+              </div>
+              <div className="rounded-2xl border bg-background/70 p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tiếp theo</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{status === "error" ? "Quay lại Get Key" : "Tự chuyển bước"}</div>
               </div>
             </div>
 
             {status === "error" ? (
-              <Button className="w-full" variant="secondary" onClick={() => nav("/free", { replace: true })}>
+              <Button className="h-12 w-full rounded-2xl text-base font-semibold" variant="secondary" onClick={() => nav("/free", { replace: true })}>
                 Quay lại Get Key
               </Button>
             ) : null}

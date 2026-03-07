@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
@@ -550,75 +551,69 @@ export function FreeClaimPage() {
 
   return (
     <div className="min-h-svh bg-background">
-      <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
-        <Card className="w-full">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
-              <div>
-                <CardTitle>Nhận Key🔑</CardTitle>
+      <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+        <Card className="w-full overflow-hidden border shadow-sm">
+          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
+                <div>
+                  <CardTitle className="text-xl">Nhận Key 🔑</CardTitle>
+                  <div className="mt-1 text-sm text-muted-foreground">Bước cuối cùng. Khi phiên hợp lệ, key sẽ hiện ngay ở bên dưới.</div>
+                </div>
               </div>
+              <Badge variant="outline" className="rounded-full">Bước 4 / 4</Badge>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
             <FreeFlowSteps current={4} />
-
-            <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
-              Khi phiên hợp lệ, key sẽ hiện ở ngay bên dưới. Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới.
+          </CardHeader>
+          <CardContent className="space-y-4 p-5">
+            <div className="rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 text-sm text-muted-foreground shadow-sm">
+              <div className="font-semibold text-foreground">Lưu ý</div>
+              <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Khi nhận thành công, bấm copy để lưu key ngay.</div>
             </div>
 
             <FreeDeviceHistoryCard history={deviceHistory} />
 
             {!claimToken ? (
-              <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium"> Xác thực không thành công hoặc lỗi </div>
-                <div className="text-muted-foreground">Hãy quay lại trang Getkey🔑 và làm lại.</div>
-                <div className="mt-3">
-                  <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
-                    Quay lại Get Key🔑
-                  </Button>
-                </div>
+              <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
+                <div className="text-sm font-semibold">Xác thực không thành công hoặc thiếu dữ liệu</div>
+                <div className="text-sm text-muted-foreground">Hãy quay lại trang Get Key 🔑 và làm lại từ đầu để tạo phiên sạch.</div>
+                <Button variant="secondary" className="h-11 w-full rounded-2xl" onClick={() => nav("/free", { replace: true })}>
+                  Quay lại Get Key 🔑
+                </Button>
               </div>
             ) : null}
 
             {claimToken && !outToken ? (
-              <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Thiếu hoặc xác thực sai</div>
-                <div className="text-muted-foreground">Hãy quay lại trang Get Key 🔑 rồi vượt lại.</div>
-                <div className="mt-3">
-                  <Button variant="secondary" className="w-full" onClick={() => nav("/free", { replace: true })}>
-                    Quay lại Get Key🔑
-                  </Button>
-                </div>
+              <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
+                <div className="text-sm font-semibold">Thiếu xác thực</div>
+                <div className="text-sm text-muted-foreground">Liên kết hiện tại chưa đủ thông tin. Hãy quay lại trang Get Key 🔑 rồi vượt lại đúng flow.</div>
+                <Button variant="secondary" className="h-11 w-full rounded-2xl" onClick={() => nav("/free", { replace: true })}>
+                  Quay lại Get Key 🔑
+                </Button>
               </div>
             ) : null}
 
-            {error ? <div className="text-sm text-destructive">{error}</div> : null}
+            {error ? (
+              <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                {error}
+              </div>
+            ) : null}
 
             {debugMode ? (
-              <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
+              <div className="rounded-2xl border p-3 text-xs text-muted-foreground space-y-1">
                 <div>debug=1</div>
                 <div>tokenSource: {tokenSource}</div>
                 <div>claim_token_len: {claimToken ? claimToken.length : 0}</div>
-                <div>
-                  claim_mask: {claimToken ? `${claimToken.slice(0, 6)}…${claimToken.slice(-4)}` : ""}
-                </div>
+                <div>claim_mask: {claimToken ? `${claimToken.slice(0, 6)}…${claimToken.slice(-4)}` : ""}</div>
                 <div>sid_len: {sessionId ? sessionId.length : 0}</div>
-                <div>
-                  sid_mask: {sessionId ? `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}` : ""}
-                </div>
+                <div>sid_mask: {sessionId ? `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}` : ""}</div>
                 <div>resolved_sid_len: {resolvedSessionId ? resolvedSessionId.length : 0}</div>
-                <div>
-                  resolved_sid_mask: {resolvedSessionId ? `${resolvedSessionId.slice(0, 6)}…${resolvedSessionId.slice(-4)}` : ""}
-                </div>
+                <div>resolved_sid_mask: {resolvedSessionId ? `${resolvedSessionId.slice(0, 6)}…${resolvedSessionId.slice(-4)}` : ""}</div>
                 <div>effective_sid_len: {effectiveSessionId ? effectiveSessionId.length : 0}</div>
-                <div>
-                  effective_sid_mask: {effectiveSessionId ? `${effectiveSessionId.slice(0, 6)}…${effectiveSessionId.slice(-4)}` : ""}
-                </div>
+                <div>effective_sid_mask: {effectiveSessionId ? `${effectiveSessionId.slice(0, 6)}…${effectiveSessionId.slice(-4)}` : ""}</div>
                 <div>t_len: {outToken ? outToken.length : 0}</div>
-                <div>
-                  t_mask: {outToken ? `${outToken.slice(0, 6)}…${outToken.slice(-4)}` : ""}
-                </div>
+                <div>t_mask: {outToken ? `${outToken.slice(0, 6)}…${outToken.slice(-4)}` : ""}</div>
                 {serverDebug ? (
                   <div className="pt-2">
                     <div className="text-foreground font-medium">backend debug</div>
@@ -628,32 +623,69 @@ export function FreeClaimPage() {
               </div>
             ) : null}
 
-             {!revealed ? (
-               <div className="space-y-3">
-                 {turnstileEnabled && turnstileSiteKey ? (
-                   <div className="rounded-md border p-3">
-                     <TurnstileWidget
-                       siteKey={turnstileSiteKey}
-                       onToken={setTurnstileToken}
-                       onError={(m) => setError(m)}
-                     />
-                   </div>
-                 ) : null}
+            {!revealed ? (
+              <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
+                {turnstileEnabled && turnstileSiteKey ? (
+                  <div className="rounded-2xl border p-3">
+                    <TurnstileWidget
+                      siteKey={turnstileSiteKey}
+                      onToken={setTurnstileToken}
+                      onError={(m) => setError(m)}
+                    />
+                  </div>
+                ) : null}
 
-                  <Button className="w-full" disabled={!canVerify || loading} onClick={() => void revealOnce()}>
-                    {loading ? "Đang xác minh…" : "Xác minh"}
-                  </Button>
-               </div>
-             ) : (
-              <div className="space-y-3">
-                <div className="rounded-md border p-3">
-                  <div className="text-sm text-muted-foreground">{revealed.label}</div>
-                  <div className="mt-1 break-all text-lg font-semibold">{revealed.key}</div>
-                  <div className="mt-2 text-xs text-muted-foreground">Expires: {revealed.expiresAt}</div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border bg-background p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                    <div className="mt-1 text-sm font-semibold">{loading ? "Đang xác minh" : "Sẵn sàng"}</div>
+                  </div>
+                  <div className="rounded-2xl border bg-background p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Loại key</div>
+                    <div className="mt-1 text-sm font-semibold">{selectedLabel}</div>
+                  </div>
+                  <div className="rounded-2xl border bg-background p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tiếp theo</div>
+                    <div className="mt-1 text-sm font-semibold">Hiển thị key</div>
+                  </div>
+                </div>
+
+                <Button className="h-12 w-full rounded-2xl text-base font-semibold" disabled={!canVerify || loading} onClick={() => void revealOnce()}>
+                  {loading ? "Đang xác minh…" : "Xác minh"}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">{revealed.label}</div>
+                    <div className="text-xs text-muted-foreground">Key đã sẵn sàng. Bạn nên copy ngay để lưu lại.</div>
+                  </div>
+                  <Badge className="rounded-full">Thành công</Badge>
+                </div>
+
+                <div className="rounded-2xl border bg-background px-4 py-4 text-center">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Key của bạn</div>
+                  <div className="mt-2 break-all font-mono text-lg font-semibold text-foreground">{revealed.key}</div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border bg-background px-3 py-3 text-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                    <div className="mt-1 font-semibold text-primary">Thành công</div>
+                  </div>
+                  <div className="rounded-2xl border bg-background px-3 py-3 text-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tự quay lại</div>
+                    <div className="mt-1 font-semibold">{returnSeconds}s</div>
+                  </div>
+                  <div className="rounded-2xl border bg-background px-3 py-3 text-sm sm:col-span-2">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Hết hạn</div>
+                    <div className="mt-1 break-all font-medium text-foreground">{revealed.expiresAt}</div>
+                  </div>
                 </div>
 
                 <Button
-                  className="w-full text-base font-semibold"
+                  className="h-12 w-full rounded-2xl text-base font-semibold"
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(revealed.key);
@@ -667,19 +699,8 @@ export function FreeClaimPage() {
                   {copied ? "Đã copy key" : "Copy key"}
                 </Button>
 
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-md border px-3 py-2 text-sm">
-                    <div className="text-xs uppercase text-muted-foreground">Trạng thái</div>
-                    <div className="mt-1 font-medium text-primary">Thành công</div>
-                  </div>
-                  <div className="rounded-md border px-3 py-2 text-sm">
-                    <div className="text-xs uppercase text-muted-foreground">Tự quay lại</div>
-                    <div className="mt-1 font-medium">{returnSeconds}s</div>
-                  </div>
-                </div>
-
                 <div className="text-center text-xs text-muted-foreground">
-                  Tự động quay lại sau {returnSeconds}s nếu không bấm Copy.
+                  Tự động quay lại sau {returnSeconds}s nếu bạn không thao tác thêm.
                 </div>
               </div>
             )}
