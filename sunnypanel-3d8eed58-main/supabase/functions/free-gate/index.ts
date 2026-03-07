@@ -258,13 +258,11 @@ Deno.serve(async (req) => {
 
   const hashPass1 = (sess as any).out_token_hash;
   const hashPass2 = (sess as any).out_token_hash_pass2;
-
   const matchPass1 = Boolean(hashPass1 && hashPass1 === outHash);
   const matchPass2 = Boolean(hashPass2 && hashPass2 === outHash);
 
   let resolvedPass = pass;
   let tokenVerified = pass === 2 ? matchPass2 : matchPass1;
-
   if (!tokenVerified) {
     if (matchPass2) {
       resolvedPass = 2;
@@ -279,16 +277,7 @@ Deno.serve(async (req) => {
     const currentBits = parseSidAndTokenFromUrl(current_url);
     if (currentBits.token) {
       const currentHash = await sha256Hex(currentBits.token);
-      const currentMatch1 = Boolean(hashPass1 && hashPass1 === currentHash);
-      const currentMatch2 = Boolean(hashPass2 && hashPass2 === currentHash);
-
-      if (currentMatch2) {
-        resolvedPass = 2;
-        tokenVerified = true;
-      } else if (currentMatch1) {
-        resolvedPass = 1;
-        tokenVerified = true;
-      }
+      tokenVerified = Boolean(expectedHash && expectedHash === currentHash);
     }
   }
 
@@ -378,7 +367,7 @@ Deno.serve(async (req) => {
   }
 
   // If VIP needs pass2 and we're on pass1
-  if (required === 2 && pass === 1) {
+  if (required === 2 && resolvedPass === 1) {
     // Only allow transition once
     if (completed >= 1) {
       return json({ ok: false, code: "PASS1_ALREADY_OK", msg: "PASS1_ALREADY_OK" } satisfies JsonErr, 200);
@@ -391,8 +380,8 @@ Deno.serve(async (req) => {
     const rotateBucket = String((sess as any).rotate_bucket ?? "").trim();
     const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
     const gateUrlPass2 = baseUrl
-      ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}&sid=${encodeURIComponent(String((sess as any).session_id))}&t=${encodeURIComponent(tokenPass2)}`
-      : `/free/gate?p=2&sid=${encodeURIComponent(String((sess as any).session_id))}&t=${encodeURIComponent(tokenPass2)}`;
+      ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`
+      : `/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`;
 
     const outboundBase1 = String((settings as any)?.free_outbound_url ?? "").trim() || "https://link4m.com/PkY7X";
     const outboundBase2 = String((settings as any)?.free_outbound_url_pass2 ?? "").trim() || outboundBase1;
@@ -450,8 +439,8 @@ Deno.serve(async (req) => {
       last_error: null,
       passes_completed: required,
       current_pass: required,
-      pass2_ok_at: pass === 2 ? nowIso : null,
-      pass1_ok_at: pass === 1 ? nowIso : (sess as any).pass1_ok_at ?? null,
+      pass2_ok_at: resolvedPass === 2 ? nowIso : null,
+      pass1_ok_at: resolvedPass === 1 ? nowIso : (sess as any).pass1_ok_at ?? null,
     })
     .eq("session_id", (sess as any).session_id);
 

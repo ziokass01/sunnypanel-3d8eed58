@@ -682,7 +682,7 @@ const disableAllKeyTypes = useMutation({
     inputMode="url"
   />
   <div className="text-xs text-muted-foreground">
-    Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Nên dùng placeholder <span className="font-mono">{'{GATE_URL_ENC}'}</span>.
+    Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Link Pass2 cũng được giữ cố định theo bucket thời gian, không tạo mới mỗi lần Get Key. Nên dùng placeholder <span className="font-mono">{'{GATE_URL_ENC}'}</span>.
   </div>
 </div>
 
@@ -695,7 +695,7 @@ const disableAllKeyTypes = useMutation({
     min={1}
   />
   <div className="text-xs text-muted-foreground">
-    Trong cùng 1 bucket, Gate URL giữ ổn định để tránh spam tạo link mới. (Ví dụ: 7 ngày)
+    Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới. (Ví dụ: 7 ngày)
   </div>
 </div>
 </div>

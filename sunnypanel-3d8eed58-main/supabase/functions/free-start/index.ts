@@ -435,8 +435,11 @@ const rotate_bucket = computeRotateBucket(rotateDays);
     const session_id = insData.session_id as string;
     
 
-const gate_url_pass1 = `${baseUrl}/free/gate?p=1&b=${encodeURIComponent(rotate_bucket)}&sid=${encodeURIComponent(session_id)}&t=${encodeURIComponent(out_token)}`;
-const gate_url_pass2 = `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotate_bucket)}&sid=${encodeURIComponent(session_id)}`;
+// Keep Link4M target stable within the rotate bucket.
+// Session/token stay in local bundle and are verified at /free/gate, so we do not
+// need to generate a brand-new Link4M URL for every Get Key click.
+const gate_url_pass1 = `${baseUrl}/free/gate?p=1&b=${encodeURIComponent(rotate_bucket)}`;
+const gate_url_pass2 = `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotate_bucket)}`;
 
 // Outbound templates
 const outboundBasePass1 = rawOutbound || fallbackOutbound;
