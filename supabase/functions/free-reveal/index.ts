@@ -209,20 +209,20 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass",
       )
       .eq("claim_token_hash", claimHash)
-      .eq("out_token_hash", outHash)
+      .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
       .maybeSingle();
     if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = "claim+out";
+    if (debugLookup) debugLookup.looked_up_by = "claim+out(any-pass)";
   }
 
   if (!sess && requestedSessionId) {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass",
       )
       .eq("session_id", requestedSessionId)
       .maybeSingle();
@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass",
       )
       .eq("claim_token_hash", claimHash)
       .maybeSingle();
@@ -246,12 +246,12 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass",
       )
-      .eq("out_token_hash", outHash)
+      .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
       .maybeSingle();
     if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "out_token_hash";
+    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "out_token_hash(any-pass)";
   }
 
   if (!sess) {
@@ -370,11 +370,12 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
-  // If session has out_token_hash, require a matching out_token.
-  if (sess.out_token_hash) {
-    if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-    if (sess.out_token_hash !== outHash) {
-      return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+  // Require a matching out_token. VIP pass2 may legitimately use out_token_hash_pass2 instead of out_token_hash.
+  const acceptedOutHashes = [String((sess as any).out_token_hash || "").trim(), String((sess as any).out_token_hash_pass2 || "").trim()].filter(Boolean);
+  if (acceptedOutHashes.length > 0) {
+    if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
+    if (!acceptedOutHashes.includes(outHash)) {
+      return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
     }
   }
 
