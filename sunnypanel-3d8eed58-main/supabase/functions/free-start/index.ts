@@ -209,13 +209,6 @@ function applyTemplateApiToken(tpl: string, token: string) {
 
 const rotateDays = Number((settings as any)?.free_link4m_rotate_days ?? 7);
 const rotate_bucket = computeRotateBucket(rotateDays);
-const requiresDoubleGate = Boolean((kt as any).requires_double_gate);
-
-    // Create token-based session(s) (expires quickly)
-    const out_token = base64url(32);
-    const out_token_hash = await sha256Hex(out_token);
-    const out_token_pass2 = requiresDoubleGate ? base64url(32) : "";
-    const out_token_hash_pass2 = out_token_pass2 ? await sha256Hex(out_token_pass2) : null;
 
     function buildOutboundUrl(outboundBase: string, gateUrl: string) {
       const tpl = String(outboundBase || "").trim();
@@ -262,6 +255,105 @@ const requiresDoubleGate = Boolean((kt as any).requires_double_gate);
       }
     }
 
+
+function isLink4mQuickUrl(raw: string) {
+  try {
+    const u = new URL(String(raw || "").trim());
+    const host = (u.hostname || "").toLowerCase();
+    if (!host.includes("link4m")) return false;
+    const path = (u.pathname || "").replace(/\/+$/, "");
+    const hasApi = u.searchParams.has("api") || u.searchParams.has("apikey") || u.searchParams.has("token");
+    return Boolean((path.endsWith("/st") || path.includes("api-shorten")) && hasApi && u.searchParams.has("url"));
+  } catch {
+    return false;
+  }
+}
+
+function pickUrlFromText(body: string) {
+  const text = String(body || "");
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["short_url", "shortened_url", "url", "link", "shortlink", "data"]) {
+      const value = parsed?.[key];
+      if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) return value.trim();
+      if (value && typeof value === "object") {
+        for (const nestedKey of ["short_url", "shortened_url", "url", "link", "shortlink"]) {
+          const nested = (value as Record<string, unknown>)[nestedKey];
+          if (typeof nested === "string" && /^https?:\/\//i.test(nested.trim())) return nested.trim();
+        }
+      }
+    }
+  } catch {
+    // ignore json parsing
+  }
+  const m = text.match(/https?:\/\/[^\s"'<>]+/i);
+  return m ? m[0].trim() : "";
+}
+
+async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: string, outboundCandidate: string, gateUrl: string) {
+  const raw = String(outboundCandidate || "").trim();
+  if (!raw || raw === "__TEMPLATE_INVALID__") return raw;
+  if (!isLink4mQuickUrl(raw)) return raw;
+
+  const templateHash = await sha256Hex(raw);
+  try {
+    const cached = await sb
+      .from("licenses_free_link4m_cache")
+      .select("short_url")
+      .eq("pass_no", passNo)
+      .eq("rotate_bucket", rotateBucket)
+      .eq("template_hash", templateHash)
+      .maybeSingle();
+    const cachedUrl = String((cached.data as any)?.short_url ?? "").trim();
+    if (cachedUrl) return cachedUrl;
+  } catch {
+    // cache table may not exist yet
+  }
+
+  let stableUrl = raw;
+  try {
+    const resp = await fetch(raw, {
+      method: "GET",
+      redirect: "manual",
+      headers: {
+        "user-agent": "SunnyPanel/1.0 Link4M resolver",
+        "accept": "text/html,application/json,text/plain,*/*",
+      },
+    });
+
+    const location = String(resp.headers.get("location") || "").trim();
+    if (location) {
+      stableUrl = new URL(location, raw).toString();
+    } else {
+      const body = await resp.text();
+      const extracted = pickUrlFromText(body);
+      if (extracted) {
+        stableUrl = new URL(extracted, raw).toString();
+      }
+    }
+  } catch {
+    stableUrl = raw;
+  }
+
+  try {
+    await sb
+      .from("licenses_free_link4m_cache")
+      .upsert({
+        pass_no: passNo,
+        rotate_bucket: rotateBucket,
+        template_hash: templateHash,
+        gate_url: gateUrl,
+        short_url: stableUrl,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "pass_no,rotate_bucket,template_hash" });
+  } catch {
+    // ignore cache write failures
+  }
+
+  return stableUrl;
+}
+
     const outboundBase = rawOutbound || fallbackOutbound;
 
     // Key type must be enabled (keep this before session insert)
@@ -278,6 +370,12 @@ const requiresDoubleGate = Boolean((kt as any).requires_double_gate);
     if (!kt || !kt.enabled) {
       return jsonResponse({ ok: false, msg: "KEY_TYPE_DISABLED" }, 400);
     }
+
+    const requiresDoubleGate = Boolean((kt as any).requires_double_gate);
+    const out_token = base64url(32);
+    const out_token_hash = await sha256Hex(out_token);
+    const out_token_pass2 = requiresDoubleGate ? base64url(32) : "";
+    const out_token_hash_pass2 = out_token_pass2 ? await sha256Hex(out_token_pass2) : null;
 
     const ua = req.headers.get("user-agent") ?? "";
     const ip = getClientIp(req);
@@ -455,8 +553,14 @@ const token2 = LINK4M_API_TOKEN_PASS2 || LINK4M_API_TOKEN_PASS1;
 const tpl1 = applyTemplateApiToken(outboundBasePass1, token1);
 const tpl2 = applyTemplateApiToken(outboundBasePass2, token2);
 
-const builtOutbound = test_mode ? gate_url_pass1 : buildOutboundUrl(tpl1, gate_url_pass1);
-const builtOutboundPass2 = test_mode ? gate_url_pass2 : buildOutboundUrl(tpl2, gate_url_pass2);
+let builtOutbound = test_mode ? gate_url_pass1 : buildOutboundUrl(tpl1, gate_url_pass1);
+let builtOutboundPass2 = test_mode ? gate_url_pass2 : buildOutboundUrl(tpl2, gate_url_pass2);
+if (!test_mode) {
+  builtOutbound = await resolveStableLink4mUrl(sb, 1, rotate_bucket, builtOutbound, gate_url_pass1);
+  if (requiresDoubleGate) {
+    builtOutboundPass2 = await resolveStableLink4mUrl(sb, 2, rotate_bucket, builtOutboundPass2, gate_url_pass2);
+  }
+}
     if (!builtOutbound) return jsonResponse({ ok: false, code: "MISSING_OUTBOUND_URL", msg: "MISSING_OUTBOUND_URL" }, 500);
     if (builtOutbound === "__TEMPLATE_INVALID__") {
       return jsonResponse(

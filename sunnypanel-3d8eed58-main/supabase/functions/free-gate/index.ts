@@ -102,6 +102,105 @@ function buildOutboundUrl(outboundBase: string, gateUrl: string) {
   }
 }
 
+
+function isLink4mQuickUrl(raw: string) {
+  try {
+    const u = new URL(String(raw || "").trim());
+    const host = (u.hostname || "").toLowerCase();
+    if (!host.includes("link4m")) return false;
+    const path = (u.pathname || "").replace(/\/+$/, "");
+    const hasApi = u.searchParams.has("api") || u.searchParams.has("apikey") || u.searchParams.has("token");
+    return Boolean((path.endsWith("/st") || path.includes("api-shorten")) && hasApi && u.searchParams.has("url"));
+  } catch {
+    return false;
+  }
+}
+
+function pickUrlFromText(body: string) {
+  const text = String(body || "");
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["short_url", "shortened_url", "url", "link", "shortlink", "data"]) {
+      const value = parsed?.[key];
+      if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) return value.trim();
+      if (value && typeof value === "object") {
+        for (const nestedKey of ["short_url", "shortened_url", "url", "link", "shortlink"]) {
+          const nested = (value as Record<string, unknown>)[nestedKey];
+          if (typeof nested === "string" && /^https?:\/\//i.test(nested.trim())) return nested.trim();
+        }
+      }
+    }
+  } catch {
+    // ignore json parsing
+  }
+  const m = text.match(/https?:\/\/[^\s"'<>]+/i);
+  return m ? m[0].trim() : "";
+}
+
+async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: string, outboundCandidate: string, gateUrl: string) {
+  const raw = String(outboundCandidate || "").trim();
+  if (!raw || raw === "__TEMPLATE_INVALID__") return raw;
+  if (!isLink4mQuickUrl(raw)) return raw;
+
+  const templateHash = await sha256Hex(raw);
+  try {
+    const cached = await sb
+      .from("licenses_free_link4m_cache")
+      .select("short_url")
+      .eq("pass_no", passNo)
+      .eq("rotate_bucket", rotateBucket)
+      .eq("template_hash", templateHash)
+      .maybeSingle();
+    const cachedUrl = String((cached.data as any)?.short_url ?? "").trim();
+    if (cachedUrl) return cachedUrl;
+  } catch {
+    // cache table may not exist yet
+  }
+
+  let stableUrl = raw;
+  try {
+    const resp = await fetch(raw, {
+      method: "GET",
+      redirect: "manual",
+      headers: {
+        "user-agent": "SunnyPanel/1.0 Link4M resolver",
+        "accept": "text/html,application/json,text/plain,*/*",
+      },
+    });
+
+    const location = String(resp.headers.get("location") || "").trim();
+    if (location) {
+      stableUrl = new URL(location, raw).toString();
+    } else {
+      const body = await resp.text();
+      const extracted = pickUrlFromText(body);
+      if (extracted) {
+        stableUrl = new URL(extracted, raw).toString();
+      }
+    }
+  } catch {
+    stableUrl = raw;
+  }
+
+  try {
+    await sb
+      .from("licenses_free_link4m_cache")
+      .upsert({
+        pass_no: passNo,
+        rotate_bucket: rotateBucket,
+        template_hash: templateHash,
+        gate_url: gateUrl,
+        short_url: stableUrl,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "pass_no,rotate_bucket,template_hash" });
+  } catch {
+    // ignore cache write failures
+  }
+
+  return stableUrl;
+}
+
 const BodySchema = z.object({
   pass: z.number().int().min(1).max(2).optional().default(1),
   session_id: z.string().uuid().optional(),
@@ -256,6 +355,10 @@ Deno.serve(async (req) => {
     }
   }
 
+  const required = Math.max(1, Math.min(2, Number((sess as any).passes_required ?? 1)));
+  const completed = Math.max(0, Math.min(2, Number((sess as any).passes_completed ?? 0)));
+  const currentPass = Math.max(1, Math.min(2, Number((sess as any).current_pass ?? 1)));
+
   const hashPass1 = (sess as any).out_token_hash;
   const hashPass2 = (sess as any).out_token_hash_pass2;
   const expectedHash = pass === 2 ? hashPass2 : hashPass1;
@@ -321,9 +424,6 @@ Deno.serve(async (req) => {
 
   const pass2StartedIso = (sess as any).pass2_started_at ?? null;
   const pass2StartedMs = pass2StartedIso ? Date.parse(pass2StartedIso) : NaN;
-
-  const required = Math.max(1, Math.min(2, Number((sess as any).passes_required ?? 1)));
-  const completed = Math.max(0, Math.min(2, Number((sess as any).passes_completed ?? 0)));
 
   // Delay enforcement
   if (resolvedPass === 1) {
@@ -394,7 +494,8 @@ Deno.serve(async (req) => {
 
     const tpl2 = applyTemplateApiToken(outboundBase2, (LINK4M_API_TOKEN_PASS2 || LINK4M_API_TOKEN_PASS1));
 
-    const outbound2 = buildOutboundUrl(tpl2, gateUrlPass2);
+    const rawOutbound2 = buildOutboundUrl(tpl2, gateUrlPass2);
+    const outbound2 = await resolveStableLink4mUrl(sb, 2, rotateBucket || "0", rawOutbound2, gateUrlPass2);
     if (!outbound2 || outbound2 === "__TEMPLATE_INVALID__") {
       return json(
         {

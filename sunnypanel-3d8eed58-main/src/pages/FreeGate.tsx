@@ -56,6 +56,14 @@ export function FreeGatePage() {
 
   const outToken = useMemo(() => {
     if (tFromQuery) return tFromQuery;
+    try {
+      if (pass === 2) {
+        const pass2a = (localStorage.getItem("free_out_token_pass2") || "").trim();
+        if (pass2a) return pass2a;
+      }
+    } catch {
+      // ignore
+    }
     const fromPrimary = (getOutToken() || "").trim();
     if (fromPrimary) return fromPrimary;
     try {
@@ -63,11 +71,15 @@ export function FreeGatePage() {
       if (fb1) return fb1;
       const fb2 = (localStorage.getItem("free_out_token") || "").trim();
       if (fb2) return fb2;
+      if (pass === 2) {
+        const pass2b = (localStorage.getItem("free_out_token_pass2") || "").trim();
+        if (pass2b) return pass2b;
+      }
     } catch {
       // ignore
     }
     return "";
-  }, [tFromQuery, query]);
+  }, [tFromQuery, query, pass]);
 
   const sessionId = useMemo(() => {
     if (sidFromQuery) return sidFromQuery;
@@ -164,11 +176,14 @@ export function FreeGatePage() {
             }
           }
           setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
-          let outbound = String(ok.outbound_url || "").trim();
+          let outbound = "";
           try {
-            if (!outbound) outbound = String(localStorage.getItem("free_outbound_url_pass2") || "").trim();
+            outbound = String(localStorage.getItem("free_outbound_url_pass2") || "").trim();
           } catch {
             // ignore
+          }
+          if (!outbound) {
+            outbound = String(ok.outbound_url || "").trim();
           }
           if (!outbound) {
             setStatus("error");
