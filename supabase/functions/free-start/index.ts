@@ -499,6 +499,21 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       return jsonResponse({ ok: false, msg: "BLOCKED" }, 403);
     }
 
+    const pendingWindowFrom = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const pendingStatuses = ["started", "gate_ok", "pass1_ok"];
+    const pendingQuery = await sb
+      .from("licenses_free_sessions")
+      .select("session_id", { count: "exact", head: true })
+      .eq("fingerprint_hash", fpHash)
+      .in("status", pendingStatuses)
+      .gte("created_at", pendingWindowFrom);
+
+    const pendingCount = Number(pendingQuery.count ?? 0);
+    if (pendingCount >= 2) {
+      await safeLogSecurity("session_waiting_limit", { key_type_code, pendingCount }, ipHash, fingerprint ? fpHash : null);
+      return jsonResponse({ ok: false, code: "SESSION_PENDING_LIMIT", msg: "SESSION_PENDING_LIMIT" }, 429);
+    }
+
     // out_token generated above (must be included in gate_url + stored hashed in session)
     // const out_token = base64url(32);
     // const out_token_hash = await sha256Hex(out_token);

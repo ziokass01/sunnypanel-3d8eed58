@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
+import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
 import {
   clearFreeFlowStorage,
@@ -249,6 +250,8 @@ export function FreeClaimPage() {
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<RevealedState | null>(null);
   const [serverDebug, setServerDebug] = useState<any>(null);
+  const [copied, setCopied] = useState(false);
+  const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
@@ -468,6 +471,8 @@ export function FreeClaimPage() {
         }
 
         const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
+        markFreeAttemptFail(code || err.msg || "REVEAL_FAILED");
+        setDeviceHistory(readFreeDeviceHistory());
         setError(debugMode && code ? `${friendly} (${code})` : friendly);
         return;
       }
@@ -491,12 +496,16 @@ export function FreeClaimPage() {
           session_id: okRes.session_id || null,
         };
         localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
+        markFreeSuccess({ keyLabel: payload.key_type, nextEligibleAt: okRes.expires_at || null });
+        setDeviceHistory(readFreeDeviceHistory());
       } catch {
         // ignore
       }
     } catch (e: any) {
       const code = String(e?.code || "").trim();
       const friendly = friendlyRevealError(code || e?.message || "UNAUTHORIZED");
+      markFreeAttemptFail(code || e?.message || "REVEAL_FAILED");
+      setDeviceHistory(readFreeDeviceHistory());
       setError(debugMode && code ? `${friendly} (${code})` : friendly);
     } finally {
       setLoading(false);
@@ -552,6 +561,14 @@ export function FreeClaimPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <FreeFlowSteps current={4} />
+
+            <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
+              Khi phiên hợp lệ, key sẽ hiện ở ngay bên dưới. Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới.
+            </div>
+
+            <FreeDeviceHistoryCard history={deviceHistory} />
+
             {!claimToken ? (
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium"> Xác thực không thành công hoặc lỗi </div>
@@ -636,18 +653,30 @@ export function FreeClaimPage() {
                 </div>
 
                 <Button
-                  className="w-full"
+                  className="w-full text-base font-semibold"
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(revealed.key);
+                      setCopied(true);
                     } catch {
                       // ignore
                     }
                     await closeAndReturn();
                   }}
                 >
-                  Copy
+                  {copied ? "Đã copy key" : "Copy key"}
                 </Button>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-md border px-3 py-2 text-sm">
+                    <div className="text-xs uppercase text-muted-foreground">Trạng thái</div>
+                    <div className="mt-1 font-medium text-primary">Thành công</div>
+                  </div>
+                  <div className="rounded-md border px-3 py-2 text-sm">
+                    <div className="text-xs uppercase text-muted-foreground">Tự quay lại</div>
+                    <div className="mt-1 font-medium">{returnSeconds}s</div>
+                  </div>
+                </div>
 
                 <div className="text-center text-xs text-muted-foreground">
                   Tự động quay lại sau {returnSeconds}s nếu không bấm Copy.

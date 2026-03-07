@@ -9,7 +9,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -267,7 +266,6 @@ export function AdminFreeKeysPage() {
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
-  const [settingsSections, setSettingsSections] = useState<string[]>(["basic", "link4m", "gate"]);
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -676,16 +674,48 @@ const disableAllKeyTypes = useMutation({
     onError: (e: any) => toast({ title: "Delete failed", description: e?.message ?? "Error", variant: "destructive" }),
   });
 
+  const dashboardStats = useMemo(() => {
+    const sessions = sessionsQuery.data ?? [];
+    const issues = issuesQuery.data ?? [];
+    const gateLogs = gateLogsQuery.data ?? [];
+    const activeBlocks = gateLogs.filter((row) => String(row.event_code || "").toUpperCase() === "AUTO_BLOCKED").length;
+    const verifyFail = gateLogs.filter((row) => /(FAIL|MISMATCH|EARLY|BLOCKED|BAD_)/i.test(String(row.event_code || ""))).length;
+    const pass1Hits = gateLogs.filter((row) => Number(row.pass_no || 1) === 1).length;
+    const pass2Hits = gateLogs.filter((row) => Number(row.pass_no || 0) === 2).length;
+    const topError = gateLogs.reduce<Record<string, number>>((acc, row) => {
+      const key = String(row.event_code || "UNKNOWN");
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const topErrorLabel = Object.entries(topError).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
+    return {
+      sessionCount: sessions.length,
+      issueCount: issues.length,
+      verifyFail,
+      activeBlocks,
+      pass1Hits,
+      pass2Hits,
+      topErrorLabel,
+    };
+  }, [sessionsQuery.data, issuesQuery.data, gateLogsQuery.data]);
 
   return (
     <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-5">
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.issueCount}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.sessionCount}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Verify fail</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.verifyFail}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Auto blocked</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.activeBlocks}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStats.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStats.pass1Hits} · Pass2: {dashboardStats.pass2Hits}</div></CardContent></Card>
+      </div>
+
       <Card>
         <CardHeader className="space-y-3 pb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
               <CardTitle className="text-xl">Free GetKey Settings</CardTitle>
               <CardDescription>
-                Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint.
+                Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint. Phần trên cùng là dashboard nhanh để bạn nhìn tình hình trong ngày.
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -712,174 +742,229 @@ const disableAllKeyTypes = useMutation({
             </div>
           ) : null}
 
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-lg border bg-muted/20 p-3">
-              <div className="text-xs text-muted-foreground">Trạng thái GetKey</div>
-              <div className="mt-1 flex items-center gap-2">
-                <Badge variant={freeEnabled ? "default" : "destructive"}>{freeEnabled ? "Đang mở" : "Đang tắt"}</Badge>
-                <span className="text-xs text-muted-foreground">Rotate {rotateDays} ngày</span>
+          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+            <div>
+              <div className="font-medium">Bật/tắt trang GetKey</div>
+              <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
+            </div>
+            <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Link4M outbound URL (https)</div>
+              <Input
+                value={outboundUrl}
+                onChange={(e) => setOutboundUrl(e.target.value)}
+                placeholder="https://link4m.co/st?api=YOUR_TOKEN&url=..."
+                inputMode="url"
+              />
+              <div className="text-xs text-muted-foreground">
+                Đây là link Link4M outbound. Hệ thống sẽ tự build URL dẫn về Gate bằng template:
+                <div className="mt-1 font-mono text-xs">
+                  • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
+                </div>
+                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
+                <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> (hoặc api-shorten) thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL. Nếu Link4M khác mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span>.</div>
+              </div>
+            
+
+<div className="space-y-2">
+  <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
+  <Input
+    value={outboundUrlPass2}
+    onChange={(e) => setOutboundUrlPass2(e.target.value)}
+    placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..."
+    inputMode="url"
+  />
+  <div className="text-xs text-muted-foreground">
+    Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Link Pass2 cũng được giữ cố định theo bucket thời gian, không tạo mới mỗi lần Get Key. Nên dùng placeholder <span className="font-mono">{'{GATE_URL_ENC}'}</span>.
+  </div>
+</div>
+
+<div className="space-y-2">
+  <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
+  <Input
+    type="number"
+    value={rotateDays}
+    onChange={(e) => setRotateDays(Number(e.target.value))}
+    min={1}
+  />
+  <div className="text-xs text-muted-foreground">
+    Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới. (Ví dụ: 7 ngày)
+  </div>
+</div>
+</div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Thông báo khi tắt</div>
+              <Textarea value={disabledMessage} onChange={(e) => setDisabledMessage(e.target.value)} rows={3} />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm font-medium">Delay tối thiểu Pass1 (giây)</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-muted-foreground">Bật</div>
+                  <Switch checked={minDelayEnabled} onCheckedChange={setMinDelayEnabled} />
+                </div>
+              </div>
+              <Input
+                type="number"
+                value={minDelay}
+                onChange={(e) => setMinDelay(Number(e.target.value))}
+                min={5}
+                disabled={!minDelayEnabled}
+              />
+              <div className="text-xs text-muted-foreground">
+                {minDelayEnabled
+                  ? "Gate chỉ hợp lệ sau thời gian này (chống spam/bypass cơ bản)."
+                  : "Đang tắt: không kiểm tra delay ở /free/gate."}
               </div>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3">
-              <div className="text-xs text-muted-foreground">Delay / Gate</div>
-              <div className="mt-1 text-sm">P1 {minDelayEnabled ? `${minDelay}s` : "Tắt"} · P2 {minDelayEnabled ? `${minDelayPass2}s` : "Tắt"}</div>
-              <div className="text-xs text-muted-foreground">Anti bypass {gateAntiBypassEnabled ? `${gateAntiBypassSeconds}s` : "Tắt"}</div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Delay tối thiểu Pass2 (giây)</div>
+              <Input
+                type="number"
+                value={minDelayPass2}
+                onChange={(e) => setMinDelayPass2(Number(e.target.value))}
+                min={5}
+                disabled={!minDelayEnabled}
+              />
+              <div className="text-xs text-muted-foreground">
+                VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này (tính từ lúc Pass1 OK). Nếu vào /free/gate?p=2 quá sớm, phiên VIP sẽ bị hủy để chặn bypass chờ sẵn ở gate.
+              </div>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3">
-              <div className="text-xs text-muted-foreground">Giới hạn / 24h</div>
-              <div className="mt-1 text-sm">{dailyLimit} fingerprint</div>
-              <div className="text-xs text-muted-foreground">Return {returnSeconds}s</div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm font-medium">Time anti bypass Gate (giây)</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-muted-foreground">Bật</div>
+                  <Switch checked={gateAntiBypassEnabled} onCheckedChange={setGateAntiBypassEnabled} />
+                </div>
+              </div>
+              <Input
+                type="number"
+                value={gateAntiBypassSeconds}
+                onChange={(e) => setGateAntiBypassSeconds(Number(e.target.value))}
+                min={0}
+                disabled={!gateAntiBypassEnabled}
+              />
+              <div className="text-xs text-muted-foreground">
+                {gateAntiBypassEnabled
+                  ? "Bộ đếm anti bypass riêng cho toàn bộ gate. Nếu người dùng mở /free/gate quá sớm so với thời gian này, phiên sẽ bị hủy ngay. Không dùng chung với Delay Pass1/Pass2 nên không bị xung đột."
+                  : "Đang tắt: không kiểm tra mốc anti bypass riêng ở /free/gate."}
+              </div>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3">
-              <div className="text-xs text-muted-foreground">Referrer Link4M</div>
-              <div className="mt-1"><Badge variant={requireRef ? "default" : "secondary"}>{requireRef ? "Đang bật" : "Đang tắt"}</Badge></div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Tự quay lại /free (giây)</div>
+              <Input
+                type="number"
+                value={returnSeconds}
+                onChange={(e) => setReturnSeconds(Number(e.target.value))}
+                min={10}
+              />
+              <div className="text-xs text-muted-foreground">Trang nhận key sẽ tự out về /free.</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Giới hạn / 24h (theo fingerprint)</div>
+              <Input
+                type="number"
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(Number(e.target.value))}
+                min={1}
+              />
+              <div className="text-xs text-muted-foreground">Chặn spam tạo key vô hạn trên 1 thiết bị.</div>
+            </div>
+
+             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+               <div>
+                 <div className="font-medium">Yêu cầu referrer Link4M</div>
+                 <div className="text-xs text-muted-foreground">
+                   Nếu bật: gate sẽ ưu tiên kiểm tra <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>.
+                   Lưu ý: referrer có thể bị browser/shortlink chặn (policy/redirect). Hệ thống sẽ fallback cho qua nếu URL gate có token hợp lệ.
+                 </div>
+               </div>
+               <Switch checked={requireRef} onCheckedChange={setRequireRef} />
+             </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Ghi chú (hiện cho người dùng)</div>
+              <Textarea
+                value={publicNote}
+                onChange={(e) => setPublicNote(e.target.value)}
+                rows={4}
+                placeholder="Ví dụ: cre, ghi chú, hướng dẫn..."
+              />
+              <div className="text-xs text-muted-foreground">Hiện trên /free và /free/claim (nếu có nội dung).</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Link cộng đồng (mỗi dòng)</div>
+              <Textarea
+                value={publicLinksText}
+                onChange={(e) => setPublicLinksText(e.target.value)}
+                rows={4}
+                placeholder={`Zalo|https://zalo.me/your-group|zalo\nYouTube|https://youtube.com/@yourchannel|youtube`}
+              />
+              <div className="text-xs text-muted-foreground">
+                Format: <span className="font-mono">label|url|icon</span> (icon optional: zalo/youtube/telegram).
+              </div>
             </div>
           </div>
 
-          <Accordion type="multiple" value={settingsSections} onValueChange={setSettingsSections} className="space-y-3">
-            <AccordionItem value="basic" className="rounded-xl border px-4">
-              <AccordionTrigger className="py-3 text-sm font-semibold">GetKey cơ bản</AccordionTrigger>
-              <AccordionContent className="space-y-4 pb-4">
-                <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-                  <div>
-                    <div className="font-medium">Bật/tắt trang GetKey</div>
-                    <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
-                  </div>
-                  <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
-                </div>
+          <div className="rounded-md border p-3 space-y-3">
+            <div>
+              <div className="font-medium">Link gốc (để copy/open)</div>
+              <div className="text-xs text-muted-foreground">Trang nhận key dùng claim token, link gốc là base.</div>
+            </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Thông báo khi tắt</div>
-                    <Textarea value={disabledMessage} onChange={(e) => setDisabledMessage(e.target.value)} rows={3} />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Ghi chú (hiện cho người dùng)</div>
-                    <Textarea value={publicNote} onChange={(e) => setPublicNote(e.target.value)} rows={4} placeholder="Ví dụ: cre, ghi chú, hướng dẫn..." />
-                    <div className="text-xs text-muted-foreground">Hiện trên /free và /free/claim (nếu có nội dung).</div>
-                  </div>
-                </div>
+            <div className="space-y-2">
+              <div className="text-xs font-medium">Trang chọn key</div>
+              <div className="flex gap-2">
+                <Input value={getKeyUrl} readOnly />
+                <Button variant="secondary" onClick={() => copyText(getKeyUrl)}>
+                  Copy
+                </Button>
+                <Button variant="outline" onClick={() => openUrl(getKeyUrl)}>
+                  Open
+                </Button>
+              </div>
+            </div>
 
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Link cộng đồng (mỗi dòng)</div>
-                  <Textarea
-                    value={publicLinksText}
-                    onChange={(e) => setPublicLinksText(e.target.value)}
-                    rows={4}
-                    placeholder={`Zalo|https://zalo.me/your-group|zalo
-YouTube|https://youtube.com/@yourchannel|youtube`}
-                  />
-                  <div className="text-xs text-muted-foreground">Format: <span className="font-mono">label|url|icon</span> (icon optional: zalo/youtube/telegram).</div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
+            <div className="space-y-2">
+              <div className="text-xs font-medium">Gate callback</div>
+              <div className="flex gap-2">
+                <Input value={gateUrl} readOnly />
+                <Button variant="secondary" onClick={() => copyText(gateUrl)}>
+                  Copy
+                </Button>
+                <Button variant="outline" onClick={() => openUrl(gateUrl)}>
+                  Open
+                </Button>
+              </div>
+            </div>
 
-            <AccordionItem value="link4m" className="rounded-xl border px-4">
-              <AccordionTrigger className="py-3 text-sm font-semibold">Link4M / rotate</AccordionTrigger>
-              <AccordionContent className="space-y-4 pb-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Link4M outbound URL (https)</div>
-                    <Input value={outboundUrl} onChange={(e) => setOutboundUrl(e.target.value)} placeholder="https://link4m.co/st?api=YOUR_TOKEN&url=..." inputMode="url" />
-                    <div className="text-xs text-muted-foreground">
-                      Đây là link Link4M outbound. Hệ thống sẽ tự build URL dẫn về Gate bằng template:
-                      <div className="mt-1 font-mono text-xs">• Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)</div>
-                      <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
-                      <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> (hoặc api-shorten) thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL. Nếu Link4M khác mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span>.</div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
-                    <Input value={outboundUrlPass2} onChange={(e) => setOutboundUrlPass2(e.target.value)} placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..." inputMode="url" />
-                    <div className="text-xs text-muted-foreground">Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Link Pass2 cũng được giữ cố định theo bucket thời gian, không tạo mới mỗi lần Get Key. Nên dùng placeholder <span className="font-mono">{'{GATE_URL_ENC}'}</span>.</div>
-                  </div>
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
-                    <Input type="number" value={rotateDays} onChange={(e) => setRotateDays(Number(e.target.value))} min={1} />
-                    <div className="text-xs text-muted-foreground">Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới. (Ví dụ: 7 ngày)</div>
-                  </div>
-                  <div className="rounded-md border p-3 space-y-3">
-                    <div>
-                      <div className="font-medium">Link gốc (copy/open)</div>
-                      <div className="text-xs text-muted-foreground">Trang nhận key dùng claim token, link gốc là base.</div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium">Trang chọn key</div>
-                      <div className="flex flex-wrap gap-2">
-                        <Input value={getKeyUrl} readOnly className="flex-1" />
-                        <Button variant="secondary" onClick={() => copyText(getKeyUrl)}>Copy</Button>
-                        <Button variant="outline" onClick={() => openUrl(getKeyUrl)}>Open</Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium">Gate callback</div>
-                      <div className="flex flex-wrap gap-2">
-                        <Input value={gateUrl} readOnly className="flex-1" />
-                        <Button variant="secondary" onClick={() => copyText(gateUrl)}>Copy</Button>
-                        <Button variant="outline" onClick={() => openUrl(gateUrl)}>Open</Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium">Trang nhận key (base)</div>
-                      <div className="flex flex-wrap gap-2">
-                        <Input value={claimBaseUrl} readOnly className="flex-1" />
-                        <Button variant="secondary" onClick={() => copyText(claimBaseUrl)}>Copy</Button>
-                        <Button variant="outline" onClick={() => openUrl(claimBaseUrl)}>Open</Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
+            <div className="space-y-2">
+              <div className="text-xs font-medium">Trang nhận key (base)</div>
+              <div className="flex gap-2">
+                <Input value={claimBaseUrl} readOnly />
+                <Button variant="secondary" onClick={() => copyText(claimBaseUrl)}>
+                  Copy
+                </Button>
+                <Button variant="outline" onClick={() => openUrl(claimBaseUrl)}>
+                  Open
+                </Button>
+              </div>
+            </div>
+          </div>
 
-            <AccordionItem value="gate" className="rounded-xl border px-4">
-              <AccordionTrigger className="py-3 text-sm font-semibold">Delay / anti bypass</AccordionTrigger>
-              <AccordionContent className="space-y-4 pb-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="text-sm font-medium">Delay tối thiểu Pass1 (giây)</div>
-                      <div className="flex items-center gap-2"><div className="text-xs text-muted-foreground">Bật</div><Switch checked={minDelayEnabled} onCheckedChange={setMinDelayEnabled} /></div>
-                    </div>
-                    <Input type="number" value={minDelay} onChange={(e) => setMinDelay(Number(e.target.value))} min={5} disabled={!minDelayEnabled} />
-                    <div className="text-xs text-muted-foreground">{minDelayEnabled ? "Gate chỉ hợp lệ sau thời gian này (chống spam/bypass cơ bản)." : "Đang tắt: không kiểm tra delay ở /free/gate."}</div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Delay tối thiểu Pass2 (giây)</div>
-                    <Input type="number" value={minDelayPass2} onChange={(e) => setMinDelayPass2(Number(e.target.value))} min={5} disabled={!minDelayEnabled} />
-                    <div className="text-xs text-muted-foreground">VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này (tính từ lúc Pass1 OK). Nếu vào /free/gate?p=2 quá sớm, phiên VIP sẽ bị hủy để chặn bypass chờ sẵn ở gate.</div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="text-sm font-medium">Time anti bypass Gate (giây)</div>
-                      <div className="flex items-center gap-2"><div className="text-xs text-muted-foreground">Bật</div><Switch checked={gateAntiBypassEnabled} onCheckedChange={setGateAntiBypassEnabled} /></div>
-                    </div>
-                    <Input type="number" value={gateAntiBypassSeconds} onChange={(e) => setGateAntiBypassSeconds(Number(e.target.value))} min={0} disabled={!gateAntiBypassEnabled} />
-                    <div className="text-xs text-muted-foreground">{gateAntiBypassEnabled ? "Bộ đếm anti bypass riêng cho toàn bộ gate. Nếu người dùng mở /free/gate quá sớm so với thời gian này, phiên sẽ bị hủy ngay. Không dùng chung với Delay Pass1/Pass2 nên không bị xung đột." : "Đang tắt: không kiểm tra mốc anti bypass riêng ở /free/gate."}</div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Tự quay lại /free (giây)</div>
-                    <Input type="number" value={returnSeconds} onChange={(e) => setReturnSeconds(Number(e.target.value))} min={10} />
-                    <div className="text-xs text-muted-foreground">Trang nhận key sẽ tự out về /free.</div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Giới hạn / 24h (theo fingerprint)</div>
-                    <Input type="number" value={dailyLimit} onChange={(e) => setDailyLimit(Number(e.target.value))} min={1} />
-                    <div className="text-xs text-muted-foreground">Chặn spam tạo key vô hạn trên 1 thiết bị.</div>
-                  </div>
-                  <div className="flex items-center justify-between gap-4 rounded-md border p-3 md:col-span-2">
-                    <div>
-                      <div className="font-medium">Yêu cầu referrer Link4M</div>
-                      <div className="text-xs text-muted-foreground">Nếu bật: gate sẽ ưu tiên kiểm tra <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>. Lưu ý: referrer có thể bị browser/shortlink chặn (policy/redirect). Hệ thống sẽ fallback cho qua nếu URL gate có token hợp lệ.</div>
-                    </div>
-                    <Switch checked={requireRef} onCheckedChange={setRequireRef} />
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
               Save settings
@@ -1044,6 +1129,13 @@ YouTube|https://youtube.com/@yourchannel|youtube`}
             <Badge variant="secondary">Ngày: {day}</Badge>
             <Badge variant="outline">Trạng thái: {statusLabel(status)}</Badge>
             <Badge variant="outline">IP: {ipHash.trim() ? shortText(ipHash, 14) : "tất cả"}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant={status === "all" ? "default" : "outline"} onClick={() => setStatus("all")}>Tất cả</Button>
+            <Button size="sm" variant={status === "started" ? "default" : "outline"} onClick={() => setStatus("started")}>Đang chờ gate</Button>
+            <Button size="sm" variant={status === "gate_ok" ? "default" : "outline"} onClick={() => setStatus("gate_ok")}>Gate OK</Button>
+            <Button size="sm" variant={status === "gate_fail" ? "default" : "outline"} onClick={() => setStatus("gate_fail")}>Gate fail</Button>
+            <Button size="sm" variant={status === "revealed" ? "default" : "outline"} onClick={() => setStatus("revealed")}>Đã reveal</Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-3 pt-0">

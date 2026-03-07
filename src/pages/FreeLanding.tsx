@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { PublicInfo } from "@/features/free/PublicInfo";
+import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -71,6 +72,7 @@ export function FreeLandingPage() {
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
   const [debugStart, setDebugStart] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
   useEffect(() => {
     try {
@@ -82,6 +84,7 @@ export function FreeLandingPage() {
     } catch {
       // ignore
     }
+    setDeviceHistory(readFreeDeviceHistory());
   }, []);
 
   useEffect(() => {
@@ -139,6 +142,12 @@ export function FreeLandingPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
+            <FreeFlowSteps current={1} />
+
+            <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
+              Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.
+            </div>
+
             {err ? (
               <div className="space-y-2">
                 <div className="text-sm text-destructive">{err}</div>
@@ -174,6 +183,8 @@ export function FreeLandingPage() {
 
             <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
+            <FreeDeviceHistoryCard history={deviceHistory} />
+
             <div className="space-y-2">
               <div className="text-sm font-medium">Chọn loại key</div>
               <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || isClosed || loading}>
@@ -199,6 +210,8 @@ export function FreeLandingPage() {
 
                 // Start a new flow atomically: clear old bundle first (avoid mixing tokens across sessions)
                 clearBundle();
+                markFreeAttempt();
+                setDeviceHistory(readFreeDeviceHistory());
 
                 setLoading(true);
                 setErr(null);
@@ -232,12 +245,22 @@ export function FreeLandingPage() {
                   if (!res.ok) {
                     const r = res as StartErr;
                     if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
+                      markFreeAttemptFail(r.code);
+                      setDeviceHistory(readFreeDeviceHistory());
                       setErr(`${r.code}: ${r.msg}`);
                       return;
                     }
                     if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
+                      markFreeAttemptFail(r.code);
+                      setDeviceHistory(readFreeDeviceHistory());
                       setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
+                    } else if (r.code === "SESSION_PENDING_LIMIT") {
+                      markFreeAttemptFail(r.code);
+                      setDeviceHistory(readFreeDeviceHistory());
+                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
                     } else {
+                      markFreeAttemptFail(r.code || r.msg || "START_FAILED");
+                      setDeviceHistory(readFreeDeviceHistory());
                       setErr(r.msg || "Start failed");
                     }
                     return;
@@ -324,6 +347,12 @@ export function FreeLandingPage() {
                     setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
                     return;
                   }
+                  if (code === "SESSION_PENDING_LIMIT") {
+                    setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+                    return;
+                  }
+                  markFreeAttemptFail(code || e?.message || "START_FAILED");
+                  setDeviceHistory(readFreeDeviceHistory());
                   setErr(e?.message ?? "Start failed");
                 } finally {
                   setLoading(false);

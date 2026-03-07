@@ -23,7 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 .npmrc
-# Sensitive/local-only files
+
+# Sensitive / temp
 .env
 .env.*
 !.env.example

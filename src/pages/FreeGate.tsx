@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
+import { FreeFlowSteps, markFreeAttemptFail } from "@/features/free/flow-ux";
 import { readBundle, writeBundle } from "@/lib/freeFlow";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
@@ -224,10 +225,12 @@ export function FreeGatePage() {
 
       const err = res as GateErr;
       const msg = err.code || err.msg || "VERIFY_FAILED";
+      markFreeAttemptFail(msg);
       setStatus("error");
       setMessage(friendlyGateError(msg));
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
     } catch (e: any) {
+      markFreeAttemptFail(e?.code ?? e?.message ?? "VERIFY_FAILED");
       setStatus("error");
       setMessage(friendlyGateError(e?.code ?? e?.message ?? "VERIFY_FAILED"));
       window.setTimeout(() => nav("/free", { replace: true }), Math.max(10, cfgReturn) * 1000);
@@ -292,11 +295,17 @@ export function FreeGatePage() {
             <CardDescription>Hệ thống đang xác thực bước vượt link.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <FreeFlowSteps current={3} />
+
+            <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
+              Đây là bước xác thực cuối trước khi hiện key. Nếu phiên bị sai, quá sớm hoặc không đúng thiết bị, hệ thống sẽ tự hủy và đưa bạn về lại bước đầu.
+            </div>
+
             <div className="rounded-md border p-3 text-sm">
               <div className="font-medium">{message}</div>
               <div className="mt-1 text-muted-foreground">
                 {status === "working" || status === "countdown"
-                  ? "Vui lòng không tắt trang."
+                  ? "Vui lòng không tắt trang hoặc đổi trình duyệt trong lúc xác thực."
                   : "Bạn sẽ được đưa về trang Get Key."}
               </div>
             </div>

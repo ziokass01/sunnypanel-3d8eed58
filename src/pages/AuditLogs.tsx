@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Filter } from "lucide-react";
+import { CheckCircle2, ChevronDown, Filter, ShieldAlert, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fetchAuditLogs } from "@/features/audit/audit-api";
+
+type QuickFilter = "all" | "verify_fail" | "verify_ok" | "mutations" | "destructive";
 
 function auditVariant(action?: string, detail?: any) {
   const v = String(action ?? "").toUpperCase();
@@ -27,40 +29,39 @@ function auditLabel(action?: string, detail?: any) {
   return v || "UNKNOWN";
 }
 
-function maskValue(value: unknown) {
-  const text = String(value ?? "");
-  if (!text) return text;
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(text)) {
-    const parts = text.split(".");
-    return `${parts[0]}.${parts[1]}.***.***`;
-  }
-  if (text.length <= 8) return `${text.slice(0, 2)}***`;
-  return `${text.slice(0, 4)}…${text.slice(-4)}`;
+function compactJson(value: unknown) {
+  const text = JSON.stringify(value ?? {}, null, 2);
+  return text.length > 280 ? `${text.slice(0, 280)}…` : text;
 }
 
-function maskSensitive(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(maskSensitive);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => {
-      if (/^(ip|ip_hash|fingerprint|fingerprint_hash|ua_hash|device|device_row|license_id|session_id)$/i.test(k)) {
-        return [k, maskValue(v)];
-      }
-      return [k, maskSensitive(v)];
-    }));
-  }
-  return value;
+function maskValue(v: string) {
+  if (!v) return v;
+  if (v.length <= 8) return `${v.slice(0, 2)}…`;
+  return `${v.slice(0, 4)}…${v.slice(-4)}`;
 }
 
-function compactJson(value: unknown, full = false) {
-  const text = JSON.stringify(full ? (value ?? {}) : maskSensitive(value), null, 2);
-  return !full && text.length > 240 ? `${text.slice(0, 240)}…` : text;
+function maskDetail(value: any): any {
+  if (Array.isArray(value)) return value.map(maskDetail);
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "string" && /(ip|device|fingerprint|token|session|secret|hash)/i.test(key)) {
+      out[key] = maskValue(raw);
+    } else if (raw && typeof raw === "object") {
+      out[key] = maskDetail(raw);
+    } else {
+      out[key] = raw;
+    }
+  }
+  return out;
 }
 
 export function AuditLogsPage() {
   const [q, setQ] = useState("");
   const [action, setAction] = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [expandedRows, setExpandedRows] = useState<number[]>([]);
+  const [quick, setQuick] = useState<QuickFilter>("all");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const queryKey = useMemo(() => ["audit_logs", { q, action }] as const, [q, action]);
   const { data = [], isLoading, error } = useQuery({
@@ -68,23 +69,39 @@ export function AuditLogsPage() {
     queryFn: () => fetchAuditLogs({ q, action }),
   });
 
-  const summary = useMemo(() => ({
-    total: data.length,
-    verifyOk: data.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false).length,
-    verifyFail: data.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false).length,
-  }), [data]);
+  const filteredData = useMemo(() => {
+    return data.filter((row) => {
+      if (quick === "verify_fail") return String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false;
+      if (quick === "verify_ok") return String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false;
+      if (quick === "mutations") return ["CREATE", "UPDATE", "RESTORE"].includes(String(row.action).toUpperCase());
+      if (quick === "destructive") return ["DELETE", "HARD_DELETE"].includes(String(row.action).toUpperCase()) || row.detail?.ok === false;
+      return true;
+    });
+  }, [data, quick]);
 
-  const toggleExpanded = (id: number) => {
-    setExpandedRows((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
+  const stats = useMemo(() => {
+    const total = filteredData.length;
+    const verifyOk = filteredData.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false).length;
+    const verifyFail = filteredData.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false).length;
+    const destructive = filteredData.filter((row) => ["DELETE", "HARD_DELETE"].includes(String(row.action).toUpperCase())).length;
+    return { total, verifyOk, verifyFail, destructive };
+  }, [filteredData]);
+
+  const quickButtons: Array<{ key: QuickFilter; label: string }> = [
+    { key: "all", label: "Tất cả" },
+    { key: "verify_fail", label: "Verify fail" },
+    { key: "verify_ok", label: "Verify ok" },
+    { key: "mutations", label: "Create / Update" },
+    { key: "destructive", label: "Delete / lỗi" },
+  ];
 
   return (
     <section className="space-y-4">
-      <header className="space-y-3">
+      <header className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Audit logs</h1>
-            <p className="mt-2 text-sm text-muted-foreground">CREATE / UPDATE / DELETE / RESTORE / VERIFY</p>
+            <p className="mt-2 text-sm text-muted-foreground">Theo dõi thao tác tạo, sửa, xoá và xác minh key theo cách gọn hơn, dễ đọc hơn.</p>
           </div>
           <Collapsible open={showFilters} onOpenChange={setShowFilters}>
             <CollapsibleTrigger asChild>
@@ -97,12 +114,57 @@ export function AuditLogsPage() {
           </Collapsible>
         </div>
 
+        <div className="grid gap-3 md:grid-cols-4">
+          <Card>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <div className="text-xs uppercase text-muted-foreground">Tổng log</div>
+                <div className="mt-1 text-2xl font-semibold">{stats.total}</div>
+              </div>
+              <Badge variant="outline">Rows</Badge>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <div className="text-xs uppercase text-muted-foreground">Verify OK</div>
+                <div className="mt-1 text-2xl font-semibold">{stats.verifyOk}</div>
+              </div>
+              <CheckCircle2 className="h-5 w-5 text-primary" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <div className="text-xs uppercase text-muted-foreground">Verify fail</div>
+                <div className="mt-1 text-2xl font-semibold">{stats.verifyFail}</div>
+              </div>
+              <ShieldAlert className="h-5 w-5 text-destructive" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <div className="text-xs uppercase text-muted-foreground">Delete / hard delete</div>
+                <div className="mt-1 text-2xl font-semibold">{stats.destructive}</div>
+              </div>
+              <Trash2 className="h-5 w-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {quickButtons.map((item) => (
+            <Button key={item.key} size="sm" variant={quick === item.key ? "default" : "outline"} onClick={() => setQuick(item.key)}>
+              {item.label}
+            </Button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap gap-2 text-xs">
-          <Badge variant="outline">Từ khóa: {q.trim() || "tất cả"}</Badge>
+          <Badge variant="outline">Từ khoá: {q.trim() || "tất cả"}</Badge>
           <Badge variant="secondary">Action: {action === "all" ? "all" : action}</Badge>
-          <Badge variant="outline">Kết quả: {summary.total} dòng</Badge>
-          <Badge variant="default">Verify OK: {summary.verifyOk}</Badge>
-          <Badge variant="destructive">Verify fail: {summary.verifyFail}</Badge>
+          <Badge variant="outline">Hiển thị: {filteredData.length} dòng</Badge>
         </div>
 
         <Collapsible open={showFilters} onOpenChange={setShowFilters}>
@@ -122,6 +184,7 @@ export function AuditLogsPage() {
                   <SelectItem value="UPDATE">UPDATE</SelectItem>
                   <SelectItem value="DELETE">DELETE</SelectItem>
                   <SelectItem value="RESTORE">RESTORE</SelectItem>
+                  <SelectItem value="HARD_DELETE">HARD_DELETE</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -129,78 +192,40 @@ export function AuditLogsPage() {
         </Collapsible>
       </header>
 
-      {error ? <div className="text-sm text-destructive">{String(error)}</div> : null}
+      {error ? <div className="text-sm text-destructive">{(error as Error).message}</div> : null}
 
-      <div className="grid gap-3 md:hidden">
-        {isLoading ? (
-          <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">Loading…</div>
-        ) : data.length === 0 ? (
-          <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">No logs.</div>
-        ) : (
-          data.map((row) => (
-            <div key={row.id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-xs text-muted-foreground">{new Date(row.created_at).toLocaleString()}</div>
-                <Badge variant={auditVariant(row.action, row.detail)}>{auditLabel(row.action, row.detail)}</Badge>
+      <Card>
+        <CardHeader>
+          <CardTitle>Danh sách log</CardTitle>
+          <CardDescription>Mặc định dữ liệu nhạy cảm được rút gọn. Bấm “Xem đầy đủ” nếu cần soi chi tiết.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : null}
+          {!isLoading && !filteredData.length ? <div className="text-sm text-muted-foreground">Không có dữ liệu phù hợp.</div> : null}
+          {filteredData.map((row) => {
+            const open = expandedId === row.id;
+            return (
+              <div key={row.id} className="rounded-xl border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={auditVariant(row.action, row.detail)}>{auditLabel(row.action, row.detail)}</Badge>
+                      <Badge variant="outline">{new Date(row.created_at).toLocaleString("vi-VN")}</Badge>
+                    </div>
+                    <div className="font-mono text-sm break-all">{row.license_key || "-"}</div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setExpandedId(open ? null : row.id)}>
+                    {open ? "Ẩn" : "Xem đầy đủ"}
+                  </Button>
+                </div>
+                <div className="mt-3 rounded-lg bg-muted/30 p-3 text-xs">
+                  <pre className="whitespace-pre-wrap break-words">{open ? JSON.stringify(row.detail ?? {}, null, 2) : compactJson(maskDetail(row.detail))}</pre>
+                </div>
               </div>
-              <div className="font-mono text-xs break-all">{row.license_key}</div>
-              <pre className="rounded-lg bg-background/70 p-2 text-[11px] whitespace-pre-wrap break-words">{compactJson(row.detail, expandedRows.includes(row.id))}</pre>
-              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => toggleExpanded(row.id)}>
-                {expandedRows.includes(row.id) ? "Ẩn chi tiết" : "Xem đầy đủ"}
-              </Button>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="hidden rounded-lg border md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>License key</TableHead>
-              <TableHead className="text-right">Detail</TableHead>
-              <TableHead className="w-[110px] text-right">Xem</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                  Loading…
-                </TableCell>
-              </TableRow>
-            ) : data.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                  No logs.
-                </TableCell>
-              </TableRow>
-            ) : (
-              data.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="whitespace-nowrap text-sm">
-                    {new Date(row.created_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-sm"><Badge variant={auditVariant(row.action, row.detail)}>{auditLabel(row.action, row.detail)}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs md:text-sm">{row.license_key}</TableCell>
-                  <TableCell className="text-right">
-                    <pre className="max-w-[28rem] overflow-auto rounded-md bg-muted p-2 text-left text-[11px] leading-snug">
-                      {compactJson(row.detail, expandedRows.includes(row.id))}
-                    </pre>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => toggleExpanded(row.id)}>
-                      {expandedRows.includes(row.id) ? "Ẩn" : "Đầy đủ"}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+            );
+          })}
+        </CardContent>
+      </Card>
     </section>
   );
 }
