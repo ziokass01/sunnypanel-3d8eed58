@@ -44,7 +44,92 @@ function isActiveBlockUntil(blockedUntil?: string | null) {
   return Number.isFinite(t) && t > Date.now();
 }
 
-async function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
+async 
+async function insertGateLog(sb: any, payload: {
+  session_id?: string | null;
+  key_type_code?: string | null;
+  pass_no?: number | null;
+  event_code: string;
+  detail?: Record<string, unknown> | null;
+  fingerprint_hash?: string | null;
+  ip_hash?: string | null;
+  ua_hash?: string | null;
+}) {
+  try {
+    await sb.from("licenses_free_gate_logs").insert({
+      session_id: payload.session_id ?? null,
+      key_type_code: payload.key_type_code ?? null,
+      pass_no: payload.pass_no ?? null,
+      event_code: payload.event_code,
+      detail: payload.detail ?? {},
+      fingerprint_hash: payload.fingerprint_hash ?? null,
+      ip_hash: payload.ip_hash ?? null,
+      ua_hash: payload.ua_hash ?? null,
+    });
+  } catch {
+    // ignore log failures
+  }
+}
+
+async function maybeAutoBlockGateFailures(sb: any, args: {
+  fingerprint_hash: string;
+  ip_hash: string;
+  session_id?: string | null;
+  key_type_code?: string | null;
+  pass_no?: number | null;
+}) {
+  const windowStart = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  let failCount = 0;
+  try {
+    const recent = await sb
+      .from("licenses_free_gate_logs")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", windowStart)
+      .in("event_code", [
+        "REFERRER_REQUIRED",
+        "BAD_REFERRER",
+        "OUT_TOKEN_MISMATCH",
+        "GATE_TOO_EARLY",
+        "TOO_FAST",
+        "TOO_FAST_PASS2",
+        "DEVICE_MISMATCH",
+        "CLAIM_INVALID",
+        "CLAIM_EXPIRED",
+        "GATE_STATUS_INVALID",
+        "DAILY_QUOTA",
+      ])
+      .or(`fingerprint_hash.eq.${args.fingerprint_hash},ip_hash.eq.${args.ip_hash}`);
+    failCount = Number(recent.count ?? 0);
+  } catch {
+    failCount = 0;
+  }
+  if (failCount < 5) return;
+  const blockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  try {
+    await sb.from("licenses_free_blocklist").upsert({
+      fingerprint_hash: args.fingerprint_hash,
+      ip_hash: args.ip_hash,
+      reason: "AUTO_GATE_FAIL_5_IN_10M",
+      enabled: true,
+      blocked_until: blockedUntil,
+      created_by: "system",
+      note: `Auto block after ${failCount} gate/claim failures in 10 minutes`,
+    });
+  } catch {
+    // ignore block failures
+  }
+  await insertGateLog(sb, {
+    session_id: args.session_id ?? null,
+    key_type_code: args.key_type_code ?? null,
+    pass_no: args.pass_no ?? null,
+    event_code: "AUTO_BLOCKED",
+    detail: { fail_count_10m: failCount, blocked_until: blockedUntil, reason: "AUTO_GATE_FAIL_5_IN_10M" },
+    fingerprint_hash: args.fingerprint_hash,
+    ip_hash: args.ip_hash,
+  });
+}
+
+function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
   const body = new URLSearchParams();
   body.set("secret", secret);
   body.set("response", token);
@@ -357,16 +442,22 @@ Deno.serve(async (req) => {
 
   if (!claimHash || !sess.claim_token_hash || sess.claim_token_hash !== claimHash) {
     await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sessionId);
+    await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "CLAIM_INVALID", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
     return json({ ok: false, msg: "CLAIM_INVALID", code: "CLAIM_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   if (!claimExpMs || claimExpMs < now) {
     await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_EXPIRED" }).eq("session_id", sessionId);
+    await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "CLAIM_EXPIRED", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
     return json({ ok: false, msg: "CLAIM_EXPIRED", code: "CLAIM_EXPIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   if (sess.status !== "gate_ok") {
     await sb.from("licenses_free_sessions").update({ last_error: "GATE_STATUS_INVALID" }).eq("session_id", sessionId);
+    await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "GATE_STATUS_INVALID", detail: { status: sess.status }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
     return json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
@@ -375,6 +466,8 @@ Deno.serve(async (req) => {
   if (acceptedOutHashes.length > 0) {
     if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
     if (!acceptedOutHashes.includes(outHash)) {
+      await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "OUT_TOKEN_MISMATCH", detail: { accepted_out_hash_slots: acceptedOutHashes.length }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+      await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
       return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
     }
   }
@@ -391,6 +484,8 @@ Deno.serve(async (req) => {
   const used = quota.count ?? 0;
   if (used >= dailyLimit) {
     await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA" }).eq("session_id", sessionId);
+    await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "DAILY_QUOTA", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
     return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 

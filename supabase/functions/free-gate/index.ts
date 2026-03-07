@@ -43,6 +43,94 @@ function isActiveBlockUntil(blockedUntil?: string | null) {
   return Number.isFinite(t) && t > Date.now();
 }
 
+
+async function insertGateLog(sb: any, payload: {
+  session_id?: string | null;
+  key_type_code?: string | null;
+  pass_no?: number | null;
+  event_code: string;
+  detail?: Record<string, unknown> | null;
+  fingerprint_hash?: string | null;
+  ip_hash?: string | null;
+  ua_hash?: string | null;
+}) {
+  try {
+    await sb.from("licenses_free_gate_logs").insert({
+      session_id: payload.session_id ?? null,
+      key_type_code: payload.key_type_code ?? null,
+      pass_no: payload.pass_no ?? null,
+      event_code: payload.event_code,
+      detail: payload.detail ?? {},
+      fingerprint_hash: payload.fingerprint_hash ?? null,
+      ip_hash: payload.ip_hash ?? null,
+      ua_hash: payload.ua_hash ?? null,
+    });
+  } catch {
+    // ignore log failures
+  }
+}
+
+async function maybeAutoBlockGateFailures(sb: any, args: {
+  fingerprint_hash: string;
+  ip_hash: string;
+  session_id?: string | null;
+  key_type_code?: string | null;
+  pass_no?: number | null;
+}) {
+  const windowStart = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  let failCount = 0;
+  try {
+    const recent = await sb
+      .from("licenses_free_gate_logs")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", windowStart)
+      .in("event_code", [
+        "REFERRER_REQUIRED",
+        "BAD_REFERRER",
+        "OUT_TOKEN_MISMATCH",
+        "GATE_TOO_EARLY",
+        "TOO_FAST",
+        "TOO_FAST_PASS2",
+        "DEVICE_MISMATCH",
+        "CLAIM_INVALID",
+        "CLAIM_EXPIRED",
+        "GATE_STATUS_INVALID",
+        "DAILY_QUOTA",
+      ])
+      .or(`fingerprint_hash.eq.${args.fingerprint_hash},ip_hash.eq.${args.ip_hash}`);
+    failCount = Number(recent.count ?? 0);
+  } catch {
+    failCount = 0;
+  }
+
+  if (failCount < 5) return;
+
+  const blockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  try {
+    await sb.from("licenses_free_blocklist").upsert({
+      fingerprint_hash: args.fingerprint_hash,
+      ip_hash: args.ip_hash,
+      reason: "AUTO_GATE_FAIL_5_IN_10M",
+      enabled: true,
+      blocked_until: blockedUntil,
+      created_by: "system",
+      note: `Auto block after ${failCount} gate/claim failures in 10 minutes`,
+    });
+  } catch {
+    // ignore block failures
+  }
+
+  await insertGateLog(sb, {
+    session_id: args.session_id ?? null,
+    key_type_code: args.key_type_code ?? null,
+    pass_no: args.pass_no ?? null,
+    event_code: "AUTO_BLOCKED",
+    detail: { fail_count_10m: failCount, blocked_until: blockedUntil, reason: "AUTO_GATE_FAIL_5_IN_10M" },
+    fingerprint_hash: args.fingerprint_hash,
+    ip_hash: args.ip_hash,
+  });
+}
+
 function applyTemplateApiToken(tpl: string, token: string) {
   const v = String(tpl || "");
   if (!token) return v;
@@ -338,6 +426,23 @@ Deno.serve(async (req) => {
 
   // Device match
   if ((sess as any).fingerprint_hash !== fpHash || (sess as any).ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
+    await insertGateLog(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: pass,
+      event_code: "DEVICE_MISMATCH",
+      detail: {},
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+    });
+    await maybeAutoBlockGateFailures(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: pass,
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+    });
     return json({ ok: false, code: "DEVICE_MISMATCH", msg: "DEVICE_MISMATCH" } satisfies JsonErr, 403);
   }
 
@@ -394,6 +499,23 @@ Deno.serve(async (req) => {
 
   if (requireRef && !hostOk && !tokenVerified) {
     if (!r) {
+      await insertGateLog(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        event_code: "REFERRER_REQUIRED",
+        detail: { hint: "Referrer bị trống. Bạn cần đi qua Link4M.", current_url },
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+        ua_hash: uaHash,
+      });
+      await maybeAutoBlockGateFailures(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+      });
       return json(
         {
           ok: false,
@@ -404,10 +526,44 @@ Deno.serve(async (req) => {
         400,
       );
     }
+    await insertGateLog(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: resolvedPass,
+      event_code: "BAD_REFERRER",
+      detail: { referrer: r },
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+    });
+    await maybeAutoBlockGateFailures(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: resolvedPass,
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+    });
     return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
   }
 
   if (!tokenVerified) {
+    await insertGateLog(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: resolvedPass,
+      event_code: "OUT_TOKEN_MISMATCH",
+      detail: {},
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+    });
+    await maybeAutoBlockGateFailures(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: resolvedPass,
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+    });
     return json({ ok: false, code: "OUT_TOKEN_MISMATCH", msg: "OUT_TOKEN_MISMATCH" } satisfies JsonErr, 403);
   }
 
@@ -450,6 +606,23 @@ Deno.serve(async (req) => {
         } catch {
           // ignore
         }
+        await insertGateLog(sb, {
+          session_id: (sess as any).session_id,
+          key_type_code: (sess as any).key_type_code ?? null,
+          pass_no: resolvedPass,
+          event_code: "GATE_TOO_EARLY",
+          detail: { seconds_left: Math.max(1, Math.ceil((mustEnterAt - nowMs) / 1000)) },
+          fingerprint_hash: fpHash,
+          ip_hash: ipHash,
+          ua_hash: uaHash,
+        });
+        await maybeAutoBlockGateFailures(sb, {
+          session_id: (sess as any).session_id,
+          key_type_code: (sess as any).key_type_code ?? null,
+          pass_no: resolvedPass,
+          fingerprint_hash: fpHash,
+          ip_hash: ipHash,
+        });
         return json({ ok: false, code: "GATE_TOO_EARLY", msg: "GATE_TOO_EARLY", detail: { seconds_left: Math.max(1, Math.ceil((mustEnterAt - nowMs) / 1000)) } } satisfies JsonErr, 200);
       }
     }
@@ -475,6 +648,23 @@ Deno.serve(async (req) => {
       } catch {
         // ignore
       }
+      await insertGateLog(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        event_code: "TOO_FAST",
+        detail: {},
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+        ua_hash: uaHash,
+      });
+      await maybeAutoBlockGateFailures(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+      });
       return json({ ok: false, code: "TOO_FAST", msg: "TOO_FAST" } satisfies JsonErr, 200);
     }
   } else {
@@ -500,6 +690,23 @@ Deno.serve(async (req) => {
       } catch {
         // ignore
       }
+      await insertGateLog(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        event_code: "TOO_FAST_PASS2",
+        detail: {},
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+        ua_hash: uaHash,
+      });
+      await maybeAutoBlockGateFailures(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+      });
       return json({ ok: false, code: "TOO_FAST", msg: "TOO_FAST" } satisfies JsonErr, 200);
     }
   }
@@ -554,6 +761,16 @@ Deno.serve(async (req) => {
 
     if (updErr) return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
 
+    await insertGateLog(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: 1,
+      event_code: "PASS1_OK",
+      detail: { next: "PASS2" },
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+    });
     const result: NextOk = { ok: true, next: "PASS2", out_token: "", outbound_url: outbound2, min_delay_seconds: minDelay2 };
     return json(result, 200);
   }
@@ -591,6 +808,16 @@ Deno.serve(async (req) => {
     claim_url = `${baseUrl}/free/claim?${params.toString()}`;
   }
 
+  await insertGateLog(sb, {
+    session_id: (sess as any).session_id,
+    key_type_code: (sess as any).key_type_code ?? null,
+    pass_no: resolvedPass,
+    event_code: "GATE_OK",
+    detail: { next: "CLAIM" },
+    fingerprint_hash: fpHash,
+    ip_hash: ipHash,
+    ua_hash: uaHash,
+  });
   const result: NextOk = { ok: true, next: "CLAIM", claim_token, claim_url };
   return json(result, 200);
 });

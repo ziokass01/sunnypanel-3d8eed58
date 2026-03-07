@@ -71,6 +71,19 @@ type SessionRow = {
   claim_token_hash: string | null;
 };
 
+type GateLogRow = {
+  id: number;
+  created_at: string;
+  session_id: string | null;
+  key_type_code: string | null;
+  pass_no: number | null;
+  event_code: string;
+  detail: any;
+  ip_hash: string | null;
+  fingerprint_hash: string | null;
+  ua_hash: string | null;
+};
+
 type IssueRow = {
   issue_id: string;
   created_at: string;
@@ -528,18 +541,37 @@ const disableAllKeyTypes = useMutation({
     },
   });
 
+  const gateLogsQuery = useQuery({
+    queryKey: ["free-gate-logs", range.from, range.to, ipHash],
+    queryFn: async () => {
+      let q = supabase
+        .from("licenses_free_gate_logs")
+        .select("id,created_at,session_id,key_type_code,pass_no,event_code,detail,ip_hash,fingerprint_hash,ua_hash")
+        .gte("created_at", range.from)
+        .lte("created_at", range.to)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (ipHash.trim()) q = q.eq("ip_hash", ipHash.trim());
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as any as GateLogRow[];
+    },
+  });
+
   const freeSchemaHint = useMemo(() => {
     const errs = [
       settingsQuery.error,
       keyTypesQuery.error,
       sessionsQuery.error,
       issuesQuery.error,
+      gateLogsQuery.error,
     ]
       .map((e: any) => String(e?.message ?? ""))
       .filter(Boolean);
     const hit = errs.find((m) => isFreeSchemaMissingError(m));
     return hit ?? null;
-  }, [settingsQuery.error, keyTypesQuery.error, sessionsQuery.error, issuesQuery.error]);
+  }, [settingsQuery.error, keyTypesQuery.error, sessionsQuery.error, issuesQuery.error, gateLogsQuery.error]);
 
   const revokeLicense = useMutation({
     mutationFn: async (args: { issueId: string; licenseId: string }) => {
@@ -1233,6 +1265,59 @@ const disableAllKeyTypes = useMutation({
                 </TableRow>
               ) : null}
             </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <div>
+            <CardTitle>Gate / Claim logs</CardTitle>
+            <CardDescription>Log anti-bypass, lỗi xác thực, và auto-block 5 lần fail trong 10 phút.</CardDescription>
+          </div>
+          <Button variant="secondary" onClick={() => gateLogsQuery.refetch()} disabled={gateLogsQuery.isFetching}>
+            Refresh
+          </Button>
+        </CardHeader>
+        <CardContent className="text-xs md:text-sm">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Event</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Pass</TableHead>
+                  <TableHead>Session</TableHead>
+                  <TableHead>IP hash</TableHead>
+                  <TableHead>FP hash</TableHead>
+                  <TableHead>Detail</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(gateLogsQuery.data ?? []).map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="whitespace-nowrap">{formatVnDateTime(row.created_at)}</TableCell>
+                    <TableCell className="font-mono text-xs">{row.event_code}</TableCell>
+                    <TableCell className="font-mono">{row.key_type_code ?? "-"}</TableCell>
+                    <TableCell>{row.pass_no ?? "-"}</TableCell>
+                    <TableCell className="font-mono">{shortText(row.session_id, 12)}</TableCell>
+                    <TableCell className="font-mono">{shortText(row.ip_hash, 12)}</TableCell>
+                    <TableCell className="font-mono">{shortText(row.fingerprint_hash, 12)}</TableCell>
+                    <TableCell className="text-xs">
+                      <pre className="whitespace-pre-wrap break-words">{JSON.stringify(row.detail ?? {}, null, 0)}</pre>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!gateLogsQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>

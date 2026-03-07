@@ -271,6 +271,53 @@ export type Database = {
         }
         Relationships: []
       }
+      licenses_free_gate_logs: {
+        Row: {
+          created_at: string
+          detail: Json | null
+          event_code: string
+          fingerprint_hash: string | null
+          id: number
+          ip_hash: string | null
+          key_type_code: string | null
+          pass_no: number | null
+          session_id: string | null
+          ua_hash: string | null
+        }
+        Insert: {
+          created_at?: string
+          detail?: Json | null
+          event_code: string
+          fingerprint_hash?: string | null
+          id?: number
+          ip_hash?: string | null
+          key_type_code?: string | null
+          pass_no?: number | null
+          session_id?: string | null
+          ua_hash?: string | null
+        }
+        Update: {
+          created_at?: string
+          detail?: Json | null
+          event_code?: string
+          fingerprint_hash?: string | null
+          id?: number
+          ip_hash?: string | null
+          key_type_code?: string | null
+          pass_no?: number | null
+          session_id?: string | null
+          ua_hash?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "licenses_free_gate_logs_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "licenses_free_sessions"
+            referencedColumns: ["session_id"]
+          },
+        ]
+      }
       licenses_free_issues: {
         Row: {
           created_at: string
