@@ -291,7 +291,7 @@ Deno.serve(async (req) => {
 
     if (action === "list_keys") {
       const { data, error } = await sb.schema("rent").from("keys")
-        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at,max_devices")
         .eq("account_id", sess.account.id)
         .order("created_at", { ascending: false });
       if (error) throw new Error(error.message);
@@ -360,6 +360,7 @@ Deno.serve(async (req) => {
         duration_value: z.number().int().min(1).max(999999).default(30),
         duration_unit: z.enum(["hour", "day"]).default("day"),
         start_mode: z.enum(["immediate", "first_use"]).default("immediate"),
+        max_devices: z.number().int().min(1).max(999999).default(1),
       });
       const parsed = Schema.parse(body);
       const masterSecret = requireRentMasterSecret(req, publicBaseUrl);
@@ -393,7 +394,8 @@ Deno.serve(async (req) => {
         starts_on_first_use,
         first_used_at: null,
         expires_at,
-      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at").single();
+        max_devices: parsed.max_devices,
+      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at,max_devices").single();
 
       if (error) throw new Error(error.message);
       await logKeyEvent(sb, {
@@ -401,7 +403,7 @@ Deno.serve(async (req) => {
         key_id: data?.id ?? null,
         action: "create_key_random",
         result: "ok",
-        detail: { note: parsed.note ?? null, duration_value: duration.duration_value, duration_unit: duration.duration_unit, start_mode: parsed.start_mode },
+        detail: { note: parsed.note ?? null, duration_value: duration.duration_value, duration_unit: duration.duration_unit, start_mode: parsed.start_mode, max_devices: parsed.max_devices },
       });
       return json(req, publicBaseUrl, { ok: true, key: data });
     }
@@ -414,6 +416,7 @@ Deno.serve(async (req) => {
         duration_value: z.number().int().min(1).max(999999).default(30),
         duration_unit: z.enum(["hour", "day"]).default("day"),
         start_mode: z.enum(["immediate", "first_use"]).default("immediate"),
+        max_devices: z.number().int().min(1).max(999999).default(1),
       });
       const parsed = Schema.parse(body);
       const key = parsed.key.trim().toUpperCase();
@@ -439,7 +442,8 @@ Deno.serve(async (req) => {
         starts_on_first_use,
         first_used_at: null,
         expires_at,
-      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at").single();
+        max_devices: parsed.max_devices,
+      }).select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at,max_devices").single();
 
       if (error) {
         const msg = error.message || "insert failed";
@@ -465,6 +469,7 @@ Deno.serve(async (req) => {
         duration_value: z.number().int().min(1).max(999999),
         duration_unit: z.enum(["hour", "day"]),
         start_mode: z.enum(["immediate", "first_use"]),
+        max_devices: z.number().int().min(1).max(999999),
       });
       const parsed = Schema.parse(body);
 
@@ -492,6 +497,7 @@ Deno.serve(async (req) => {
         duration_unit: duration.duration_unit,
         starts_on_first_use: parsed.start_mode === "first_use",
         expires_at,
+        max_devices: parsed.max_devices,
       } as const;
 
       const { data, error } = await sb.schema("rent").from("keys")

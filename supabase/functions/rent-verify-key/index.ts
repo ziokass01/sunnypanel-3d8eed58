@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
         device_id,
         detail: { username, key, ...detail },
       });
-      return json(req, publicBaseUrl, { ok: true, valid: false, code }, 200);
+      return json(req, publicBaseUrl, { ok: false, valid: false, code }, 200);
     };
 
     if (!isValidRentKeyFormat(key)) {
@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: rk, error: keyErr } = await sb.schema("rent").from("keys")
-      .select("id,account_id,created_at,expires_at,is_active,server_tag,master_sig,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
+      .select("id,account_id,created_at,expires_at,is_active,server_tag,master_sig,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at,max_devices")
       .eq("key", key)
       .maybeSingle();
 
@@ -157,8 +157,9 @@ Deno.serve(async (req) => {
         .eq("key_id", rk.id);
 
       const currentCount = count ?? 0;
-      if (currentCount >= (acc.max_devices ?? 1)) {
-        return await invalid("DEVICE_LIMIT", acc.id, rk.id, { currentCount, max_devices: acc.max_devices ?? 1 });
+      const keyMaxDevices = Number(rk.max_devices ?? acc.max_devices ?? 1);
+      if (currentCount >= keyMaxDevices) {
+        return await invalid("DEVICE_LIMIT", acc.id, rk.id, { currentCount, max_devices: keyMaxDevices });
       }
 
       const { error: insErr } = await sb.schema("rent").from("key_devices").insert({
@@ -209,7 +210,7 @@ Deno.serve(async (req) => {
       valid: true,
       expires_at: acc.expires_at,
       key_expires_at: keyExpiresAt,
-      max_devices: acc.max_devices,
+      max_devices: Number(rk.max_devices ?? acc.max_devices ?? 1),
     }, 200);
   } catch (e: any) {
     return json(req, publicBaseUrl, { ok: false, code: "ERROR", msg: String(e?.message ?? e) }, 400);
