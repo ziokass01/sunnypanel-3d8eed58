@@ -388,7 +388,6 @@ Deno.serve(async (req) => {
         note: parsed.note ?? null,
         server_tag,
         duration_days: duration.duration_days,
-        duration_seconds: duration.duration_seconds,
         duration_value: duration.duration_value,
         duration_unit: duration.duration_unit,
         starts_on_first_use,
@@ -436,7 +435,6 @@ Deno.serve(async (req) => {
         note: parsed.note ?? null,
         server_tag,
         duration_days: duration.duration_days,
-        duration_seconds: duration.duration_seconds,
         duration_value: duration.duration_value,
         duration_unit: duration.duration_unit,
         starts_on_first_use,
@@ -492,7 +490,6 @@ Deno.serve(async (req) => {
       const patch = {
         note: parsed.note ?? null,
         duration_days: duration.duration_days,
-        duration_seconds: duration.duration_seconds,
         duration_value: duration.duration_value,
         duration_unit: duration.duration_unit,
         starts_on_first_use: parsed.start_mode === "first_use",
@@ -504,7 +501,7 @@ Deno.serve(async (req) => {
         .update(patch)
         .eq("id", parsed.key_id)
         .eq("account_id", sess.account.id)
-        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at")
+        .select("id,key,created_at,expires_at,is_active,note,starts_on_first_use,duration_days,duration_value,duration_unit,first_used_at,max_devices")
         .single();
       if (error) throw new Error(error.message);
 
