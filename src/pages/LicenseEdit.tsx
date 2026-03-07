@@ -16,7 +16,7 @@ import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 
 const schema = z.object({
   expires_at: z.string().optional(),
-  duration_value: z.coerce.number().int().min(1).max(3650).optional(),
+  duration_value: z.coerce.number().int().min(1).max(999999).optional(),
   duration_unit: z.enum(["minutes", "hours", "days"]).default("days"),
   max_devices: z.coerce.number().int().min(1),
   is_active: z.boolean(),
@@ -134,7 +134,7 @@ export function LicenseEditPage() {
                   id="duration_value"
                   type="number"
                   min={1}
-                  max={3650}
+                  max={999999}
                   disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
                   {...form.register("duration_value")}
                 />

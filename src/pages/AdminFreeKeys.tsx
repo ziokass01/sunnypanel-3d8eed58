@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2 } from "lucide-react";
+import { ChevronDown, Filter, Trash2 } from "lucide-react";
 import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -142,6 +144,24 @@ function shortText(v?: string | null, n = 10) {
   const x = String(v ?? "").trim();
   if (!x) return "-";
   return x.length > n ? `${x.slice(0, n)}…` : x;
+}
+
+function statusBadgeVariant(status?: string | null): "default" | "secondary" | "destructive" | "outline" {
+  const v = String(status ?? "").toLowerCase();
+  if (["revealed", "gate_ok", "pass1_ok", "reveal_ok", "ok"].includes(v)) return "default";
+  if (["gate_fail", "closed", "blocked", "auto_blocked", "bad_referrer", "out_token_mismatch", "claim_invalid"].includes(v)) return "destructive";
+  if (["started", "init", "pending"].includes(v)) return "secondary";
+  return "outline";
+}
+
+function statusLabel(status?: string | null) {
+  const v = String(status ?? "").trim();
+  return v || "-";
+}
+
+function compactJson(value: any) {
+  const text = JSON.stringify(value ?? {}, null, 2);
+  return text.length > 240 ? `${text.slice(0, 240)}…` : text;
 }
 
 function toLinksText(value: any): string {
@@ -436,6 +456,7 @@ const disableAllKeyTypes = useMutation({
 
   const [pingResult, setPingResult] = useState<any>(null);
   const [pingError, setPingError] = useState<string | null>(null);
+  const [showMonitorFilters, setShowMonitorFilters] = useState(false);
 
   useEffect(() => {
     if (!keyTypesQuery.data?.length) return;
@@ -655,14 +676,17 @@ const disableAllKeyTypes = useMutation({
 
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Card>
-        <CardHeader>
-          <CardTitle>Free GetKey Settings</CardTitle>
-          <CardDescription>
-            Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint.
-          </CardDescription>
-          <div className="flex flex-wrap gap-2">
+        <CardHeader className="space-y-3 pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="text-xl">Free GetKey Settings</CardTitle>
+              <CardDescription>
+                Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
             <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
               Open GetKey
             </Button>
@@ -670,8 +694,9 @@ const disableAllKeyTypes = useMutation({
               Copy GetKey URL
             </Button>
           </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           {freeSchemaHint ? (
             <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
               <div className="font-medium text-destructive">Thiếu cấu hình Free DB/RPC</div>
@@ -924,7 +949,7 @@ const disableAllKeyTypes = useMutation({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
           <div>
             <CardTitle>Key types (giờ/ngày)</CardTitle>
             <CardDescription>Chỉ loại nào bật thì trang /free mới hiện lựa chọn.</CardDescription>
@@ -942,7 +967,7 @@ const disableAllKeyTypes = useMutation({
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="text-xs md:text-sm">
+        <CardContent className="space-y-3 text-xs md:text-sm">
           <div className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
@@ -1052,37 +1077,61 @@ const disableAllKeyTypes = useMutation({
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Free keys monitor</CardTitle>
-          <CardDescription>Log sessions + keys đã phát.</CardDescription>
+        <CardHeader className="space-y-3 pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle>Free keys monitor</CardTitle>
+              <CardDescription>Log sessions + keys đã phát.</CardDescription>
+            </div>
+            <Collapsible open={showMonitorFilters} onOpenChange={setShowMonitorFilters}>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Filter className="h-4 w-4" />
+                  Bộ lọc
+                  <ChevronDown className={`h-4 w-4 transition-transform ${showMonitorFilters ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
+            </Collapsible>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Badge variant="secondary">Ngày: {day}</Badge>
+            <Badge variant="outline">Trạng thái: {statusLabel(status)}</Badge>
+            <Badge variant="outline">IP: {ipHash.trim() ? shortText(ipHash, 14) : "tất cả"}</Badge>
+          </div>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Day (UTC)</div>
-            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Status</div>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="started">started</SelectItem>
-                <SelectItem value="gate_ok">gate_ok</SelectItem>
-                <SelectItem value="gate_fail">gate_fail</SelectItem>
-                <SelectItem value="revealed">revealed</SelectItem>
-                <SelectItem value="closed">closed</SelectItem>
-                <SelectItem value="init">init (legacy)</SelectItem>
-                <SelectItem value="gate_returned">gate_returned (legacy)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <div className="text-sm font-medium">IP hash</div>
-            <Input value={ipHash} onChange={(e) => setIpHash(e.target.value)} placeholder="sha256(ip)" />
-          </div>
+        <CardContent className="space-y-3 pt-0">
+          <Collapsible open={showMonitorFilters} onOpenChange={setShowMonitorFilters}>
+            <CollapsibleContent className="rounded-xl border bg-muted/20 p-3">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Day (UTC)</div>
+                  <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Status</div>
+                  <Select value={status} onValueChange={setStatus}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="started">started</SelectItem>
+                      <SelectItem value="gate_ok">gate_ok</SelectItem>
+                      <SelectItem value="gate_fail">gate_fail</SelectItem>
+                      <SelectItem value="revealed">revealed</SelectItem>
+                      <SelectItem value="closed">closed</SelectItem>
+                      <SelectItem value="init">init (legacy)</SelectItem>
+                      <SelectItem value="gate_returned">gate_returned (legacy)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">IP hash</div>
+                  <Input value={ipHash} onChange={(e) => setIpHash(e.target.value)} placeholder="sha256(ip)" />
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </CardContent>
       </Card>
 
@@ -1188,14 +1237,44 @@ const disableAllKeyTypes = useMutation({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2">
-          <CardTitle>Sessions</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
+          <div className="space-y-1">
+            <CardTitle>Sessions</CardTitle>
+            <CardDescription>{sessionsQuery.data?.length ?? 0} phiên gần nhất theo bộ lọc hiện tại.</CardDescription>
+          </div>
           <Button variant="secondary" onClick={() => sessionsQuery.refetch()} disabled={sessionsQuery.isFetching}>
             Refresh
           </Button>
         </CardHeader>
-        <CardContent className="text-xs md:text-sm">
-          <div className="overflow-x-auto">
+        <CardContent className="space-y-3 pt-0 text-xs md:text-sm">
+          <div className="grid gap-3 md:hidden">
+            {(sessionsQuery.data ?? []).map((s) => (
+              <div key={s.session_id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs text-muted-foreground">{formatVnDateTime(s.created_at)}</div>
+                    <div className="font-mono text-sm">{s.key_type_code ?? "-"}</div>
+                  </div>
+                  <Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>Reveal: {s.reveal_count}</div>
+                  <div>IP: <span className="font-mono">{shortText(s.ip_hash, 12)}</span></div>
+                  <div>FP: <span className="font-mono">{shortText(s.fingerprint_hash, 12)}</span></div>
+                  <div className="truncate">Error: {s.last_error ?? "-"}</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? ""; if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason }); }}>Block IP</Button>
+                  <Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? ""; if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason }); }}>Block FP</Button>
+                  <Button size="sm" variant="destructive" onClick={() => { const ok = window.confirm("Delete session này?"); if (ok) deleteSession.mutate(s.session_id); }}>Delete</Button>
+                </div>
+              </div>
+            ))}
+            {!sessionsQuery.data?.length ? (
+              <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">No rows</div>
+            ) : null}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
             <TableHeader>
               <TableRow>
@@ -1213,7 +1292,7 @@ const disableAllKeyTypes = useMutation({
               {(sessionsQuery.data ?? []).map((s) => (
                 <TableRow key={s.session_id}>
                   <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
-                  <TableCell>{s.status}</TableCell>
+                  <TableCell><Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
                   <TableCell className="font-mono">
                     {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
                   </TableCell>
@@ -1271,8 +1350,8 @@ const disableAllKeyTypes = useMutation({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2">
-          <div>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
+          <div className="space-y-1">
             <CardTitle>Gate / Claim logs</CardTitle>
             <CardDescription>Log anti-bypass, lỗi xác thực, và auto-block 5 lần fail trong 10 phút.</CardDescription>
           </div>
@@ -1280,8 +1359,31 @@ const disableAllKeyTypes = useMutation({
             Refresh
           </Button>
         </CardHeader>
-        <CardContent className="text-xs md:text-sm">
-          <div className="overflow-x-auto">
+        <CardContent className="space-y-3 pt-0 text-xs md:text-sm">
+          <div className="grid gap-3 md:hidden">
+            {(gateLogsQuery.data ?? []).map((row) => (
+              <div key={row.id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs text-muted-foreground">{formatVnDateTime(row.created_at)}</div>
+                    <div className="font-mono text-sm">{row.key_type_code ?? "-"}</div>
+                  </div>
+                  <Badge variant={statusBadgeVariant(row.event_code)}>{row.event_code}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>Pass: {row.pass_no ?? "-"}</div>
+                  <div>Session: <span className="font-mono">{shortText(row.session_id, 12)}</span></div>
+                  <div>IP: <span className="font-mono">{shortText(row.ip_hash, 12)}</span></div>
+                  <div>FP: <span className="font-mono">{shortText(row.fingerprint_hash, 12)}</span></div>
+                </div>
+                <pre className="rounded-lg bg-background/70 p-2 text-[11px] whitespace-pre-wrap break-words">{compactJson(row.detail)}</pre>
+              </div>
+            ))}
+            {!gateLogsQuery.data?.length ? (
+              <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">No rows</div>
+            ) : null}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1299,14 +1401,14 @@ const disableAllKeyTypes = useMutation({
                 {(gateLogsQuery.data ?? []).map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="whitespace-nowrap">{formatVnDateTime(row.created_at)}</TableCell>
-                    <TableCell className="font-mono text-xs">{row.event_code}</TableCell>
+                    <TableCell><Badge variant={statusBadgeVariant(row.event_code)}>{row.event_code}</Badge></TableCell>
                     <TableCell className="font-mono">{row.key_type_code ?? "-"}</TableCell>
                     <TableCell>{row.pass_no ?? "-"}</TableCell>
                     <TableCell className="font-mono">{shortText(row.session_id, 12)}</TableCell>
                     <TableCell className="font-mono">{shortText(row.ip_hash, 12)}</TableCell>
                     <TableCell className="font-mono">{shortText(row.fingerprint_hash, 12)}</TableCell>
                     <TableCell className="text-xs">
-                      <pre className="whitespace-pre-wrap break-words">{JSON.stringify(row.detail ?? {}, null, 0)}</pre>
+                      <pre className="max-w-[26rem] whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2">{compactJson(row.detail)}</pre>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1324,8 +1426,11 @@ const disableAllKeyTypes = useMutation({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2">
-          <CardTitle>Issued keys</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
+          <div className="space-y-1">
+            <CardTitle>Issued keys</CardTitle>
+            <CardDescription>{issuesQuery.data?.length ?? 0} key đã phát theo bộ lọc hiện tại.</CardDescription>
+          </div>
           <Button variant="secondary" onClick={() => issuesQuery.refetch()} disabled={issuesQuery.isFetching}>
             Refresh
           </Button>
