@@ -24,13 +24,13 @@ function friendlyGateError(msg: string) {
   if (m === "TOO_FAST" || m.startsWith("TOO_FAST") || m === "VERIFY_FAILED") {
     return "Xác thực không thành công. Vui lòng vượt link lại rồi thử lại.";
   }
-  if (m === "BAD_REFERRER") return "BAD_REFERRER: Referrer không phải Link4M. Nếu bạn đã đi Link4M nhưng bị chặn referrer, hãy thử trình duyệt khác.";
-  if (m === "SESSION_EXPIRED") return "Phiên đã hết hạn. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi. Nếu muốn lấy key mới, hãy quay lại Get Key.";
-  if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng. Vui lòng quay lại Get Key và làm lại.";
-  if (m === "GATE_TOO_EARLY") return "Bạn đã vào trang gate quá sớm so với thời gian anti bypass. Phiên đã bị hủy, vui lòng quay lại Get Key và làm lại.";
+  if (m === "BAD_REFERRER") return "ADMIN đã bật xác minh cao cấp nên có thể bạn vượt link đúng nhưng vẫn lỗi thì hay liên hệ với ADMIN để được hỗ trợ.";
+  if (m === "SESSION_EXPIRED") return "Phiên đã hết hạn❌. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session❌. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên❌. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi❌. Nếu muốn lấy key mới, hãy quay lại Get Key.";
+  if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng❌. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "GATE_TOO_EARLY") return "Xác minh đã bị gián đoạn❌.Lý do bạn không vượt link. Phiên đã bị hủy, vui lòng quay lại Get Key🔑 và làm lại.";
   return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
 }
 
@@ -124,7 +124,7 @@ export function FreeGatePage() {
 
     if (!tok || !sid) {
       setStatus("error");
-      setMessage("Thiếu phiên. Hãy quay lại trang Get Key và làm lại.");
+      setMessage("Thiếu phiên. Hãy quay lại trang Get Key🔑 và làm lại.");
       window.setTimeout(() => nav("/free", { replace: true }), 1200);
       return;
     }
@@ -141,7 +141,7 @@ export function FreeGatePage() {
     }
 
     setStatus("working");
-    setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP…" : "Đang xác thực key 🔑…");
+    setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP💰…" : "Đang xác thực ⏳…");
 
     try {
       const fp = getOrCreateFingerprint();
@@ -240,7 +240,7 @@ export function FreeGatePage() {
 
     if (!sid || !tok) {
       setStatus("error");
-      setMessage("Vượt link không thành công. Hãy quay lại trang Get Key và làm lại.");
+      setMessage("Vượt link không thành công. Hãy quay lại trang Get Key🔑 và làm lại.");
       return;
     }
 
@@ -250,7 +250,7 @@ export function FreeGatePage() {
     // Entering gate too early must fail on backend immediately for all passes.
     if (pass === 2 || gateAntiBypassEnabled) {
       setStatus("working");
-      setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP…" : "Đang xác thực key 🔑…");
+      setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP💰…" : "Đang xác thực key ⏳…");
       void gateOnce();
       return;
     }
@@ -288,7 +288,7 @@ export function FreeGatePage() {
       <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
         <Card className="w-full">
           <CardHeader>
-            <CardTitle>{pass === 2 ? "Đang xác thực key 🔑 VIP" : "Đang xác thực 🔑 "}</CardTitle>
+            <CardTitle>{pass === 2 ? "Đang xác thực key 🔑 VIP💰" : "Đang xác thực 🔑 "}</CardTitle>
             <CardDescription>Hệ thống đang xác thực bước vượt link.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
