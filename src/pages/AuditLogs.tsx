@@ -27,21 +27,56 @@ function auditLabel(action?: string, detail?: any) {
   return v || "UNKNOWN";
 }
 
-function compactJson(value: unknown) {
-  const text = JSON.stringify(value ?? {}, null, 2);
-  return text.length > 240 ? `${text.slice(0, 240)}…` : text;
+function maskValue(value: unknown) {
+  const text = String(value ?? "");
+  if (!text) return text;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(text)) {
+    const parts = text.split(".");
+    return `${parts[0]}.${parts[1]}.***.***`;
+  }
+  if (text.length <= 8) return `${text.slice(0, 2)}***`;
+  return `${text.slice(0, 4)}…${text.slice(-4)}`;
+}
+
+function maskSensitive(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskSensitive);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => {
+      if (/^(ip|ip_hash|fingerprint|fingerprint_hash|ua_hash|device|device_row|license_id|session_id)$/i.test(k)) {
+        return [k, maskValue(v)];
+      }
+      return [k, maskSensitive(v)];
+    }));
+  }
+  return value;
+}
+
+function compactJson(value: unknown, full = false) {
+  const text = JSON.stringify(full ? (value ?? {}) : maskSensitive(value), null, 2);
+  return !full && text.length > 240 ? `${text.slice(0, 240)}…` : text;
 }
 
 export function AuditLogsPage() {
   const [q, setQ] = useState("");
   const [action, setAction] = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<number[]>([]);
 
   const queryKey = useMemo(() => ["audit_logs", { q, action }] as const, [q, action]);
   const { data = [], isLoading, error } = useQuery({
     queryKey,
     queryFn: () => fetchAuditLogs({ q, action }),
   });
+
+  const summary = useMemo(() => ({
+    total: data.length,
+    verifyOk: data.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false).length,
+    verifyFail: data.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false).length,
+  }), [data]);
+
+  const toggleExpanded = (id: number) => {
+    setExpandedRows((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   return (
     <section className="space-y-4">
@@ -65,7 +100,9 @@ export function AuditLogsPage() {
         <div className="flex flex-wrap gap-2 text-xs">
           <Badge variant="outline">Từ khóa: {q.trim() || "tất cả"}</Badge>
           <Badge variant="secondary">Action: {action === "all" ? "all" : action}</Badge>
-          <Badge variant="outline">Kết quả: {data.length} dòng</Badge>
+          <Badge variant="outline">Kết quả: {summary.total} dòng</Badge>
+          <Badge variant="default">Verify OK: {summary.verifyOk}</Badge>
+          <Badge variant="destructive">Verify fail: {summary.verifyFail}</Badge>
         </div>
 
         <Collapsible open={showFilters} onOpenChange={setShowFilters}>
@@ -107,7 +144,10 @@ export function AuditLogsPage() {
                 <Badge variant={auditVariant(row.action, row.detail)}>{auditLabel(row.action, row.detail)}</Badge>
               </div>
               <div className="font-mono text-xs break-all">{row.license_key}</div>
-              <pre className="rounded-lg bg-background/70 p-2 text-[11px] whitespace-pre-wrap break-words">{compactJson(row.detail)}</pre>
+              <pre className="rounded-lg bg-background/70 p-2 text-[11px] whitespace-pre-wrap break-words">{compactJson(row.detail, expandedRows.includes(row.id))}</pre>
+              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => toggleExpanded(row.id)}>
+                {expandedRows.includes(row.id) ? "Ẩn chi tiết" : "Xem đầy đủ"}
+              </Button>
             </div>
           ))
         )}
@@ -121,18 +161,19 @@ export function AuditLogsPage() {
               <TableHead>Action</TableHead>
               <TableHead>License key</TableHead>
               <TableHead className="text-right">Detail</TableHead>
+              <TableHead className="w-[110px] text-right">Xem</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
                   No logs.
                 </TableCell>
               </TableRow>
@@ -146,8 +187,13 @@ export function AuditLogsPage() {
                   <TableCell className="font-mono text-xs md:text-sm">{row.license_key}</TableCell>
                   <TableCell className="text-right">
                     <pre className="max-w-[28rem] overflow-auto rounded-md bg-muted p-2 text-left text-[11px] leading-snug">
-                      {compactJson(row.detail)}
+                      {compactJson(row.detail, expandedRows.includes(row.id))}
                     </pre>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => toggleExpanded(row.id)}>
+                      {expandedRows.includes(row.id) ? "Ẩn" : "Đầy đủ"}
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))

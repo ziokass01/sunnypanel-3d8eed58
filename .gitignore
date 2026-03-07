@@ -23,3 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 .npmrc
+# Sensitive/local-only files
+.env
+.env.*
+!.env.example
+*.zip
+repo_check_clean/
+repo_push_tmp/
