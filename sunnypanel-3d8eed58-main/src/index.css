@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* SUNNY Key Panel — Tech Futurist (warm sun accent on deep navy) */
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 42% 9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 42% 9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 38 92% 58%;
+    --primary-foreground: 222 47% 7%;
+
+    --primary-glow: 44 95% 72%;
+
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 222 24% 14%;
+    --muted-foreground: 215 18% 72%;
+
+    --accent: 222 24% 16%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84% 58%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 222 18% 22%;
+    --input: 222 18% 22%;
+    --ring: 44 95% 72%;
+
+    --radius: 0.5rem;
+
+    /* Signature surfaces */
+    --gradient-sun: radial-gradient(800px circle at var(--mx, 50%) var(--my, 40%), hsl(var(--primary) / 0.22), transparent 55%),
+      radial-gradient(620px circle at calc(var(--mx, 50%) + 12%) calc(var(--my, 40%) + 10%), hsl(var(--primary-glow) / 0.12), transparent 58%);
+    --shadow-elev: 0 18px 60px -24px hsl(var(--primary) / 0.45);
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  /* Keep .dark mapped to same palette for parity (no theme switch UI needed) */
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 42% 9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 42% 9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 38 92% 58%;
+    --primary-foreground: 222 47% 7%;
+
+    --primary-glow: 44 95% 72%;
+
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 222 24% 14%;
+    --muted-foreground: 215 18% 72%;
+
+    --accent: 222 24% 16%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84% 58%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 222 18% 22%;
+    --input: 222 18% 22%;
+    --ring: 44 95% 72%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer base {
+  /* Subtle background texture + pointer-driven “sun field” (signature moment) */
+  body {
+    background-image: var(--gradient-sun);
+    background-attachment: fixed;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body {
+      background-image: none;
+    }
+  }
+}
