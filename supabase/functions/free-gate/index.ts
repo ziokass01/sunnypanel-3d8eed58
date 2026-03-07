@@ -102,6 +102,105 @@ function buildOutboundUrl(outboundBase: string, gateUrl: string) {
   }
 }
 
+
+function isLink4mQuickUrl(raw: string) {
+  try {
+    const u = new URL(String(raw || "").trim());
+    const host = (u.hostname || "").toLowerCase();
+    if (!host.includes("link4m")) return false;
+    const path = (u.pathname || "").replace(/\/+$/, "");
+    const hasApi = u.searchParams.has("api") || u.searchParams.has("apikey") || u.searchParams.has("token");
+    return Boolean((path.endsWith("/st") || path.includes("api-shorten")) && hasApi && u.searchParams.has("url"));
+  } catch {
+    return false;
+  }
+}
+
+function pickUrlFromText(body: string) {
+  const text = String(body || "");
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["short_url", "shortened_url", "url", "link", "shortlink", "data"]) {
+      const value = parsed?.[key];
+      if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) return value.trim();
+      if (value && typeof value === "object") {
+        for (const nestedKey of ["short_url", "shortened_url", "url", "link", "shortlink"]) {
+          const nested = (value as Record<string, unknown>)[nestedKey];
+          if (typeof nested === "string" && /^https?:\/\//i.test(nested.trim())) return nested.trim();
+        }
+      }
+    }
+  } catch {
+    // ignore json parsing
+  }
+  const m = text.match(/https?:\/\/[^\s"'<>]+/i);
+  return m ? m[0].trim() : "";
+}
+
+async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: string, outboundCandidate: string, gateUrl: string) {
+  const raw = String(outboundCandidate || "").trim();
+  if (!raw || raw === "__TEMPLATE_INVALID__") return raw;
+  if (!isLink4mQuickUrl(raw)) return raw;
+
+  const templateHash = await sha256Hex(raw);
+  try {
+    const cached = await sb
+      .from("licenses_free_link4m_cache")
+      .select("short_url")
+      .eq("pass_no", passNo)
+      .eq("rotate_bucket", rotateBucket)
+      .eq("template_hash", templateHash)
+      .maybeSingle();
+    const cachedUrl = String((cached.data as any)?.short_url ?? "").trim();
+    if (cachedUrl) return cachedUrl;
+  } catch {
+    // cache table may not exist yet
+  }
+
+  let stableUrl = raw;
+  try {
+    const resp = await fetch(raw, {
+      method: "GET",
+      redirect: "manual",
+      headers: {
+        "user-agent": "SunnyPanel/1.0 Link4M resolver",
+        "accept": "text/html,application/json,text/plain,*/*",
+      },
+    });
+
+    const location = String(resp.headers.get("location") || "").trim();
+    if (location) {
+      stableUrl = new URL(location, raw).toString();
+    } else {
+      const body = await resp.text();
+      const extracted = pickUrlFromText(body);
+      if (extracted) {
+        stableUrl = new URL(extracted, raw).toString();
+      }
+    }
+  } catch {
+    stableUrl = raw;
+  }
+
+  try {
+    await sb
+      .from("licenses_free_link4m_cache")
+      .upsert({
+        pass_no: passNo,
+        rotate_bucket: rotateBucket,
+        template_hash: templateHash,
+        gate_url: gateUrl,
+        short_url: stableUrl,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "pass_no,rotate_bucket,template_hash" });
+  } catch {
+    // ignore cache write failures
+  }
+
+  return stableUrl;
+}
+
 const BodySchema = z.object({
   pass: z.number().int().min(1).max(2).optional().default(1),
   session_id: z.string().uuid().optional(),
@@ -256,8 +355,27 @@ Deno.serve(async (req) => {
     }
   }
 
-  const expectedHash = pass === 2 ? (sess as any).out_token_hash_pass2 : (sess as any).out_token_hash;
-  let tokenVerified = Boolean(expectedHash && expectedHash === outHash);
+  const required = Math.max(1, Math.min(2, Number((sess as any).passes_required ?? 1)));
+  const completed = Math.max(0, Math.min(2, Number((sess as any).passes_completed ?? 0)));
+  const currentPass = Math.max(1, Math.min(2, Number((sess as any).current_pass ?? 1)));
+
+  const hashPass1 = (sess as any).out_token_hash;
+  const hashPass2 = (sess as any).out_token_hash_pass2;
+  const expectedHash = pass === 2 ? hashPass2 : hashPass1;
+  const matchPass1 = Boolean(hashPass1 && hashPass1 === outHash);
+  const matchPass2 = Boolean(hashPass2 && hashPass2 === outHash);
+
+  let resolvedPass = pass;
+  let tokenVerified = pass === 2 ? matchPass2 : matchPass1;
+  if (!tokenVerified) {
+    if (matchPass2) {
+      resolvedPass = 2;
+      tokenVerified = true;
+    } else if (matchPass1) {
+      resolvedPass = 1;
+      tokenVerified = true;
+    }
+  }
 
   if (!tokenVerified && current_url) {
     const currentBits = parseSidAndTokenFromUrl(current_url);
@@ -265,6 +383,13 @@ Deno.serve(async (req) => {
       const currentHash = await sha256Hex(currentBits.token);
       tokenVerified = Boolean(expectedHash && expectedHash === currentHash);
     }
+  }
+
+  // Mobile/in-app browsers can occasionally lose the local PASS2 plaintext token.
+  // If the session is already in pass2 stage for the same device and we are validating pass2,
+  // allow the flow to continue even when the client did not send the exact PASS2 out_token.
+  if (!tokenVerified && resolvedPass === 2 && currentPass >= 2 && completed >= 1 && (sess as any).out_token_hash_pass2) {
+    tokenVerified = true;
   }
 
   if (requireRef && !hostOk && !tokenVerified) {
@@ -300,11 +425,8 @@ Deno.serve(async (req) => {
   const pass2StartedIso = (sess as any).pass2_started_at ?? null;
   const pass2StartedMs = pass2StartedIso ? Date.parse(pass2StartedIso) : NaN;
 
-  const required = Math.max(1, Math.min(2, Number((sess as any).passes_required ?? 1)));
-  const completed = Math.max(0, Math.min(2, Number((sess as any).passes_completed ?? 0)));
-
   // Delay enforcement
-  if (pass === 1) {
+  if (resolvedPass === 1) {
     const mustWaitUntil = startedAtMs + minDelay1 * 1000;
     if (minDelay1 > 0 && Number.isFinite(startedAtMs) && nowMs < mustWaitUntil) {
       const nowIso = new Date().toISOString();
@@ -353,28 +475,27 @@ Deno.serve(async (req) => {
   }
 
   // If VIP needs pass2 and we're on pass1
-  if (required === 2 && pass === 1) {
+  if (required === 2 && resolvedPass === 1) {
     // Only allow transition once
     if (completed >= 1) {
       return json({ ok: false, code: "PASS1_ALREADY_OK", msg: "PASS1_ALREADY_OK" } satisfies JsonErr, 200);
     }
 
-    const tokenPass2 = base64url(32);
-    const tokenPass2Hash = await sha256Hex(tokenPass2);
     const nowIso = new Date().toISOString();
 
     const rotateBucket = String((sess as any).rotate_bucket ?? "").trim();
     const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
     const gateUrlPass2 = baseUrl
-      ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}&sid=${encodeURIComponent(String((sess as any).session_id))}&t=${encodeURIComponent(tokenPass2)}`
-      : `/free/gate?p=2&sid=${encodeURIComponent(String((sess as any).session_id))}&t=${encodeURIComponent(tokenPass2)}`;
+      ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`
+      : `/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`;
 
     const outboundBase1 = String((settings as any)?.free_outbound_url ?? "").trim() || "https://link4m.com/PkY7X";
     const outboundBase2 = String((settings as any)?.free_outbound_url_pass2 ?? "").trim() || outboundBase1;
 
     const tpl2 = applyTemplateApiToken(outboundBase2, (LINK4M_API_TOKEN_PASS2 || LINK4M_API_TOKEN_PASS1));
 
-    const outbound2 = buildOutboundUrl(tpl2, gateUrlPass2);
+    const rawOutbound2 = buildOutboundUrl(tpl2, gateUrlPass2);
+    const outbound2 = await resolveStableLink4mUrl(sb, 2, rotateBucket || "0", rawOutbound2, gateUrlPass2);
     if (!outbound2 || outbound2 === "__TEMPLATE_INVALID__") {
       return json(
         {
@@ -393,7 +514,6 @@ Deno.serve(async (req) => {
         pass1_ok_at: nowIso,
         passes_completed: 1,
         current_pass: 2,
-        out_token_hash_pass2: tokenPass2Hash,
         pass2_started_at: nowIso,
         last_error: null,
         // ensure claim token not set yet
@@ -404,7 +524,7 @@ Deno.serve(async (req) => {
 
     if (updErr) return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
 
-    const result: NextOk = { ok: true, next: "PASS2", out_token: tokenPass2, outbound_url: outbound2, min_delay_seconds: minDelay2 };
+    const result: NextOk = { ok: true, next: "PASS2", out_token: "", outbound_url: outbound2, min_delay_seconds: minDelay2 };
     return json(result, 200);
   }
 
@@ -425,8 +545,8 @@ Deno.serve(async (req) => {
       last_error: null,
       passes_completed: required,
       current_pass: required,
-      pass2_ok_at: pass === 2 ? nowIso : null,
-      pass1_ok_at: pass === 1 ? nowIso : (sess as any).pass1_ok_at ?? null,
+      pass2_ok_at: resolvedPass === 2 ? nowIso : null,
+      pass1_ok_at: resolvedPass === 1 ? nowIso : (sess as any).pass1_ok_at ?? null,
     })
     .eq("session_id", (sess as any).session_id);
 

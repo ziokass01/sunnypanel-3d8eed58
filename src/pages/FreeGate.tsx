@@ -56,6 +56,14 @@ export function FreeGatePage() {
 
   const outToken = useMemo(() => {
     if (tFromQuery) return tFromQuery;
+    try {
+      if (pass === 2) {
+        const pass2a = (localStorage.getItem("free_out_token_pass2") || "").trim();
+        if (pass2a) return pass2a;
+      }
+    } catch {
+      // ignore
+    }
     const fromPrimary = (getOutToken() || "").trim();
     if (fromPrimary) return fromPrimary;
     try {
@@ -63,11 +71,15 @@ export function FreeGatePage() {
       if (fb1) return fb1;
       const fb2 = (localStorage.getItem("free_out_token") || "").trim();
       if (fb2) return fb2;
+      if (pass === 2) {
+        const pass2b = (localStorage.getItem("free_out_token_pass2") || "").trim();
+        if (pass2b) return pass2b;
+      }
     } catch {
       // ignore
     }
     return "";
-  }, [tFromQuery, query]);
+  }, [tFromQuery, query, pass]);
 
   const sessionId = useMemo(() => {
     if (sidFromQuery) return sidFromQuery;
@@ -143,8 +155,14 @@ export function FreeGatePage() {
         const ok = res as GateOk;
 
         if (ok.next === "PASS2") {
-          // Transition to Pass2
-          const nextTok = String(ok.out_token || "").trim();
+          // Transition to Pass2. Prefer the pre-issued pass2 token/outbound captured at /free-start
+          // so Link4M pass2 can stay fixed and we do not depend on generating a new token here.
+          let nextTok = String(ok.out_token || "").trim();
+          try {
+            if (!nextTok) nextTok = String(localStorage.getItem("free_out_token_pass2") || "").trim();
+          } catch {
+            // ignore
+          }
           if (nextTok) {
             setOutToken(nextTok);
             writeBundle({ session_id: sid, out_token: nextTok });
@@ -156,9 +174,17 @@ export function FreeGatePage() {
             } catch {
               // ignore
             }
-            setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
           }
-          const outbound = String(ok.outbound_url || "").trim();
+          setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
+          let outbound = "";
+          try {
+            outbound = String(localStorage.getItem("free_outbound_url_pass2") || "").trim();
+          } catch {
+            // ignore
+          }
+          if (!outbound) {
+            outbound = String(ok.outbound_url || "").trim();
+          }
           if (!outbound) {
             setStatus("error");
             setMessage("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M Key 🔑 VIP.");
