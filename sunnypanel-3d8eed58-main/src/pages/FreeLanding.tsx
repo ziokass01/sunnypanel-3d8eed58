@@ -18,11 +18,16 @@ import { supabase } from "@/integrations/supabase/client";
 type StartOk = {
   ok: true;
   out_token: string;
+  out_token_pass2?: string | null;
   session_id?: string;
   outbound_url: string;
+  outbound_url_pass2?: string | null;
   gate_url: string;
+  gate_url_pass2?: string | null;
   claim_base_url: string;
   min_delay_seconds: number;
+  min_delay_seconds_pass2?: number;
+  passes_required?: number;
 };
 type StartErr = { ok: false; msg: string; code?: string; detail?: any };
 type LastFreeKey = {
@@ -277,6 +282,10 @@ export function FreeLandingPage() {
                     localStorage.setItem("free_started_at_ms", String(Date.now()));
                     localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
                     localStorage.setItem("free_key_type_code", String(selected));
+                    const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
+                    if (pass2Tok) localStorage.setItem("free_out_token_pass2", pass2Tok);
+                    const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
+                    if (pass2Outbound) localStorage.setItem("free_outbound_url_pass2", pass2Outbound);
                   } catch {
                     // ignore
                   }

@@ -209,11 +209,13 @@ function applyTemplateApiToken(tpl: string, token: string) {
 
 const rotateDays = Number((settings as any)?.free_link4m_rotate_days ?? 7);
 const rotate_bucket = computeRotateBucket(rotateDays);
+const requiresDoubleGate = Boolean((kt as any).requires_double_gate);
 
-
-    // Create a token-based session (expires quickly)
+    // Create token-based session(s) (expires quickly)
     const out_token = base64url(32);
     const out_token_hash = await sha256Hex(out_token);
+    const out_token_pass2 = requiresDoubleGate ? base64url(32) : "";
+    const out_token_hash_pass2 = out_token_pass2 ? await sha256Hex(out_token_pass2) : null;
 
     function buildOutboundUrl(outboundBase: string, gateUrl: string) {
       const tpl = String(outboundBase || "").trim();
@@ -422,10 +424,11 @@ const rotate_bucket = computeRotateBucket(rotateDays);
       out_expires_at,
       key_type_code,
       duration_seconds,
-      passes_required: Boolean((kt as any).requires_double_gate) ? 2 : 1,
+      passes_required: requiresDoubleGate ? 2 : 1,
       passes_completed: 0,
       current_pass: 1,
       rotate_bucket,
+      out_token_hash_pass2,
     }).select("session_id").single();
 
     if (insErr || !insData?.session_id) {
@@ -476,7 +479,7 @@ const builtOutboundPass2 = test_mode ? gate_url_pass2 : buildOutboundUrl(tpl2, g
     const minDelayPass2Raw = Number((settings as any)?.free_min_delay_seconds_pass2 ?? min_delay_seconds);
     const min_delay_seconds_pass2 = Math.max(0, minDelayEnabled ? (Math.floor(minDelayPass2Raw) || min_delay_seconds) : 0);
 
-    return jsonResponse({ ok: true, out_token, session_id, outbound_url, outbound_url_pass2: builtOutboundPass2, gate_url: gate_url_pass1, gate_url_pass2, claim_base_url, min_delay_seconds, min_delay_seconds_pass2, passes_required: Boolean((kt as any).requires_double_gate) ? 2 : 1, rotate_bucket }, 200);
+    return jsonResponse({ ok: true, out_token, out_token_pass2: out_token_pass2 || null, session_id, outbound_url, outbound_url_pass2: builtOutboundPass2, gate_url: gate_url_pass1, gate_url_pass2, claim_base_url, min_delay_seconds, min_delay_seconds_pass2, passes_required: requiresDoubleGate ? 2 : 1, rotate_bucket }, 200);
   } catch (error) {
     console.error("free-start error", error);
     return jsonResponse({

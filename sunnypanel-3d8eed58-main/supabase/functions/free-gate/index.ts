@@ -258,6 +258,7 @@ Deno.serve(async (req) => {
 
   const hashPass1 = (sess as any).out_token_hash;
   const hashPass2 = (sess as any).out_token_hash_pass2;
+  const expectedHash = pass === 2 ? hashPass2 : hashPass1;
   const matchPass1 = Boolean(hashPass1 && hashPass1 === outHash);
   const matchPass2 = Boolean(hashPass2 && hashPass2 === outHash);
 
@@ -279,6 +280,13 @@ Deno.serve(async (req) => {
       const currentHash = await sha256Hex(currentBits.token);
       tokenVerified = Boolean(expectedHash && expectedHash === currentHash);
     }
+  }
+
+  // Mobile/in-app browsers can occasionally lose the local PASS2 plaintext token.
+  // If the session is already in pass2 stage for the same device and we are validating pass2,
+  // allow the flow to continue even when the client did not send the exact PASS2 out_token.
+  if (!tokenVerified && resolvedPass === 2 && currentPass >= 2 && completed >= 1 && (sess as any).out_token_hash_pass2) {
+    tokenVerified = true;
   }
 
   if (requireRef && !hostOk && !tokenVerified) {
@@ -373,8 +381,6 @@ Deno.serve(async (req) => {
       return json({ ok: false, code: "PASS1_ALREADY_OK", msg: "PASS1_ALREADY_OK" } satisfies JsonErr, 200);
     }
 
-    const tokenPass2 = base64url(32);
-    const tokenPass2Hash = await sha256Hex(tokenPass2);
     const nowIso = new Date().toISOString();
 
     const rotateBucket = String((sess as any).rotate_bucket ?? "").trim();
@@ -407,7 +413,6 @@ Deno.serve(async (req) => {
         pass1_ok_at: nowIso,
         passes_completed: 1,
         current_pass: 2,
-        out_token_hash_pass2: tokenPass2Hash,
         pass2_started_at: nowIso,
         last_error: null,
         // ensure claim token not set yet
@@ -418,7 +423,7 @@ Deno.serve(async (req) => {
 
     if (updErr) return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
 
-    const result: NextOk = { ok: true, next: "PASS2", out_token: tokenPass2, outbound_url: outbound2, min_delay_seconds: minDelay2 };
+    const result: NextOk = { ok: true, next: "PASS2", out_token: "", outbound_url: outbound2, min_delay_seconds: minDelay2 };
     return json(result, 200);
   }
 

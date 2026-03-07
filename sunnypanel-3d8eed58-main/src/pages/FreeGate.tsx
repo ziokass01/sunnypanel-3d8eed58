@@ -143,8 +143,14 @@ export function FreeGatePage() {
         const ok = res as GateOk;
 
         if (ok.next === "PASS2") {
-          // Transition to Pass2
-          const nextTok = String(ok.out_token || "").trim();
+          // Transition to Pass2. Prefer the pre-issued pass2 token/outbound captured at /free-start
+          // so Link4M pass2 can stay fixed and we do not depend on generating a new token here.
+          let nextTok = String(ok.out_token || "").trim();
+          try {
+            if (!nextTok) nextTok = String(localStorage.getItem("free_out_token_pass2") || "").trim();
+          } catch {
+            // ignore
+          }
           if (nextTok) {
             setOutToken(nextTok);
             writeBundle({ session_id: sid, out_token: nextTok });
@@ -156,9 +162,14 @@ export function FreeGatePage() {
             } catch {
               // ignore
             }
-            setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
           }
-          const outbound = String(ok.outbound_url || "").trim();
+          setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
+          let outbound = String(ok.outbound_url || "").trim();
+          try {
+            if (!outbound) outbound = String(localStorage.getItem("free_outbound_url_pass2") || "").trim();
+          } catch {
+            // ignore
+          }
           if (!outbound) {
             setStatus("error");
             setMessage("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M Key 🔑 VIP.");
