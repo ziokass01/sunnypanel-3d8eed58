@@ -53,6 +53,7 @@ type RentKey = {
   duration_days: number | null;
   duration_value?: number | null;
   duration_unit?: "hour" | "day" | null;
+  max_devices?: number | null;
   first_used_at: string | null;
 };
 
@@ -226,6 +227,7 @@ export function RentPortalPage() {
   const [keyNote, setKeyNote] = useState("");
   const [durationValue, setDurationValue] = useState("30");
   const [durationUnit, setDurationUnit] = useState<DurationUnit>("day");
+  const [maxDevicesValue, setMaxDevicesValue] = useState("1");
   const [keyStartMode, setKeyStartMode] = useState<KeyStartMode>("immediate");
   const [resetCode, setResetCode] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -236,6 +238,7 @@ export function RentPortalPage() {
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [editDurationValue, setEditDurationValue] = useState("30");
   const [editDurationUnit, setEditDurationUnit] = useState<DurationUnit>("day");
+  const [editMaxDevicesValue, setEditMaxDevicesValue] = useState("1");
   const [editKeyStartMode, setEditKeyStartMode] = useState<KeyStartMode>("immediate");
   const [editKeyNote, setEditKeyNote] = useState("");
   const [hmacDialogOpen, setHmacDialogOpen] = useState(false);
@@ -420,6 +423,7 @@ export function RentPortalPage() {
           key: mode === "custom" ? normalizeKeyInput(customKey) : null,
           note: keyNote.trim() || null,
           start_mode: keyStartMode,
+          max_devices: Math.max(1, Math.min(999999, parseInt(maxDevicesValue || "0", 10) || 1)),
           ...buildDurationPayload(durationValue, durationUnit),
         },
         { authToken: token ?? undefined },
@@ -432,6 +436,7 @@ export function RentPortalPage() {
       setKeyNote("");
       setDurationValue("30");
       setDurationUnit("day");
+      setMaxDevicesValue("1");
       setKeyStartMode("immediate");
       qc.invalidateQueries({ queryKey: ["rent", "keys"] });
       qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
@@ -452,6 +457,7 @@ export function RentPortalPage() {
           key_id: selectedKey.id,
           note: editKeyNote.trim() || null,
           start_mode: editKeyStartMode,
+          max_devices: Math.max(1, Math.min(999999, parseInt(editMaxDevicesValue || "0", 10) || 1)),
           ...buildDurationPayload(editDurationValue, editDurationUnit),
         },
         { authToken: token ?? undefined },
@@ -634,6 +640,7 @@ export function RentPortalPage() {
     setSelectedKeyId(key.id);
     setEditDurationValue(String(getDurationValue(key) || 30));
     setEditDurationUnit(getDurationUnit(key));
+    setEditMaxDevicesValue(String(key.max_devices ?? 1));
     setEditKeyStartMode(key.starts_on_first_use ? "first_use" : "immediate");
     setEditKeyNote(key.note ?? "");
     setKeyDialogOpen(true);
@@ -792,6 +799,17 @@ export function RentPortalPage() {
                 </div>
               </div>
               <div className="space-y-2">
+                <Label>Số máy tối đa</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999999}
+                  value={maxDevicesValue}
+                  onChange={(e) => setMaxDevicesValue(e.target.value)}
+                  placeholder="1"
+                />
+                <p className="text-xs text-muted-foreground">Từ 1 đến 999999 máy.</p>
+
                 <Label>Kiểu chạy</Label>
                 <div className="flex flex-wrap gap-2">
                   <Button variant={keyStartMode === "immediate" ? "default" : "outline"} onClick={() => setKeyStartMode("immediate")}>Chạy ngay</Button>
@@ -1120,6 +1138,17 @@ export function RentPortalPage() {
               </div>
 
               <div className="space-y-2">
+                <Label>Số máy tối đa</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999999}
+                  value={editMaxDevicesValue}
+                  onChange={(e) => setEditMaxDevicesValue(e.target.value)}
+                  placeholder="1"
+                />
+                <p className="text-xs text-muted-foreground">Từ 1 đến 999999 máy.</p>
+
                 <Label>Kiểu chạy</Label>
                 <div className="flex flex-wrap gap-2">
                   <Button variant={editKeyStartMode === "immediate" ? "default" : "outline"} onClick={() => setEditKeyStartMode("immediate")}>Chạy ngay</Button>
