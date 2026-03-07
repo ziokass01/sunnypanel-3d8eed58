@@ -44,7 +44,6 @@ function isActiveBlockUntil(blockedUntil?: string | null) {
   return Number.isFinite(t) && t > Date.now();
 }
 
-async 
 async function insertGateLog(sb: any, payload: {
   session_id?: string | null;
   key_type_code?: string | null;
@@ -129,7 +128,7 @@ async function maybeAutoBlockGateFailures(sb: any, args: {
   });
 }
 
-function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
+async function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
   const body = new URLSearchParams();
   body.set("secret", secret);
   body.set("response", token);

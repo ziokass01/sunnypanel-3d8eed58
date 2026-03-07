@@ -10,12 +10,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fetchAuditLogs } from "@/features/audit/audit-api";
 
-function auditVariant(action?: string) {
+function auditVariant(action?: string, detail?: any) {
   const v = String(action ?? "").toUpperCase();
-  if (["VERIFY", "CREATE", "RESTORE"].includes(v)) return "default" as const;
+  if (v === "VERIFY") {
+    return detail?.ok === false ? ("destructive" as const) : ("default" as const);
+  }
+  if (["CREATE", "RESTORE"].includes(v)) return "default" as const;
   if (["DELETE", "HARD_DELETE"].includes(v)) return "destructive" as const;
   if (["UPDATE"].includes(v)) return "secondary" as const;
   return "outline" as const;
+}
+
+function auditLabel(action?: string, detail?: any) {
+  const v = String(action ?? "").toUpperCase();
+  if (v === "VERIFY") return detail?.ok === false ? "VERIFY FAIL" : "VERIFY OK";
+  return v || "UNKNOWN";
 }
 
 function compactJson(value: unknown) {
@@ -95,7 +104,7 @@ export function AuditLogsPage() {
             <div key={row.id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
               <div className="flex items-start justify-between gap-2">
                 <div className="text-xs text-muted-foreground">{new Date(row.created_at).toLocaleString()}</div>
-                <Badge variant={auditVariant(row.action)}>{row.action}</Badge>
+                <Badge variant={auditVariant(row.action, row.detail)}>{auditLabel(row.action, row.detail)}</Badge>
               </div>
               <div className="font-mono text-xs break-all">{row.license_key}</div>
               <pre className="rounded-lg bg-background/70 p-2 text-[11px] whitespace-pre-wrap break-words">{compactJson(row.detail)}</pre>
@@ -133,7 +142,7 @@ export function AuditLogsPage() {
                   <TableCell className="whitespace-nowrap text-sm">
                     {new Date(row.created_at).toLocaleString()}
                   </TableCell>
-                  <TableCell className="text-sm"><Badge variant={auditVariant(row.action)}>{row.action}</Badge></TableCell>
+                  <TableCell className="text-sm"><Badge variant={auditVariant(row.action, row.detail)}>{auditLabel(row.action, row.detail)}</Badge></TableCell>
                   <TableCell className="font-mono text-xs md:text-sm">{row.license_key}</TableCell>
                   <TableCell className="text-right">
                     <pre className="max-w-[28rem] overflow-auto rounded-md bg-muted p-2 text-left text-[11px] leading-snug">
