@@ -1135,6 +1135,28 @@ export function RentPortalPage() {
               </div>
 
               <div className="space-y-2">
+                <Label>Số máy tối đa</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999999}
+                  value={maxDevicesValue}
+                  onChange={(e) => setMaxDevicesValue(e.target.value)}
+                  placeholder="1"
+                />
+                <p className="text-xs text-muted-foreground">Từ 1 đến 999999 máy.</p>
+
+                <Label>Số máy tối đa</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999999}
+                  value={maxDevicesValue}
+                  onChange={(e) => setMaxDevicesValue(e.target.value)}
+                  placeholder="1"
+                />
+                <p className="text-xs text-muted-foreground">Từ 1 đến 999999 máy.</p>
+
                 <Label>Kiểu chạy</Label>
                 <div className="flex flex-wrap gap-2">
                   <Button variant={editKeyStartMode === "immediate" ? "default" : "outline"} onClick={() => setEditKeyStartMode("immediate")}>Chạy ngay</Button>
