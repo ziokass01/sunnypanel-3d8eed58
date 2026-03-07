@@ -1135,8 +1135,6 @@ export function RentPortalPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Số máy tối đa</Label>
-                <Input
                   type="number"
                   min={1}
                   max={999999}
