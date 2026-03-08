@@ -30,6 +30,9 @@ type SettingsRow = {
   free_gate_antibypass_enabled?: boolean;
   free_gate_antibypass_seconds?: number;
   free_link4m_rotate_days?: number;
+  free_session_waiting_limit?: number;
+  free_link4m_rotate_nonce_pass1?: number;
+  free_link4m_rotate_nonce_pass2?: number;
   free_enabled: boolean;
   free_disabled_message: string;
   free_min_delay_seconds: number;
@@ -241,7 +244,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
+          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -253,6 +256,9 @@ export function AdminFreeKeysPage() {
   const [outboundUrl, setOutboundUrl] = useState("");
   const [outboundUrlPass2, setOutboundUrlPass2] = useState("");
   const [rotateDays, setRotateDays] = useState(7);
+  const [sessionWaitingLimit, setSessionWaitingLimit] = useState(2);
+  const [rotateNoncePass1, setRotateNoncePass1] = useState(0);
+  const [rotateNoncePass2, setRotateNoncePass2] = useState(0);
 
   const [freeEnabled, setFreeEnabled] = useState(true);
   const [disabledMessage, setDisabledMessage] = useState("Trang GetKey đang tạm đóng.");
@@ -273,6 +279,9 @@ export function AdminFreeKeysPage() {
     setOutboundUrl(s.free_outbound_url ?? "");
     setOutboundUrlPass2((s as any).free_outbound_url_pass2 ?? "");
     setRotateDays(Number((s as any).free_link4m_rotate_days ?? 7));
+    setSessionWaitingLimit(Number((s as any).free_session_waiting_limit ?? 2));
+    setRotateNoncePass1(Number((s as any).free_link4m_rotate_nonce_pass1 ?? 0));
+    setRotateNoncePass2(Number((s as any).free_link4m_rotate_nonce_pass2 ?? 0));
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
     setMinDelayEnabled(Boolean((s as any).free_min_delay_enabled ?? true));
@@ -293,6 +302,9 @@ export function AdminFreeKeysPage() {
         free_outbound_url: outboundUrl.trim() || null,
         free_outbound_url_pass2: outboundUrlPass2.trim() || null,
         free_link4m_rotate_days: Math.max(1, Math.floor(Number(rotateDays) || 7)),
+        free_session_waiting_limit: Math.max(1, Math.floor(Number(sessionWaitingLimit) || 2)),
+        free_link4m_rotate_nonce_pass1: Math.max(0, Math.floor(Number(rotateNoncePass1) || 0)),
+        free_link4m_rotate_nonce_pass2: Math.max(0, Math.floor(Number(rotateNoncePass2) || 0)),
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
         free_min_delay_enabled: Boolean(minDelayEnabled),
@@ -323,6 +335,25 @@ export function AdminFreeKeysPage() {
     onError: (e: any) => {
       toast({ title: "Save failed", description: e?.message ?? "Error", variant: "destructive" });
     },
+  });
+
+
+  const rotateNow = useMutation({
+    mutationFn: async (passNo: 1 | 2) => {
+      const field = passNo === 1 ? "free_link4m_rotate_nonce_pass1" : "free_link4m_rotate_nonce_pass2";
+      const current = passNo === 1 ? rotateNoncePass1 : rotateNoncePass2;
+      const { error } = await supabase
+        .from("licenses_free_settings")
+        .update({ [field]: current + 1 })
+        .eq("id", 1);
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Rotated", description: "Đã đổi bucket ngay lập tức." });
+      await settingsQuery.refetch();
+    },
+    onError: (e: any) => toast({ title: "Rotate failed", description: e?.message ?? "Error", variant: "destructive" }),
   });
 
   // -------- Key types --------
@@ -700,7 +731,7 @@ const disableAllKeyTypes = useMutation({
   }, [sessionsQuery.data, issuesQuery.data, gateLogsQuery.data]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.issueCount}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.sessionCount}</div></CardContent></Card>
@@ -709,8 +740,8 @@ const disableAllKeyTypes = useMutation({
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStats.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStats.pass1Hits} · Pass2: {dashboardStats.pass2Hits}</div></CardContent></Card>
       </div>
 
-      <Card className="overflow-hidden border-border/80 shadow-lg shadow-primary/5">
-        <CardHeader className="space-y-3 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-4">
+      <Card>
+        <CardHeader className="space-y-3 pb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
               <CardTitle className="text-xl">Free GetKey Settings</CardTitle>
@@ -728,7 +759,7 @@ const disableAllKeyTypes = useMutation({
           </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           {freeSchemaHint ? (
             <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
               <div className="font-medium text-destructive">Thiếu cấu hình Free DB/RPC</div>
@@ -793,6 +824,16 @@ const disableAllKeyTypes = useMutation({
   <div className="text-xs text-muted-foreground">
     Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới. (Ví dụ: 7 ngày)
   </div>
+  <div className="flex flex-wrap gap-2">
+    <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(1)} disabled={rotateNow.isPending}>Rotate pass1 now</Button>
+    <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(2)} disabled={rotateNow.isPending}>Rotate pass2 now</Button>
+  </div>
+</div>
+
+<div className="space-y-2">
+  <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
+  <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
+  <div className="text-xs text-muted-foreground">Nếu 1 thiết bị tạo quá nhiều phiên đang chờ trong 15 phút, hệ thống sẽ chặn tạo thêm.</div>
 </div>
 </div>
 
@@ -1181,7 +1222,7 @@ const disableAllKeyTypes = useMutation({
             Chạy test server-side để kiểm tra flow phát key. Dùng thêm “Ping backend” để xem backend có phản hồi / CORS có ổn.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"

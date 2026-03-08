@@ -409,7 +409,7 @@ Deno.serve(async (req) => {
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash,out_token_hash_pass2,key_type_code,passes_required,passes_completed,current_pass,rotate_bucket,pass2_started_at",
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash,out_token_hash_pass2,key_type_code,passes_required,passes_completed,current_pass,rotate_bucket,rotate_bucket_pass2,pass2_started_at",
     )
     .eq("session_id", sid)
     .maybeSingle();
@@ -720,7 +720,7 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
 
-    const rotateBucket = String((sess as any).rotate_bucket ?? "").trim();
+    const rotateBucket = String((sess as any).rotate_bucket_pass2 ?? (sess as any).rotate_bucket ?? "").trim();
     const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
     const gateUrlPass2 = baseUrl
       ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`

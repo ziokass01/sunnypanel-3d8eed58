@@ -25,6 +25,9 @@ export type FreeConfig = {
   free_outbound_url: string | null;
   free_outbound_url_pass2?: string | null;
   free_link4m_rotate_days?: number;
+  free_session_waiting_limit?: number;
+  free_link4m_rotate_nonce_pass1?: number;
+  free_link4m_rotate_nonce_pass2?: number;
   free_min_delay_seconds: number;
   free_min_delay_seconds_pass2?: number;
   free_return_seconds: number;

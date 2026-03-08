@@ -471,6 +471,9 @@ export type Database = {
           free_enabled: boolean
           free_gate_antibypass_enabled: boolean
           free_gate_antibypass_seconds: number
+          free_link4m_rotate_days: number
+          free_link4m_rotate_nonce_pass1: number
+          free_link4m_rotate_nonce_pass2: number
           free_min_delay_enabled: boolean
           free_min_delay_seconds: number
           free_min_delay_seconds_pass2: number
@@ -480,6 +483,7 @@ export type Database = {
           free_public_note: string
           free_require_link4m_referrer: boolean
           free_return_seconds: number
+          free_session_waiting_limit: number
           id: number
           updated_at: string
           updated_by: string | null
@@ -490,6 +494,9 @@ export type Database = {
           free_enabled?: boolean
           free_gate_antibypass_enabled?: boolean
           free_gate_antibypass_seconds?: number
+          free_link4m_rotate_days?: number
+          free_link4m_rotate_nonce_pass1?: number
+          free_link4m_rotate_nonce_pass2?: number
           free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
           free_min_delay_seconds_pass2?: number
@@ -499,6 +506,7 @@ export type Database = {
           free_public_note?: string
           free_require_link4m_referrer?: boolean
           free_return_seconds?: number
+          free_session_waiting_limit?: number
           id: number
           updated_at?: string
           updated_by?: string | null
@@ -509,6 +517,9 @@ export type Database = {
           free_enabled?: boolean
           free_gate_antibypass_enabled?: boolean
           free_gate_antibypass_seconds?: number
+          free_link4m_rotate_days?: number
+          free_link4m_rotate_nonce_pass1?: number
+          free_link4m_rotate_nonce_pass2?: number
           free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
           free_min_delay_seconds_pass2?: number
@@ -518,9 +529,7 @@ export type Database = {
           free_public_note?: string
           free_require_link4m_referrer?: boolean
           free_return_seconds?: number
-          id?: number
-          updated_at?: string
-          updated_by?: string | null
+          free_session_waiting_limit?: number
         }
         Relationships: []
       }

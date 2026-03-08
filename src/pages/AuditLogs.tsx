@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchAuditLogs } from "@/features/audit/audit-api";
 
-type QuickFilter = "all" | "verify_fail" | "verify_ok" | "mutations" | "destructive";
+type QuickFilter = "all" | "verify_fail" | "verify_ok" | "mutations" | "destructive" | "blocked" | "today" | "last_10m";
 
 function auditVariant(action?: string, detail?: any) {
   const v = String(action ?? "").toUpperCase();
@@ -71,10 +71,15 @@ export function AuditLogsPage() {
 
   const filteredData = useMemo(() => {
     return data.filter((row) => {
-      if (quick === "verify_fail") return String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false;
-      if (quick === "verify_ok") return String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false;
-      if (quick === "mutations") return ["CREATE", "UPDATE", "RESTORE"].includes(String(row.action).toUpperCase());
-      if (quick === "destructive") return ["DELETE", "HARD_DELETE"].includes(String(row.action).toUpperCase()) || row.detail?.ok === false;
+      const actionUpper = String(row.action).toUpperCase();
+      const created = new Date(row.created_at).getTime();
+      if (quick === "verify_fail") return actionUpper === "VERIFY" && row.detail?.ok === false;
+      if (quick === "verify_ok") return actionUpper === "VERIFY" && row.detail?.ok !== false;
+      if (quick === "mutations") return ["CREATE", "UPDATE", "RESTORE"].includes(actionUpper);
+      if (quick === "destructive") return ["DELETE", "HARD_DELETE"].includes(actionUpper) || row.detail?.ok === false;
+      if (quick === "blocked") return JSON.stringify(row.detail ?? {}).includes("BLOCK") || actionUpper.includes("BLOCK");
+      if (quick === "today") return new Date(row.created_at).toDateString() === new Date().toDateString();
+      if (quick === "last_10m") return created >= Date.now() - 10 * 60 * 1000;
       return true;
     });
   }, [data, quick]);
@@ -93,6 +98,9 @@ export function AuditLogsPage() {
     { key: "verify_ok", label: "Verify ok" },
     { key: "mutations", label: "Create / Update" },
     { key: "destructive", label: "Delete / lỗi" },
+    { key: "blocked", label: "Blocked" },
+    { key: "last_10m", label: "10 phút gần" },
+    { key: "today", label: "Hôm nay" },
   ];
 
   return (
@@ -101,7 +109,7 @@ export function AuditLogsPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Audit logs</h1>
-            <p className="mt-2 text-sm text-muted-foreground">Theo dõi thao tác tạo, sửa, xoá và xác minh key theo cách gọn hơn, dễ đọc hơn, đồng thời tách nhanh log thành công và thất bại.</p>
+            <p className="mt-2 text-sm text-muted-foreground">Theo dõi thao tác tạo, sửa, xoá và xác minh key theo cách gọn hơn, dễ đọc hơn.</p>
           </div>
           <Collapsible open={showFilters} onOpenChange={setShowFilters}>
             <CollapsibleTrigger asChild>
@@ -205,7 +213,7 @@ export function AuditLogsPage() {
           {filteredData.map((row) => {
             const open = expandedId === row.id;
             return (
-              <div key={row.id} className="rounded-2xl border p-3 shadow-sm">
+              <div key={row.id} className="rounded-xl border p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">

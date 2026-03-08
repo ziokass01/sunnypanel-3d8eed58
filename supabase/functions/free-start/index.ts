@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
     // Settings
     const { data: settings, error: sErr } = await sb
       .from("licenses_free_settings")
-      .select("free_outbound_url,free_outbound_url_pass2,free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_link4m_rotate_days")
+      .select("free_outbound_url,free_outbound_url_pass2,free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2")
       .eq("id", 1)
       .maybeSingle();
 
@@ -193,11 +193,11 @@ Deno.serve(async (req) => {
 const LINK4M_API_TOKEN_PASS1 = (Deno.env.get("LINK4M_API_TOKEN_PASS1") ?? "").trim();
 const LINK4M_API_TOKEN_PASS2 = (Deno.env.get("LINK4M_API_TOKEN_PASS2") ?? "").trim();
 
-function computeRotateBucket(rotateDays: number) {
+function computeRotateBucket(rotateDays: number, nonce = 0) {
   const days = Math.max(1, Math.floor(Number(rotateDays) || 7));
   const epochDays = Math.floor(Date.now() / 86400000); // UTC-ish
   const bucket = Math.floor(epochDays / days);
-  return String(bucket);
+  return `${bucket}:${Math.max(0, Math.floor(Number(nonce) || 0))}`;
 }
 
 function applyTemplateApiToken(tpl: string, token: string) {
@@ -208,7 +208,11 @@ function applyTemplateApiToken(tpl: string, token: string) {
 }
 
 const rotateDays = Number((settings as any)?.free_link4m_rotate_days ?? 7);
-const rotate_bucket = computeRotateBucket(rotateDays);
+const rotateNoncePass1 = Number((settings as any)?.free_link4m_rotate_nonce_pass1 ?? 0);
+const rotateNoncePass2 = Number((settings as any)?.free_link4m_rotate_nonce_pass2 ?? 0);
+const sessionWaitingLimit = Math.max(1, Number((settings as any)?.free_session_waiting_limit ?? 2));
+const rotate_bucket = computeRotateBucket(rotateDays, rotateNoncePass1);
+const rotate_bucket_pass2 = computeRotateBucket(rotateDays, rotateNoncePass2);
 
     function buildOutboundUrl(outboundBase: string, gateUrl: string) {
       const tpl = String(outboundBase || "").trim();
@@ -509,8 +513,8 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       .gte("created_at", pendingWindowFrom);
 
     const pendingCount = Number(pendingQuery.count ?? 0);
-    if (pendingCount >= 2) {
-      await safeLogSecurity("session_waiting_limit", { key_type_code, pendingCount }, ipHash, fingerprint ? fpHash : null);
+    if (pendingCount >= sessionWaitingLimit) {
+      await safeLogSecurity("session_waiting_limit", { key_type_code, pendingCount, limit: sessionWaitingLimit }, ipHash, fingerprint ? fpHash : null);
       return jsonResponse({ ok: false, code: "SESSION_PENDING_LIMIT", msg: "SESSION_PENDING_LIMIT" }, 429);
     }
 
@@ -541,6 +545,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       passes_completed: 0,
       current_pass: 1,
       rotate_bucket,
+      rotate_bucket_pass2,
       out_token_hash_pass2,
     }).select("session_id").single();
 
@@ -555,7 +560,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
 // Session/token stay in local bundle and are verified at /free/gate, so we do not
 // need to generate a brand-new Link4M URL for every Get Key click.
 const gate_url_pass1 = `${baseUrl}/free/gate?p=1&b=${encodeURIComponent(rotate_bucket)}`;
-const gate_url_pass2 = `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotate_bucket)}`;
+const gate_url_pass2 = `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotate_bucket_pass2)}`;
 
 // Outbound templates
 const outboundBasePass1 = rawOutbound || fallbackOutbound;
@@ -573,7 +578,7 @@ let builtOutboundPass2 = test_mode ? gate_url_pass2 : buildOutboundUrl(tpl2, gat
 if (!test_mode) {
   builtOutbound = await resolveStableLink4mUrl(sb, 1, rotate_bucket, builtOutbound, gate_url_pass1);
   if (requiresDoubleGate) {
-    builtOutboundPass2 = await resolveStableLink4mUrl(sb, 2, rotate_bucket, builtOutboundPass2, gate_url_pass2);
+    builtOutboundPass2 = await resolveStableLink4mUrl(sb, 2, rotate_bucket_pass2, builtOutboundPass2, gate_url_pass2);
   }
 }
     if (!builtOutbound) return jsonResponse({ ok: false, code: "MISSING_OUTBOUND_URL", msg: "MISSING_OUTBOUND_URL" }, 500);
