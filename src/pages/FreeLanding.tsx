@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Download, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -413,6 +414,34 @@ export function FreeLandingPage() {
                   Copy key
                 </Button>
                 <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
+              </div>
+            ) : null}
+
+            {cfg?.free_download_enabled && cfg?.free_download_url ? (
+              <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/20 p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Tệp tải xuống 📥</div>
+                    <div className="text-xs text-muted-foreground">Tải nhanh file được admin cập nhật cho người dùng free.</div>
+                  </div>
+                  <Badge variant="outline" className="rounded-full">Free</Badge>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border bg-background/80 px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên file</div>
+                    <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                      <FileText className="h-4 w-4 text-primary" />
+                      <span className="break-all">{cfg.free_download_name || 'Tệp tải xuống'}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-background/80 px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thông tin</div>
+                    <div className="mt-1 text-sm text-foreground">{cfg.free_download_info || 'Bản file được admin ghim sẵn cho trang free.'}</div>
+                  </div>
+                </div>
+                <Button type="button" className="h-11 rounded-2xl" onClick={() => window.open(cfg.free_download_url as string, '_blank', 'noopener')}>
+                  <Download className="mr-2 h-4 w-4" /> Tải file 📥
+                </Button>
               </div>
             ) : null}
 

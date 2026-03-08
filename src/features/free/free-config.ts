@@ -39,6 +39,11 @@ export type FreeConfig = {
   // Public content (optional)
   free_public_note: string;
   free_public_links: PublicLink[];
+  free_download_enabled?: boolean;
+  free_download_name?: string | null;
+  free_download_info?: string | null;
+  free_download_url?: string | null;
+  free_download_size?: number | null;
 
   // Available options (only enabled key types are returned)
   key_types: FreeKeyType[];

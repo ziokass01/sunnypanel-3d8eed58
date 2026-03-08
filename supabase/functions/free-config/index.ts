@@ -76,7 +76,12 @@ Deno.serve(async (req) => {
   free_daily_limit_per_fingerprint,
   free_require_link4m_referrer,
   free_public_note,
-  free_public_links
+  free_public_links,
+  free_download_enabled,
+  free_download_name,
+  free_download_info,
+  free_download_url,
+  free_download_size
 `)
     .eq("id", 1)
     .maybeSingle();
@@ -104,6 +109,11 @@ Deno.serve(async (req) => {
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
   const free_public_note = String(settings?.free_public_note ?? "");
   const free_public_links = Array.isArray(settings?.free_public_links) ? settings?.free_public_links : [];
+  const free_download_enabled = Boolean((settings as any)?.free_download_enabled ?? false);
+  const free_download_name = String((settings as any)?.free_download_name ?? "").trim() || null;
+  const free_download_info = String((settings as any)?.free_download_info ?? "").trim() || null;
+  const free_download_url = String((settings as any)?.free_download_url ?? "").trim() || null;
+  const free_download_size = Math.max(0, Number((settings as any)?.free_download_size ?? 0)) || null;
 
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
@@ -165,6 +175,11 @@ Deno.serve(async (req) => {
 
     free_public_note,
     free_public_links,
+    free_download_enabled,
+    free_download_name,
+    free_download_info,
+    free_download_url,
+    free_download_size,
 
     key_types: (keyTypes ?? []).map((k) => ({
       code: k.code,

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, Filter, Trash2 } from "lucide-react";
+import { ChevronDown, Filter, Trash2, Upload, Download } from "lucide-react";
 import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +42,12 @@ type SettingsRow = {
   free_require_link4m_referrer: boolean;
   free_public_note: string;
   free_public_links: any;
+  free_download_enabled?: boolean;
+  free_download_name?: string | null;
+  free_download_info?: string | null;
+  free_download_path?: string | null;
+  free_download_url?: string | null;
+  free_download_size?: number | null;
   updated_at: string;
   updated_by: string | null;
 };
@@ -244,7 +250,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
+          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,free_download_enabled,free_download_name,free_download_info,free_download_path,free_download_url,free_download_size,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -272,6 +278,14 @@ export function AdminFreeKeysPage() {
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
+  const [downloadEnabled, setDownloadEnabled] = useState(false);
+  const [downloadName, setDownloadName] = useState("");
+  const [downloadInfo, setDownloadInfo] = useState("");
+  const [downloadPath, setDownloadPath] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadSize, setDownloadSize] = useState<number>(0);
+  const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -294,7 +308,85 @@ export function AdminFreeKeysPage() {
     setRequireRef(Boolean(s.free_require_link4m_referrer));
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
+    setDownloadEnabled(Boolean((s as any).free_download_enabled ?? false));
+    setDownloadName(String((s as any).free_download_name ?? ""));
+    setDownloadInfo(String((s as any).free_download_info ?? ""));
+    setDownloadPath(((s as any).free_download_path ?? null) as any);
+    setDownloadUrl(((s as any).free_download_url ?? null) as any);
+    setDownloadSize(Number((s as any).free_download_size ?? 0));
   }, [settingsQuery.data]);
+
+  const formatFileSize = (bytes?: number | null) => {
+    const n = Number(bytes || 0);
+    if (!n) return "-";
+    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+    if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${n} B`;
+  };
+
+  const handleUploadFile = async (file?: File | null) => {
+    if (!file) return;
+    setUploadingFile(true);
+    try {
+      const ext = file.name.includes('.') ? file.name.split('.').pop() : '';
+      const safeBase = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 48) || 'download';
+      const path = `free/${Date.now()}-${safeBase}${ext ? `.${ext}` : ''}`;
+      const storage = (supabase.storage.from('free-downloads') as any);
+      const { error: uploadErr } = await storage.upload(path, file, { upsert: true, cacheControl: '3600', contentType: file.type || 'application/octet-stream' });
+      if (uploadErr) throw uploadErr;
+      const { data } = storage.getPublicUrl(path);
+      const publicUrl = String(data?.publicUrl || '').trim();
+      const prevPath = downloadPath;
+      setDownloadName(file.name);
+      setDownloadPath(path);
+      setDownloadUrl(publicUrl || null);
+      setDownloadSize(file.size || 0);
+      setDownloadEnabled(true);
+      setDownloadPanelOpen(true);
+      const patch: any = {
+        free_download_enabled: true,
+        free_download_name: file.name,
+        free_download_info: (downloadInfo || '').trim() || null,
+        free_download_path: path,
+        free_download_url: publicUrl || null,
+        free_download_size: file.size || 0,
+      };
+      const query: any = supabase.from('licenses_free_settings');
+      const { error: upsertErr } = await query.upsert({ id: 1, ...patch }, { onConflict: 'id' });
+      if (upsertErr) throw upsertErr;
+      if (prevPath && prevPath !== path) {
+        try { await storage.remove([prevPath]); } catch {}
+      }
+      await settingsQuery.refetch();
+      toast({ title: 'Đã upload file', description: 'File tải xuống đã sẵn sàng ở trang free.' });
+    } catch (e: any) {
+      toast({ title: 'Upload failed', description: e?.message ?? 'Không thể upload file.', variant: 'destructive' });
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const removeDownloadFile = async () => {
+    try {
+      const prevPath = downloadPath;
+      if (prevPath) {
+        try { await (supabase.storage.from('free-downloads') as any).remove([prevPath]); } catch {}
+      }
+      const query: any = supabase.from('licenses_free_settings');
+      const { error } = await query.upsert({ id: 1, free_download_enabled: false, free_download_name: null, free_download_info: null, free_download_path: null, free_download_url: null, free_download_size: null }, { onConflict: 'id' });
+      if (error) throw error;
+      setDownloadEnabled(false);
+      setDownloadName('');
+      setDownloadInfo('');
+      setDownloadPath(null);
+      setDownloadUrl(null);
+      setDownloadSize(0);
+      await settingsQuery.refetch();
+      toast({ title: 'Đã gỡ file', description: 'Nút tải file đã được ẩn khỏi trang free.' });
+    } catch (e: any) {
+      toast({ title: 'Remove failed', description: e?.message ?? 'Không thể gỡ file.', variant: 'destructive' });
+    }
+  };
 
   const saveSettings = useMutation({
     mutationFn: async () => {
@@ -317,10 +409,16 @@ export function AdminFreeKeysPage() {
         free_require_link4m_referrer: Boolean(requireRef),
         free_public_note: publicNote,
         free_public_links: parseLinksText(publicLinksText),
+        free_download_enabled: Boolean(downloadEnabled && (downloadUrl || downloadPath)),
+        free_download_name: (downloadName || "").trim() || null,
+        free_download_info: (downloadInfo || "").trim() || null,
+        free_download_path: downloadPath || null,
+        free_download_url: downloadUrl || null,
+        free_download_size: Math.max(0, Math.floor(Number(downloadSize) || 0)) || null,
       };
 
-      const { data, error } = await supabase
-        .from("licenses_free_settings")
+      const query: any = supabase.from("licenses_free_settings");
+      const { data, error } = await query
         .upsert({ id: 1, ...patch }, { onConflict: "id" })
         .select("id")
         .single();
@@ -756,6 +854,19 @@ const disableAllKeyTypes = useMutation({
             <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
               Copy GetKey URL
             </Button>
+            <Button type="button" variant="outline" onClick={() => setDownloadPanelOpen((v) => !v)}>
+              Upload file📥
+            </Button>
+            <input
+              id="free-download-file-input"
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                void handleUploadFile(file);
+                e.currentTarget.value = '';
+              }}
+            />
           </div>
           </div>
         </CardHeader>
@@ -772,6 +883,77 @@ const disableAllKeyTypes = useMutation({
               <div className="mt-2 break-all font-mono text-xs">{freeSchemaHint}</div>
             </div>
           ) : null}
+
+          <Collapsible open={downloadPanelOpen} onOpenChange={setDownloadPanelOpen}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
+                <span className="flex items-center gap-2"><Upload className="h-4 w-4" /> Tệp tải xuống cho trang free</span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${downloadPanelOpen ? "rotate-180" : ""}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3">
+              <div className="rounded-2xl border bg-background/60 p-4 space-y-4">
+                <div className="flex items-center justify-between gap-4 rounded-2xl border p-3">
+                  <div>
+                    <div className="font-medium">Hiển thị nút tải file ở trang free</div>
+                    <div className="text-xs text-muted-foreground">Bật lên khi đã upload file xong. Nút tải sẽ nằm dưới khối thông tin key để người dùng tải trực tiếp.</div>
+                  </div>
+                  <Switch checked={downloadEnabled} onCheckedChange={setDownloadEnabled} />
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Tên file hiển thị</div>
+                    <Input value={downloadName} onChange={(e) => setDownloadName(e.target.value)} placeholder="Ví dụ: SunnyMod-v2.apk" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Thông tin file</div>
+                    <Input value={downloadInfo} onChange={(e) => setDownloadInfo(e.target.value)} placeholder="Ví dụ: Bản mới nhất cho Android 64bit" />
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-muted/20 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">File hiện tại</div>
+                      <div className="text-xs text-muted-foreground">Upload xong là nút tải sẽ hiện ở trang free. Bạn vẫn có thể sửa tên file/thông tin rồi bấm Save settings để cập nhật.</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" onClick={() => document.getElementById('free-download-file-input')?.click()} disabled={uploadingFile}>
+                        {uploadingFile ? 'Đang upload…' : 'Chọn file'}
+                      </Button>
+                      {downloadUrl ? (
+                        <Button type="button" variant="outline" onClick={() => window.open(downloadUrl, '_blank', 'noopener')}>
+                          <Download className="mr-2 h-4 w-4" /> Xem file
+                        </Button>
+                      ) : null}
+                      {downloadPath || downloadUrl ? (
+                        <Button type="button" variant="destructive" onClick={() => void removeDownloadFile()}>
+                          Gỡ file
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl border bg-background/80 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên file</div>
+                      <div className="mt-1 text-sm font-medium break-all">{downloadName || 'Chưa có file'}</div>
+                    </div>
+                    <div className="rounded-xl border bg-background/80 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Dung lượng</div>
+                      <div className="mt-1 text-sm font-medium">{formatFileSize(downloadSize)}</div>
+                    </div>
+                    <div className="rounded-xl border bg-background/80 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                      <div className="mt-1 text-sm font-medium">{downloadEnabled && downloadUrl ? 'Đang hiển thị' : downloadUrl ? 'Đã upload, chưa bật' : 'Chưa có file'}</div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-background/80 px-3 py-3 text-xs text-muted-foreground break-all">
+                    <div className="font-medium text-foreground">Mô tả ngắn</div>
+                    <div className="mt-1">{downloadInfo || 'Chưa có mô tả file.'}</div>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           <div className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div>
