@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ChevronRight, Link2, MessageCircle, Send, Youtube } from "lucide-react";
+import { Link2, MessageCircle, Send, Youtube } from "lucide-react";
 
 export type PublicLink = {
   label: string;
@@ -33,22 +33,21 @@ export function PublicInfo({
 
   return (
     <div className={cn("space-y-3", className)}>
-      {hasNote ? <div className="rounded-[24px] border bg-gradient-to-br from-background to-muted/20 p-4 text-sm leading-8 whitespace-pre-wrap shadow-sm">{note}</div> : null}
+      {hasNote ? <div className="rounded-md border p-3 text-sm whitespace-pre-wrap">{note}</div> : null}
 
       {hasLinks ? (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2">
           {list.map((l, idx) => {
             const Icon = pickIcon(l.icon, l.label);
             return (
               <Button
                 key={`${l.url}-${idx}`}
                 variant="outline"
-                className="h-auto justify-between gap-2 rounded-2xl border-border/80 bg-background/70 px-4 py-3 whitespace-normal shadow-sm transition hover:bg-muted/40"
+                className="h-auto justify-start gap-2 whitespace-normal py-2"
                 onClick={() => window.open(l.url, "_blank", "noopener")}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                <span className="text-left text-sm font-medium leading-tight">{l.label}</span>
-                <ChevronRight className="ml-auto h-4 w-4 shrink-0 opacity-60" />
+                <span className="text-left text-sm leading-tight">{l.label}</span>
               </Button>
             );
           })}
