@@ -290,14 +290,14 @@ export function FreeGatePage() {
   return (
     <div className="min-h-svh bg-background">
       <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
-        <Card className="w-full overflow-hidden border shadow-sm">
-          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
-            <div className="flex items-center justify-between gap-3">
+        <Card className="w-full overflow-hidden border-border/80 shadow-xl shadow-primary/5">
+          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/12 via-background to-background pb-5">
+            <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <CardTitle className="text-xl">{pass === 2 ? "Đang xác thực key 🔑 VIP💰" : "Đang xác thực key 🔑"}</CardTitle>
                 <CardDescription>Hệ thống đang kiểm tra bước vượt link trước khi chuyển sang bước nhận key.</CardDescription>
               </div>
-              <Badge variant="outline" className="rounded-full">Bước 3 / 4</Badge>
+              <Badge variant="outline" className="min-w-[92px] justify-center rounded-full px-3 py-1 text-center">Bước 3 / 4</Badge>
             </div>
             <FreeFlowSteps current={3} />
           </CardHeader>

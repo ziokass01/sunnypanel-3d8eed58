@@ -552,17 +552,17 @@ export function FreeClaimPage() {
   return (
     <div className="min-h-svh bg-background">
       <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
-        <Card className="w-full overflow-hidden border shadow-sm">
-          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+        <Card className="w-full overflow-hidden border-border/80 shadow-xl shadow-primary/5">
+          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/12 via-background to-background pb-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
                 <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
                 <div>
                   <CardTitle className="text-xl">Nhận Key 🔑</CardTitle>
                   <div className="mt-1 text-sm text-muted-foreground">Bước cuối cùng. Khi phiên hợp lệ, key sẽ hiện ngay ở bên dưới.</div>
                 </div>
               </div>
-              <Badge variant="outline" className="rounded-full">Bước 4 / 4</Badge>
+              <Badge variant="outline" className="min-w-[92px] justify-center rounded-full px-3 py-1 text-center">Bước 4 / 4</Badge>
             </div>
             <FreeFlowSteps current={4} />
           </CardHeader>

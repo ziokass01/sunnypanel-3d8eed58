@@ -101,7 +101,7 @@ export function AuditLogsPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Audit logs</h1>
-            <p className="mt-2 text-sm text-muted-foreground">Theo dõi thao tác tạo, sửa, xoá và xác minh key theo cách gọn hơn, dễ đọc hơn.</p>
+            <p className="mt-2 text-sm text-muted-foreground">Theo dõi thao tác tạo, sửa, xoá và xác minh key theo cách gọn hơn, dễ đọc hơn, đồng thời tách nhanh log thành công và thất bại.</p>
           </div>
           <Collapsible open={showFilters} onOpenChange={setShowFilters}>
             <CollapsibleTrigger asChild>
@@ -205,7 +205,7 @@ export function AuditLogsPage() {
           {filteredData.map((row) => {
             const open = expandedId === row.id;
             return (
-              <div key={row.id} className="rounded-xl border p-3">
+              <div key={row.id} className="rounded-2xl border p-3 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">

@@ -700,7 +700,7 @@ const disableAllKeyTypes = useMutation({
   }, [sessionsQuery.data, issuesQuery.data, gateLogsQuery.data]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.issueCount}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.sessionCount}</div></CardContent></Card>
@@ -709,8 +709,8 @@ const disableAllKeyTypes = useMutation({
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStats.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStats.pass1Hits} · Pass2: {dashboardStats.pass2Hits}</div></CardContent></Card>
       </div>
 
-      <Card>
-        <CardHeader className="space-y-3 pb-4">
+      <Card className="overflow-hidden border-border/80 shadow-lg shadow-primary/5">
+        <CardHeader className="space-y-3 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
               <CardTitle className="text-xl">Free GetKey Settings</CardTitle>
