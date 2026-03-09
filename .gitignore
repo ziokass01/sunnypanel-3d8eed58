@@ -31,3 +31,8 @@ dist-ssr
 *.zip
 repo_check_clean/
 repo_push_tmp/
+
+.env
+*.zip
+*.bak
+*.bak_*
