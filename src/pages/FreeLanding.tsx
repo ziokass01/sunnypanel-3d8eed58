@@ -17,6 +17,7 @@ import {
   setSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
+import ZaloGetKeyBubble from "../components/ZaloGetKeyBubble";
 
 type StartOk = {
   ok: true;
@@ -113,7 +114,9 @@ export function FreeLandingPage() {
         }
         setErr(e?.message ?? "Failed to load config");
       });
-    return () => {
+    return (
+    <>
+      <ZaloGetKeyBubble />) => {
       cancelled = true;
     };
   }, []);
@@ -464,5 +467,6 @@ export function FreeLandingPage() {
         </Card>
       </main>
     </div>
-  );
+      </>
+);
 }

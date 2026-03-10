@@ -36,3 +36,8 @@ repo_push_tmp/
 *.zip
 *.bak
 *.bak_*
+
+.env
+*.zip
+*.bak
+*.bak_*
