@@ -111,7 +111,12 @@ Deno.serve(async (req) => {
     });
 
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders, status: 204 });
+    
+
+  const shortUrl = await createShortLink(outboundUrl);
+outboundUrl = shortUrl;
+
+return new Response(null, { headers: corsHeaders, status: 204 });
   }
   if (req.method !== "POST") {
     return jsonResponse({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);

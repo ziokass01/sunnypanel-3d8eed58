@@ -111,38 +111,7 @@ Deno.serve(async (req) => {
     });
 
   if (req.method === "OPTIONS") {
-    
-
-  const bucket = currentBucket;
-
-  const bucketField =
-    pass === 2
-      ? 'free_cached_short_bucket_pass2'
-      : 'free_cached_short_bucket_pass1';
-
-  const urlField =
-    pass === 2
-      ? 'free_cached_short_url_pass2'
-      : 'free_cached_short_url_pass1';
-
-  let shortUrl = (settings as any)?.[urlField];
-  let shortBucket = (settings as any)?.[bucketField];
-
-  if (!shortUrl || String(shortBucket) !== String(bucket)) {
-    shortUrl = await createShortLink(outboundUrl);
-
-    await supabase
-      .from('licenses_free_settings')
-      .update({
-        [bucketField]: String(bucket),
-        [urlField]: shortUrl,
-      })
-      .eq('id', (settings as any).id);
-  }
-
-  outboundUrl = shortUrl;
-
-return new Response(null, { headers: corsHeaders, status: 204 });
+    return new Response(null, { headers: corsHeaders, status: 204 });
   }
   if (req.method !== "POST") {
     return jsonResponse({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
