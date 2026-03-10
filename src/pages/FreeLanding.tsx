@@ -114,9 +114,7 @@ export function FreeLandingPage() {
         }
         setErr(e?.message ?? "Failed to load config");
       });
-    return (
-    <>
-      <ZaloGetKeyBubble />) => {
+    return () => {
       cancelled = true;
     };
   }, []);
@@ -134,8 +132,9 @@ export function FreeLandingPage() {
   const canGet = hasTypes && !isClosed && !loading && !missingText;
 
   return (
-    <div className="min-h-svh bg-background">
-      <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+    <>
+      <div className="min-h-svh bg-background">
+        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
         <Card className="w-full">
           <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
             <div className="flex items-center gap-3">
@@ -465,8 +464,9 @@ export function FreeLandingPage() {
             ) : null}
           </CardContent>
         </Card>
-      </main>
-    </div>
-      </>
-);
+        </main>
+      </div>
+      <ZaloGetKeyBubble />
+    </>
+  );
 }
