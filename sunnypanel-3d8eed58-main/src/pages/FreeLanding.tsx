@@ -125,6 +125,7 @@ export function FreeLandingPage() {
   }, [cfg]);
 
   const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
+  const isPendingSessionLimit = useMemo(() => String(err ?? "").includes("quá nhiều phiên đang chờ xác thực"), [err]);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
@@ -168,24 +169,10 @@ export function FreeLandingPage() {
               <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
             </div>
 
-            {err ? (
+            {err && !isPendingSessionLimit ? (
               <div className="space-y-2">
-                {err.includes("quá nhiều phiên đang chờ xác thực") ? (
-                  <div className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-amber-500/5 px-4 py-4 shadow-sm">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-lg">⚠️</div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-amber-300">Phát hiện thao tác quá nhanh</div>
-                        <div className="mt-1 text-sm leading-6 text-amber-100/90">
-                          Thiết bị này đang có phiên xác thực chờ xử lý. Hãy hoàn tất tab đang mở hoặc chờ vài phút rồi bấm lại để tránh bị xem là spam.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-destructive">{err}</div>
-                )}
-                {errMeta?.url && !err.includes("quá nhiều phiên đang chờ xác thực") ? (
+                <div className="text-sm text-destructive">{err}</div>
+                {errMeta?.url ? (
                   <div className="text-xs text-muted-foreground break-all">
                     Backend: <span className="font-mono">{errMeta.url}</span>
                     {errMeta.origin ? (
@@ -480,6 +467,26 @@ export function FreeLandingPage() {
         </Card>
         </main>
       </div>
+      {isPendingSessionLimit ? (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-[1000] flex justify-center px-4">
+          <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-amber-400/40 bg-slate-950/95 px-4 py-4 shadow-2xl backdrop-blur">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-xl">⚠️</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-amber-300">Đang có phiên xác thực chờ xử lý</div>
+                <div className="mt-1 text-sm leading-6 text-slate-200">Bạn đang bấm quá nhanh hoặc còn tab cũ chưa hoàn tất. Hãy quay lại tab trước để làm tiếp, hoặc chờ vài phút rồi thử lại.</div>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/5"
+                onClick={() => setErr(null)}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <ZaloGetKeyBubble />
     </>
   );
