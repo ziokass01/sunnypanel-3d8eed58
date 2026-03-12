@@ -70,13 +70,13 @@ export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [errMeta, setErrMeta] = useState<{ url?: string; origin?: string } | null>(null);
-  const [dismissedPendingToast, setDismissedPendingToast] = useState(false);
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
   const [debugStart, setDebugStart] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
+  const [showPendingToast, setShowPendingToast] = useState(false);
 
   useEffect(() => {
     try {
@@ -127,16 +127,14 @@ export function FreeLandingPage() {
 
   const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
-  const pendingSessionError = useMemo(() => {
-    const value = String(err ?? "").toLowerCase();
-    return value.includes("quá nhiều phiên") || value.includes("phiên đang chờ xác thực") || value.includes("session_pending_limit");
+  const isPendingLimitError = useMemo(() => {
+    const message = String(err ?? "");
+    return message.includes("quá nhiều phiên đang chờ xác thực") || message.includes("SESSION_PENDING_LIMIT");
   }, [err]);
 
   useEffect(() => {
-    if (!pendingSessionError) {
-      setDismissedPendingToast(false);
-    }
-  }, [pendingSessionError]);
+    if (isPendingLimitError) setShowPendingToast(true);
+  }, [isPendingLimitError]);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
@@ -145,37 +143,31 @@ export function FreeLandingPage() {
 
   return (
     <>
-      <div className="min-h-svh bg-background">
-        {pendingSessionError && !dismissedPendingToast ? (
-          <div className="pointer-events-none fixed inset-x-0 top-4 z-[100000] flex justify-center px-4">
-            <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-amber-400/40 bg-[#171522]/95 p-4 shadow-2xl backdrop-blur">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-full bg-amber-400/15 p-2 text-amber-300">
-                  <AlertTriangle className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-amber-200">Thiết bị đang chờ xác thực</div>
-                      <div className="mt-1 text-sm leading-6 text-slate-200">
-                        Bạn đang thao tác quá nhanh hoặc còn phiên cũ chưa hoàn tất. Hãy quay lại tab trước đó hoặc chờ vài phút rồi thử lại.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Đóng thông báo"
-                      onClick={() => setDismissedPendingToast(true)}
-                      className="rounded-full border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 hover:text-white"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
+      {isPendingLimitError && showPendingToast ? (
+        <div className="fixed inset-x-0 top-4 z-[9999] flex justify-center px-4">
+          <div className="w-full max-w-md rounded-2xl border border-amber-400/40 bg-slate-950/95 p-4 shadow-2xl backdrop-blur">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-full bg-amber-400/15 p-2 text-amber-300">
+                <AlertTriangle className="h-5 w-5" />
               </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-amber-200">Cảnh báo phiên chờ xác thực</div>
+                <div className="mt-1 text-sm leading-6 text-slate-200">Thiết bị này đang có phiên xác thực chưa hoàn tất. Hãy quay lại tab trước đó để hoàn tất hoặc chờ vài phút rồi thử lại.</div>
+              </div>
+              <button
+                type="button"
+                aria-label="Đóng cảnh báo"
+                className="rounded-full p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                onClick={() => setShowPendingToast(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           </div>
-        ) : null}
-        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+        </div>
+      ) : null}
+      <div className="min-h-svh bg-background">
+        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4 pt-20">
         <Card className="w-full">
           <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
             <div className="flex items-center gap-3">
@@ -209,23 +201,21 @@ export function FreeLandingPage() {
               <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
             </div>
 
-            {err ? (
-              pendingSessionError ? null : (
-                <div className="space-y-2">
-                  <div className="text-sm text-destructive">{err}</div>
-                  {errMeta?.url ? (
-                    <div className="text-xs text-muted-foreground break-all">
-                      Backend: <span className="font-mono">{errMeta.url}</span>
-                      {errMeta.origin ? (
-                        <>
-                          <br />
-                          Origin: <span className="font-mono">{errMeta.origin}</span>
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              )
+            {err && !isPendingLimitError ? (
+              <div className="space-y-2">
+                <div className="text-sm text-destructive">{err}</div>
+                {errMeta?.url ? (
+                  <div className="text-xs text-muted-foreground break-all">
+                    Backend: <span className="font-mono">{errMeta.url}</span>
+                    {errMeta.origin ? (
+                      <>
+                        <br />
+                        Origin: <span className="font-mono">{errMeta.origin}</span>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             ) : null}
 
             {missingText ? (
