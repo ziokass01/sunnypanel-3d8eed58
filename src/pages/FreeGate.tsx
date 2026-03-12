@@ -51,6 +51,7 @@ export function FreeGatePage() {
   const [remaining, setRemaining] = useState<number>(0);
 
   const query = useMemo(() => sp.toString(), [sp]);
+  const debugMode = useMemo(() => import.meta.env.DEV && (sp.get("debug") || "").trim() === "1", [query]);
   const pass = useMemo(() => {
     const v = Number(sp.get("p") || 1);
     return v === 2 ? 2 : 1;
@@ -218,7 +219,7 @@ export function FreeGatePage() {
         url.searchParams.set("claim", claim);
         url.searchParams.set("sid", sid);
         url.searchParams.set("t", tok);
-        if ((sp.get("debug") || "").trim() === "1") url.searchParams.set("debug", "1");
+        if (debugMode) url.searchParams.set("debug", "1");
 
         nav(`${url.pathname}${url.search}${url.hash}`, { replace: true });
         return;

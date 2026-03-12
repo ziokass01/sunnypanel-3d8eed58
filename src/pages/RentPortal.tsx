@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { postFunction } from "@/lib/functions";
 import { useToast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error-message";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -384,7 +385,7 @@ export function RentPortalPage() {
       toast({ title: "Đăng nhập thành công" });
     },
     onError: (error: any) => {
-      toast({ title: "Đăng nhập thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Đăng nhập thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -405,7 +406,7 @@ export function RentPortalPage() {
       qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
     },
     onError: (error: any) => {
-      toast({ title: "Kích hoạt thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Kích hoạt thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -443,7 +444,7 @@ export function RentPortalPage() {
       toast({ title: "Đã tạo key" });
     },
     onError: (error: any) => {
-      toast({ title: "Tạo key thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Tạo key thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -472,7 +473,7 @@ export function RentPortalPage() {
       setKeyDialogOpen(false);
     },
     onError: (error: any) => {
-      toast({ title: "Cập nhật thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Cập nhật thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -490,7 +491,7 @@ export function RentPortalPage() {
       qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
     },
     onError: (error: any) => {
-      toast({ title: "Đổi trạng thái thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Đổi trạng thái thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -509,7 +510,7 @@ export function RentPortalPage() {
       setKeyDialogOpen(false);
     },
     onError: (error: any) => {
-      toast({ title: "Xóa key thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Xóa key thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -527,7 +528,7 @@ export function RentPortalPage() {
       toast({ title: "Đổi mật khẩu thành công" });
     },
     onError: (error: any) => {
-      toast({ title: "Đổi mật khẩu thất bại", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Đổi mật khẩu thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -566,7 +567,7 @@ export function RentPortalPage() {
       toast({ title: "Đã đặt mật khẩu xem HMAC" });
     },
     onError: (error: any) => {
-      toast({ title: "Không đặt được mật khẩu", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Không đặt được mật khẩu", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -591,7 +592,7 @@ export function RentPortalPage() {
       toast({ title: "Đã mở khóa HMAC" });
     },
     onError: (error: any) => {
-      toast({ title: "Không mở khóa được", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Không mở khóa được", description: getErrorMessage(error), variant: "destructive" });
       qc.invalidateQueries({ queryKey: ["rent", "me"] });
       qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
     },

@@ -108,7 +108,7 @@ export function FreeClaimPage() {
   const queryClaimRaw = getParam(["claim", "claim_token", "claimToken", "c", "token"]);
   const tFromQuery = getParam(["t", "outToken", "out_token"]);
   const sidFromQuery = getParam(["sid", "session_id"]);
-  const debugMode = getParam(["debug"]) === "1";
+  const debugMode = import.meta.env.DEV && getParam(["debug"]) === "1";
 
   // ---- Token source rules (NO MIX of *different* sessions):
   // Primary: URL. If URL is incomplete, we may do HYBRID recovery for missing pieces from *fresh* storage.

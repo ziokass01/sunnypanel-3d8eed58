@@ -32,13 +32,11 @@ export async function getFunction<T>(
     });
   } catch (e: any) {
     // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const err = new Error(
-      `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${url}). ` +
-        "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project."
+      `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
     ) as Error & { code?: string; meta?: Record<string, unknown> };
     err.code = "FETCH_FAILED";
-    err.meta = { path, origin, url };
+    err.meta = { path };
     throw err;
   }
 
@@ -105,25 +103,19 @@ export async function postFunction<T>(
       try {
         res = await doFetch(makeUrl(fallbackPath));
       } catch {
-        const origin = typeof window !== "undefined" ? window.location.origin : "";
         const err = new Error(
-          `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${primaryUrl}). ` +
-            `Tried URLs: ${triedUrls.join(", ")}. ` +
-            "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project.",
+          `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
         ) as Error & { code?: string; meta?: Record<string, unknown> };
         err.code = "FETCH_FAILED";
-        err.meta = { path, origin, url: primaryUrl, triedUrls };
+        err.meta = { path };
         throw err;
       }
     } else {
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
       const err = new Error(
-        `Failed to fetch when calling function ${path} (origin: ${origin || "(unknown)"}, url: ${primaryUrl}). ` +
-          `Tried URLs: ${triedUrls.join(", ") || primaryUrl}. ` +
-          "Gợi ý: kiểm tra (1) backend URL/project có đúng 1 project duy nhất, (2) CORS allow origin cho domain hiện tại, (3) function đã deploy đúng project.",
+        `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
       ) as Error & { code?: string; meta?: Record<string, unknown> };
       err.code = "FETCH_FAILED";
-      err.meta = { path, origin, url: primaryUrl, triedUrls };
+      err.meta = { path };
       throw err;
     }
   }

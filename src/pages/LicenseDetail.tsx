@@ -34,6 +34,7 @@ import {
 } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
+import { getErrorMessage } from "@/lib/error-message";
 
 function computeStatus(lic: {
   is_active: boolean;
@@ -108,7 +109,7 @@ export function LicenseDetailPage() {
       setRemoveTarget(null);
     },
     onError: (err) => {
-      toast({ title: "Failed to remove device", description: String(err), variant: "destructive" });
+      toast({ title: "Failed to remove device", description: getErrorMessage(err), variant: "destructive" });
     },
   });
 
@@ -120,7 +121,7 @@ export function LicenseDetailPage() {
       setResetOpen(false);
     },
     onError: (err) => {
-      toast({ title: "Failed to reset devices", description: String(err), variant: "destructive" });
+      toast({ title: "Failed to reset devices", description: getErrorMessage(err), variant: "destructive" });
     },
   });
 
@@ -151,7 +152,7 @@ export function LicenseDetailPage() {
       setReactivateOpen(false);
     },
     onError: (err) => {
-      const msg = String(err);
+      const msg = getErrorMessage(err);
       toast({
         title: "Failed to reactivate/renew",
         description: msg.includes("CANNOT_CLEAR_EXPIRES")
@@ -189,7 +190,7 @@ export function LicenseDetailPage() {
       setResetActivationOpen(false);
     },
     onError: (err) => {
-      toast({ title: "Failed to reset activation", description: String(err), variant: "destructive" });
+      toast({ title: "Failed to reset activation", description: getErrorMessage(err), variant: "destructive" });
     },
   });
 
