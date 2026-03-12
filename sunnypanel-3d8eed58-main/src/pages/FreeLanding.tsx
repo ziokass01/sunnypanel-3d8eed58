@@ -70,7 +70,8 @@ function isPendingSessionMessage(value?: string | null) {
 function shortHash(v?: string | null, n = 10) {
   const x = String(v ?? "").trim();
   if (!x) return "-";
-  return x.length > n ? `${x.slice(0, n)}…` : x;
+  return x.length > n ? `${x.slice(0, n  )
+)}…` : x;
 }
 
 export function FreeLandingPage() {
