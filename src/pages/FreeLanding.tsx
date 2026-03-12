@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Download, FileText } from "lucide-react";
+import { AlertTriangle, Download, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,6 +17,7 @@ import {
   setSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 import ZaloGetKeyBubble from "../components/ZaloGetKeyBubble";
 
 type StartOk = {
@@ -77,6 +78,16 @@ export function FreeLandingPage() {
   const [showDebug, setShowDebug] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
+  const isPendingSessionError = useMemo(() => {
+    const message = String(err ?? "").toLowerCase();
+    return (
+      message.includes("quá nhiều phiên")
+      || message.includes("đang chờ xác thực")
+      || message.includes("pending")
+      || message.includes("session_pending_limit")
+    );
+  }, [err]);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LAST_FREE_KEY_STORAGE);
@@ -89,6 +100,20 @@ export function FreeLandingPage() {
     }
     setDeviceHistory(readFreeDeviceHistory());
   }, []);
+
+  useEffect(() => {
+    if (!err || !isPendingSessionError) return;
+    toast({
+      variant: "destructive",
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4" />
+          Cảnh báo xác thực
+        </span>
+      ),
+      description: "Thiết bị đang có phiên xác thực chờ xử lý. Hãy hoàn tất tab trước hoặc chờ vài phút rồi thử lại.",
+    });
+  }, [err, isPendingSessionError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,7 +193,7 @@ export function FreeLandingPage() {
               <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
             </div>
 
-            {err ? (
+            {err && !isPendingSessionError ? (
               <div className="space-y-2">
                 <div className="text-sm text-destructive">{err}</div>
                 {errMeta?.url ? (
