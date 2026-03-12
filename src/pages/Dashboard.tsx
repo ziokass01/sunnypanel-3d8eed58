@@ -5,6 +5,7 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchDashboardStats, fetchVerifyCountsPerDay } from "@/features/dashboard/dashboard-api";
+import { getErrorMessage } from "@/lib/error-message";
 
 function StatCard({ title, value }: { title: string; value: number }) {
   return (
@@ -39,8 +40,8 @@ export function DashboardPage() {
         <p className="mt-2 text-sm text-muted-foreground">Last updated: {lastUpdated}</p>
       </header>
 
-      {statsQuery.error ? <div className="text-sm text-destructive">{String(statsQuery.error)}</div> : null}
-      {chartQuery.error ? <div className="text-sm text-destructive">{String(chartQuery.error)}</div> : null}
+      {statsQuery.error ? <div className="text-sm text-destructive">{getErrorMessage(statsQuery.error)}</div> : null}
+      {chartQuery.error ? <div className="text-sm text-destructive">{getErrorMessage(chartQuery.error)}</div> : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {statsQuery.isLoading ? (

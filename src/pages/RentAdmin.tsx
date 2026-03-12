@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/auth/AuthProvider";
 import { postFunction } from "@/lib/functions";
+import { getErrorMessage } from "@/lib/error-message";
 import { useToast } from "@/hooks/use-toast";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -255,7 +256,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "users"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi tạo user", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi tạo user", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -282,7 +283,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "users"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi cập nhật", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi cập nhật", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -310,7 +311,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "activation-keys", selectedUser?.id] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi tạo activation key", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi tạo activation key", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -327,7 +328,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "activation-keys", selectedUser?.id] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi xóa key", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi xóa key", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -348,7 +349,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "reset-codes", selectedUser?.id] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi tạo reset code", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi tạo reset code", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -375,7 +376,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "users"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi rotate HMAC", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi rotate HMAC", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -393,7 +394,7 @@ export function RentAdminPage() {
       toast({ title: "Đã xóa mật khẩu xem HMAC" });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi xóa mật khẩu xem HMAC", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi xóa mật khẩu xem HMAC", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -412,7 +413,7 @@ export function RentAdminPage() {
       toast({ title: "Đã reset mật khẩu về mặc định" });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi reset mật khẩu", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi reset mật khẩu", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -432,7 +433,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "users"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi xóa user", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi xóa user", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -450,7 +451,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "downloads"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi thêm file/link", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi thêm file/link", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -468,7 +469,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "downloads"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi lưu file/link", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi lưu file/link", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -484,7 +485,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "downloads"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi bật/tắt", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi bật/tắt", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -501,7 +502,7 @@ export function RentAdminPage() {
       qc.invalidateQueries({ queryKey: ["rent-admin", "downloads"] });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi xóa file/link", description: String(error?.message ?? error), variant: "destructive" });
+      toast({ title: "Lỗi xóa file/link", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 

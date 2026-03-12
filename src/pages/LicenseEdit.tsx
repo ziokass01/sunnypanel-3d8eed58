@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchLicense, updateLicense } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
+import { getErrorMessage } from "@/lib/error-message";
 
 const schema = z.object({
   expires_at: z.string().optional(),
@@ -117,7 +118,7 @@ export function LicenseEditPage() {
       </header>
 
       {isLoading ? <div className="mt-4 text-sm text-muted-foreground">Loading…</div> : null}
-      {error ? <div className="mt-4 text-sm text-destructive">{String(error)}</div> : null}
+      {error ? <div className="mt-4 text-sm text-destructive">{getErrorMessage(error)}</div> : null}
 
       {data ? (
         <form className="mt-6 max-w-xl space-y-4" onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))}>
@@ -185,7 +186,7 @@ export function LicenseEditPage() {
           </div>
 
           {saveMutation.error ? (
-            <div className="text-sm text-destructive">{String(saveMutation.error)}</div>
+            <div className="text-sm text-destructive">{getErrorMessage(saveMutation.error)}</div>
           ) : null}
 
           <div className="flex gap-2">
