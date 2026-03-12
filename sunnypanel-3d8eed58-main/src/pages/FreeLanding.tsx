@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { BellRing, Clock3, Download, FileText } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,7 +18,6 @@ import {
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
 import ZaloGetKeyBubble from "../components/ZaloGetKeyBubble";
-import { toast } from "@/components/ui/sonner";
 
 type StartOk = {
   ok: true;
@@ -61,17 +60,10 @@ function formatVnDateTime(value?: string | null) {
   }).format(d);
 }
 
-
-function isPendingSessionMessage(value?: string | null) {
-  const text = String(value ?? "").toLowerCase();
-  return text.includes("quá nhiều phiên đang chờ xác thực") || text.includes("session_pending_limit");
-}
-
 function shortHash(v?: string | null, n = 10) {
   const x = String(v ?? "").trim();
   if (!x) return "-";
-  return x.length > n ? `${x.slice(0, n  )
-)}…` : x;
+  return x.length > n ? `${x.slice(0, n)}…` : x;
 }
 
 export function FreeLandingPage() {
@@ -84,7 +76,6 @@ export function FreeLandingPage() {
   const [debugStart, setDebugStart] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
-  const pendingToastShownRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -135,22 +126,6 @@ export function FreeLandingPage() {
 
   const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
-  const pendingSessionLimit = useMemo(() => isPendingSessionMessage(err), [err]);
-
-  useEffect(() => {
-    if (pendingSessionLimit) {
-      if (!pendingToastShownRef.current) {
-        toast("Có phiên đang chờ xác thực", {
-          description: "Hoàn tất bước đang mở hoặc chờ vài phút rồi thử lại để tránh spam phiên mới.",
-          duration: 6500,
-        });
-        pendingToastShownRef.current = true;
-      }
-      return;
-    }
-    pendingToastShownRef.current = false;
-  }, [pendingSessionLimit]);
-
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
   // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
@@ -194,57 +169,34 @@ export function FreeLandingPage() {
             </div>
 
             {err ? (
-              pendingSessionLimit ? (
-                <div className="relative overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-background to-background p-4 shadow-sm">
-                  <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-amber-400/10 to-transparent" />
-                  <div className="relative flex items-start gap-3">
-                    <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-400/30 bg-amber-500/15 text-amber-300 shadow-sm">
-                      <BellRing className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0 flex-1 space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold text-foreground">Thông báo phiên tạm thời</div>
-                        <Badge variant="outline" className="rounded-full border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-200">
-                          Chống spam
-                        </Badge>
-                      </div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        Thiết bị này đang có phiên <span className="font-medium text-foreground">chờ xác thực</span>.
-                        Hãy hoàn tất tab đang mở hoặc chờ vài phút rồi thử lại để hệ thống xử lý ổn định hơn.
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <div className="rounded-xl border border-amber-500/20 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-                          <div className="mb-1 flex items-center gap-2 font-medium text-foreground">
-                            <Clock3 className="h-3.5 w-3.5 text-amber-300" /> Chờ một chút
-                          </div>
-                          Đợi vài phút trước khi bấm <span className="font-medium text-foreground">Get Key</span> lại.
-                        </div>
-                        <div className="rounded-xl border border-amber-500/20 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-                          <div className="mb-1 flex items-center gap-2 font-medium text-foreground">
-                            <BellRing className="h-3.5 w-3.5 text-amber-300" /> Kiểm tra tab cũ
-                          </div>
-                          Nếu đang mở bước xác thực trước đó, hãy hoàn tất nó thay vì tạo thêm phiên mới.
+              <div className="space-y-2">
+                {err.includes("quá nhiều phiên đang chờ xác thực") ? (
+                  <div className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-amber-500/5 px-4 py-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-lg">⚠️</div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-amber-300">Phát hiện thao tác quá nhanh</div>
+                        <div className="mt-1 text-sm leading-6 text-amber-100/90">
+                          Thiết bị này đang có phiên xác thực chờ xử lý. Hãy hoàn tất tab đang mở hoặc chờ vài phút rồi bấm lại để tránh bị xem là spam.
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
+                ) : (
                   <div className="text-sm text-destructive">{err}</div>
-                  {errMeta?.url ? (
-                    <div className="text-xs text-muted-foreground break-all">
-                      Backend: <span className="font-mono">{errMeta.url}</span>
-                      {errMeta.origin ? (
-                        <>
-                          <br />
-                          Origin: <span className="font-mono">{errMeta.origin}</span>
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              )
+                )}
+                {errMeta?.url && !err.includes("quá nhiều phiên đang chờ xác thực") ? (
+                  <div className="text-xs text-muted-foreground break-all">
+                    Backend: <span className="font-mono">{errMeta.url}</span>
+                    {errMeta.origin ? (
+                      <>
+                        <br />
+                        Origin: <span className="font-mono">{errMeta.origin}</span>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             ) : null}
 
             {missingText ? (
@@ -342,10 +294,7 @@ export function FreeLandingPage() {
                     } else if (r.code === "SESSION_PENDING_LIMIT") {
                       markFreeAttemptFail(r.code);
                       setDeviceHistory(readFreeDeviceHistory());
-                      setErr("
-⚠️ Thiết bị đang có phiên xác thực chờ xử lý.
-Vui lòng hoàn tất tab trước hoặc chờ vài phút rồi thử lại.
-");
+                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
                     } else {
                       markFreeAttemptFail(r.code || r.msg || "START_FAILED");
                       setDeviceHistory(readFreeDeviceHistory());
@@ -436,10 +385,7 @@ Vui lòng hoàn tất tab trước hoặc chờ vài phút rồi thử lại.
                     return;
                   }
                   if (code === "SESSION_PENDING_LIMIT") {
-                    setErr("
-⚠️ Thiết bị đang có phiên xác thực chờ xử lý.
-Vui lòng hoàn tất tab trước hoặc chờ vài phút rồi thử lại.
-");
+                    setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
                     return;
                   }
                   markFreeAttemptFail(code || e?.message || "START_FAILED");
