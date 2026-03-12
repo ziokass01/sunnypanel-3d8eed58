@@ -9,6 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchAuditLogs } from "@/features/audit/audit-api";
+import { supabase } from "@/integrations/supabase/client";
 
 type QuickFilter = "all" | "verify_fail" | "verify_ok" | "mutations" | "destructive" | "blocked" | "today" | "last_10m";
 
@@ -56,6 +57,10 @@ function maskDetail(value: any): any {
   return out;
 }
 
+function escapeILike(s: string): string {
+  return s.replace(/[\\%_]/g, "\\\\$&");
+}
+
 export function AuditLogsPage() {
   const [q, setQ] = useState("");
   const [action, setAction] = useState<string>("all");
@@ -67,6 +72,53 @@ export function AuditLogsPage() {
   const { data = [], isLoading, error } = useQuery({
     queryKey,
     queryFn: () => fetchAuditLogs({ q, action }),
+  });
+
+  const statsQuery = useQuery({
+    queryKey: ["audit_logs_stats", q, action, quick],
+    queryFn: async () => {
+      const qText = q.trim();
+      const todayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+      const last10m = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      const applyFilters = (query: any) => {
+        let next = query;
+        if (action !== "all") next = next.eq("action", action);
+        if (qText) next = next.ilike("license_key", `%${escapeILike(qText)}%`);
+        if (quick === "verify_fail") next = next.eq("action", "VERIFY").contains("detail", { ok: false });
+        if (quick === "verify_ok") next = next.eq("action", "VERIFY").not("detail", "cs", { ok: false } as any);
+        if (quick === "mutations") next = next.in("action", ["CREATE", "UPDATE", "RESTORE"]);
+        if (quick === "destructive") next = next.or("action.in.(DELETE,HARD_DELETE),and(action.eq.VERIFY,detail.cs.{\"ok\":false})");
+        if (quick === "blocked") next = next.or("action.ilike.%BLOCK%,detail::text.ilike.%BLOCK%");
+        if (quick === "today") next = next.gte("created_at", todayStart);
+        if (quick === "last_10m") next = next.gte("created_at", last10m);
+        return next;
+      };
+
+      const countQuery = () => applyFilters(supabase.from("audit_logs").select("id", { count: "exact", head: true }));
+      const verifyFailQuery = () => countQuery().eq("action", "VERIFY").contains("detail", { ok: false });
+      const verifyTotalQuery = () => countQuery().eq("action", "VERIFY");
+      const destructiveQuery = () => countQuery().in("action", ["DELETE", "HARD_DELETE"]);
+
+      const [totalRes, verifyFailRes, verifyTotalRes, destructiveRes] = await Promise.all([
+        countQuery(),
+        verifyFailQuery(),
+        verifyTotalQuery(),
+        destructiveQuery(),
+      ]);
+
+      if (totalRes.error) throw totalRes.error;
+      if (verifyFailRes.error) throw verifyFailRes.error;
+      if (verifyTotalRes.error) throw verifyTotalRes.error;
+      if (destructiveRes.error) throw destructiveRes.error;
+
+      return {
+        total: totalRes.count ?? 0,
+        verifyFail: verifyFailRes.count ?? 0,
+        verifyOk: Math.max(0, (verifyTotalRes.count ?? 0) - (verifyFailRes.count ?? 0)),
+        destructive: destructiveRes.count ?? 0,
+      };
+    },
   });
 
   const filteredData = useMemo(() => {
@@ -84,13 +136,7 @@ export function AuditLogsPage() {
     });
   }, [data, quick]);
 
-  const stats = useMemo(() => {
-    const total = filteredData.length;
-    const verifyOk = filteredData.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false).length;
-    const verifyFail = filteredData.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false).length;
-    const destructive = filteredData.filter((row) => ["DELETE", "HARD_DELETE"].includes(String(row.action).toUpperCase())).length;
-    return { total, verifyOk, verifyFail, destructive };
-  }, [filteredData]);
+  const stats = statsQuery.data ?? { total: 0, verifyOk: 0, verifyFail: 0, destructive: 0 };
 
   const quickButtons: Array<{ key: QuickFilter; label: string }> = [
     { key: "all", label: "Tất cả" },
