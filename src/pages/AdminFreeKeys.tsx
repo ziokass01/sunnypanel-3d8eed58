@@ -804,13 +804,7 @@ const disableAllKeyTypes = useMutation({
   });
 
   const dashboardStats = useMemo(() => {
-    const sessions = sessionsQuery.data ?? [];
-    const issues = issuesQuery.data ?? [];
     const gateLogs = gateLogsQuery.data ?? [];
-    const activeBlocks = gateLogs.filter((row) => String(row.event_code || "").toUpperCase() === "AUTO_BLOCKED").length;
-    const verifyFail = gateLogs.filter((row) => /(FAIL|MISMATCH|EARLY|BLOCKED|BAD_)/i.test(String(row.event_code || ""))).length;
-    const pass1Hits = gateLogs.filter((row) => Number(row.pass_no || 1) === 1).length;
-    const pass2Hits = gateLogs.filter((row) => Number(row.pass_no || 0) === 2).length;
     const topError = gateLogs.reduce<Record<string, number>>((acc, row) => {
       const key = String(row.event_code || "UNKNOWN");
       acc[key] = (acc[key] || 0) + 1;
@@ -818,24 +812,90 @@ const disableAllKeyTypes = useMutation({
     }, {});
     const topErrorLabel = Object.entries(topError).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
     return {
-      sessionCount: sessions.length,
-      issueCount: issues.length,
-      verifyFail,
-      activeBlocks,
-      pass1Hits,
-      pass2Hits,
+      sessionCount: 0,
+      issueCount: 0,
+      verifyFail: 0,
+      activeBlocks: 0,
+      pass1Hits: 0,
+      pass2Hits: 0,
       topErrorLabel,
     };
-  }, [sessionsQuery.data, issuesQuery.data, gateLogsQuery.data]);
+  }, [gateLogsQuery.data]);
+
+  const dashboardStatsQuery = useQuery({
+    queryKey: ["free-dashboard-stats", range.from, range.to, status, ipHash],
+    queryFn: async () => {
+      const baseSessions = () => {
+        let query = supabase
+          .from("licenses_free_sessions")
+          .select("session_id", { count: "exact", head: true })
+          .gte("created_at", range.from)
+          .lte("created_at", range.to);
+        if (status !== "all") query = query.eq("status", status);
+        if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
+        return query;
+      };
+
+      const baseIssues = () => {
+        let query = supabase
+          .from("licenses_free_issues")
+          .select("issue_id", { count: "exact", head: true })
+          .gte("created_at", range.from)
+          .lte("created_at", range.to);
+        if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
+        return query;
+      };
+
+      const baseGateLogs = () => {
+        let query = supabase
+          .from("licenses_free_gate_logs")
+          .select("id", { count: "exact", head: true })
+          .gte("created_at", range.from)
+          .lte("created_at", range.to);
+        if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
+        return query;
+      };
+
+      const [sessionsRes, issuesRes, verifyFailRes, activeBlocksRes, pass1Res, pass2Res] = await Promise.all([
+        baseSessions(),
+        baseIssues(),
+        baseGateLogs().or("event_code.ilike.%FAIL%,event_code.ilike.%MISMATCH%,event_code.ilike.%EARLY%,event_code.ilike.%BLOCKED%,event_code.ilike.BAD_%"),
+        baseGateLogs().eq("event_code", "AUTO_BLOCKED"),
+        baseGateLogs().eq("pass_no", 1),
+        baseGateLogs().eq("pass_no", 2),
+      ]);
+
+      if (sessionsRes.error) throw sessionsRes.error;
+      if (issuesRes.error) throw issuesRes.error;
+      if (verifyFailRes.error) throw verifyFailRes.error;
+      if (activeBlocksRes.error) throw activeBlocksRes.error;
+      if (pass1Res.error) throw pass1Res.error;
+      if (pass2Res.error) throw pass2Res.error;
+
+      return {
+        sessionCount: sessionsRes.count ?? 0,
+        issueCount: issuesRes.count ?? 0,
+        verifyFail: verifyFailRes.count ?? 0,
+        activeBlocks: activeBlocksRes.count ?? 0,
+        pass1Hits: pass1Res.count ?? 0,
+        pass2Hits: pass2Res.count ?? 0,
+      };
+    },
+  });
+
+  const dashboardStatsView = {
+    ...dashboardStats,
+    ...(dashboardStatsQuery.data ?? {}),
+  };
 
   return (
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-5">
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.issueCount}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.sessionCount}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Verify fail</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.verifyFail}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Auto blocked</div><div className="mt-1 text-2xl font-semibold">{dashboardStats.activeBlocks}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStats.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStats.pass1Hits} · Pass2: {dashboardStats.pass2Hits}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.issueCount}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.sessionCount}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Verify fail</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.verifyFail}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Auto blocked</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.activeBlocks}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStatsView.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStatsView.pass1Hits} · Pass2: {dashboardStatsView.pass2Hits}</div></CardContent></Card>
       </div>
 
       <Card>
