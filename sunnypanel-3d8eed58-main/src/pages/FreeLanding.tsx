@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Download, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import {
   setSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import ZaloGetKeyBubble from "../components/ZaloGetKeyBubble";
 
 type StartOk = {
@@ -76,6 +77,27 @@ export function FreeLandingPage() {
   const [debugStart, setDebugStart] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
+  const { toast, dismiss } = useToast();
+  const pendingToastShownRef = useRef(false);
+
+  const isPendingLimitError = Boolean(err && /quá nhiều phiên đang chờ xác thực/i.test(err));
+
+  useEffect(() => {
+    if (isPendingLimitError && !pendingToastShownRef.current) {
+      dismiss();
+      toast({
+        variant: "destructive",
+        title: "Thiết bị đang chờ xác thực",
+        description: "Bạn đang có phiên xác thực chưa hoàn tất. Hãy quay lại tab cũ hoặc chờ vài phút rồi thử lại.",
+      });
+      pendingToastShownRef.current = true;
+      return;
+    }
+
+    if (!isPendingLimitError) {
+      pendingToastShownRef.current = false;
+    }
+  }, [isPendingLimitError, toast]);
 
   useEffect(() => {
     try {
@@ -130,32 +152,9 @@ export function FreeLandingPage() {
   const hasTypes = Boolean(cfg?.key_types?.length);
   // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
   const canGet = hasTypes && !isClosed && !loading && !missingText;
-  const isPendingLimitError = Boolean(err && err.includes("quá nhiều phiên đang chờ xác thực"));
-  const showPendingToast = isPendingLimitError;
 
   return (
     <>
-      {showPendingToast ? (
-        <div className="fixed inset-x-0 top-3 z-[1000] px-4">
-          <div className="mx-auto max-w-xl rounded-2xl border border-amber-400/30 bg-[#1c1720]/95 shadow-2xl backdrop-blur">
-            <div className="flex items-start gap-3 px-4 py-3">
-              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-400/15 text-lg">⚠️</div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-amber-300">Phiên xác thực đang chờ xử lý</div>
-                <div className="mt-1 text-sm leading-6 text-amber-100/90">Thiết bị này đang có phiên chờ xác thực. Hãy hoàn tất tab trước hoặc chờ vài phút rồi thử lại.</div>
-              </div>
-              <button
-                type="button"
-                aria-label="Đóng thông báo"
-                onClick={() => setErr(null)}
-                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-muted-foreground transition hover:bg-white/10 hover:text-foreground"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
       <div className="min-h-svh bg-background">
         <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
         <Card className="w-full">
