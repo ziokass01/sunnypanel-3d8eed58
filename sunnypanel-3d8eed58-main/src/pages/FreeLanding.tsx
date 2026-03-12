@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, Download, FileText, X } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -76,7 +76,6 @@ export function FreeLandingPage() {
   const [debugStart, setDebugStart] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
-  const [showPendingToast, setShowPendingToast] = useState(false);
 
   useEffect(() => {
     try {
@@ -127,47 +126,38 @@ export function FreeLandingPage() {
 
   const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
-  const isPendingLimitError = useMemo(() => {
-    const message = String(err ?? "");
-    return message.includes("quá nhiều phiên đang chờ xác thực") || message.includes("SESSION_PENDING_LIMIT");
-  }, [err]);
-
-  useEffect(() => {
-    if (isPendingLimitError) setShowPendingToast(true);
-  }, [isPendingLimitError]);
-
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
   // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
   const canGet = hasTypes && !isClosed && !loading && !missingText;
+  const isPendingLimitError = Boolean(err && err.includes("quá nhiều phiên đang chờ xác thực"));
+  const showPendingToast = isPendingLimitError;
 
   return (
     <>
-      {isPendingLimitError && showPendingToast ? (
-        <div className="fixed inset-x-0 top-4 z-[9999] flex justify-center px-4">
-          <div className="w-full max-w-md rounded-2xl border border-amber-400/40 bg-slate-950/95 p-4 shadow-2xl backdrop-blur">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 rounded-full bg-amber-400/15 p-2 text-amber-300">
-                <AlertTriangle className="h-5 w-5" />
-              </div>
+      {showPendingToast ? (
+        <div className="fixed inset-x-0 top-3 z-[1000] px-4">
+          <div className="mx-auto max-w-xl rounded-2xl border border-amber-400/30 bg-[#1c1720]/95 shadow-2xl backdrop-blur">
+            <div className="flex items-start gap-3 px-4 py-3">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-400/15 text-lg">⚠️</div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-amber-200">Cảnh báo phiên chờ xác thực</div>
-                <div className="mt-1 text-sm leading-6 text-slate-200">Thiết bị này đang có phiên xác thực chưa hoàn tất. Hãy quay lại tab trước đó để hoàn tất hoặc chờ vài phút rồi thử lại.</div>
+                <div className="text-sm font-semibold text-amber-300">Phiên xác thực đang chờ xử lý</div>
+                <div className="mt-1 text-sm leading-6 text-amber-100/90">Thiết bị này đang có phiên chờ xác thực. Hãy hoàn tất tab trước hoặc chờ vài phút rồi thử lại.</div>
               </div>
               <button
                 type="button"
-                aria-label="Đóng cảnh báo"
-                className="rounded-full p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
-                onClick={() => setShowPendingToast(false)}
+                aria-label="Đóng thông báo"
+                onClick={() => setErr(null)}
+                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-muted-foreground transition hover:bg-white/10 hover:text-foreground"
               >
-                <X className="h-4 w-4" />
+                Đóng
               </button>
             </div>
           </div>
         </div>
       ) : null}
       <div className="min-h-svh bg-background">
-        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4 pt-20">
+        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
         <Card className="w-full">
           <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
             <div className="flex items-center gap-3">
