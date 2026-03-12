@@ -70,12 +70,9 @@ function shortHash(v?: string | null, n = 10) {
 export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [errMeta, setErrMeta] = useState<{ url?: string; origin?: string } | null>(null);
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
-  const [debugStart, setDebugStart] = useState<any>(null);
-  const [showDebug, setShowDebug] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
   const isPendingSessionError = useMemo(() => {
@@ -149,7 +146,7 @@ export function FreeLandingPage() {
     return m.length ? m.join(", ") : null;
   }, [cfg]);
 
-  const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
+  const debugMode = useMemo(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "1", []);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
@@ -196,17 +193,6 @@ export function FreeLandingPage() {
             {err && !isPendingSessionError ? (
               <div className="space-y-2">
                 <div className="text-sm text-destructive">{err}</div>
-                {errMeta?.url ? (
-                  <div className="text-xs text-muted-foreground break-all">
-                    Backend: <span className="font-mono">{errMeta.url}</span>
-                    {errMeta.origin ? (
-                      <>
-                        <br />
-                        Origin: <span className="font-mono">{errMeta.origin}</span>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
               </div>
             ) : null}
 
@@ -330,14 +316,6 @@ export function FreeLandingPage() {
                     startedAtMs: Date.now(),
                     minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
                   });
-                  setDebugStart({
-                    session_id: (res as any).session_id ?? null,
-                    gate_url: res.gate_url,
-                    outbound_url: res.outbound_url,
-                    min_delay_seconds: res.min_delay_seconds,
-                    started_at_ms: Date.now(),
-                  });
-
                   try {
                     // Keep backward compat, but ensure current key is used by FreeGate fallbacks.
                     localStorage.setItem("free_out_token_v1", String(res.out_token));
@@ -472,21 +450,6 @@ export function FreeLandingPage() {
               </div>
             ) : null}
 
-            {debugMode ? (
-              <div className="rounded-md border p-3 text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">Advanced / Debug</div>
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowDebug((v) => !v)}>
-                    {showDebug ? "Hide" : "Show"}
-                  </Button>
-                </div>
-                {showDebug ? (
-                  <pre className="whitespace-pre-wrap break-words">{JSON.stringify(debugStart, null, 2)}</pre>
-                ) : (
-                  <div className="text-muted-foreground">(Bật để xem session_id / gate_url / outbound_url)</div>
-                )}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
         </main>

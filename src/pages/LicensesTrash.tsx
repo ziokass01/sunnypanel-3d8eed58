@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { NavLink } from "@/components/NavLink";
 import { fetchDeletedLicenses, hardDeleteLicense, restoreLicense } from "@/features/licenses/licenses-api";
+import { getErrorMessage } from "@/lib/error-message";
 
 export function LicensesTrashPage() {
   const [q, setQ] = useState("");
@@ -65,7 +66,7 @@ export function LicensesTrashPage() {
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search key/note…" />
       </div>
 
-      {error ? <div className="text-sm text-destructive">{String(error)}</div> : null}
+      {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}
 
       <div className="rounded-lg border">
         <Table>
