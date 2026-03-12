@@ -341,7 +341,10 @@ export function FreeLandingPage() {
                     } else if (r.code === "SESSION_PENDING_LIMIT") {
                       markFreeAttemptFail(r.code);
                       setDeviceHistory(readFreeDeviceHistory());
-                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+                      setErr("
+⚠️ Thiết bị đang có phiên xác thực chờ xử lý.
+Vui lòng hoàn tất tab trước hoặc chờ vài phút rồi thử lại.
+");
                     } else {
                       markFreeAttemptFail(r.code || r.msg || "START_FAILED");
                       setDeviceHistory(readFreeDeviceHistory());
@@ -432,7 +435,10 @@ export function FreeLandingPage() {
                     return;
                   }
                   if (code === "SESSION_PENDING_LIMIT") {
-                    setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+                    setErr("
+⚠️ Thiết bị đang có phiên xác thực chờ xử lý.
+Vui lòng hoàn tất tab trước hoặc chờ vài phút rồi thử lại.
+");
                     return;
                   }
                   markFreeAttemptFail(code || e?.message || "START_FAILED");
