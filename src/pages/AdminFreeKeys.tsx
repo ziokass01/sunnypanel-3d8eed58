@@ -355,7 +355,7 @@ export function AdminFreeKeysPage() {
       const { error: upsertErr } = await query.upsert({ id: 1, ...patch }, { onConflict: 'id' });
       if (upsertErr) throw upsertErr;
       if (prevPath && prevPath !== path) {
-        try { await storage.remove([prevPath]); } catch {}
+        try { await storage.remove([prevPath]); } catch { /* best-effort cleanup */ }
       }
       await settingsQuery.refetch();
       toast({ title: 'Đã upload file', description: 'File tải xuống đã sẵn sàng ở trang free.' });
@@ -370,7 +370,7 @@ export function AdminFreeKeysPage() {
     try {
       const prevPath = downloadPath;
       if (prevPath) {
-        try { await (supabase.storage.from('free-downloads') as any).remove([prevPath]); } catch {}
+        try { await (supabase.storage.from('free-downloads') as any).remove([prevPath]); } catch { /* best-effort cleanup */ }
       }
       const query: any = supabase.from('licenses_free_settings');
       const { error } = await query.upsert({ id: 1, free_download_enabled: false, free_download_name: null, free_download_info: null, free_download_path: null, free_download_url: null, free_download_size: null }, { onConflict: 'id' });

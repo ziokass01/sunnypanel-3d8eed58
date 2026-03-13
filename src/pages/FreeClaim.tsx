@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -219,11 +219,11 @@ export function FreeClaimPage() {
     }
   }
 
-  function clearAllFreeStorage() {
+  const clearAllFreeStorage = useCallback(() => {
     clearBundle();
     clearFreeFlowStorage();
     clearLegacyFreeKeys();
-  }
+  }, []);
 
   // Reset the one-time retry guard when tokens change.
   useEffect(() => {
@@ -244,7 +244,6 @@ export function FreeClaimPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outToken, debugMode]);
 
   const [loading, setLoading] = useState(false);
@@ -360,7 +359,7 @@ export function FreeClaimPage() {
 
     clearAllFreeStorage();
     setError("Link nhận key không hợp lệ hoặc đã bị rút gọn sai. Hãy quay lại trang Get Key 🔑 và bấm Get Key 🔑 lại.");
-  }, [hasBareClaimKey, claimFromUrl, tokenSource]);
+  }, [hasBareClaimKey, claimFromUrl, tokenSource, clearAllFreeStorage]);
 
   useEffect(() => {
     if (!claimToken) return;
