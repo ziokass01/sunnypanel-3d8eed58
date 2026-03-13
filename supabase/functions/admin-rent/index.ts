@@ -353,11 +353,15 @@ Deno.serve(async (req) => {
       });
       const parsed = Schema.parse(body);
 
-      const default_password = Deno.env.get("RENT_DEFAULT_PASSWORD") ?? "12345678";
+      const default_password = (Deno.env.get("RENT_DEFAULT_PASSWORD") ?? "").trim();
+      if (!default_password) {
+        return json(req, publicBaseUrl, { ok: false, code: "RENT_DEFAULT_PASSWORD_NOT_CONFIGURED", msg: "Default password is not configured" }, 503);
+      }
+
       const password_hash = await hashPassword(default_password);
       const { error } = await sb.schema("rent").from("accounts").update({ password_hash }).eq("id", parsed.account_id);
       if (error) throw new Error(error.message);
-      return json(req, publicBaseUrl, { ok: true, default_password });
+      return json(req, publicBaseUrl, { ok: true });
     }
 
     if (action === "rotate_hmac") {

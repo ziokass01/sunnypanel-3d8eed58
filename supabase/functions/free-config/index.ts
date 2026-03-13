@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
     console.error("free-config unexpected error", e);
     return jsonResponse(
       { ok: false, code: "INTERNAL", error: "Internal server error" },
-      { status: 500, headers: corsHeaders },
+      500,
     );
   }
 
