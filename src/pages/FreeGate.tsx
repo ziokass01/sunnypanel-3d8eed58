@@ -50,15 +50,14 @@ export function FreeGatePage() {
   const [message, setMessage] = useState<string>("Đang xác thực…");
   const [remaining, setRemaining] = useState<number>(0);
 
-  const query = useMemo(() => sp.toString(), [sp]);
-  const debugMode = useMemo(() => import.meta.env.DEV && (sp.get("debug") || "").trim() === "1", [query]);
+  const debugMode = useMemo(() => import.meta.env.DEV && (sp.get("debug") || "").trim() === "1", [sp]);
   const pass = useMemo(() => {
     const v = Number(sp.get("p") || 1);
     return v === 2 ? 2 : 1;
-  }, [query]);
+  }, [sp]);
 
-  const sidFromQuery = useMemo(() => (sp.get("sid") || "").trim(), [query]);
-  const tFromQuery = useMemo(() => (sp.get("t") || "").trim(), [query]);
+  const sidFromQuery = useMemo(() => (sp.get("sid") || "").trim(), [sp]);
+  const tFromQuery = useMemo(() => (sp.get("t") || "").trim(), [sp]);
 
   const outToken = useMemo(() => {
     if (tFromQuery) return tFromQuery;
@@ -85,7 +84,7 @@ export function FreeGatePage() {
       // ignore
     }
     return "";
-  }, [tFromQuery, query, pass]);
+  }, [tFromQuery, pass]);
 
   const sessionId = useMemo(() => {
     if (sidFromQuery) return sidFromQuery;
@@ -100,7 +99,7 @@ export function FreeGatePage() {
       // ignore
     }
     return "";
-  }, [sidFromQuery, query]);
+  }, [sidFromQuery]);
 
   useEffect(() => {
     let cancelled = false;
