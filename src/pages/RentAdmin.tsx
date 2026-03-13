@@ -139,7 +139,6 @@ export function RentAdminPage() {
 
   const [customRotateHmac, setCustomRotateHmac] = useState("");
   const [lastNewHmac, setLastNewHmac] = useState<string | null>(null);
-  const [lastDefaultPass, setLastDefaultPass] = useState<string | null>(null);
 
   const [dlTitle, setDlTitle] = useState("");
   const [dlUrl, setDlUrl] = useState("");
@@ -401,19 +400,24 @@ export function RentAdminPage() {
   const resetDefaultM = useMutation({
     mutationFn: async () => {
       if (!selectedUser) throw new Error("NO_SELECTED");
-      const res = await postFunction<ApiOk<{ default_password: string }>>(
+      await postFunction<ApiOk<{}>>(
         "/admin-rent",
         { action: "reset_password_default", account_id: selectedUser.id },
         { authToken },
       );
-      return res;
     },
-    onSuccess: (res) => {
-      setLastDefaultPass(res.default_password);
+    onSuccess: () => {
       toast({ title: "Đã reset mật khẩu về mặc định" });
     },
     onError: (error: any) => {
-      toast({ title: "Lỗi reset mật khẩu", description: getErrorMessage(error), variant: "destructive" });
+      const message = getErrorMessage(error);
+      toast({
+        title: "Lỗi reset mật khẩu",
+        description: message.includes("RENT_DEFAULT_PASSWORD_NOT_CONFIGURED")
+          ? "Mật khẩu mặc định chưa được cấu hình. Vui lòng liên hệ quản trị hệ thống."
+          : message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -1175,25 +1179,6 @@ export function RentAdminPage() {
                       {clearHmacViewPasswordM.isPending ? "Đang xóa..." : "Xóa mật khẩu xem HMAC"}
                     </Button>
                   </div>
-                  {lastDefaultPass ? (
-                    <div className="rounded-lg border p-3 text-sm">
-                      <div className="text-xs text-muted-foreground">Mật khẩu mặc định</div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <code className="rounded bg-muted px-2 py-1">{lastDefaultPass}</code>
-                        <Button
-                          size="sm"
-                          variant="soft"
-                          onClick={async () => {
-                            const ok = await copyText(lastDefaultPass);
-                            toast({ title: ok ? "Đã copy" : "Không copy được" });
-                          }}
-                        >
-                          Copy
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setLastDefaultPass(null)}>Ẩn</Button>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             ) : (

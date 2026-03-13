@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { createLicense, generateLicenseKey } from "@/features/licenses/licenses-api";
 import { localToIso } from "@/features/licenses/license-utils";
+import { getErrorMessage } from "@/lib/error-message";
 
 const schema = z
   .object({
@@ -175,7 +176,7 @@ export function LicenseCreatePage() {
             </div>
 
             {form.formState.errors.duration_value ? (
-              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_value?.message)}</div>
+              <div className="text-sm text-destructive">{getErrorMessage((form.formState.errors as any).duration_value?.message)}</div>
             ) : null}
             <div className="text-xs text-muted-foreground">Countdown starts on the first successful verify.</div>
           </div>
@@ -220,7 +221,7 @@ export function LicenseCreatePage() {
         </div>
 
         {createMutation.error ? (
-          <div className="text-sm text-destructive">{String(createMutation.error)}</div>
+          <div className="text-sm text-destructive">{getErrorMessage(createMutation.error)}</div>
         ) : null}
 
         <div className="flex gap-2">
