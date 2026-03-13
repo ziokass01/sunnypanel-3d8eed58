@@ -123,11 +123,30 @@ type AdminTestResult = {
   message?: string;
 };
 
-function utcDayRange(day: string) {
-  // day = YYYY-MM-DD in UTC
-  const from = `${day}T00:00:00.000Z`;
-  const to = `${day}T23:59:59.999Z`;
-  return { from, to };
+function getVietnamDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function getVietnamDayRangeUtc(day: string) {
+  // day = YYYY-MM-DD in Asia/Ho_Chi_Minh timezone (UTC+7)
+  const [year, month, date] = day.split("-").map((v) => Number(v));
+  const utcOffsetMs = 7 * 60 * 60 * 1000;
+  const startMs = Date.UTC(year, month - 1, date, 0, 0, 0, 0) - utcOffsetMs;
+  const nextStartMs = startMs + 24 * 60 * 60 * 1000;
+  return {
+    startUtcIso: new Date(startMs).toISOString(),
+    nextStartUtcIso: new Date(nextStartMs).toISOString(),
+  };
 }
 
 function pad2(n: number) {
@@ -644,23 +663,22 @@ const disableAllKeyTypes = useMutation({
   });
 
   // -------- Sessions / Issues --------
-  const todayUtc = new Date().toISOString().slice(0, 10);
-  const [day, setDay] = useState(todayUtc);
+  const [day, setDay] = useState(() => getVietnamDateKey());
   const [status, setStatus] = useState<string>("all");
   const [ipHash, setIpHash] = useState<string>("");
 
-  const range = useMemo(() => utcDayRange(day), [day]);
+  const range = useMemo(() => getVietnamDayRangeUtc(day), [day]);
 
   const sessionsQuery = useQuery({
-    queryKey: ["free-sessions", range.from, range.to, status, ipHash],
+    queryKey: ["free-sessions", range.startUtcIso, range.nextStartUtcIso, status, ipHash],
     queryFn: async () => {
       let q = supabase
         .from("licenses_free_sessions")
         .select(
           "session_id,created_at,status,reveal_count,ip_hash,ua_hash,fingerprint_hash,last_error,started_at,gate_ok_at,revealed_at,key_type_code,duration_seconds,out_token_hash,claim_token_hash",
         )
-        .gte("created_at", range.from)
-        .lte("created_at", range.to)
+        .gte("created_at", range.startUtcIso)
+        .lt("created_at", range.nextStartUtcIso)
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -674,13 +692,13 @@ const disableAllKeyTypes = useMutation({
   });
 
   const issuesQuery = useQuery({
-    queryKey: ["free-issues", range.from, range.to, ipHash],
+    queryKey: ["free-issues", range.startUtcIso, range.nextStartUtcIso, ipHash],
     queryFn: async () => {
       let q = supabase
         .from("licenses_free_issues")
         .select("issue_id,created_at,expires_at,license_id,key_mask,session_id,ip_hash,fingerprint_hash,ua_hash")
-        .gte("created_at", range.from)
-        .lte("created_at", range.to)
+        .gte("created_at", range.startUtcIso)
+        .lt("created_at", range.nextStartUtcIso)
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -692,13 +710,13 @@ const disableAllKeyTypes = useMutation({
   });
 
   const gateLogsQuery = useQuery({
-    queryKey: ["free-gate-logs", range.from, range.to, ipHash],
+    queryKey: ["free-gate-logs", range.startUtcIso, range.nextStartUtcIso, ipHash],
     queryFn: async () => {
       let q = supabase
         .from("licenses_free_gate_logs")
         .select("id,created_at,session_id,key_type_code,pass_no,event_code,detail,ip_hash,fingerprint_hash,ua_hash")
-        .gte("created_at", range.from)
-        .lte("created_at", range.to)
+        .gte("created_at", range.startUtcIso)
+        .lt("created_at", range.nextStartUtcIso)
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -823,14 +841,14 @@ const disableAllKeyTypes = useMutation({
   }, [gateLogsQuery.data]);
 
   const dashboardStatsQuery = useQuery({
-    queryKey: ["free-dashboard-stats", range.from, range.to, status, ipHash],
+    queryKey: ["free-dashboard-stats", range.startUtcIso, range.nextStartUtcIso, status, ipHash],
     queryFn: async () => {
       const baseSessions = () => {
         let query = supabase
           .from("licenses_free_sessions")
           .select("session_id", { count: "exact", head: true })
-          .gte("created_at", range.from)
-          .lte("created_at", range.to);
+          .gte("created_at", range.startUtcIso)
+          .lt("created_at", range.nextStartUtcIso);
         if (status !== "all") query = query.eq("status", status);
         if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
         return query;
@@ -840,8 +858,8 @@ const disableAllKeyTypes = useMutation({
         let query = supabase
           .from("licenses_free_issues")
           .select("issue_id", { count: "exact", head: true })
-          .gte("created_at", range.from)
-          .lte("created_at", range.to);
+          .gte("created_at", range.startUtcIso)
+          .lt("created_at", range.nextStartUtcIso);
         if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
         return query;
       };
@@ -850,8 +868,8 @@ const disableAllKeyTypes = useMutation({
         let query = supabase
           .from("licenses_free_gate_logs")
           .select("id", { count: "exact", head: true })
-          .gte("created_at", range.from)
-          .lte("created_at", range.to);
+          .gte("created_at", range.startUtcIso)
+          .lt("created_at", range.nextStartUtcIso);
         if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
         return query;
       };
