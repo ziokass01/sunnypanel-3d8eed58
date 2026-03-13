@@ -14,7 +14,6 @@ import {
   getOrCreateFingerprint,
   getOutToken,
   getSelectedKeyTypeCode,
-  setOutToken,
 } from "@/features/free/fingerprint";
 
 type RevealOk = {
@@ -150,8 +149,8 @@ export function FreeClaimPage() {
   }
 
   const { claimToken, outToken, sessionId, tokenSource } = useMemo(() => {
-    const sidUrl = String(sidFromQuery || "").trim();
-    const outUrl = String(tFromQuery || "").trim();
+    const sidUrl = "";
+    const outUrl = "";
 
     // URL / HYBRID mode (claim is required to proceed)
     if (claimFromUrl) {
@@ -168,8 +167,7 @@ export function FreeClaimPage() {
         }
       }
 
-      // If URL has sid but missing t: still allow (out may be recovered above)
-      // If URL has t but missing sid: keep sid empty and force canonical resolve by out_token later.
+      // sid/t query params are intentionally ignored to avoid sensitive URL dependencies.
       let sid = sidUrl;
 
       // Borrow sid from bundle ONLY when bundle matches claim+out (and is fresh)
@@ -196,7 +194,24 @@ export function FreeClaimPage() {
     }
 
     return { claimToken: "", outToken: "", sessionId: "", tokenSource: "none" as const };
-  }, [bundle, bundleFresh, claimFromUrl, metaFresh, sidFromQuery, tFromQuery]);
+  }, [bundle, bundleFresh, claimFromUrl, metaFresh]);
+
+  useEffect(() => {
+    const hasSensitiveQuery = Boolean(tFromQuery || sidFromQuery);
+    if (!hasSensitiveQuery && (!sp.get("debug") || import.meta.env.DEV)) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("sid");
+    url.searchParams.delete("session_id");
+    url.searchParams.delete("t");
+    url.searchParams.delete("outToken");
+    url.searchParams.delete("out_token");
+    if (!import.meta.env.DEV) {
+      url.searchParams.delete("debug");
+    }
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(null, "", next);
+  }, [sidFromQuery, sp, tFromQuery]);
 
   const [resolvedSessionId, setResolvedSessionId] = useState<string>("");
   const effectiveSessionId = resolvedSessionId || sessionId || "";
@@ -306,28 +321,6 @@ export function FreeClaimPage() {
       // ignore
     }
   }, [tokenSource, claimToken, outToken, effectiveSessionId]);
-
-  // Backward-compat: persist out token from query so reloads don't lose it.
-  useEffect(() => {
-    if (!tFromQuery) return;
-    setOutToken(tFromQuery);
-    try {
-      localStorage.setItem("free_out_token_v1", tFromQuery);
-    } catch {
-      // ignore
-    }
-  }, [tFromQuery]);
-
-  // Backward-compat: persist session_id from query for robustness.
-  useEffect(() => {
-    if (!sidFromQuery) return;
-    try {
-      localStorage.setItem("free_session_id_v1", sidFromQuery);
-      localStorage.setItem("free_session_id", sidFromQuery);
-    } catch {
-      // ignore
-    }
-  }, [sidFromQuery]);
 
   const hasBareClaimKey = useMemo(() => {
     const q = `&${normalizedQuery}&`;

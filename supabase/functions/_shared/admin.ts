@@ -21,7 +21,7 @@ export function createAdminClient() {
 }
 
 export function json(status: number, body: unknown, origin?: string | null) {
-  const allowOrigin = resolveCorsOrigin(origin ?? undefined);
+  const allowOrigin = resolveCorsOrigin(String(origin ?? ""), Deno.env.get("PUBLIC_BASE_URL") ?? "");
   return new Response(JSON.stringify(body), {
     status,
     headers: {

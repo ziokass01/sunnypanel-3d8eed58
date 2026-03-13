@@ -22,6 +22,19 @@ function json(req: Request, publicBaseUrl: string, data: unknown, status = 200) 
   });
 }
 
+function getClientIp(req: Request) {
+  const xff = req.headers.get("x-forwarded-for") ?? "";
+  if (xff.trim()) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const realIp = (req.headers.get("x-real-ip") ?? "").trim();
+  if (realIp) return realIp;
+  const cfIp = (req.headers.get("cf-connecting-ip") ?? "").trim();
+  if (cfIp) return cfIp;
+  return "0.0.0.0";
+}
+
 function getBearer(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
   if (auth.toLowerCase().startsWith("bearer ")) return auth.slice("bearer ".length).trim();
@@ -137,6 +150,21 @@ Deno.serve(async (req) => {
       });
       const parsed = Schema.parse(body);
       const username = parsed.username.trim().toLowerCase();
+      const ip = getClientIp(req);
+
+      const { data: rate, error: rateErr } = await sb.schema("rent").rpc("check_login_rate_limit", {
+        p_ip: ip,
+        p_username: username,
+        p_limit: 10,
+        p_window_sec: 60,
+      });
+
+      if (!rateErr) {
+        const limited = rate && typeof rate === "object" && "allowed" in rate && (rate as any).allowed === false;
+        if (limited) {
+          return json(req, publicBaseUrl, { ok: false, code: "LOGIN_FAILED", msg: "Sai tài khoản hoặc mật khẩu" }, 429);
+        }
+      }
 
       const { data: acc, error: accErr } = await sb.schema("rent").from("accounts")
         .select("id,username,password_hash,is_disabled")
@@ -177,7 +205,6 @@ Deno.serve(async (req) => {
       });
       const parsed = Schema.parse(body);
       const username = parsed.username.trim().toLowerCase();
-
       const { data: acc, error: accErr } = await sb.schema("rent").from("accounts")
         .select("id")
         .eq("username", username)
