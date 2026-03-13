@@ -125,6 +125,17 @@ export async function hashPassword(password: string, opts?: { iterations?: numbe
   return `pbkdf2_sha256$${iterations}$${saltB64}$${hashB64}`;
 }
 
+function timingSafeEqual(a: string, b: string) {
+  const aa = new TextEncoder().encode(String(a));
+  const bb = new TextEncoder().encode(String(b));
+  const len = Math.max(aa.length, bb.length);
+  let diff = aa.length ^ bb.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (aa[i] ?? 0) ^ (bb[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 export async function verifyPassword(password: string, stored: string) {
   const parts = stored.split("$");
   if (parts.length !== 4) return false;
@@ -150,7 +161,7 @@ export async function verifyPassword(password: string, stored: string) {
   );
 
   const calc = b64urlEncode(new Uint8Array(bits));
-  return calc === hashB64;
+  return timingSafeEqual(calc, hashB64);
 }
 
 const RENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

@@ -216,8 +216,6 @@ export function FreeGatePage() {
         const url = new URL(base, window.location.origin);
         url.search = "";
         url.searchParams.set("claim", claim);
-        url.searchParams.set("sid", sid);
-        url.searchParams.set("t", tok);
         if (debugMode) url.searchParams.set("debug", "1");
 
         nav(`${url.pathname}${url.search}${url.hash}`, { replace: true });
