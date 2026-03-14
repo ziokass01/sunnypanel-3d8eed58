@@ -4,6 +4,17 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+  on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      run_db_push:
+        description: "Run supabase db push"
+        required: false
+        default: "false"
 
 jobs:
   deploy:
@@ -23,7 +34,11 @@ jobs:
       - name: Link project
         run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
 
+      - name: Show migration list
+        run: supabase migration list
+
       - name: Push migrations
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
         run: yes | supabase db push --include-all
 
       - name: Deploy all Edge Functions
