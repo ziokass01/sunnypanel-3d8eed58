@@ -24,7 +24,7 @@ jobs:
         run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
 
       - name: Push migrations
-        run: yes | supabase db push
+        run: yes | supabase db push --include-all
 
       - name: Deploy all Edge Functions
         run: supabase functions deploy --project-ref "$PROJECT_REF"
