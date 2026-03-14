@@ -22,22 +22,22 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-free-test]
-verify_jwt = false
+verify_jwt = true
 
 [functions.free-admin-test]
-verify_jwt = false
+verify_jwt = true
 
 [functions.admin-free-block]
-verify_jwt = false
+verify_jwt = true
 
 [functions.admin-free-delete-session]
-verify_jwt = false
+verify_jwt = true
 
 [functions.admin-free-delete-issued]
-verify_jwt = false
+verify_jwt = true
 
 [functions.admin-rent]
-verify_jwt = false
+verify_jwt = true
 
 [functions.rent-user]
 verify_jwt = false

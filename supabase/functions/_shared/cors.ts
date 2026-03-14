@@ -3,10 +3,6 @@ const BASE_ALLOWED_HOSTS = new Set([
   "www.mityangho.id.vn",
   "admin.mityangho.id.vn",
   "www.admin.mityangho.id.vn",
-  "sunnypanel.lovable.app",
-  // Lovable preview/review subdomains (stable allow-list would be too brittle)
-  "preview--sunnypanel.lovable.app",
-  "review--sunnypanel.lovable.app",
   "localhost",
   "127.0.0.1",
 ]);
@@ -22,6 +18,12 @@ const DEFAULT_ALLOW_HEADERS = [
 
 const DEFAULT_ALLOW_METHODS = "GET,POST,PUT,DELETE,OPTIONS";
 
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+} as const;
+
 function toHostname(raw: string): string | null {
   if (!raw) return null;
   try {
@@ -31,18 +33,48 @@ function toHostname(raw: string): string | null {
   }
 }
 
+function parseAllowedOrigins(raw: string | null): Set<string> {
+  const hosts = new Set<string>();
+  for (const entry of String(raw ?? "").split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+
+    const asHost = toHostname(trimmed);
+    if (asHost) {
+      hosts.add(asHost);
+      continue;
+    }
+
+    const normalized = trimmed.replace(/^https?:\/\//i, "").replace(/\/$/, "").toLowerCase();
+    if (normalized) hosts.add(normalized);
+  }
+  return hosts;
+}
+
+function shouldAllowLovableOrigins(): boolean {
+  return Deno.env.get("ALLOW_LOVABLE_ORIGINS") === "1";
+}
+
+function buildAllowedHosts(publicBaseUrl: string): Set<string> {
+  const allowedHosts = new Set(BASE_ALLOWED_HOSTS);
+  const envHosts = parseAllowedOrigins(Deno.env.get("ALLOWED_ORIGINS"));
+
+  for (const host of envHosts) allowedHosts.add(host);
+
+  const publicHost = toHostname(publicBaseUrl);
+  if (publicHost) allowedHosts.add(publicHost);
+
+  return allowedHosts;
+}
+
 export function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
   const originHost = toHostname(origin);
   const publicHost = toHostname(publicBaseUrl);
+  const allowedHosts = buildAllowedHosts(publicBaseUrl);
 
-  // Allow any Lovable preview subdomain (e.g. id-preview--...lovable.app)
-  // Security note: admin endpoints are still protected by auth in-code.
-  if (originHost && originHost.endsWith(".lovable.app")) {
+  if (originHost && shouldAllowLovableOrigins() && originHost.endsWith(".lovable.app")) {
     return origin;
   }
-
-  const allowedHosts = new Set(BASE_ALLOWED_HOSTS);
-  if (publicHost) allowedHosts.add(publicHost);
 
   if (originHost && allowedHosts.has(originHost)) {
     return origin;
@@ -55,15 +87,9 @@ export function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
   return "https://mityangho.id.vn";
 }
 
-/**
- * Build CORS headers for both preflight and normal responses.
- * - If request has Origin: echo allowed origin + allow-credentials.
- * - If request has NO Origin (server-to-server/tools): allow "*" WITHOUT credentials.
- */
 export function buildCorsHeaders(req: Request, publicBaseUrl: string, methods = DEFAULT_ALLOW_METHODS) {
   const origin = (req.headers.get("origin") ?? "").trim();
 
-  // No Origin => safe wildcard, but MUST NOT send allow-credentials with "*".
   if (!origin) {
     return {
       "Access-Control-Allow-Origin": "*",
@@ -71,6 +97,7 @@ export function buildCorsHeaders(req: Request, publicBaseUrl: string, methods = 
       "Access-Control-Allow-Headers": DEFAULT_ALLOW_HEADERS,
       "Access-Control-Max-Age": "86400",
       "Cache-Control": "no-store",
+      ...SECURITY_HEADERS,
     } as Record<string, string>;
   }
 
@@ -83,6 +110,7 @@ export function buildCorsHeaders(req: Request, publicBaseUrl: string, methods = 
     "Access-Control-Allow-Headers": DEFAULT_ALLOW_HEADERS,
     "Access-Control-Max-Age": "86400",
     "Cache-Control": "no-store",
+    ...SECURITY_HEADERS,
   } as Record<string, string>;
 }
 
@@ -90,9 +118,7 @@ export function handleOptions(req: Request, publicBaseUrl: string, methods = DEF
   return new Response(null, { status: 204, headers: buildCorsHeaders(req, publicBaseUrl, methods) });
 }
 
-// Back-compat helper used by older functions.
 export function corsHeaders(origin: string, publicBaseUrl: string, methods = "POST,OPTIONS") {
-  // When origin is empty, return wildcard without credentials.
   if (!String(origin ?? "").trim()) {
     return {
       "Access-Control-Allow-Origin": "*",
@@ -100,6 +126,7 @@ export function corsHeaders(origin: string, publicBaseUrl: string, methods = "PO
       "Access-Control-Allow-Headers": DEFAULT_ALLOW_HEADERS,
       "Access-Control-Max-Age": "86400",
       "Cache-Control": "no-store",
+      ...SECURITY_HEADERS,
     };
   }
 
@@ -112,6 +139,6 @@ export function corsHeaders(origin: string, publicBaseUrl: string, methods = "PO
     "Access-Control-Allow-Headers": DEFAULT_ALLOW_HEADERS,
     "Access-Control-Max-Age": "86400",
     "Cache-Control": "no-store",
+    ...SECURITY_HEADERS,
   };
 }
-
