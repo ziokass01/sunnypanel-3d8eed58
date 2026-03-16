@@ -486,20 +486,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (!tokenVerified && current_url) {
-    const currentBits = parseGateBitsFromUrl(current_url);
-    if (currentBits.token) {
-      const currentHash = await sha256Hex(currentBits.token);
-      tokenVerified = Boolean(expectedHash && expectedHash === currentHash);
-    }
-  }
-
-  // Mobile/in-app browsers can occasionally lose the local PASS2 plaintext token.
-  // If the session is already in pass2 stage for the same device and we are validating pass2,
-  // allow the flow to continue even when the client did not send the exact PASS2 out_token.
-  if (!tokenVerified && resolvedPass === 2 && currentPass >= 2 && completed >= 1 && (sess as any).out_token_hash_pass2) {
-    tokenVerified = true;
-  }
+  // Never promote token proof from client-supplied current_url.
+  // current_url is treated only as supporting telemetry when referrer is missing.
 
   const expectedBucket = String(resolvedPass === 2 ? ((sess as any).rotate_bucket_pass2 ?? "") : ((sess as any).rotate_bucket ?? "")).trim();
   const currentUrlProofOk = Boolean(
@@ -534,45 +522,55 @@ Deno.serve(async (req) => {
     return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
   }
 
-  if (requireRef && !r && !(tokenVerified && currentUrlProofOk)) {
-    if (!r) {
-      await insertGateLog(sb, {
-        session_id: (sess as any).session_id,
-        key_type_code: (sess as any).key_type_code ?? null,
-        pass_no: resolvedPass,
-        event_code: "REFERRER_REQUIRED",
+  const sessionPassStateProofOk = Boolean(
+    sid === String((sess as any).session_id) &&
+    (
+      resolvedPass === 1
+        ? currentPass >= 1
+        : (required === 2 ? (completed >= 1 && currentPass >= 2) : currentPass >= 1)
+    ),
+  );
+  const missingRefFallbackOk = Boolean(tokenVerified && (currentUrlProofOk || sessionPassStateProofOk));
+
+  if (requireRef && !r && !missingRefFallbackOk) {
+    await insertGateLog(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: resolvedPass,
+      event_code: "REFERRER_REQUIRED",
+      detail: {
+        hint: "Referrer bị trống. Bạn cần đi qua Link4M.",
+        current_url,
+        token_verified: tokenVerified,
+        current_url_proof_ok: currentUrlProofOk,
+        session_pass_state_proof_ok: sessionPassStateProofOk,
+      },
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+    });
+    await maybeAutoBlockGateFailures(sb, {
+      session_id: (sess as any).session_id,
+      key_type_code: (sess as any).key_type_code ?? null,
+      pass_no: resolvedPass,
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+    });
+    return json(
+      {
+        ok: false,
+        code: "REFERRER_REQUIRED",
+        msg: "REFERRER_REQUIRED",
         detail: {
           hint: "Referrer bị trống. Bạn cần đi qua Link4M.",
           current_url,
           token_verified: tokenVerified,
           current_url_proof_ok: currentUrlProofOk,
+          session_pass_state_proof_ok: sessionPassStateProofOk,
         },
-        fingerprint_hash: fpHash,
-        ip_hash: ipHash,
-        ua_hash: uaHash,
-      });
-      await maybeAutoBlockGateFailures(sb, {
-        session_id: (sess as any).session_id,
-        key_type_code: (sess as any).key_type_code ?? null,
-        pass_no: resolvedPass,
-        fingerprint_hash: fpHash,
-        ip_hash: ipHash,
-      });
-      return json(
-        {
-          ok: false,
-          code: "REFERRER_REQUIRED",
-          msg: "REFERRER_REQUIRED",
-          detail: {
-            hint: "Referrer bị trống. Bạn cần đi qua Link4M.",
-            current_url,
-            token_verified: tokenVerified,
-            current_url_proof_ok: currentUrlProofOk,
-          },
-        } satisfies JsonErr,
-        400,
-      );
-    }
+      } satisfies JsonErr,
+      400,
+    );
   }
 
   if (!tokenVerified) {
