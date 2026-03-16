@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
+import { resolveClientIp } from "../_shared/client-ip.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -30,13 +31,6 @@ function makeKey() {
 function maskKey(key: string) {
   if (key.length <= 10) return "***";
   return `${key.slice(0, 9)}…${key.slice(-4)}`;
-}
-
-function getClientIp(req: Request) {
-  return req.headers.get("cf-connecting-ip")
-    ?? req.headers.get("x-real-ip")
-    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
-    ?? "0.0.0.0";
 }
 
 function getVietnamDateKey(date = new Date()) {
@@ -229,7 +223,7 @@ Deno.serve(async (req) => {
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
 
-  const ip = getClientIp(req);
+  const ip = resolveClientIp(req) ?? "";
   const ua = req.headers.get("user-agent") ?? "";
 
   // Settings
