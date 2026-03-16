@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
 import { resolveCorsOrigin } from "../_shared/cors.ts";
+import { resolveClientIp } from "../_shared/client-ip.ts";
 
 function inferBaseUrl(req: Request) {
   const origin = req.headers.get("origin");
@@ -22,13 +23,6 @@ async function sha256Hex(input: string) {
   const data = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", data);
   return toHex(digest);
-}
-
-function getClientIp(req: Request) {
-  return req.headers.get("cf-connecting-ip")
-    ?? req.headers.get("x-real-ip")
-    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
-    ?? "";
 }
 
 function base64url(bytesLen = 32) {
@@ -383,7 +377,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
     const out_token_hash_pass2 = out_token_pass2 ? await sha256Hex(out_token_pass2) : null;
 
     const ua = req.headers.get("user-agent") ?? "";
-    const ip = getClientIp(req);
+    const ip = resolveClientIp(req) ?? "";
 
     const fpHash = fingerprint ? await sha256Hex(fingerprint) : await sha256Hex(`missing:${ua}:${ip}`);
     const uaHash = await sha256Hex(ua);

@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
+import { resolveClientIp } from "../_shared/client-ip.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -20,13 +21,6 @@ function base64url(bytesLen = 18) {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function getClientIp(req: Request) {
-  return req.headers.get("cf-connecting-ip")
-    ?? req.headers.get("x-real-ip")
-    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
-    ?? "";
 }
 
 function inferBaseUrl(req: Request) {
@@ -388,7 +382,7 @@ Deno.serve(async (req) => {
   const outHash = await sha256Hex(outToken);
   const fpHash = await sha256Hex(fingerprint);
   const uaHash = await sha256Hex(req.headers.get("user-agent") ?? "");
-  const ipHash = await sha256Hex(getClientIp(req));
+  const ipHash = await sha256Hex(resolveClientIp(req) ?? "");
 
   // Blocklist
   const blocked = await sb
