@@ -367,7 +367,7 @@ Deno.serve(async (req) => {
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
     .select(
-      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_gate_require_ip_match,free_gate_require_ua_match,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
+      "*",
     )
     .eq("id", 1)
     .maybeSingle();

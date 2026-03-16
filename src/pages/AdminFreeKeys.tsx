@@ -272,7 +272,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_gate_require_ip_match,free_gate_require_ua_match,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_daily_limit_per_ip,free_require_link4m_referrer,free_public_note,free_public_links,free_download_enabled,free_download_name,free_download_info,free_download_path,free_download_url,free_download_size,updated_at,updated_by",
+          "*",
         )
         .eq("id", 1)
         .maybeSingle();
