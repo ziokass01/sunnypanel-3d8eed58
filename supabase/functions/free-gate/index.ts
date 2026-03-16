@@ -136,17 +136,20 @@ function applyTemplateApiToken(tpl: string, token: string) {
 }
 
 
-function parseSidAndTokenFromUrl(raw: string) {
+function parseGateBitsFromUrl(raw: string) {
   const url = String(raw || "").trim();
-  if (!url) return { sid: "", token: "" };
+  if (!url) return { sid: "", token: "", pass: 0, bucket: "" };
   try {
     const u = new URL(url);
+    const passRaw = Number(u.searchParams.get("p") || "0");
     return {
       sid: String(u.searchParams.get("sid") || "").trim(),
       token: String(u.searchParams.get("t") || "").trim(),
+      pass: Number.isFinite(passRaw) ? Math.floor(passRaw) : 0,
+      bucket: String(u.searchParams.get("b") || "").trim(),
     };
   } catch {
-    return { sid: "", token: "" };
+    return { sid: "", token: "", pass: 0, bucket: "" };
   }
 }
 
@@ -353,7 +356,7 @@ Deno.serve(async (req) => {
   }
 
   const { pass, session_id: bodySid, out_token: bodyOutToken, fingerprint, referrer, current_url } = parsed.data;
-  const parsedUrlBits = parseSidAndTokenFromUrl(current_url);
+  const parsedUrlBits = parseGateBitsFromUrl(current_url);
   const sid = String(bodySid || parsedUrlBits.sid || "").trim();
   const outToken = String(bodyOutToken || parsedUrlBits.token || "").trim();
 
@@ -484,7 +487,7 @@ Deno.serve(async (req) => {
   }
 
   if (!tokenVerified && current_url) {
-    const currentBits = parseSidAndTokenFromUrl(current_url);
+    const currentBits = parseGateBitsFromUrl(current_url);
     if (currentBits.token) {
       const currentHash = await sha256Hex(currentBits.token);
       tokenVerified = Boolean(expectedHash && expectedHash === currentHash);
@@ -498,35 +501,19 @@ Deno.serve(async (req) => {
     tokenVerified = true;
   }
 
-  if (requireRef && !hostOk && !tokenVerified) {
-    if (!r) {
-      await insertGateLog(sb, {
-        session_id: (sess as any).session_id,
-        key_type_code: (sess as any).key_type_code ?? null,
-        pass_no: resolvedPass,
-        event_code: "REFERRER_REQUIRED",
-        detail: { hint: "Referrer bị trống. Bạn cần đi qua Link4M.", current_url },
-        fingerprint_hash: fpHash,
-        ip_hash: ipHash,
-        ua_hash: uaHash,
-      });
-      await maybeAutoBlockGateFailures(sb, {
-        session_id: (sess as any).session_id,
-        key_type_code: (sess as any).key_type_code ?? null,
-        pass_no: resolvedPass,
-        fingerprint_hash: fpHash,
-        ip_hash: ipHash,
-      });
-      return json(
-        {
-          ok: false,
-          code: "REFERRER_REQUIRED",
-          msg: "REFERRER_REQUIRED",
-          detail: { hint: "Referrer bị trống. Bạn cần đi qua Link4M.", current_url },
-        } satisfies JsonErr,
-        400,
-      );
-    }
+  const expectedBucket = String(resolvedPass === 2 ? ((sess as any).rotate_bucket_pass2 ?? "") : ((sess as any).rotate_bucket ?? "")).trim();
+  const currentUrlProofOk = Boolean(
+    current_url &&
+    parsedUrlBits.sid &&
+    parsedUrlBits.token &&
+    parsedUrlBits.sid === String((sess as any).session_id) &&
+    parsedUrlBits.token === outToken &&
+    parsedUrlBits.pass === resolvedPass &&
+    expectedBucket &&
+    parsedUrlBits.bucket === expectedBucket,
+  );
+
+  if (requireRef && r && !hostOk) {
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
       key_type_code: (sess as any).key_type_code ?? null,
@@ -545,6 +532,47 @@ Deno.serve(async (req) => {
       ip_hash: ipHash,
     });
     return json({ ok: false, code: "BAD_REFERRER", msg: "BAD_REFERRER", detail: { referrer: r } } satisfies JsonErr, 400);
+  }
+
+  if (requireRef && !r && !(tokenVerified && currentUrlProofOk)) {
+    if (!r) {
+      await insertGateLog(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        event_code: "REFERRER_REQUIRED",
+        detail: {
+          hint: "Referrer bị trống. Bạn cần đi qua Link4M.",
+          current_url,
+          token_verified: tokenVerified,
+          current_url_proof_ok: currentUrlProofOk,
+        },
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+        ua_hash: uaHash,
+      });
+      await maybeAutoBlockGateFailures(sb, {
+        session_id: (sess as any).session_id,
+        key_type_code: (sess as any).key_type_code ?? null,
+        pass_no: resolvedPass,
+        fingerprint_hash: fpHash,
+        ip_hash: ipHash,
+      });
+      return json(
+        {
+          ok: false,
+          code: "REFERRER_REQUIRED",
+          msg: "REFERRER_REQUIRED",
+          detail: {
+            hint: "Referrer bị trống. Bạn cần đi qua Link4M.",
+            current_url,
+            token_verified: tokenVerified,
+            current_url_proof_ok: currentUrlProofOk,
+          },
+        } satisfies JsonErr,
+        400,
+      );
+    }
   }
 
   if (!tokenVerified) {
