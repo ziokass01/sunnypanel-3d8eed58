@@ -243,6 +243,17 @@ function parseLinksText(text: string): PublicLink[] {
   return out.slice(0, 8);
 }
 
+const NEW_FREE_SETTINGS_COLUMNS = [
+  "free_daily_limit_per_ip",
+  "free_gate_require_ip_match",
+  "free_gate_require_ua_match",
+] as const;
+
+function isMissingFreeSettingsColumnError(error: any) {
+  const msg = String(error?.message || error?.details || error?.hint || "");
+  return NEW_FREE_SETTINGS_COLUMNS.some((col) => msg.includes(col));
+}
+
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
 
@@ -449,13 +460,27 @@ export function AdminFreeKeysPage() {
       };
 
       const query: any = supabase.from("licenses_free_settings");
-      const { data, error } = await query
+      const attempt = await query
         .upsert({ id: 1, ...patch }, { onConflict: "id" })
         .select("id")
         .single();
 
-      if (error) throw error;
-      return data;
+      if (!attempt.error) return attempt.data;
+      if (!isMissingFreeSettingsColumnError(attempt.error)) throw attempt.error;
+
+      const legacyPatch = { ...patch } as any;
+      delete legacyPatch.free_daily_limit_per_ip;
+      delete legacyPatch.free_gate_require_ip_match;
+      delete legacyPatch.free_gate_require_ua_match;
+
+      const legacyAttempt = await supabase
+        .from("licenses_free_settings")
+        .upsert({ id: 1, ...legacyPatch }, { onConflict: "id" })
+        .select("id")
+        .single();
+
+      if (legacyAttempt.error) throw legacyAttempt.error;
+      return legacyAttempt.data;
     },
     onSuccess: async () => {
       toast({ title: "Saved", description: "Free settings updated." });
