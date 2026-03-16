@@ -25,9 +25,10 @@ async function sha256Hex(input: string) {
 }
 
 function getClientIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
+  return req.headers.get("cf-connecting-ip")
+    ?? req.headers.get("x-real-ip")
+    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    ?? "";
 }
 
 function base64url(bytesLen = 32) {

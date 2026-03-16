@@ -23,9 +23,10 @@ function base64url(bytesLen = 18) {
 }
 
 function getClientIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "";
+  return req.headers.get("cf-connecting-ip")
+    ?? req.headers.get("x-real-ip")
+    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    ?? "";
 }
 
 function inferBaseUrl(req: Request) {
@@ -96,6 +97,8 @@ async function maybeAutoBlockGateFailures(sb: any, args: {
         "CLAIM_EXPIRED",
         "GATE_STATUS_INVALID",
         "DAILY_QUOTA",
+        "DAILY_QUOTA_FP",
+        "DAILY_QUOTA_IP",
       ])
       .or(`fingerprint_hash.eq.${args.fingerprint_hash},ip_hash.eq.${args.ip_hash}`);
     failCount = Number(recent.count ?? 0);
@@ -364,7 +367,7 @@ Deno.serve(async (req) => {
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
     .select(
-      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
+      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_gate_require_ip_match,free_gate_require_ua_match,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -425,13 +428,19 @@ Deno.serve(async (req) => {
   }
 
   // Device match
-  if ((sess as any).fingerprint_hash !== fpHash || (sess as any).ua_hash !== uaHash || (sess as any).ip_hash !== ipHash) {
+  const requireUaMatch = Boolean((settings as any)?.free_gate_require_ua_match ?? true);
+  const requireIpMatch = Boolean((settings as any)?.free_gate_require_ip_match ?? true);
+  const fingerprintMismatch = (sess as any).fingerprint_hash !== fpHash;
+  const uaMismatch = requireUaMatch && (sess as any).ua_hash !== uaHash;
+  const ipMismatch = requireIpMatch && (sess as any).ip_hash !== ipHash;
+
+  if (fingerprintMismatch || uaMismatch || ipMismatch) {
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: pass,
       event_code: "DEVICE_MISMATCH",
-      detail: {},
+      detail: { fingerprintMismatch, uaMismatch, ipMismatch, requireUaMatch, requireIpMatch },
       fingerprint_hash: fpHash,
       ip_hash: ipHash,
       ua_hash: uaHash,

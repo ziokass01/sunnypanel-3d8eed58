@@ -12,7 +12,7 @@ function getAnonKey() {
 
 export async function getFunction<T>(
   path: string,
-  opts?: { authToken?: string | null; withCredentials?: boolean },
+  opts?: { authToken?: string | null; withCredentials?: boolean; headers?: Record<string, string> },
 ): Promise<T> {
   const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -26,6 +26,7 @@ export async function getFunction<T>(
       headers: {
         apikey: anonKey,
         Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+        ...(opts?.headers ?? {}),
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
       credentials: opts?.withCredentials ? "include" : "omit",

@@ -39,6 +39,9 @@ type SettingsRow = {
   free_min_delay_enabled?: boolean;
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
+  free_daily_limit_per_ip?: number;
+  free_gate_require_ip_match?: boolean;
+  free_gate_require_ua_match?: boolean;
   free_require_link4m_referrer: boolean;
   free_public_note: string;
   free_public_links: any;
@@ -269,7 +272,7 @@ export function AdminFreeKeysPage() {
       const { data, error } = await supabase
         .from("licenses_free_settings")
         .select(
-          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,free_download_enabled,free_download_name,free_download_info,free_download_path,free_download_url,free_download_size,updated_at,updated_by",
+          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_gate_require_ip_match,free_gate_require_ua_match,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_daily_limit_per_ip,free_require_link4m_referrer,free_public_note,free_public_links,free_download_enabled,free_download_name,free_download_info,free_download_path,free_download_url,free_download_size,updated_at,updated_by",
         )
         .eq("id", 1)
         .maybeSingle();
@@ -294,6 +297,9 @@ export function AdminFreeKeysPage() {
   const [gateAntiBypassSeconds, setGateAntiBypassSeconds] = useState(0);
   const [returnSeconds, setReturnSeconds] = useState(10);
   const [dailyLimit, setDailyLimit] = useState(1);
+  const [dailyLimitPerIp, setDailyLimitPerIp] = useState(0);
+  const [gateRequireIpMatch, setGateRequireIpMatch] = useState(true);
+  const [gateRequireUaMatch, setGateRequireUaMatch] = useState(true);
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
@@ -324,6 +330,9 @@ export function AdminFreeKeysPage() {
     setGateAntiBypassSeconds(Math.max(0, Number((s as any).free_gate_antibypass_seconds ?? 0)));
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
+    setDailyLimitPerIp(Math.max(0, Number((s as any).free_daily_limit_per_ip ?? 0)));
+    setGateRequireIpMatch(Boolean((s as any).free_gate_require_ip_match ?? true));
+    setGateRequireUaMatch(Boolean((s as any).free_gate_require_ua_match ?? true));
     setRequireRef(Boolean(s.free_require_link4m_referrer));
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
@@ -424,7 +433,10 @@ export function AdminFreeKeysPage() {
         free_gate_antibypass_enabled: Boolean(gateAntiBypassEnabled),
         free_gate_antibypass_seconds: gateAntiBypassEnabled ? Math.max(0, Math.floor(Number(gateAntiBypassSeconds) || 0)) : 0,
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
-        free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
+        free_daily_limit_per_fingerprint: Math.max(0, Math.floor(Number(dailyLimit) || 0)),
+        free_daily_limit_per_ip: Math.max(0, Math.floor(Number(dailyLimitPerIp) || 0)),
+        free_gate_require_ip_match: Boolean(gateRequireIpMatch),
+        free_gate_require_ua_match: Boolean(gateRequireUaMatch),
         free_require_link4m_referrer: Boolean(requireRef),
         free_public_note: publicNote,
         free_public_links: parseLinksText(publicLinksText),
@@ -1172,14 +1184,38 @@ const disableAllKeyTypes = useMutation({
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium">Giới hạn / 24h (theo fingerprint)</div>
+              <div className="text-sm font-medium">Giới hạn / ngày VN (theo fingerprint)</div>
               <Input
                 type="number"
                 value={dailyLimit}
                 onChange={(e) => setDailyLimit(Number(e.target.value))}
-                min={1}
+                min={0}
               />
-              <div className="text-xs text-muted-foreground">Chặn spam tạo key vô hạn trên 1 thiết bị.</div>
+              <div className="text-xs text-muted-foreground">0 = tắt. Reset lúc 00:00 Asia/Ho_Chi_Minh.</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Giới hạn / ngày VN (theo IP)</div>
+              <Input
+                type="number"
+                value={dailyLimitPerIp}
+                onChange={(e) => setDailyLimitPerIp(Number(e.target.value))}
+                min={0}
+              />
+              <div className="text-xs text-muted-foreground">0 = tắt (mặc định an toàn). Dùng để giảm spam khi cần.</div>
+            </div>
+
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="text-sm font-medium">Ràng buộc thiết bị ở /free/gate (VIP 2-pass)</div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">Bắt buộc khớp IP</span>
+                <Switch checked={gateRequireIpMatch} onCheckedChange={setGateRequireIpMatch} />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">Bắt buộc khớp UA</span>
+                <Switch checked={gateRequireUaMatch} onCheckedChange={setGateRequireUaMatch} />
+              </div>
+              <div className="text-xs text-muted-foreground">Mặc định đang bật để tương thích ngược. Có thể tắt khi mobile/NAT gây fail oan.</div>
             </div>
 
              <div className="flex items-center justify-between gap-4 rounded-md border p-3">

@@ -33,9 +33,35 @@ function maskKey(key: string) {
 }
 
 function getClientIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "0.0.0.0";
+  return req.headers.get("cf-connecting-ip")
+    ?? req.headers.get("x-real-ip")
+    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    ?? "0.0.0.0";
+}
+
+function getVietnamDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((x) => x.type === "year")?.value;
+  const month = parts.find((x) => x.type === "month")?.value;
+  const day = parts.find((x) => x.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function getVietnamDayRangeUtc(day: string) {
+  const [year, month, date] = day.split("-").map((v) => Number(v));
+  const utcOffsetMs = 7 * 60 * 60 * 1000;
+  const startMs = Date.UTC(year, month - 1, date, 0, 0, 0, 0) - utcOffsetMs;
+  const nextStartMs = startMs + 24 * 60 * 60 * 1000;
+  return {
+    startUtcIso: new Date(startMs).toISOString(),
+    nextStartUtcIso: new Date(nextStartMs).toISOString(),
+  };
 }
 
 function isActiveBlockUntil(blockedUntil?: string | null) {
@@ -96,6 +122,8 @@ async function maybeAutoBlockGateFailures(sb: any, args: {
         "CLAIM_EXPIRED",
         "GATE_STATUS_INVALID",
         "DAILY_QUOTA",
+        "DAILY_QUOTA_FP",
+        "DAILY_QUOTA_IP",
       ])
       .or(`fingerprint_hash.eq.${args.fingerprint_hash},ip_hash.eq.${args.ip_hash}`);
     failCount = Number(recent.count ?? 0);
@@ -207,7 +235,7 @@ Deno.serve(async (req) => {
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select("free_enabled,free_disabled_message,free_daily_limit_per_fingerprint,free_return_seconds")
+.select("free_enabled,free_disabled_message,free_daily_limit_per_fingerprint,free_daily_limit_per_ip,free_return_seconds")
     .eq("id", 1)
     .maybeSingle();
 
@@ -471,21 +499,44 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Daily limit per fingerprint (admin-config)
-  const dailyLimit = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const quota = await sb
-    .from("licenses_free_issues")
-    .select("issue_id", { count: "exact", head: true })
-    .gte("created_at", since)
-    .eq("fingerprint_hash", fpHash);
+  // Daily quota by Vietnam calendar day (00:00 Asia/Ho_Chi_Minh)
+  const dayKey = getVietnamDateKey();
+  const dayRange = getVietnamDayRangeUtc(dayKey);
 
-  const used = quota.count ?? 0;
-  if (used >= dailyLimit) {
-    await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA" }).eq("session_id", sessionId);
-    await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "DAILY_QUOTA", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-    return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+  const dailyLimitFp = Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  if (dailyLimitFp > 0) {
+    const quotaFp = await sb
+      .from("licenses_free_issues")
+      .select("issue_id", { count: "exact", head: true })
+      .gte("created_at", dayRange.startUtcIso)
+      .lt("created_at", dayRange.nextStartUtcIso)
+      .eq("fingerprint_hash", fpHash);
+
+    const usedFp = Number(quotaFp.count ?? 0);
+    if (usedFp >= dailyLimitFp) {
+      await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA_FP" }).eq("session_id", sessionId);
+      await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "DAILY_QUOTA_FP", detail: { day_key: dayKey, used: usedFp, limit: dailyLimitFp }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+      await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
+      return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+    }
+  }
+
+  const dailyLimitIp = Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0));
+  if (dailyLimitIp > 0) {
+    const quotaIp = await sb
+      .from("licenses_free_issues")
+      .select("issue_id", { count: "exact", head: true })
+      .gte("created_at", dayRange.startUtcIso)
+      .lt("created_at", dayRange.nextStartUtcIso)
+      .eq("ip_hash", ipHash);
+
+    const usedIp = Number(quotaIp.count ?? 0);
+    if (usedIp >= dailyLimitIp) {
+      await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA_IP" }).eq("session_id", sessionId);
+      await insertGateLog(sb, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "DAILY_QUOTA_IP", detail: { day_key: dayKey, used: usedIp, limit: dailyLimitIp }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+      await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
+      return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+    }
   }
 
   // Acquire lock BEFORE inserting license (prevents multi-mint bug).

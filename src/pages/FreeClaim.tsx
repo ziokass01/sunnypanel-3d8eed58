@@ -50,7 +50,7 @@ function friendlyRevealError(msg: string) {
   if (m === "OUT_TOKEN_MISMATCH") return "Xác thực không đúng . Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "CLAIM_INVALID") return "Lỗi xác minh không hợp lệ. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "GATE_STATUS_INVALID") return "Xác thực chưa hợp lệ hoặc chưa xác thực. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
-  if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong 24 giờ. Vui lòng thử lại sau.";
+  if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong hôm nay. Vui lòng thử lại sau 00:00 (GMT+7).";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
   if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "SESSION_BIND_MISMATCH") return "Phiên không khớp thiết bị/IP. Vui lòng bắt đầu lại từ trang Get Key 🔑.";
@@ -271,6 +271,7 @@ export function FreeClaimPage() {
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
 
   async function resolveByOutToken(outTok: string, debug: boolean): Promise<string | null> {
     const tok = String(outTok || "").trim();
@@ -376,11 +377,13 @@ export function FreeClaimPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const cfg = await fetchFreeConfig();
+        const fp = getOrCreateFingerprint();
+        const cfg = await fetchFreeConfig({ fingerprint: fp });
         const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
         setTurnstileEnabled(enabled);
         setTurnstileSiteKey(cfg.turnstile_site_key ?? null);
         if (!enabled) setTurnstileToken("");
+        setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
         // If config cannot be fetched, fail open (do not block claim UI).
         setTurnstileEnabled(false);
@@ -564,7 +567,7 @@ export function FreeClaimPage() {
               <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Khi nhận thành công, bấm copy để lưu key ngay.</div>
             </div>
 
-            <FreeDeviceHistoryCard history={deviceHistory} />
+            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={remainingTodayServer} />
 
             {!claimToken ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
