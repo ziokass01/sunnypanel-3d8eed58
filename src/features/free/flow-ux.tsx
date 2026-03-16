@@ -153,7 +153,7 @@ function friendlyFailLabel(code?: string | null) {
   return v.replaceAll("_", " ");
 }
 
-export function FreeDeviceHistoryCard({ history }: { history: FreeFlowDeviceHistory }) {
+export function FreeDeviceHistoryCard({ history, remainingTodayServer }: { history: FreeFlowDeviceHistory; remainingTodayServer?: number | null }) {
   return (
     <Card className="overflow-hidden border-dashed bg-gradient-to-br from-background to-muted/30">
       <CardContent className="space-y-3 p-4">
@@ -165,7 +165,13 @@ export function FreeDeviceHistoryCard({ history }: { history: FreeFlowDeviceHist
           <Badge variant="outline" className="rounded-full px-3 py-1 text-center leading-none min-w-[74px]">Hôm nay</Badge>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-4">
+
+          <div className="rounded-2xl border bg-background/80 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Còn lại hôm nay</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{remainingTodayServer ?? "-"}</div>
+            <div className="text-xs text-muted-foreground">reset lúc 00:00 (GMT+7)</div>
+          </div>
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thành công</div>
             <div className="mt-1 text-2xl font-semibold text-foreground">{history.successToday}</div>

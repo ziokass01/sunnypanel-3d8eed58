@@ -114,7 +114,7 @@ export function FreeLandingPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchFreeConfig()
+    getOrCreateFingerprint().then((fp) => fetchFreeConfig({ fingerprint: fp }))
       .then((c) => {
         if (cancelled) return;
         setCfg(c);
@@ -214,7 +214,7 @@ export function FreeLandingPage() {
 
             <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
-            <FreeDeviceHistoryCard history={deviceHistory} />
+            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} />
 
             <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
               <div className="flex items-center justify-between gap-3">

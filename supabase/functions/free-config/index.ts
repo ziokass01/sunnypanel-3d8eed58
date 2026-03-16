@@ -10,6 +10,51 @@ function inferBaseUrl(req: Request) {
   return "";
 }
 
+
+function getClientIp(req: Request) {
+  return req.headers.get("cf-connecting-ip")
+    ?? req.headers.get("x-real-ip")
+    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    ?? "0.0.0.0";
+}
+
+function toHex(bytes: ArrayBuffer) {
+  return Array.from(new Uint8Array(bytes))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256Hex(input: string) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return toHex(digest);
+}
+
+function getVietnamDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((x) => x.type === "year")?.value;
+  const month = parts.find((x) => x.type === "month")?.value;
+  const day = parts.find((x) => x.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function getVietnamDayRangeUtc(day: string) {
+  const [year, month, date] = day.split("-").map((v) => Number(v));
+  const utcOffsetMs = 7 * 60 * 60 * 1000;
+  const startMs = Date.UTC(year, month - 1, date, 0, 0, 0, 0) - utcOffsetMs;
+  const nextStartMs = startMs + 24 * 60 * 60 * 1000;
+  return {
+    startUtcIso: new Date(startMs).toISOString(),
+    nextStartUtcIso: new Date(nextStartMs).toISOString(),
+  };
+}
+
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
@@ -74,6 +119,9 @@ Deno.serve(async (req) => {
   free_link4m_rotate_nonce_pass2,
   free_return_seconds,
   free_daily_limit_per_fingerprint,
+  free_daily_limit_per_ip,
+  free_gate_require_ip_match,
+  free_gate_require_ua_match,
   free_require_link4m_referrer,
   free_public_note,
   free_public_links,
@@ -105,7 +153,10 @@ Deno.serve(async (req) => {
   const free_link4m_rotate_nonce_pass1 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass1 ?? 0));
   const free_link4m_rotate_nonce_pass2 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass2 ?? 0));
   const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
-  const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  const free_daily_limit_per_fingerprint = Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  const free_daily_limit_per_ip = Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0));
+  const free_gate_require_ip_match = Boolean((settings as any)?.free_gate_require_ip_match ?? true);
+  const free_gate_require_ua_match = Boolean((settings as any)?.free_gate_require_ua_match ?? true);
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
   const free_public_note = String(settings?.free_public_note ?? "");
   const free_public_links = Array.isArray(settings?.free_public_links) ? settings?.free_public_links : [];
@@ -147,6 +198,41 @@ Deno.serve(async (req) => {
 
   const destination_gate_url = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
 
+  const ip = getClientIp(req);
+  const ipHash = await sha256Hex(ip);
+  const fpRaw = String(req.headers.get("x-fp") ?? "").trim();
+
+  const dayKey = getVietnamDateKey();
+  const dayRange = getVietnamDayRangeUtc(dayKey);
+  const fpHash = fpRaw ? await sha256Hex(fpRaw) : "";
+
+  let fpUsedToday = 0;
+  if (fpHash) {
+    const fpQuota = await sb
+      .from("licenses_free_issues")
+      .select("issue_id", { count: "exact", head: true })
+      .gte("created_at", dayRange.startUtcIso)
+      .lt("created_at", dayRange.nextStartUtcIso)
+      .eq("fingerprint_hash", fpHash);
+    fpUsedToday = Number(fpQuota.count ?? 0);
+  }
+
+  const ipQuota = await sb
+    .from("licenses_free_issues")
+    .select("issue_id", { count: "exact", head: true })
+    .gte("created_at", dayRange.startUtcIso)
+    .lt("created_at", dayRange.nextStartUtcIso)
+    .eq("ip_hash", ipHash);
+  const ipUsedToday = Number(ipQuota.count ?? 0);
+
+  const fpRemaining = free_daily_limit_per_fingerprint <= 0
+    ? null
+    : Math.max(0, free_daily_limit_per_fingerprint - fpUsedToday);
+  const ipRemaining = free_daily_limit_per_ip <= 0
+    ? null
+    : Math.max(0, free_daily_limit_per_ip - ipUsedToday);
+  const remainingToday = [fpRemaining, ipRemaining].filter((v) => v !== null).reduce((m, v) => Math.min(m, Number(v)), Number.POSITIVE_INFINITY);
+
   const body = {
     ok: true,
 
@@ -171,7 +257,13 @@ Deno.serve(async (req) => {
     free_gate_antibypass_seconds,
     free_return_seconds,
     free_daily_limit_per_fingerprint,
+    free_daily_limit_per_ip,
+    free_gate_require_ip_match,
+    free_gate_require_ua_match,
     free_require_link4m_referrer,
+    free_quota_timezone: "Asia/Ho_Chi_Minh",
+    free_quota_day_key: dayKey,
+    free_quota_remaining_today: Number.isFinite(remainingToday) ? remainingToday : null,
 
     free_public_note,
     free_public_links,

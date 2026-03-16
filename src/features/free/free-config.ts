@@ -32,9 +32,15 @@ export type FreeConfig = {
   free_min_delay_seconds_pass2?: number;
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
+  free_daily_limit_per_ip?: number;
+  free_gate_require_ip_match?: boolean;
+  free_gate_require_ua_match?: boolean;
   free_require_link4m_referrer: boolean;
   free_gate_antibypass_enabled?: boolean;
   free_gate_antibypass_seconds?: number;
+  free_quota_timezone?: string;
+  free_quota_day_key?: string;
+  free_quota_remaining_today?: number | null;
 
   // Public content (optional)
   free_public_note: string;
@@ -55,6 +61,9 @@ export type FreeConfig = {
   missing: string[];
 };
 
-export async function fetchFreeConfig() {
-  return getFunction<FreeConfig>("/free-config");
+export async function fetchFreeConfig(opts?: { fingerprint?: string | null }) {
+  const fp = String(opts?.fingerprint ?? "").trim();
+  return getFunction<FreeConfig>("/free-config", {
+    headers: fp ? { "x-fp": fp } : undefined,
+  });
 }
