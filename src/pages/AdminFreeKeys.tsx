@@ -282,9 +282,7 @@ export function AdminFreeKeysPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("licenses_free_settings")
-        .select(
-          "*",
-        )
+        .select("*")
         .eq("id", 1)
         .maybeSingle();
       if (error) throw error;

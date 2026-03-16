@@ -366,9 +366,7 @@ Deno.serve(async (req) => {
   // Settings
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select(
-      "*",
-    )
+    .select("*")
     .eq("id", 1)
     .maybeSingle();
 
