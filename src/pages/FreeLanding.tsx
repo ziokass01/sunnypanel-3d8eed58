@@ -114,7 +114,7 @@ export function FreeLandingPage() {
 
   useEffect(() => {
     let cancelled = false;
-    getOrCreateFingerprint().then((fp) => fetchFreeConfig({ fingerprint: fp }))
+    Promise.resolve(fetchFreeConfig({ fingerprint: getOrCreateFingerprint() }))
       .then((c) => {
         if (cancelled) return;
         setCfg(c);
