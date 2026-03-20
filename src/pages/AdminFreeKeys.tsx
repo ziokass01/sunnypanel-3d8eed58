@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, Filter, Trash2, Upload, Download } from "lucide-react";
+import { ChevronDown, Filter, Trash2, Download, Plus } from "lucide-react";
 import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,6 +51,7 @@ type SettingsRow = {
   free_download_path?: string | null;
   free_download_url?: string | null;
   free_download_size?: number | null;
+  free_download_cards?: any;
   free_notice_enabled?: boolean;
   free_notice_title?: string | null;
   free_notice_content?: string | null;
@@ -129,6 +130,17 @@ type PublicLink = {
   icon?: string | null;
 };
 
+type DownloadCardEditorItem = {
+  id: string;
+  enabled: boolean;
+  title: string;
+  description: string;
+  url: string;
+  button_label: string;
+  badge: string;
+  icon_url: string;
+};
+
 type AdminTestResult = {
   ok: boolean;
   key?: string;
@@ -138,6 +150,74 @@ type AdminTestResult = {
   session_id?: string | null;
   message?: string;
 };
+
+function nextDownloadCardId() {
+  return `dl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createEditorDownloadCard(value?: Partial<DownloadCardEditorItem> & Record<string, any>): DownloadCardEditorItem {
+  return {
+    id: String(value?.id ?? nextDownloadCardId()),
+    enabled: Boolean(value?.enabled ?? true),
+    title: String(value?.title ?? ""),
+    description: String(value?.description ?? ""),
+    url: String(value?.url ?? ""),
+    button_label: String(value?.button_label ?? ""),
+    badge: String(value?.badge ?? ""),
+    icon_url: String(value?.icon_url ?? ""),
+  };
+}
+
+function createEmptyDownloadCard(): DownloadCardEditorItem {
+  return createEditorDownloadCard({
+    enabled: true,
+    title: "",
+    description: "",
+    url: "",
+    button_label: "Mở liên kết",
+    badge: "",
+    icon_url: "",
+  });
+}
+
+function buildDownloadCardsFromSettings(settings?: Partial<SettingsRow> | null): DownloadCardEditorItem[] {
+  const rawCards = Array.isArray((settings as any)?.free_download_cards) ? (settings as any)?.free_download_cards : [];
+  const cards = rawCards
+    .map((card: any) => createEditorDownloadCard(card))
+    .filter((card: DownloadCardEditorItem) => card.title || card.description || card.url || card.button_label || card.badge || card.icon_url);
+
+  if (cards.length) return cards;
+
+  const fallback: DownloadCardEditorItem[] = [];
+  const primaryUrl = String((settings as any)?.free_download_url ?? "").trim();
+  const externalUrl = String((settings as any)?.free_external_download_url ?? "").trim();
+
+  if (primaryUrl || (settings as any)?.free_download_name || (settings as any)?.free_download_info) {
+    fallback.push(createEditorDownloadCard({
+      enabled: Boolean((settings as any)?.free_download_enabled ?? true),
+      title: String((settings as any)?.free_download_name ?? ""),
+      description: String((settings as any)?.free_download_info ?? ""),
+      url: primaryUrl,
+      button_label: "Mở liên kết",
+      badge: "Link 1",
+      icon_url: "",
+    }));
+  }
+
+  if (externalUrl || (settings as any)?.free_external_download_title || (settings as any)?.free_external_download_description) {
+    fallback.push(createEditorDownloadCard({
+      enabled: Boolean((settings as any)?.free_external_download_enabled ?? true),
+      title: String((settings as any)?.free_external_download_title ?? ""),
+      description: String((settings as any)?.free_external_download_description ?? ""),
+      url: externalUrl,
+      button_label: String((settings as any)?.free_external_download_button_label ?? "Mở liên kết"),
+      badge: String((settings as any)?.free_external_download_badge ?? "Link 2"),
+      icon_url: String((settings as any)?.free_external_download_icon_url ?? ""),
+    }));
+  }
+
+  return fallback.length ? fallback : [createEmptyDownloadCard()];
+}
 
 function getVietnamDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -154,7 +234,6 @@ function getVietnamDateKey(date = new Date()) {
 }
 
 function getVietnamDayRangeUtc(day: string) {
-  // day = YYYY-MM-DD in Asia/Ho_Chi_Minh timezone (UTC+7)
   const [year, month, date] = day.split("-").map((v) => Number(v));
   const utcOffsetMs = 7 * 60 * 60 * 1000;
   const startMs = Date.UTC(year, month - 1, date, 0, 0, 0, 0) - utcOffsetMs;
@@ -222,8 +301,6 @@ function toLinksText(value: any): string {
     .join("\n");
 }
 
-
-
 function isFreeSchemaMissingError(message: string) {
   const msg = String(message || "").toLowerCase();
   return (
@@ -249,7 +326,6 @@ function parseLinksText(text: string): PublicLink[] {
     const url = (urlRaw ?? "").trim();
     const icon = (iconRaw ?? "").trim();
     if (!label || !url) continue;
-    // Very light url sanity
     if (!/^https?:\/\//i.test(url)) continue;
     out.push({ label, url, icon: icon || null });
   }
@@ -273,6 +349,7 @@ const NEW_FREE_SETTINGS_COLUMNS = [
   "free_external_download_button_label",
   "free_external_download_badge",
   "free_external_download_icon_url",
+  "free_download_cards",
 ] as const;
 
 function isMissingFreeSettingsColumnError(error: any) {
@@ -308,7 +385,6 @@ export function AdminFreeKeysPage() {
     }
   };
 
-  // -------- Settings (admin-controlled) --------
   const settingsQuery = useQuery({
     queryKey: ["free-settings"],
     queryFn: async () => {
@@ -344,27 +420,14 @@ export function AdminFreeKeysPage() {
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
-  const [downloadEnabled, setDownloadEnabled] = useState(false);
-  const [downloadName, setDownloadName] = useState("");
-  const [downloadInfo, setDownloadInfo] = useState("");
-  const [downloadPath, setDownloadPath] = useState<string | null>(null);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadSize, setDownloadSize] = useState<number>(0);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
-  const [uploadingFile, setUploadingFile] = useState(false);
+  const [downloadCards, setDownloadCards] = useState<DownloadCardEditorItem[]>([createEmptyDownloadCard()]);
   const [noticeEnabled, setNoticeEnabled] = useState(false);
   const [noticeTitle, setNoticeTitle] = useState("");
   const [noticeContent, setNoticeContent] = useState("");
   const [noticeMode, setNoticeMode] = useState<"modal" | "inline">("modal");
   const [noticeClosable, setNoticeClosable] = useState(true);
   const [noticeShowOnce, setNoticeShowOnce] = useState(false);
-  const [externalDownloadEnabled, setExternalDownloadEnabled] = useState(false);
-  const [externalDownloadTitle, setExternalDownloadTitle] = useState("");
-  const [externalDownloadDescription, setExternalDownloadDescription] = useState("");
-  const [externalDownloadUrl, setExternalDownloadUrl] = useState("");
-  const [externalDownloadButtonLabel, setExternalDownloadButtonLabel] = useState("");
-  const [externalDownloadBadge, setExternalDownloadBadge] = useState("");
-  const [externalDownloadIconUrl, setExternalDownloadIconUrl] = useState("");
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -390,101 +453,49 @@ export function AdminFreeKeysPage() {
     setRequireRef(Boolean(s.free_require_link4m_referrer));
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
-    setDownloadEnabled(Boolean((s as any).free_download_enabled ?? false));
-    setDownloadName(String((s as any).free_download_name ?? ""));
-    setDownloadInfo(String((s as any).free_download_info ?? ""));
-    setDownloadPath(((s as any).free_download_path ?? null) as any);
-    setDownloadUrl(((s as any).free_download_url ?? null) as any);
-    setDownloadSize(Number((s as any).free_download_size ?? 0));
+    setDownloadCards(buildDownloadCardsFromSettings(s));
     setNoticeEnabled(Boolean((s as any).free_notice_enabled ?? false));
     setNoticeTitle(String((s as any).free_notice_title ?? ""));
     setNoticeContent(String((s as any).free_notice_content ?? ""));
     setNoticeMode(String((s as any).free_notice_mode ?? "").trim().toLowerCase() === "inline" ? "inline" : "modal");
     setNoticeClosable(Boolean((s as any).free_notice_closable ?? true));
     setNoticeShowOnce(Boolean((s as any).free_notice_show_once ?? false));
-    setExternalDownloadEnabled(Boolean((s as any).free_external_download_enabled ?? false));
-    setExternalDownloadTitle(String((s as any).free_external_download_title ?? ""));
-    setExternalDownloadDescription(String((s as any).free_external_download_description ?? ""));
-    setExternalDownloadUrl(String((s as any).free_external_download_url ?? ""));
-    setExternalDownloadButtonLabel(String((s as any).free_external_download_button_label ?? ""));
-    setExternalDownloadBadge(String((s as any).free_external_download_badge ?? ""));
-    setExternalDownloadIconUrl(String((s as any).free_external_download_icon_url ?? ""));
   }, [settingsQuery.data]);
 
-  const formatFileSize = (bytes?: number | null) => {
-    const n = Number(bytes || 0);
-    if (!n) return "-";
-    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-    if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${n} B`;
+  const addDownloadCard = () => {
+    setDownloadCards((prev) => [...prev, createEmptyDownloadCard()]);
+    setDownloadPanelOpen(true);
   };
 
-  const handleUploadFile = async (file?: File | null) => {
-    if (!file) return;
-    setUploadingFile(true);
-    try {
-      const ext = file.name.includes('.') ? file.name.split('.').pop() : '';
-      const safeBase = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 48) || 'download';
-      const path = `free/${Date.now()}-${safeBase}${ext ? `.${ext}` : ''}`;
-      const storage = (supabase.storage.from('free-downloads') as any);
-      const { error: uploadErr } = await storage.upload(path, file, { upsert: true, cacheControl: '3600', contentType: file.type || 'application/octet-stream' });
-      if (uploadErr) throw uploadErr;
-      const { data } = storage.getPublicUrl(path);
-      const publicUrl = String(data?.publicUrl || '').trim();
-      const prevPath = downloadPath;
-      setDownloadName(file.name);
-      setDownloadPath(path);
-      setDownloadUrl(publicUrl || null);
-      setDownloadSize(file.size || 0);
-      setDownloadEnabled(true);
-      setDownloadPanelOpen(true);
-      const patch: any = {
-        free_download_enabled: true,
-        free_download_name: file.name,
-        free_download_info: (downloadInfo || '').trim() || null,
-        free_download_path: path,
-        free_download_url: publicUrl || null,
-        free_download_size: file.size || 0,
-      };
-      const query: any = supabase.from('licenses_free_settings');
-      const attempt = await query.upsert({ id: 1, ...patch }, { onConflict: 'id' });
-      if (attempt.error) throw attempt.error;
-      if (prevPath && prevPath !== path) {
-        try { await storage.remove([prevPath]); } catch { /* best-effort cleanup */ }
-      }
-      await settingsQuery.refetch();
-      toast({ title: 'Đã upload file', description: 'File tải xuống đã sẵn sàng ở trang free.' });
-    } catch (e: any) {
-      toast({ title: 'Upload failed', description: e?.message ?? 'Không thể upload file.', variant: 'destructive' });
-    } finally {
-      setUploadingFile(false);
-    }
+  const updateDownloadCard = (id: string, patch: Partial<DownloadCardEditorItem>) => {
+    setDownloadCards((prev) => prev.map((card) => (card.id === id ? { ...card, ...patch } : card)));
   };
 
-  const removeDownloadFile = async () => {
-    try {
-      const prevPath = downloadPath;
-      if (prevPath) {
-        try { await (supabase.storage.from('free-downloads') as any).remove([prevPath]); } catch { /* best-effort cleanup */ }
-      }
-      const query: any = supabase.from('licenses_free_settings');
-      const attempt = await query.upsert({ id: 1, free_download_enabled: false, free_download_name: null, free_download_info: null, free_download_path: null, free_download_url: null, free_download_size: null }, { onConflict: 'id' });
-      if (attempt.error) throw attempt.error;
-      setDownloadEnabled(false);
-      setDownloadName('');
-      setDownloadInfo('');
-      setDownloadPath(null);
-      setDownloadUrl(null);
-      setDownloadSize(0);
-      await settingsQuery.refetch();
-      toast({ title: 'Đã gỡ file', description: 'Nút tải file đã được ẩn khỏi trang free.' });
-    } catch (e: any) {
-      toast({ title: 'Remove failed', description: e?.message ?? 'Không thể gỡ file.', variant: 'destructive' });
-    }
+  const removeDownloadCard = (id: string) => {
+    setDownloadCards((prev) => {
+      const next = prev.filter((card) => card.id !== id);
+      return next.length ? next : [createEmptyDownloadCard()];
+    });
   };
 
   const saveSettings = useMutation({
     mutationFn: async () => {
+      const normalizedDownloadCards = downloadCards
+        .map((card) => ({
+          enabled: Boolean(card.enabled),
+          title: card.title.trim(),
+          description: card.description.trim(),
+          url: card.url.trim(),
+          button_label: card.button_label.trim(),
+          badge: card.badge.trim(),
+          icon_url: card.icon_url.trim(),
+        }))
+        .filter((card) => card.title || card.description || card.url || card.button_label || card.badge || card.icon_url);
+
+      const legacyVisibleCards = normalizedDownloadCards.filter((card) => card.enabled && /^https?:\/\//i.test(card.url));
+      const legacyPrimaryCard = legacyVisibleCards[0] ?? null;
+      const legacySecondaryCard = legacyVisibleCards[1] ?? null;
+
       const patch = {
         free_outbound_url: outboundUrl.trim() || null,
         free_outbound_url_pass2: outboundUrlPass2.trim() || null,
@@ -507,25 +518,26 @@ export function AdminFreeKeysPage() {
         free_require_link4m_referrer: Boolean(requireRef),
         free_public_note: publicNote,
         free_public_links: parseLinksText(publicLinksText),
-        free_download_enabled: Boolean(downloadEnabled && (downloadUrl || downloadPath)),
-        free_download_name: (downloadName || "").trim() || null,
-        free_download_info: (downloadInfo || "").trim() || null,
-        free_download_path: downloadPath || null,
-        free_download_url: downloadUrl || null,
-        free_download_size: Math.max(0, Math.floor(Number(downloadSize) || 0)) || null,
+        free_download_enabled: Boolean(legacyPrimaryCard?.enabled && legacyPrimaryCard?.url),
+        free_download_name: legacyPrimaryCard?.title || null,
+        free_download_info: legacyPrimaryCard?.description || null,
+        free_download_path: null,
+        free_download_url: legacyPrimaryCard?.url || null,
+        free_download_size: null,
+        free_download_cards: normalizedDownloadCards,
         free_notice_enabled: Boolean(noticeEnabled && noticeContent.trim()),
         free_notice_title: noticeTitle.trim() || null,
         free_notice_content: noticeContent.trim() || null,
         free_notice_mode: noticeMode === "inline" ? "inline" : "modal",
         free_notice_closable: Boolean(noticeClosable),
         free_notice_show_once: Boolean(noticeShowOnce),
-        free_external_download_enabled: Boolean(externalDownloadEnabled && /^https?:\/\//i.test(externalDownloadUrl.trim())),
-        free_external_download_title: externalDownloadTitle.trim() || null,
-        free_external_download_description: externalDownloadDescription.trim() || null,
-        free_external_download_url: externalDownloadUrl.trim() || null,
-        free_external_download_button_label: externalDownloadButtonLabel.trim() || null,
-        free_external_download_badge: externalDownloadBadge.trim() || null,
-        free_external_download_icon_url: externalDownloadIconUrl.trim() || null,
+        free_external_download_enabled: Boolean(legacySecondaryCard?.enabled && legacySecondaryCard?.url),
+        free_external_download_title: legacySecondaryCard?.title || null,
+        free_external_download_description: legacySecondaryCard?.description || null,
+        free_external_download_url: legacySecondaryCard?.url || null,
+        free_external_download_button_label: legacySecondaryCard?.button_label || null,
+        free_external_download_badge: legacySecondaryCard?.badge || null,
+        free_external_download_icon_url: legacySecondaryCard?.icon_url || null,
       };
 
       const query: any = supabase.from("licenses_free_settings");
@@ -557,7 +569,6 @@ export function AdminFreeKeysPage() {
     },
   });
 
-
   const rotateNow = useMutation({
     mutationFn: async (passNo: 1 | 2) => {
       const field = passNo === 1 ? "free_link4m_rotate_nonce_pass1" : "free_link4m_rotate_nonce_pass2";
@@ -576,7 +587,6 @@ export function AdminFreeKeysPage() {
     onError: (e: any) => toast({ title: "Rotate failed", description: e?.message ?? "Error", variant: "destructive" }),
   });
 
-  // -------- Key types --------
   const keyTypesQuery = useQuery({
     queryKey: ["free-key-types"],
     queryFn: async () => {
@@ -638,10 +648,8 @@ export function AdminFreeKeysPage() {
     },
   });
 
-const disableAllKeyTypes = useMutation({
+  const disableAllKeyTypes = useMutation({
     mutationFn: async () => {
-      // Some PostgREST/Supabase setups reject UPDATE without a WHERE clause.
-      // Keep behavior (disable all) while satisfying that requirement.
       const { error } = await supabase
         .from("licenses_free_key_types")
         .update({ enabled: false })
@@ -658,7 +666,6 @@ const disableAllKeyTypes = useMutation({
     },
   });
 
-  // Create/enable a key type (hours: 1..24, days: 1..30)
   const [newKind, setNewKind] = useState<"hour" | "day">("hour");
   const [newValue, setNewValue] = useState<number>(1);
   const [newLabel, setNewLabel] = useState<string>("");
@@ -756,7 +763,7 @@ const disableAllKeyTypes = useMutation({
       toast({
         title: "Test failed",
         description: isFetch
-          ? `${msg}. Gợi ý: (1) CORS/OPTIONS bị chặn, (2) deploy sai tên function (/admin-free-test vs /free-admin-test), (3) backend URL/project mismatch. (tried URLs thường nằm trong message)`
+          ? `${msg}. Gợi ý: (1) CORS/OPTIONS bị chặn, (2) deploy sai tên function (/admin-free-test vs /free-admin-test), (3) backend URL/project mismatch.`
           : msg.includes("MISCONFIG")
             ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)`
             : msg,
@@ -765,7 +772,6 @@ const disableAllKeyTypes = useMutation({
     },
   });
 
-  // -------- Sessions / Issues --------
   const [day, setDay] = useState(() => getVietnamDateKey());
   const [status, setStatus] = useState<string>("all");
   const [ipHash, setIpHash] = useState<string>("");
@@ -1029,26 +1035,16 @@ const disableAllKeyTypes = useMutation({
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
-              Open GetKey
-            </Button>
-            <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
-              Copy GetKey URL
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setDownloadPanelOpen((v) => !v)}>
-              Upload file📥
-            </Button>
-            <input
-              id="free-download-file-input"
-              type="file"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0] ?? null;
-                void handleUploadFile(file);
-                e.currentTarget.value = '';
-              }}
-            />
-          </div>
+              <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
+                Open GetKey
+              </Button>
+              <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
+                Copy GetKey URL
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setDownloadPanelOpen((v) => !v)}>
+                Download links
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1068,70 +1064,73 @@ const disableAllKeyTypes = useMutation({
           <Collapsible open={downloadPanelOpen} onOpenChange={setDownloadPanelOpen}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
-                <span className="flex items-center gap-2"><Upload className="h-4 w-4" /> Tệp tải xuống cho trang free</span>
+                <span className="flex items-center gap-2"><Download className="h-4 w-4" /> Download links</span>
                 <ChevronDown className={`h-4 w-4 transition-transform ${downloadPanelOpen ? "rotate-180" : ""}`} />
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-3">
               <div className="rounded-2xl border bg-background/60 p-4 space-y-4">
-                <div className="flex items-center justify-between gap-4 rounded-2xl border p-3">
-                  <div>
-                    <div className="font-medium">Hiển thị nút tải file ở trang free</div>
-                    <div className="text-xs text-muted-foreground">Bật lên khi đã upload file xong. Nút tải sẽ nằm dưới khối thông tin key để người dùng tải trực tiếp.</div>
-                  </div>
-                  <Switch checked={downloadEnabled} onCheckedChange={setDownloadEnabled} />
+                <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+                  Không upload file vào Supabase nữa. Phần này chỉ dùng link ngoài để tránh tốn bộ nhớ. Mỗi box là một link tải riêng, có thể thêm nhiều box.
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Tên file hiển thị</div>
-                    <Input value={downloadName} onChange={(e) => setDownloadName(e.target.value)} placeholder="Ví dụ: SunnyMod-v2.apk" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Thông tin file</div>
-                    <Input value={downloadInfo} onChange={(e) => setDownloadInfo(e.target.value)} placeholder="Ví dụ: Bản mới nhất cho Android 64bit" />
-                  </div>
+
+                <div className="space-y-4">
+                  {downloadCards.map((card, index) => (
+                    <div key={card.id} className="rounded-2xl border bg-muted/20 p-4 space-y-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">Box tải {index + 1}</div>
+                          <div className="text-xs text-muted-foreground">Card tải xuống hiển thị ở trang free.</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Hiện</span>
+                          <Switch checked={card.enabled} onCheckedChange={(v) => updateDownloadCard(card.id, { enabled: Boolean(v) })} />
+                          {downloadCards.length > 1 ? (
+                            <Button type="button" variant="ghost" size="icon" onClick={() => removeDownloadCard(card.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Tên app / file</div>
+                          <Input value={card.title} onChange={(e) => updateDownloadCard(card.id, { title: e.target.value })} placeholder="Ví dụ: SunnyMod V4" />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Badge</div>
+                          <Input value={card.badge} onChange={(e) => updateDownloadCard(card.id, { badge: e.target.value })} placeholder="Ví dụ: Recommended" />
+                        </div>
+
+                        <div className="space-y-2 sm:col-span-2">
+                          <div className="text-sm font-medium">Link tải</div>
+                          <Input value={card.url} onChange={(e) => updateDownloadCard(card.id, { url: e.target.value })} placeholder="https://example.com/download" />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Nhãn nút</div>
+                          <Input value={card.button_label} onChange={(e) => updateDownloadCard(card.id, { button_label: e.target.value })} placeholder="Mở liên kết" />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Ảnh / icon URL</div>
+                          <Input value={card.icon_url} onChange={(e) => updateDownloadCard(card.id, { icon_url: e.target.value })} placeholder="https://example.com/icon.png" />
+                        </div>
+
+                        <div className="space-y-2 sm:col-span-2">
+                          <div className="text-sm font-medium">Mô tả</div>
+                          <Textarea value={card.description} onChange={(e) => updateDownloadCard(card.id, { description: e.target.value })} rows={3} placeholder="Mô tả ngắn gọn cho box tải này..." />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="rounded-2xl border bg-muted/20 p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">File hiện tại</div>
-                      <div className="text-xs text-muted-foreground">Upload xong là nút tải sẽ hiện ở trang free. Bạn vẫn có thể sửa tên file/thông tin rồi bấm Save settings để cập nhật.</div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" onClick={() => document.getElementById('free-download-file-input')?.click()} disabled={uploadingFile}>
-                        {uploadingFile ? 'Đang upload…' : 'Chọn file'}
-                      </Button>
-                      {downloadUrl ? (
-                        <Button type="button" variant="outline" onClick={() => window.open(downloadUrl, '_blank', 'noopener')}>
-                          <Download className="mr-2 h-4 w-4" /> Xem file
-                        </Button>
-                      ) : null}
-                      {downloadPath || downloadUrl ? (
-                        <Button type="button" variant="destructive" onClick={() => void removeDownloadFile()}>
-                          Gỡ file
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl border bg-background/80 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên file</div>
-                      <div className="mt-1 text-sm font-medium break-all">{downloadName || 'Chưa có file'}</div>
-                    </div>
-                    <div className="rounded-xl border bg-background/80 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Dung lượng</div>
-                      <div className="mt-1 text-sm font-medium">{formatFileSize(downloadSize)}</div>
-                    </div>
-                    <div className="rounded-xl border bg-background/80 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
-                      <div className="mt-1 text-sm font-medium">{downloadEnabled && downloadUrl ? 'Đang hiển thị' : downloadUrl ? 'Đã upload, chưa bật' : 'Chưa có file'}</div>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-3 text-xs text-muted-foreground break-all">
-                    <div className="font-medium text-foreground">Mô tả ngắn</div>
-                    <div className="mt-1">{downloadInfo || 'Chưa có mô tả file.'}</div>
-                  </div>
-                </div>
+
+                <Button type="button" variant="outline" className="rounded-2xl" onClick={addDownloadCard}>
+                  <Plus className="mr-2 h-4 w-4" /> Add box
+                </Button>
               </div>
             </CollapsibleContent>
           </Collapsible>
@@ -1159,46 +1158,45 @@ const disableAllKeyTypes = useMutation({
                   • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
                 </div>
                 <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
-                <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> (hoặc api-shorten) thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL. Nếu Link4M khác mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span>.</div>
+                <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL.</div>
               </div>
-            
 
-<div className="space-y-2">
-  <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
-  <Input
-    value={outboundUrlPass2}
-    onChange={(e) => setOutboundUrlPass2(e.target.value)}
-    placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..."
-    inputMode="url"
-  />
-  <div className="text-xs text-muted-foreground">
-    Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Link Pass2 cũng được giữ cố định theo bucket thời gian, không tạo mới mỗi lần Get Key. Nên dùng placeholder <span className="font-mono">{'{GATE_URL_ENC}'}</span>.
-  </div>
-</div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
+                <Input
+                  value={outboundUrlPass2}
+                  onChange={(e) => setOutboundUrlPass2(e.target.value)}
+                  placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..."
+                  inputMode="url"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Nên dùng placeholder <span className="font-mono">{"{GATE_URL_ENC}"}</span>.
+                </div>
+              </div>
 
-<div className="space-y-2">
-  <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
-  <Input
-    type="number"
-    value={rotateDays}
-    onChange={(e) => setRotateDays(Number(e.target.value))}
-    min={1}
-  />
-  <div className="text-xs text-muted-foreground">
-    Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới. (Ví dụ: 7 ngày)
-  </div>
-  <div className="flex flex-wrap gap-2">
-    <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(1)} disabled={rotateNow.isPending}>Rotate pass1 now</Button>
-    <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(2)} disabled={rotateNow.isPending}>Rotate pass2 now</Button>
-  </div>
-</div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
+                <Input
+                  type="number"
+                  value={rotateDays}
+                  onChange={(e) => setRotateDays(Number(e.target.value))}
+                  min={1}
+                />
+                <div className="text-xs text-muted-foreground">
+                  Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(1)} disabled={rotateNow.isPending}>Rotate pass1 now</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(2)} disabled={rotateNow.isPending}>Rotate pass2 now</Button>
+                </div>
+              </div>
 
-<div className="space-y-2">
-  <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
-  <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
-  <div className="text-xs text-muted-foreground">Nếu 1 thiết bị tạo quá nhiều phiên đang chờ trong 15 phút, hệ thống sẽ chặn tạo thêm.</div>
-</div>
-</div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
+                <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
+                <div className="text-xs text-muted-foreground">Nếu 1 thiết bị tạo quá nhiều phiên đang chờ trong 15 phút, hệ thống sẽ chặn tạo thêm.</div>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <div className="text-sm font-medium">Thông báo khi tắt</div>
@@ -1237,7 +1235,7 @@ const disableAllKeyTypes = useMutation({
                 disabled={!minDelayEnabled}
               />
               <div className="text-xs text-muted-foreground">
-                VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này (tính từ lúc Pass1 OK). Nếu vào /free/gate?p=2 quá sớm, phiên VIP sẽ bị hủy để chặn bypass chờ sẵn ở gate.
+                VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này.
               </div>
             </div>
 
@@ -1258,7 +1256,7 @@ const disableAllKeyTypes = useMutation({
               />
               <div className="text-xs text-muted-foreground">
                 {gateAntiBypassEnabled
-                  ? "Bộ đếm anti bypass riêng cho toàn bộ gate. Nếu người dùng mở /free/gate quá sớm so với thời gian này, phiên sẽ bị hủy ngay. Không dùng chung với Delay Pass1/Pass2 nên không bị xung đột."
+                  ? "Nếu người dùng mở /free/gate quá sớm so với thời gian này, phiên sẽ bị hủy ngay."
                   : "Đang tắt: không kiểm tra mốc anti bypass riêng ở /free/gate."}
               </div>
             </div>
@@ -1306,19 +1304,18 @@ const disableAllKeyTypes = useMutation({
                 <span className="text-xs text-muted-foreground">Bắt buộc khớp UA</span>
                 <Switch checked={gateRequireUaMatch} onCheckedChange={setGateRequireUaMatch} />
               </div>
-              <div className="text-xs text-muted-foreground">Mặc định đang bật để tương thích ngược. Có thể tắt khi mobile/NAT gây fail oan.</div>
+              <div className="text-xs text-muted-foreground">Mặc định đang bật để tương thích ngược.</div>
             </div>
 
-             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-               <div>
-                 <div className="font-medium">Yêu cầu referrer Link4M</div>
-                 <div className="text-xs text-muted-foreground">
-                   Nếu bật: gate sẽ ưu tiên kiểm tra <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>.
-                   Lưu ý: referrer có thể bị browser/shortlink chặn (policy/redirect). Hệ thống sẽ fallback cho qua nếu URL gate có token hợp lệ.
-                 </div>
-               </div>
-               <Switch checked={requireRef} onCheckedChange={setRequireRef} />
-             </div>
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div>
+                <div className="font-medium">Yêu cầu referrer Link4M</div>
+                <div className="text-xs text-muted-foreground">
+                  Nếu bật: gate sẽ ưu tiên kiểm tra document.referrer có host chứa link4m.
+                </div>
+              </div>
+              <Switch checked={requireRef} onCheckedChange={setRequireRef} />
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -1347,81 +1344,42 @@ const disableAllKeyTypes = useMutation({
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="space-y-3 rounded-md border p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium">Thông báo quan trọng</div>
-                  <div className="text-xs text-muted-foreground">Hiển thị trên /free theo dạng popup hoặc banner, không ảnh hưởng flow hiện tại.</div>
-                </div>
-                <Switch checked={noticeEnabled} onCheckedChange={setNoticeEnabled} />
+          <div className="space-y-3 rounded-md border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">Thông báo quan trọng</div>
+                <div className="text-xs text-muted-foreground">Hiển thị trên /free theo dạng popup hoặc banner, không ảnh hưởng flow hiện tại.</div>
               </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="text-sm font-medium">Tiêu đề</div>
-                  <Input value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="Thông báo quan trọng" />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="text-sm font-medium">Nội dung</div>
-                  <Textarea value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} rows={5} placeholder="Nhập nội dung nhiều dòng nếu cần..." />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Kiểu hiển thị</div>
-                  <Select value={noticeMode} onValueChange={(v) => setNoticeMode(v === "inline" ? "inline" : "modal")}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="modal">Modal popup</SelectItem>
-                      <SelectItem value="inline">Inline banner/card</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-3 rounded-md border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs text-muted-foreground">Cho phép đóng</span>
-                    <Switch checked={noticeClosable} onCheckedChange={setNoticeClosable} />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs text-muted-foreground">Chỉ hiển thị 1 lần mỗi trình duyệt</span>
-                    <Switch checked={noticeShowOnce} onCheckedChange={setNoticeShowOnce} />
-                  </div>
-                </div>
-              </div>
+              <Switch checked={noticeEnabled} onCheckedChange={setNoticeEnabled} />
             </div>
 
-            <div className="space-y-3 rounded-md border p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium">Secondary external download</div>
-                  <div className="text-xs text-muted-foreground">Card tải phụ dùng URL ngoài, tách biệt hoàn toàn với file upload chính.</div>
-                </div>
-                <Switch checked={externalDownloadEnabled} onCheckedChange={setExternalDownloadEnabled} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <div className="text-sm font-medium">Tiêu đề</div>
+                <Input value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="Thông báo quan trọng" />
               </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="text-sm font-medium">Tên app / file</div>
-                  <Input value={externalDownloadTitle} onChange={(e) => setExternalDownloadTitle(e.target.value)} placeholder="Ví dụ: Mirror Android" />
+              <div className="space-y-2 sm:col-span-2">
+                <div className="text-sm font-medium">Nội dung</div>
+                <Textarea value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} rows={5} placeholder="Nhập nội dung nhiều dòng nếu cần..." />
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Kiểu hiển thị</div>
+                <Select value={noticeMode} onValueChange={(v) => setNoticeMode(v === "inline" ? "inline" : "modal")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="modal">Modal popup</SelectItem>
+                    <SelectItem value="inline">Inline banner/card</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-muted-foreground">Cho phép đóng</span>
+                  <Switch checked={noticeClosable} onCheckedChange={setNoticeClosable} />
                 </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="text-sm font-medium">Mô tả</div>
-                  <Textarea value={externalDownloadDescription} onChange={(e) => setExternalDownloadDescription(e.target.value)} rows={4} placeholder="Thông tin ngắn gọn về link ngoài..." />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="text-sm font-medium">External URL</div>
-                  <Input value={externalDownloadUrl} onChange={(e) => setExternalDownloadUrl(e.target.value)} placeholder="https://example.com/download" />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Nhãn nút</div>
-                  <Input value={externalDownloadButtonLabel} onChange={(e) => setExternalDownloadButtonLabel(e.target.value)} placeholder="Mở liên kết" />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Badge</div>
-                  <Input value={externalDownloadBadge} onChange={(e) => setExternalDownloadBadge(e.target.value)} placeholder="External" />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="text-sm font-medium">Icon / image URL</div>
-                  <Input value={externalDownloadIconUrl} onChange={(e) => setExternalDownloadIconUrl(e.target.value)} placeholder="https://example.com/icon.png" />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-muted-foreground">Chỉ hiển thị 1 lần mỗi trình duyệt</span>
+                  <Switch checked={noticeShowOnce} onCheckedChange={setNoticeShowOnce} />
                 </div>
               </div>
             </div>
@@ -1556,61 +1514,61 @@ const disableAllKeyTypes = useMutation({
 
           <div className="overflow-x-auto">
             <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>On</TableHead>
-                <TableHead>Code</TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Seconds</TableHead>
-                <TableHead>VIP 2-pass</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(keyTypesQuery.data ?? []).map((k) => (
-                <TableRow key={k.code}>
-                  <TableCell className="w-16">
-                    <Switch
-                      checked={k.enabled}
-                      onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono">{k.code}</TableCell>
-                  <TableCell>{k.label}</TableCell>
-                  <TableCell>{k.kind}</TableCell>
-                  <TableCell>{k.value}</TableCell>
-                  <TableCell className="font-mono">{k.duration_seconds}</TableCell>
-                  <TableCell className="w-24">
-                    <Switch
-                      checked={Boolean((k as any).requires_double_gate ?? false)}
-                      onCheckedChange={(v) => toggleVipKeyType.mutate({ code: k.code, requires_double_gate: Boolean(v) })}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Delete"
-                      onClick={() => {
-                        const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
-                        if (ok) deleteKeyType.mutate(k.code);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!keyTypesQuery.data?.length ? (
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
-                    No rows
-                  </TableCell>
+                  <TableHead>On</TableHead>
+                  <TableHead>Code</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Value</TableHead>
+                  <TableHead>Seconds</TableHead>
+                  <TableHead>VIP 2-pass</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
+              </TableHeader>
+              <TableBody>
+                {(keyTypesQuery.data ?? []).map((k) => (
+                  <TableRow key={k.code}>
+                    <TableCell className="w-16">
+                      <Switch
+                        checked={k.enabled}
+                        onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono">{k.code}</TableCell>
+                    <TableCell>{k.label}</TableCell>
+                    <TableCell>{k.kind}</TableCell>
+                    <TableCell>{k.value}</TableCell>
+                    <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                    <TableCell className="w-24">
+                      <Switch
+                        checked={Boolean((k as any).requires_double_gate ?? false)}
+                        onCheckedChange={(v) => toggleVipKeyType.mutate({ code: k.code, requires_double_gate: Boolean(v) })}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Delete"
+                        onClick={() => {
+                          const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
+                          if (ok) deleteKeyType.mutate(k.code);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!keyTypesQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>
@@ -1686,7 +1644,7 @@ const disableAllKeyTypes = useMutation({
         <CardHeader>
           <CardTitle>🧪 Admin Test GetKey</CardTitle>
           <CardDescription>
-            Chạy test server-side để kiểm tra flow phát key. Dùng thêm “Ping backend” để xem backend có phản hồi / CORS có ổn.
+            Chạy test server-side để kiểm tra flow phát key. Dùng thêm “Ping backend” để xem backend có phản hồi.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1769,15 +1727,9 @@ const disableAllKeyTypes = useMutation({
               <div>Message: {adminTestResult.message || "-"}</div>
               <div>Key: {adminTestResult.key || "-"}</div>
               <div>Expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
-              <div>
-                IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span>
-              </div>
-              <div>
-                FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span>
-              </div>
-              <div>
-                Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span>
-              </div>
+              <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>
+              <div>FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span></div>
+              <div>Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span></div>
             </div>
           ) : null}
         </CardContent>
@@ -1823,74 +1775,74 @@ const disableAllKeyTypes = useMutation({
           </div>
           <div className="hidden overflow-x-auto md:block">
             <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Created</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Reveal</TableHead>
-                <TableHead>IP hash</TableHead>
-                <TableHead>FP hash</TableHead>
-                <TableHead>Error</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(sessionsQuery.data ?? []).map((s) => (
-                <TableRow key={s.session_id}>
-                  <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
-                  <TableCell><Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
-                  <TableCell className="font-mono">
-                    {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
-                  </TableCell>
-                  <TableCell>{s.reveal_count}</TableCell>
-                  <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
-                  <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
-                  <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? "";
-                          if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason });
-                        }}
-                      >
-                        Block IP
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? "";
-                          if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason });
-                        }}
-                      >
-                        Block FP
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => {
-                          const ok = window.confirm("Delete session này?");
-                          if (ok) deleteSession.mutate(s.session_id);
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!sessionsQuery.data?.length ? (
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                    No rows
-                  </TableCell>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Reveal</TableHead>
+                  <TableHead>IP hash</TableHead>
+                  <TableHead>FP hash</TableHead>
+                  <TableHead>Error</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
+              </TableHeader>
+              <TableBody>
+                {(sessionsQuery.data ?? []).map((s) => (
+                  <TableRow key={s.session_id}>
+                    <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
+                    <TableCell><Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
+                    <TableCell className="font-mono">
+                      {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
+                    </TableCell>
+                    <TableCell>{s.reveal_count}</TableCell>
+                    <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
+                    <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
+                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? "";
+                            if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason });
+                          }}
+                        >
+                          Block IP
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? "";
+                            if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason });
+                          }}
+                        >
+                          Block FP
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            const ok = window.confirm("Delete session này?");
+                            if (ok) deleteSession.mutate(s.session_id);
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!sessionsQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>
@@ -1985,65 +1937,65 @@ const disableAllKeyTypes = useMutation({
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Created</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Session</TableHead>
-                <TableHead>IP hash</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(issuesQuery.data ?? []).map((i) => (
-                <TableRow key={i.issue_id}>
-                  <TableCell className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
-                  <TableCell className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
-                  <TableCell className="font-mono">{i.key_mask}</TableCell>
-                  <TableCell className="font-mono">{shortText(i.session_id, 12)}</TableCell>
-                  <TableCell className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
-                  <TableCell className="text-right whitespace-nowrap">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
-                        Open
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={revokeLicense.isPending}
-                        onClick={() => {
-                          const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
-                          if (ok) revokeLicense.mutate({ issueId: i.issue_id, licenseId: i.license_id });
-                        }}
-                      >
-                        Revoke
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={deleteIssuedKey.isPending}
-                        onClick={() => {
-                          const ok = window.confirm("Delete issued key record này? Key sẽ bị revoke trước khi xóa log.");
-                          if (!ok) return;
-                          const reason = window.prompt("Reason (optional):", "admin delete") ?? "";
-                          deleteIssuedKey.mutate({ issueId: i.issue_id, licenseId: i.license_id, reason });
-                        }}
-                      >
-                        Delete key
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!issuesQuery.data?.length ? (
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
-                    No rows
-                  </TableCell>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Key</TableHead>
+                  <TableHead>Session</TableHead>
+                  <TableHead>IP hash</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
+              </TableHeader>
+              <TableBody>
+                {(issuesQuery.data ?? []).map((i) => (
+                  <TableRow key={i.issue_id}>
+                    <TableCell className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
+                    <TableCell className="font-mono">{i.key_mask}</TableCell>
+                    <TableCell className="font-mono">{shortText(i.session_id, 12)}</TableCell>
+                    <TableCell className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      <div className="flex justify-end gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
+                          Open
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={revokeLicense.isPending}
+                          onClick={() => {
+                            const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
+                            if (ok) revokeLicense.mutate({ issueId: i.issue_id, licenseId: i.license_id });
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={deleteIssuedKey.isPending}
+                          onClick={() => {
+                            const ok = window.confirm("Delete issued key record này? Key sẽ bị revoke trước khi xóa log.");
+                            if (!ok) return;
+                            const reason = window.prompt("Reason (optional):", "admin delete") ?? "";
+                            deleteIssuedKey.mutate({ issueId: i.issue_id, licenseId: i.license_id, reason });
+                          }}
+                        >
+                          Delete key
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!issuesQuery.data?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      No rows
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
             </Table>
           </div>
         </CardContent>
