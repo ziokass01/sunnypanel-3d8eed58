@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, Filter, Trash2, Download, Plus } from "lucide-react";
+import { ChevronDown, Filter, Trash2, Download, Plus, Image as ImageIcon } from "lucide-react";
 import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -419,6 +419,7 @@ export function AdminFreeKeysPage() {
   const [publicLinksText, setPublicLinksText] = useState("");
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [downloadCards, setDownloadCards] = useState<DownloadCardEditorItem[]>([createEmptyDownloadCard()]);
+  const [uploadingIconId, setUploadingIconId] = useState<string | null>(null);
   const [noticeEnabled, setNoticeEnabled] = useState(false);
   const [noticeTitle, setNoticeTitle] = useState("");
   const [noticeContent, setNoticeContent] = useState("");
@@ -473,6 +474,33 @@ export function AdminFreeKeysPage() {
       const next = prev.filter((card) => card.id !== id);
       return next.length ? next : [createEmptyDownloadCard()];
     });
+  };
+
+
+  const uploadCardIcon = async (id: string, file?: File | null) => {
+    if (!file) return;
+    setUploadingIconId(id);
+    try {
+      const ext = file.name.includes(".") ? file.name.split(".").pop() : "png";
+      const safeBase = file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/-+/g, "-").slice(0, 40) || "icon";
+      const path = `free-icons/${Date.now()}-${safeBase}.${ext || "png"}`;
+      const storage = supabase.storage.from("free-downloads") as any;
+      const { error: uploadErr } = await storage.upload(path, file, {
+        upsert: true,
+        cacheControl: "3600",
+        contentType: file.type || "image/png",
+      });
+      if (uploadErr) throw uploadErr;
+      const { data } = storage.getPublicUrl(path);
+      const publicUrl = String(data?.publicUrl || "").trim();
+      if (!publicUrl) throw new Error("ICON_URL_EMPTY");
+      updateDownloadCard(id, { icon_url: publicUrl });
+      toast({ title: "Đã upload icon", description: "Ảnh icon đã được gán vào box." });
+    } catch (e: any) {
+      toast({ title: "Upload icon failed", description: e?.message ?? "Không thể upload icon.", variant: "destructive" });
+    } finally {
+      setUploadingIconId(null);
+    }
   };
 
   const saveSettings = useMutation({
@@ -1109,6 +1137,29 @@ export function AdminFreeKeysPage() {
                         <div className="space-y-2">
                           <div className="text-sm font-medium">Ảnh / icon URL</div>
                           <Input value={card.icon_url} onChange={(e) => updateDownloadCard(card.id, { icon_url: e.target.value })} placeholder="https://example.com/icon.png" />
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => document.getElementById(`icon-upload-${card.id}`)?.click()}
+                              disabled={uploadingIconId === card.id}
+                            >
+                              <ImageIcon className="mr-2 h-4 w-4" />
+                              {uploadingIconId === card.id ? "Đang upload..." : "Upload icon"}
+                            </Button>
+                            <input
+                              id={`icon-upload-${card.id}`}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] ?? null;
+                                void uploadCardIcon(card.id, file);
+                                e.currentTarget.value = "";
+                              }}
+                            />
+                          </div>
                         </div>
 
                         <div className="space-y-2 sm:col-span-2">
