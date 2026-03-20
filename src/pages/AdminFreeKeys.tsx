@@ -51,6 +51,19 @@ type SettingsRow = {
   free_download_path?: string | null;
   free_download_url?: string | null;
   free_download_size?: number | null;
+  free_notice_enabled?: boolean;
+  free_notice_title?: string | null;
+  free_notice_content?: string | null;
+  free_notice_mode?: "modal" | "inline" | null;
+  free_notice_closable?: boolean;
+  free_notice_show_once?: boolean;
+  free_external_download_enabled?: boolean;
+  free_external_download_title?: string | null;
+  free_external_download_description?: string | null;
+  free_external_download_url?: string | null;
+  free_external_download_button_label?: string | null;
+  free_external_download_badge?: string | null;
+  free_external_download_icon_url?: string | null;
   updated_at: string;
   updated_by: string | null;
 };
@@ -247,11 +260,30 @@ const NEW_FREE_SETTINGS_COLUMNS = [
   "free_daily_limit_per_ip",
   "free_gate_require_ip_match",
   "free_gate_require_ua_match",
+  "free_notice_enabled",
+  "free_notice_title",
+  "free_notice_content",
+  "free_notice_mode",
+  "free_notice_closable",
+  "free_notice_show_once",
+  "free_external_download_enabled",
+  "free_external_download_title",
+  "free_external_download_description",
+  "free_external_download_url",
+  "free_external_download_button_label",
+  "free_external_download_badge",
+  "free_external_download_icon_url",
 ] as const;
 
 function isMissingFreeSettingsColumnError(error: any) {
   const msg = String(error?.message || error?.details || error?.hint || "");
   return NEW_FREE_SETTINGS_COLUMNS.some((col) => msg.includes(col));
+}
+
+function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
+  const legacyPatch = { ...patch } as Record<string, any>;
+  for (const col of NEW_FREE_SETTINGS_COLUMNS) delete legacyPatch[col];
+  return legacyPatch;
 }
 
 export function AdminFreeKeysPage() {
@@ -320,6 +352,19 @@ export function AdminFreeKeysPage() {
   const [downloadSize, setDownloadSize] = useState<number>(0);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [noticeEnabled, setNoticeEnabled] = useState(false);
+  const [noticeTitle, setNoticeTitle] = useState("");
+  const [noticeContent, setNoticeContent] = useState("");
+  const [noticeMode, setNoticeMode] = useState<"modal" | "inline">("modal");
+  const [noticeClosable, setNoticeClosable] = useState(true);
+  const [noticeShowOnce, setNoticeShowOnce] = useState(false);
+  const [externalDownloadEnabled, setExternalDownloadEnabled] = useState(false);
+  const [externalDownloadTitle, setExternalDownloadTitle] = useState("");
+  const [externalDownloadDescription, setExternalDownloadDescription] = useState("");
+  const [externalDownloadUrl, setExternalDownloadUrl] = useState("");
+  const [externalDownloadButtonLabel, setExternalDownloadButtonLabel] = useState("");
+  const [externalDownloadBadge, setExternalDownloadBadge] = useState("");
+  const [externalDownloadIconUrl, setExternalDownloadIconUrl] = useState("");
 
   useEffect(() => {
     const s = settingsQuery.data;
@@ -351,6 +396,19 @@ export function AdminFreeKeysPage() {
     setDownloadPath(((s as any).free_download_path ?? null) as any);
     setDownloadUrl(((s as any).free_download_url ?? null) as any);
     setDownloadSize(Number((s as any).free_download_size ?? 0));
+    setNoticeEnabled(Boolean((s as any).free_notice_enabled ?? false));
+    setNoticeTitle(String((s as any).free_notice_title ?? ""));
+    setNoticeContent(String((s as any).free_notice_content ?? ""));
+    setNoticeMode(String((s as any).free_notice_mode ?? "").trim().toLowerCase() === "inline" ? "inline" : "modal");
+    setNoticeClosable(Boolean((s as any).free_notice_closable ?? true));
+    setNoticeShowOnce(Boolean((s as any).free_notice_show_once ?? false));
+    setExternalDownloadEnabled(Boolean((s as any).free_external_download_enabled ?? false));
+    setExternalDownloadTitle(String((s as any).free_external_download_title ?? ""));
+    setExternalDownloadDescription(String((s as any).free_external_download_description ?? ""));
+    setExternalDownloadUrl(String((s as any).free_external_download_url ?? ""));
+    setExternalDownloadButtonLabel(String((s as any).free_external_download_button_label ?? ""));
+    setExternalDownloadBadge(String((s as any).free_external_download_badge ?? ""));
+    setExternalDownloadIconUrl(String((s as any).free_external_download_icon_url ?? ""));
   }, [settingsQuery.data]);
 
   const formatFileSize = (bytes?: number | null) => {
@@ -389,8 +447,8 @@ export function AdminFreeKeysPage() {
         free_download_size: file.size || 0,
       };
       const query: any = supabase.from('licenses_free_settings');
-      const { error: upsertErr } = await query.upsert({ id: 1, ...patch }, { onConflict: 'id' });
-      if (upsertErr) throw upsertErr;
+      const attempt = await query.upsert({ id: 1, ...patch }, { onConflict: 'id' });
+      if (attempt.error) throw attempt.error;
       if (prevPath && prevPath !== path) {
         try { await storage.remove([prevPath]); } catch { /* best-effort cleanup */ }
       }
@@ -410,8 +468,8 @@ export function AdminFreeKeysPage() {
         try { await (supabase.storage.from('free-downloads') as any).remove([prevPath]); } catch { /* best-effort cleanup */ }
       }
       const query: any = supabase.from('licenses_free_settings');
-      const { error } = await query.upsert({ id: 1, free_download_enabled: false, free_download_name: null, free_download_info: null, free_download_path: null, free_download_url: null, free_download_size: null }, { onConflict: 'id' });
-      if (error) throw error;
+      const attempt = await query.upsert({ id: 1, free_download_enabled: false, free_download_name: null, free_download_info: null, free_download_path: null, free_download_url: null, free_download_size: null }, { onConflict: 'id' });
+      if (attempt.error) throw attempt.error;
       setDownloadEnabled(false);
       setDownloadName('');
       setDownloadInfo('');
@@ -455,6 +513,19 @@ export function AdminFreeKeysPage() {
         free_download_path: downloadPath || null,
         free_download_url: downloadUrl || null,
         free_download_size: Math.max(0, Math.floor(Number(downloadSize) || 0)) || null,
+        free_notice_enabled: Boolean(noticeEnabled && noticeContent.trim()),
+        free_notice_title: noticeTitle.trim() || null,
+        free_notice_content: noticeContent.trim() || null,
+        free_notice_mode: noticeMode === "inline" ? "inline" : "modal",
+        free_notice_closable: Boolean(noticeClosable),
+        free_notice_show_once: Boolean(noticeShowOnce),
+        free_external_download_enabled: Boolean(externalDownloadEnabled && /^https?:\/\//i.test(externalDownloadUrl.trim())),
+        free_external_download_title: externalDownloadTitle.trim() || null,
+        free_external_download_description: externalDownloadDescription.trim() || null,
+        free_external_download_url: externalDownloadUrl.trim() || null,
+        free_external_download_button_label: externalDownloadButtonLabel.trim() || null,
+        free_external_download_badge: externalDownloadBadge.trim() || null,
+        free_external_download_icon_url: externalDownloadIconUrl.trim() || null,
       };
 
       const query: any = supabase.from("licenses_free_settings");
@@ -466,10 +537,7 @@ export function AdminFreeKeysPage() {
       if (!attempt.error) return attempt.data;
       if (!isMissingFreeSettingsColumnError(attempt.error)) throw attempt.error;
 
-      const legacyPatch = { ...patch } as any;
-      delete legacyPatch.free_daily_limit_per_ip;
-      delete legacyPatch.free_gate_require_ip_match;
-      delete legacyPatch.free_gate_require_ua_match;
+      const legacyPatch = omitNewFreeSettingsColumns(patch);
 
       const legacyAttempt = await supabase
         .from("licenses_free_settings")
@@ -1275,6 +1343,86 @@ const disableAllKeyTypes = useMutation({
               />
               <div className="text-xs text-muted-foreground">
                 Format: <span className="font-mono">label|url|icon</span> (icon optional: zalo/youtube/telegram).
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">Thông báo quan trọng</div>
+                  <div className="text-xs text-muted-foreground">Hiển thị trên /free theo dạng popup hoặc banner, không ảnh hưởng flow hiện tại.</div>
+                </div>
+                <Switch checked={noticeEnabled} onCheckedChange={setNoticeEnabled} />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="text-sm font-medium">Tiêu đề</div>
+                  <Input value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="Thông báo quan trọng" />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="text-sm font-medium">Nội dung</div>
+                  <Textarea value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} rows={5} placeholder="Nhập nội dung nhiều dòng nếu cần..." />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Kiểu hiển thị</div>
+                  <Select value={noticeMode} onValueChange={(v) => setNoticeMode(v === "inline" ? "inline" : "modal")}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="modal">Modal popup</SelectItem>
+                      <SelectItem value="inline">Inline banner/card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">Cho phép đóng</span>
+                    <Switch checked={noticeClosable} onCheckedChange={setNoticeClosable} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">Chỉ hiển thị 1 lần mỗi trình duyệt</span>
+                    <Switch checked={noticeShowOnce} onCheckedChange={setNoticeShowOnce} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">Secondary external download</div>
+                  <div className="text-xs text-muted-foreground">Card tải phụ dùng URL ngoài, tách biệt hoàn toàn với file upload chính.</div>
+                </div>
+                <Switch checked={externalDownloadEnabled} onCheckedChange={setExternalDownloadEnabled} />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="text-sm font-medium">Tên app / file</div>
+                  <Input value={externalDownloadTitle} onChange={(e) => setExternalDownloadTitle(e.target.value)} placeholder="Ví dụ: Mirror Android" />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="text-sm font-medium">Mô tả</div>
+                  <Textarea value={externalDownloadDescription} onChange={(e) => setExternalDownloadDescription(e.target.value)} rows={4} placeholder="Thông tin ngắn gọn về link ngoài..." />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="text-sm font-medium">External URL</div>
+                  <Input value={externalDownloadUrl} onChange={(e) => setExternalDownloadUrl(e.target.value)} placeholder="https://example.com/download" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Nhãn nút</div>
+                  <Input value={externalDownloadButtonLabel} onChange={(e) => setExternalDownloadButtonLabel(e.target.value)} placeholder="Mở liên kết" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Badge</div>
+                  <Input value={externalDownloadBadge} onChange={(e) => setExternalDownloadBadge(e.target.value)} placeholder="External" />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="text-sm font-medium">Icon / image URL</div>
+                  <Input value={externalDownloadIconUrl} onChange={(e) => setExternalDownloadIconUrl(e.target.value)} placeholder="https://example.com/icon.png" />
+                </div>
               </div>
             </div>
           </div>

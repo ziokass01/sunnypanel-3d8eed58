@@ -15,6 +15,27 @@ export type PublicLink = {
   icon?: string | null;
 };
 
+export type FreeNoticeMode = "modal" | "inline";
+
+export type FreeNoticeConfig = {
+  enabled: boolean;
+  title: string | null;
+  content: string | null;
+  mode: FreeNoticeMode;
+  closable: boolean;
+  showOnce: boolean;
+};
+
+export type FreeExternalDownload = {
+  enabled: boolean;
+  title: string | null;
+  description: string | null;
+  url: string | null;
+  button_label: string | null;
+  badge: string | null;
+  icon_url: string | null;
+};
+
 export type FreeConfig = {
   public_base_url: string | null;
   destination_gate_url: string;
@@ -50,6 +71,8 @@ export type FreeConfig = {
   free_download_info?: string | null;
   free_download_url?: string | null;
   free_download_size?: number | null;
+  free_notice?: FreeNoticeConfig;
+  free_external_download?: FreeExternalDownload;
 
   // Available options (only enabled key types are returned)
   key_types: FreeKeyType[];

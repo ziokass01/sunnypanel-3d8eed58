@@ -30,6 +30,16 @@ async function sha256Hex(input: string) {
   return toHex(digest);
 }
 
+
+function sanitizeNoticeMode(value: unknown): "modal" | "inline" {
+  return String(value ?? "").trim().toLowerCase() === "inline" ? "inline" : "modal";
+}
+
+function sanitizeExternalUrl(value: unknown): string | null {
+  const url = String(value ?? "").trim();
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
 function getVietnamDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -139,6 +149,19 @@ Deno.serve(async (req) => {
   const free_download_info = String((settings as any)?.free_download_info ?? "").trim() || null;
   const free_download_url = String((settings as any)?.free_download_url ?? "").trim() || null;
   const free_download_size = Math.max(0, Number((settings as any)?.free_download_size ?? 0)) || null;
+  const free_notice_title = String((settings as any)?.free_notice_title ?? "").trim() || null;
+  const free_notice_content = String((settings as any)?.free_notice_content ?? "").trim() || null;
+  const free_notice_enabled = Boolean((settings as any)?.free_notice_enabled ?? false) && Boolean(free_notice_content);
+  const free_notice_mode = sanitizeNoticeMode((settings as any)?.free_notice_mode);
+  const free_notice_closable = Boolean((settings as any)?.free_notice_closable ?? true);
+  const free_notice_show_once = Boolean((settings as any)?.free_notice_show_once ?? false);
+  const free_external_download_url = sanitizeExternalUrl((settings as any)?.free_external_download_url);
+  const free_external_download_enabled = Boolean((settings as any)?.free_external_download_enabled ?? false) && Boolean(free_external_download_url);
+  const free_external_download_title = String((settings as any)?.free_external_download_title ?? "").trim() || null;
+  const free_external_download_description = String((settings as any)?.free_external_download_description ?? "").trim() || null;
+  const free_external_download_button_label = String((settings as any)?.free_external_download_button_label ?? "").trim() || null;
+  const free_external_download_badge = String((settings as any)?.free_external_download_badge ?? "").trim() || null;
+  const free_external_download_icon_url = sanitizeExternalUrl((settings as any)?.free_external_download_icon_url);
 
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
@@ -246,6 +269,23 @@ Deno.serve(async (req) => {
     free_download_info,
     free_download_url,
     free_download_size,
+    free_notice: {
+      enabled: free_notice_enabled,
+      title: free_notice_title,
+      content: free_notice_content,
+      mode: free_notice_mode,
+      closable: free_notice_closable,
+      showOnce: free_notice_show_once,
+    },
+    free_external_download: {
+      enabled: free_external_download_enabled,
+      title: free_external_download_title,
+      description: free_external_download_description,
+      url: free_external_download_url,
+      button_label: free_external_download_button_label,
+      badge: free_external_download_badge,
+      icon_url: free_external_download_icon_url,
+    },
 
     key_types: (keyTypes ?? []).map((k) => ({
       code: k.code,
