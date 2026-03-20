@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
-import { fetchFreeConfig } from "@/features/free/free-config";
+import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
+import { FreeNotice } from "@/features/free/FreeNotice";
+import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
@@ -272,6 +274,7 @@ export function FreeClaimPage() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
   const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
+  const [cfg, setCfg] = useState<FreeConfig | null>(null);
 
   async function resolveByOutToken(outTok: string, debug: boolean): Promise<string | null> {
     const tok = String(outTok || "").trim();
@@ -379,6 +382,7 @@ export function FreeClaimPage() {
       try {
         const fp = getOrCreateFingerprint();
         const cfg = await fetchFreeConfig({ fingerprint: fp });
+        setCfg(cfg);
         const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
         setTurnstileEnabled(enabled);
         setTurnstileSiteKey(cfg.turnstile_site_key ?? null);
@@ -386,6 +390,7 @@ export function FreeClaimPage() {
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
         // If config cannot be fetched, fail open (do not block claim UI).
+        setCfg(null);
         setTurnstileEnabled(false);
         setTurnstileSiteKey(null);
         setTurnstileToken("");
@@ -562,6 +567,8 @@ export function FreeClaimPage() {
             <FreeFlowSteps current={4} />
           </CardHeader>
           <CardContent className="space-y-4 p-5">
+            <FreeNotice notice={cfg?.free_notice} />
+
             <div className="rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 text-sm text-muted-foreground shadow-sm">
               <div className="font-semibold text-foreground">Lưu ý</div>
               <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Khi nhận thành công, bấm copy để lưu key ngay.</div>
@@ -617,6 +624,8 @@ export function FreeClaimPage() {
                 ) : null}
               </div>
             ) : null}
+
+            <FreeDownloadCards cfg={cfg} />
 
             {!revealed ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
