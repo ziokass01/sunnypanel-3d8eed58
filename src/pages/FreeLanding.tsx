@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
@@ -76,6 +77,7 @@ export function FreeLandingPage() {
   const [loading, setLoading] = useState(false);
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
+  const [showClosedDialog, setShowClosedDialog] = useState(false);
 
   const isPendingSessionError = useMemo(() => {
     const message = String(err ?? "").toLowerCase();
@@ -153,7 +155,7 @@ export function FreeLandingPage() {
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
   // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
-  const canGet = hasTypes && !isClosed && !loading && !missingText;
+  const canGet = hasTypes && !loading && !missingText;
 
   return (
     <>
@@ -209,13 +211,6 @@ export function FreeLandingPage() {
               </div>
             ) : null}
 
-            {cfg && isClosed ? (
-              <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Tạm đóng</div>
-                <div className="text-muted-foreground">{cfg.free_disabled_message}</div>
-              </div>
-            ) : null}
-
             <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
             <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} />
@@ -225,7 +220,7 @@ export function FreeLandingPage() {
                 <div className="text-sm font-semibold">Chọn loại key</div>
                 <Badge variant="outline" className="rounded-full">Bước 1</Badge>
               </div>
-              <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || isClosed || loading}>
+              <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || loading}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"} />
                 </SelectTrigger>
@@ -244,6 +239,11 @@ export function FreeLandingPage() {
               size="lg"
               disabled={!canGet}
               onClick={async () => {
+                if (isClosed) {
+                  setShowClosedDialog(true);
+                  return;
+                }
+
                 if (!selected) return;
 
                 // Start a new flow atomically: clear old bundle first (avoid mixing tokens across sessions)
@@ -431,6 +431,57 @@ export function FreeLandingPage() {
         </Card>
         </main>
       </div>
+
+      <Dialog open={showClosedDialog} onOpenChange={setShowClosedDialog}>
+        <DialogContent
+          hideCloseButton
+          className="w-[calc(100vw-2.5rem)] max-w-[24rem] overflow-hidden rounded-[28px] border border-primary/20 bg-[#101010]/95 p-0 text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:max-w-md"
+        >
+          <div className="bg-gradient-to-r from-primary/18 via-primary/8 to-transparent px-5 py-4">
+            <DialogHeader className="space-y-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-primary/80">Thông báo</div>
+                    <DialogTitle className="mt-1 text-left text-base font-semibold sm:text-lg">
+                      Tạm đóng Get Key
+                    </DialogTitle>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowClosedDialog(false)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-primary/20 bg-background/70 text-muted-foreground transition hover:text-foreground"
+                  aria-label="Đóng thông báo"
+                >
+                  <span className="text-lg leading-none">×</span>
+                </button>
+              </div>
+            </DialogHeader>
+          </div>
+
+          <div className="px-5 pb-5 pt-4">
+            <div className="rounded-[22px] border border-primary/15 bg-primary/5 px-4 py-4 text-sm leading-6 text-muted-foreground">
+              {String(cfg?.free_disabled_message ?? "Trang Get Key đang tạm đóng.")
+                .split(/\n+/)
+                .filter(Boolean)
+                .map((line, index) => (
+                  <p key={`${index}-${line.slice(0, 24)}`}>{line}</p>
+                ))}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <Button type="button" variant="secondary" className="rounded-2xl" onClick={() => setShowClosedDialog(false)}>
+                Đã hiểu
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <ZaloGetKeyBubble />
     </>
   );
