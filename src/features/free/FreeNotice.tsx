@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FreeNoticeConfig } from "./free-config";
 
-const SESSION_STORAGE_KEY = "freeImportantNoticeSessionState";
 const HIDE_UNTIL_STORAGE_KEY = "freeImportantNoticeHideUntil";
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -66,10 +65,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
       return;
     }
 
-    const sessionStore = typeof window === "undefined" ? undefined : window.sessionStorage;
     const localStore = typeof window === "undefined" ? undefined : window.localStorage;
-
-    const sessionMap = readStorageMap<boolean>(sessionStore, SESSION_STORAGE_KEY);
     const untilMap = readStorageMap<number>(localStore, HIDE_UNTIL_STORAGE_KEY);
 
     const now = Date.now();
@@ -80,16 +76,12 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
       writeStorageMap(localStore, HIDE_UNTIL_STORAGE_KEY, untilMap);
     }
 
-    setDismissed(Boolean(sessionMap[noticeKey]) || hideUntil > now);
+    setDismissed(hideUntil > now);
   }, [normalized, noticeKey]);
 
   if (!normalized || dismissed) return null;
 
-  const dismissForSession = () => {
-    const sessionStore = typeof window === "undefined" ? undefined : window.sessionStorage;
-    const sessionMap = readStorageMap<boolean>(sessionStore, SESSION_STORAGE_KEY);
-    sessionMap[noticeKey] = true;
-    writeStorageMap(sessionStore, SESSION_STORAGE_KEY, sessionMap);
+  const dismissForCurrentView = () => {
     setDismissed(true);
   };
 
@@ -106,7 +98,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
       <Dialog
         open
         onOpenChange={(open) => {
-          if (!open && normalized.closable) dismissForSession();
+          if (!open && normalized.closable) dismissForCurrentView();
         }}
       >
         <DialogContent
@@ -137,7 +129,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
                 {normalized.closable ? (
                   <button
                     type="button"
-                    onClick={dismissForSession}
+                    onClick={dismissForCurrentView}
                     className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-background/70 text-muted-foreground transition hover:text-foreground"
                     aria-label="Đóng thông báo"
                   >
@@ -159,7 +151,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
                   type="button"
                   variant="outline"
                   className="rounded-2xl border-primary/20"
-                  onClick={dismissForSession}
+                  onClick={dismissForCurrentView}
                 >
                   Đóng
                 </Button>
@@ -197,7 +189,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
             {normalized.closable ? (
               <button
                 type="button"
-                onClick={dismissForSession}
+                onClick={dismissForCurrentView}
                 className={cn(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/20 bg-background/70 text-muted-foreground transition hover:text-foreground",
                 )}
@@ -216,7 +208,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
                 type="button"
                 variant="outline"
                 className="rounded-2xl border-primary/20"
-                onClick={dismissForSession}
+                onClick={dismissForCurrentView}
               >
                 Đóng
               </Button>
