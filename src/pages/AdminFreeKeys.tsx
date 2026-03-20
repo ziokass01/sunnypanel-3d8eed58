@@ -137,7 +137,6 @@ type DownloadCardEditorItem = {
   description: string;
   url: string;
   button_label: string;
-  badge: string;
   icon_url: string;
 };
 
@@ -163,7 +162,6 @@ function createEditorDownloadCard(value?: Partial<DownloadCardEditorItem> & Reco
     description: String(value?.description ?? ""),
     url: String(value?.url ?? ""),
     button_label: String(value?.button_label ?? ""),
-    badge: String(value?.badge ?? ""),
     icon_url: String(value?.icon_url ?? ""),
   };
 }
@@ -175,7 +173,6 @@ function createEmptyDownloadCard(): DownloadCardEditorItem {
     description: "",
     url: "",
     button_label: "Mở liên kết",
-    badge: "",
     icon_url: "",
   });
 }
@@ -184,7 +181,7 @@ function buildDownloadCardsFromSettings(settings?: Partial<SettingsRow> | null):
   const rawCards = Array.isArray((settings as any)?.free_download_cards) ? (settings as any)?.free_download_cards : [];
   const cards = rawCards
     .map((card: any) => createEditorDownloadCard(card))
-    .filter((card: DownloadCardEditorItem) => card.title || card.description || card.url || card.button_label || card.badge || card.icon_url);
+    .filter((card: DownloadCardEditorItem) => card.title || card.description || card.url || card.button_label || card.icon_url);
 
   if (cards.length) return cards;
 
@@ -487,10 +484,9 @@ export function AdminFreeKeysPage() {
           description: card.description.trim(),
           url: card.url.trim(),
           button_label: card.button_label.trim(),
-          badge: card.badge.trim(),
           icon_url: card.icon_url.trim(),
         }))
-        .filter((card) => card.title || card.description || card.url || card.button_label || card.badge || card.icon_url);
+        .filter((card) => card.title || card.description || card.url || card.button_label || card.icon_url);
 
       const legacyVisibleCards = normalizedDownloadCards.filter((card) => card.enabled && /^https?:\/\//i.test(card.url));
       const legacyPrimaryCard = legacyVisibleCards[0] ?? null;
@@ -536,7 +532,7 @@ export function AdminFreeKeysPage() {
         free_external_download_description: legacySecondaryCard?.description || null,
         free_external_download_url: legacySecondaryCard?.url || null,
         free_external_download_button_label: legacySecondaryCard?.button_label || null,
-        free_external_download_badge: legacySecondaryCard?.badge || null,
+        free_external_download_badge: null,
         free_external_download_icon_url: legacySecondaryCard?.icon_url || null,
       };
 
@@ -1099,10 +1095,6 @@ export function AdminFreeKeysPage() {
                           <Input value={card.title} onChange={(e) => updateDownloadCard(card.id, { title: e.target.value })} placeholder="Ví dụ: SunnyMod V4" />
                         </div>
 
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Badge</div>
-                          <Input value={card.badge} onChange={(e) => updateDownloadCard(card.id, { badge: e.target.value })} placeholder="Ví dụ: Recommended" />
-                        </div>
 
                         <div className="space-y-2 sm:col-span-2">
                           <div className="text-sm font-medium">Link tải</div>

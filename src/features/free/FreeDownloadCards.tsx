@@ -1,5 +1,4 @@
 import { Download, FileText } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { FreeConfig, FreeDownloadCard } from "./free-config";
 
@@ -10,14 +9,12 @@ function openSafe(url: string) {
 function DownloadCard({
   title,
   description,
-  badge,
   buttonLabel,
   icon,
   onClick,
 }: {
   title: string;
   description: string;
-  badge: string;
   buttonLabel: string;
   icon?: string | null;
   onClick: () => void;
@@ -38,7 +35,6 @@ function DownloadCard({
             <div className="mt-1 text-xs leading-5 text-muted-foreground">{description}</div>
           </div>
         </div>
-        <Badge variant="outline" className="rounded-full">{badge}</Badge>
       </div>
       <Button type="button" className="h-11 w-full rounded-2xl sm:w-auto" onClick={onClick}>
         <Download className="mr-2 h-4 w-4" /> {buttonLabel}
@@ -97,7 +93,6 @@ export function FreeDownloadCards({ cfg }: { cfg: FreeConfig | null }) {
           key={`${card.url || "card"}-${index}`}
           title={card.title || `Link tải ${index + 1}`}
           description={card.description || "Liên kết ngoài do admin cấu hình cho người dùng free."}
-          badge={card.badge || `Link ${index + 1}`}
           buttonLabel={card.button_label || "Mở liên kết"}
           icon={card.icon_url || null}
           onClick={() => openSafe(card.url as string)}
