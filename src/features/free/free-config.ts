@@ -26,6 +26,16 @@ export type FreeNoticeConfig = {
   showOnce: boolean;
 };
 
+export type FreeDownloadCard = {
+  enabled: boolean;
+  title: string | null;
+  description: string | null;
+  url: string | null;
+  button_label: string | null;
+  badge: string | null;
+  icon_url: string | null;
+};
+
 export type FreeExternalDownload = {
   enabled: boolean;
   title: string | null;
@@ -40,7 +50,6 @@ export type FreeConfig = {
   public_base_url: string | null;
   destination_gate_url: string;
 
-  // Admin-controlled
   free_enabled: boolean;
   free_disabled_message: string;
   free_outbound_url: string | null;
@@ -63,7 +72,6 @@ export type FreeConfig = {
   free_quota_day_key?: string;
   free_quota_remaining_today?: number | null;
 
-  // Public content (optional)
   free_public_note: string;
   free_public_links: PublicLink[];
   free_download_enabled?: boolean;
@@ -71,13 +79,12 @@ export type FreeConfig = {
   free_download_info?: string | null;
   free_download_url?: string | null;
   free_download_size?: number | null;
+  free_download_cards?: FreeDownloadCard[];
   free_notice?: FreeNoticeConfig;
   free_external_download?: FreeExternalDownload;
 
-  // Available options (only enabled key types are returned)
   key_types: FreeKeyType[];
 
-  // Optional anti-bot
   turnstile_enabled: boolean;
   turnstile_site_key: string | null;
 

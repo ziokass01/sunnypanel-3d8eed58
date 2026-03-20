@@ -40,6 +40,23 @@ function sanitizeExternalUrl(value: unknown): string | null {
   return /^https?:\/\//i.test(url) ? url : null;
 }
 
+function sanitizeDownloadCards(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((raw: any) => {
+      const title = String(raw?.title ?? "").trim() || null;
+      const description = String(raw?.description ?? "").trim() || null;
+      const url = sanitizeExternalUrl(raw?.url);
+      const button_label = String(raw?.button_label ?? "").trim() || null;
+      const badge = String(raw?.badge ?? "").trim() || null;
+      const icon_url = sanitizeExternalUrl(raw?.icon_url);
+      const enabled = Boolean(raw?.enabled ?? true);
+      if (!(title || description || url || button_label || badge || icon_url)) return null;
+      return { enabled, title, description, url, button_label, badge, icon_url };
+    })
+    .filter(Boolean);
+}
+
 function getVietnamDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -162,6 +179,34 @@ Deno.serve(async (req) => {
   const free_external_download_button_label = String((settings as any)?.free_external_download_button_label ?? "").trim() || null;
   const free_external_download_badge = String((settings as any)?.free_external_download_badge ?? "").trim() || null;
   const free_external_download_icon_url = sanitizeExternalUrl((settings as any)?.free_external_download_icon_url);
+let free_download_cards = sanitizeDownloadCards((settings as any)?.free_download_cards);
+if (!free_download_cards.length) {
+  const legacyCards: any[] = [];
+  if (free_download_enabled && free_download_url) {
+    legacyCards.push({
+      enabled: true,
+      title: free_download_name ?? "Tệp tải xuống",
+      description: free_download_info,
+      url: free_download_url,
+      button_label: "Mở liên kết",
+      badge: "Link 1",
+      icon_url: null,
+    });
+  }
+  if (free_external_download_enabled && free_external_download_url) {
+    legacyCards.push({
+      enabled: true,
+      title: free_external_download_title ?? "Liên kết tải thêm",
+      description: free_external_download_description,
+      url: free_external_download_url,
+      button_label: free_external_download_button_label,
+      badge: free_external_download_badge,
+      icon_url: free_external_download_icon_url,
+    });
+  }
+  free_download_cards = legacyCards;
+}
+
 
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
@@ -269,6 +314,7 @@ Deno.serve(async (req) => {
     free_download_info,
     free_download_url,
     free_download_size,
+    free_download_cards,
     free_notice: {
       enabled: free_notice_enabled,
       title: free_notice_title,
