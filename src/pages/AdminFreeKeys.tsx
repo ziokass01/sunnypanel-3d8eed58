@@ -476,6 +476,21 @@ export function AdminFreeKeysPage() {
     });
   };
 
+  const moveDownloadCard = (id: string, direction: -1 | 1) => {
+    setDownloadCards((prev) => {
+      const index = prev.findIndex((card) => card.id === id);
+      if (index < 0) return prev;
+
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[target];
+      next[target] = temp;
+      return next;
+    });
+  };
 
   const uploadCardIcon = async (id: string, file?: File | null) => {
     if (!file) return;
@@ -1109,6 +1124,29 @@ export function AdminFreeKeysPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Hiện</span>
                           <Switch checked={card.enabled} onCheckedChange={(v) => updateDownloadCard(card.id, { enabled: Boolean(v) })} />
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => moveDownloadCard(card.id, -1)}
+                            disabled={index === 0}
+                            title="Đưa box lên trên"
+                          >
+                            <span className="text-sm leading-none">↑</span>
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => moveDownloadCard(card.id, 1)}
+                            disabled={index === downloadCards.length - 1}
+                            title="Đưa box xuống dưới"
+                          >
+                            <span className="text-sm leading-none">↓</span>
+                          </Button>
+
                           {downloadCards.length > 1 ? (
                             <Button type="button" variant="ghost" size="icon" onClick={() => removeDownloadCard(card.id)}>
                               <Trash2 className="h-4 w-4" />
