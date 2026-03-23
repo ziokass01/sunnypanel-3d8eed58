@@ -16,9 +16,7 @@ const BodySchema = z.object({
 });
 
 function toHex(bytes: ArrayBuffer) {
-  return Array.from(new Uint8Array(bytes))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function sha256Hex(input: string) {
@@ -41,6 +39,8 @@ async function verifyTurnstile(secret: string, token: string, remoteIp?: string)
   const data = (await res.json().catch(() => null)) as any;
   return Boolean(data?.success);
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
@@ -69,7 +69,8 @@ Deno.serve(async (req) => {
 
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return json({ ok: false, msg: "INVALID_INPUT" }, 400);
+    await sleep(500);
+    return json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
   }
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -85,12 +86,7 @@ Deno.serve(async (req) => {
   const ip = resolveClientIp(req) ?? "0.0.0.0";
   const key = parsed.data.key.trim().toUpperCase();
 
-  const settingsRes = await db
-    .from("license_reset_settings")
-    .select("*")
-    .eq("id", 1)
-    .maybeSingle();
-
+  const settingsRes = await db.from("license_reset_settings").select("*").eq("id", 1).maybeSingle();
   if (settingsRes.error) {
     return json({ ok: false, msg: settingsRes.error.message }, 500);
   }
@@ -98,9 +94,9 @@ Deno.serve(async (req) => {
   const settings = settingsRes.data ?? {
     enabled: false,
     require_turnstile: false,
-    public_check_limit: 12,
+    public_check_limit: 8,
     public_check_window_seconds: 300,
-    public_reset_limit: 5,
+    public_reset_limit: 4,
     public_reset_window_seconds: 600,
     disabled_message: "Reset Key đang tạm đóng.",
   };
@@ -109,8 +105,8 @@ Deno.serve(async (req) => {
   const keyBucket = await sha256Hex(key);
 
   const limit = action === "check"
-    ? Number(settings.public_check_limit ?? 12)
-    : Number(settings.public_reset_limit ?? 5);
+    ? Number(settings.public_check_limit ?? 8)
+    : Number(settings.public_reset_limit ?? 4);
 
   const windowSeconds = action === "check"
     ? Number(settings.public_check_window_seconds ?? 300)
@@ -128,6 +124,7 @@ Deno.serve(async (req) => {
   const allowed = rl.error ? true : Boolean(rlRow?.allowed);
 
   if (!allowed) {
+    await sleep(700);
     return json({ ok: false, msg: "RATE_LIMIT" }, 429);
   }
 
@@ -141,11 +138,13 @@ Deno.serve(async (req) => {
       String(parsed.data.turnstile_token ?? "").trim();
 
     if (!token) {
+      await sleep(600);
       return json({ ok: false, msg: "TURNSTILE_REQUIRED" }, 200);
     }
 
     const ok = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
     if (!ok) {
+      await sleep(600);
       return json({ ok: false, msg: "TURNSTILE_FAILED" }, 200);
     }
   }
@@ -159,9 +158,11 @@ Deno.serve(async (req) => {
     }
 
     if (!info) {
-      return json({ ok: false, msg: "KEY_NOT_FOUND" }, 200);
+      await sleep(650);
+      return json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
     }
 
+    await sleep(450);
     return json({
       ok: true,
       msg: "OK",
@@ -177,6 +178,18 @@ Deno.serve(async (req) => {
   }
 
   const payload = resetRes.data as Record<string, unknown> | null;
+  const msg = String(payload?.msg ?? "");
+  if (["KEY_NOT_FOUND", "KEY_BLOCKED", "KEY_EXPIRED"].includes(msg)) {
+    await sleep(650);
+    return json({
+      ok: false,
+      msg: "KEY_UNAVAILABLE",
+      reset_enabled: Boolean(settings.enabled),
+      disabled_message: settings.disabled_message ?? null,
+    }, 200);
+  }
+
+  await sleep(450);
   return json({
     reset_enabled: Boolean(settings.enabled),
     disabled_message: settings.disabled_message ?? null,

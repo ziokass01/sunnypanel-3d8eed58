@@ -26,11 +26,11 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/auth/AuthProvider";
 import { usePanelRole } from "@/hooks/use-panel-role";
 import { toast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 
 export function AdminShell() {
   const { signOut } = useAuth();
@@ -46,6 +46,9 @@ export function AdminShell() {
           ? "User"
           : "Panel";
 
+  const roleVariant =
+    role === "admin" ? "default" : role === "moderator" ? "secondary" : "outline";
+
   const showLockedToast = (section: string) => {
     toast({
       title: "Quyền truy cập bị giới hạn",
@@ -58,12 +61,9 @@ export function AdminShell() {
       <Sidebar variant="inset" collapsible="icon">
         <SidebarHeader>
           <div className="flex items-center justify-between gap-2 px-2 py-1">
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0">
               <div className="truncate text-sm font-semibold">SUNNY Key Panel</div>
-              <div className="flex items-center gap-2">
-                <Badge variant={isAdmin ? "default" : "secondary"}>{roleLabel}</Badge>
-                {!isAdmin ? <span className="truncate text-xs text-muted-foreground">Quyền hạn giới hạn</span> : null}
-              </div>
+              <div className="mt-1"><Badge variant={roleVariant as any}>{roleLabel}</Badge></div>
             </div>
             <SidebarTrigger />
           </div>
@@ -197,6 +197,20 @@ export function AdminShell() {
                   <SidebarMenuButton tooltip="Thuê Website" className="opacity-60" onClick={() => showLockedToast("Thuê Website")}>
                     <Building2 />
                     <span>Thuê Website</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Reset Settings" className="opacity-60" onClick={() => showLockedToast("Reset Settings")}>
+                    <SlidersHorizontal />
+                    <span>Reset Settings</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Reset Logs" className="opacity-60" onClick={() => showLockedToast("Reset Logs")}>
+                    <History />
+                    <span>Reset Logs</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </>

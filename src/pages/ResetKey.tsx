@@ -3,8 +3,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { TurnstileWidget } from "@/components/turnstile/TurnstileWidget";
 import { postFunction } from "@/lib/functions";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type ResetKeyPayload = {
   ok: boolean;
@@ -73,10 +82,9 @@ export function ResetKeyPage() {
   const [key, setKey] = useState("");
   const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(null);
   const [result, setResult] = useState<ResetKeyPayload | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
-  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   async function runAction(action: "check" | "reset") {
     if (!normalizedKey) return;
@@ -86,7 +94,6 @@ export function ResetKeyPage() {
       const res = await postFunction<ResetKeyPayload>("/reset-key", {
         action,
         key: normalizedKey,
-        turnstile_token: turnstileToken,
       });
       setResult(res);
     } catch (e: any) {
@@ -134,36 +141,21 @@ export function ResetKeyPage() {
 
             <Button
               disabled={!normalizedKey || loadingAction !== null}
-              onClick={() => runAction("reset")}
+              onClick={() => setConfirmOpen(true)}
             >
               {loadingAction === "reset" ? "Đang reset..." : "Reset key"}
             </Button>
           </div>
-
-          {turnstileSiteKey ? (
-            <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                Turnstile sẽ được dùng khi admin bật chế độ chống spam ở Reset Settings.
-              </div>
-              <TurnstileWidget siteKey={turnstileSiteKey} onTokenChange={setTurnstileToken} />
-            </div>
-          ) : (
-            <div className="rounded-xl border p-3 text-xs text-muted-foreground">
-              Frontend chưa có Turnstile site key. Bạn vẫn dùng được Reset Key khi admin chưa bật yêu cầu Turnstile.
-            </div>
-          )}
-
-          {result?.msg === "TURNSTILE_REQUIRED" || result?.msg === "TURNSTILE_FAILED" ? (
-            <div className="rounded-xl border p-3 text-sm text-destructive">
-              Turnstile đang được yêu cầu. Hãy hoàn thành widget xác minh rồi thử lại.
-            </div>
-          ) : null}
 
           {result?.reset_enabled === false ? (
             <div className="rounded-xl border p-3 text-sm text-muted-foreground">
               {result.disabled_message || "Tính năng reset đang tạm đóng."}
             </div>
           ) : null}
+
+          <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+            Vì lý do chống dò key và chống abuse, hệ thống sẽ giới hạn tần suất kiểm tra/reset và có thể trả thông báo chung khi key không khả dụng.
+          </div>
         </CardContent>
       </Card>
 
@@ -237,6 +229,29 @@ export function ResetKeyPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xác nhận reset key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Hệ thống sẽ xóa toàn bộ thiết bị của key này. Nếu là key free hoặc key đã reset nhiều lần, thời gian còn lại có thể bị trừ theo chính sách hiện tại.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loadingAction === "reset"}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={loadingAction === "reset" || !normalizedKey}
+              onClick={() => {
+                setConfirmOpen(false);
+                void runAction("reset");
+              }}
+            >
+              {loadingAction === "reset" ? "Đang reset..." : "Xác nhận reset"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

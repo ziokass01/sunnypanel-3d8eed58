@@ -87,62 +87,13 @@ const App = () => {
                   <Route path="/licenses/:id" element={<LicenseDetailPage />} />
                   <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
 
-                  <Route
-                    path="/free-licenses"
-                    element={
-                      <AdminRoute>
-                        <FreeLicensesPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/licenses/trash"
-                    element={
-                      <AdminRoute>
-                        <LicensesTrashPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/audit"
-                    element={
-                      <AdminRoute>
-                        <AuditLogsPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/free-keys"
-                    element={
-                      <AdminRoute>
-                        <AdminFreeKeysPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/rent"
-                    element={
-                      <AdminRoute>
-                        <RentAdminPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/settings/reset-key"
-                    element={
-                      <AdminRoute>
-                        <ResetSettingsPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/settings/reset-logs"
-                    element={
-                      <AdminRoute>
-                        <ResetLogsPage />
-                      </AdminRoute>
-                    }
-                  />
+                  <Route path="/free-licenses" element={<AdminRoute><FreeLicensesPage /></AdminRoute>} />
+                  <Route path="/licenses/trash" element={<AdminRoute><LicensesTrashPage /></AdminRoute>} />
+                  <Route path="/audit" element={<AdminRoute><AuditLogsPage /></AdminRoute>} />
+                  <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
+                  <Route path="/rent" element={<AdminRoute><RentAdminPage /></AdminRoute>} />
+                  <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
+                  <Route path="/settings/reset-logs" element={<AdminRoute><ResetLogsPage /></AdminRoute>} />
                 </Route>
               )}
 
