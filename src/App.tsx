@@ -27,6 +27,7 @@ import { RentAdminPage } from "@/pages/RentAdmin";
 import { RentPortalPage } from "@/pages/RentPortal";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
 import { ResetKeyPage } from "@/pages/ResetKey";
+import { ResetSettingsPage } from "@/pages/ResetSettings";
 
 const queryClient = new QueryClient();
 
@@ -122,6 +123,14 @@ const App = () => {
                     element={
                       <AdminRoute>
                         <RentAdminPage />
+                      </AdminRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/reset-key"
+                    element={
+                      <AdminRoute>
+                        <ResetSettingsPage />
                       </AdminRoute>
                     }
                   />

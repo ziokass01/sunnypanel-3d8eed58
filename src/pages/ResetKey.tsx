@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TurnstileWidget } from "@/components/turnstile/TurnstileWidget";
 import { postFunction } from "@/lib/functions";
 
 type ResetKeyPayload = {
@@ -72,8 +73,10 @@ export function ResetKeyPage() {
   const [key, setKey] = useState("");
   const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(null);
   const [result, setResult] = useState<ResetKeyPayload | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
+  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   async function runAction(action: "check" | "reset") {
     if (!normalizedKey) return;
@@ -83,6 +86,7 @@ export function ResetKeyPage() {
       const res = await postFunction<ResetKeyPayload>("/reset-key", {
         action,
         key: normalizedKey,
+        turnstile_token: turnstileToken,
       });
       setResult(res);
     } catch (e: any) {
@@ -135,6 +139,25 @@ export function ResetKeyPage() {
               {loadingAction === "reset" ? "Đang reset..." : "Reset key"}
             </Button>
           </div>
+
+          {turnstileSiteKey ? (
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground">
+                Turnstile sẽ được dùng khi admin bật chế độ chống spam ở Reset Settings.
+              </div>
+              <TurnstileWidget siteKey={turnstileSiteKey} onTokenChange={setTurnstileToken} />
+            </div>
+          ) : (
+            <div className="rounded-xl border p-3 text-xs text-muted-foreground">
+              Frontend chưa có Turnstile site key. Bạn vẫn dùng được Reset Key khi admin chưa bật yêu cầu Turnstile.
+            </div>
+          )}
+
+          {result?.msg === "TURNSTILE_REQUIRED" || result?.msg === "TURNSTILE_FAILED" ? (
+            <div className="rounded-xl border p-3 text-sm text-destructive">
+              Turnstile đang được yêu cầu. Hãy hoàn thành widget xác minh rồi thử lại.
+            </div>
+          ) : null}
 
           {result?.reset_enabled === false ? (
             <div className="rounded-xl border p-3 text-sm text-muted-foreground">

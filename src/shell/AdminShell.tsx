@@ -9,6 +9,7 @@ import {
   Gift,
   Ticket,
   Building2,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import {
@@ -135,6 +136,15 @@ export function AdminShell() {
                     <NavLink to="/rent" activeClassName="data-[active=true]">
                       <Building2 />
                       <span>Thuê Website</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Reset Settings">
+                    <NavLink to="/settings/reset-key" activeClassName="data-[active=true]">
+                      <SlidersHorizontal />
+                      <span>Reset Settings</span>
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
