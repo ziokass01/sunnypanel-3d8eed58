@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ShieldCheck, ShieldEllipsis } from "lucide-react";
 
@@ -33,6 +34,7 @@ function activityBadge(action: string) {
 }
 
 export function ResetSettingsPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
@@ -41,9 +43,12 @@ export function ResetSettingsPage() {
     queryFn: fetchResetSettings,
   });
 
+  const [activityFilter, setActivityFilter] = useState<"all" | "PUBLIC_RESET" | "RESET_DEVICES" | "RESET_DEVICES_PENALTY">("all");
+  const [activityQueryText, setActivityQueryText] = useState("");
+
   const activityQuery = useQuery({
     queryKey: ["reset_activity"],
-    queryFn: () => fetchResetActivities(30),
+    queryFn: () => fetchResetActivities(100),
   });
 
   const settings = settingsQuery.data;
@@ -115,6 +120,16 @@ export function ResetSettingsPage() {
 
   const hasUnsavedChanges = Boolean(form);
 
+  const filteredActivities = useMemo(() => {
+    const q = activityQueryText.trim().toLowerCase();
+    return (activityQuery.data ?? []).filter((row) => {
+      const actionOk = activityFilter === "all" ? true : row.action === activityFilter;
+      if (!actionOk) return false;
+      if (!q) return true;
+      return String(row.license_key ?? "").toLowerCase().includes(q);
+    });
+  }, [activityFilter, activityQuery.data, activityQueryText]);
+
   return (
     <section className="space-y-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -124,10 +139,11 @@ export function ResetSettingsPage() {
             Điều chỉnh luật Reset Key public, giới hạn 30 ngày cho user sale và lớp chống abuse.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Badge variant={settings?.enabled ? "default" : "secondary"}>
             {settings?.enabled ? "Public reset: ON" : "Public reset: OFF"}
           </Badge>
+          <Button variant="outline" onClick={() => navigate("/settings/reset-logs")}>Mở Reset Logs</Button>
           <Button variant="outline" disabled={!hasUnsavedChanges || saveMutation.isPending} onClick={() => setForm(null)}>
             Hoàn tác
           </Button>
@@ -286,7 +302,21 @@ export function ResetSettingsPage() {
           <CardTitle>Recent Reset Activity</CardTitle>
           <CardDescription>Xem nhanh những lần reset gần đây để soi abuse hoặc chỉnh lại penalty.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <Input value={activityQueryText} onChange={(e) => setActivityQueryText(e.target.value)} placeholder="Lọc theo key..." />
+            <select
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+              value={activityFilter}
+              onChange={(e) => setActivityFilter(e.target.value as any)}
+            >
+              <option value="all">Tất cả action</option>
+              <option value="PUBLIC_RESET">PUBLIC_RESET</option>
+              <option value="RESET_DEVICES">RESET_DEVICES</option>
+              <option value="RESET_DEVICES_PENALTY">RESET_DEVICES_PENALTY</option>
+            </select>
+            <div className="flex items-center text-sm text-muted-foreground">{filteredActivities.length} bản ghi</div>
+          </div>
           <div className="rounded-xl border">
             <Table>
               <TableHeader>
@@ -303,12 +333,12 @@ export function ResetSettingsPage() {
                   <TableRow>
                     <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Đang tải log reset...</TableCell>
                   </TableRow>
-                ) : (activityQuery.data ?? []).length === 0 ? (
+                ) : filteredActivities.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Chưa có log reset nào.</TableCell>
                   </TableRow>
                 ) : (
-                  (activityQuery.data ?? []).map((row) => (
+                  filteredActivities.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="text-sm">{new Date(row.created_at).toLocaleString()}</TableCell>
                       <TableCell><Badge variant={activityBadge(row.action)}>{row.action}</Badge></TableCell>

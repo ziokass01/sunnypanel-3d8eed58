@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createLicense, generateLicenseKey } from "@/features/licenses/licenses-api";
 import { localToIso } from "@/features/licenses/license-utils";
 import { getErrorMessage } from "@/lib/error-message";
+import { usePanelRole } from "@/hooks/use-panel-role";
 
 const schema = z
   .object({
@@ -42,6 +44,29 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
+const USER_MAX_SECONDS = 30 * 24 * 60 * 60;
+
+function userMaxValueForUnit(unit: "minutes" | "hours" | "days") {
+  if (unit === "minutes") return USER_MAX_SECONDS / 60;
+  if (unit === "hours") return USER_MAX_SECONDS / 3600;
+  return USER_MAX_SECONDS / 86400;
+}
+
+function localMaxDateTimeFromNow(seconds: number) {
+  const d = new Date(Date.now() + seconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function secondsToText(seconds: number) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const parts = [];
+  if (d) parts.push(`${d} ngày`);
+  if (h) parts.push(`${h} giờ`);
+  return parts.join(" ") || `${seconds} giây`;
+}
+
 function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes" | "hours" | "days" }) {
   const value = typeof v.duration_value === "number" && Number.isFinite(v.duration_value) ? v.duration_value : null;
   if (!value || value <= 0) return null;
@@ -53,6 +78,7 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
 export function LicenseCreatePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { isAdmin } = usePanelRole();
 
   // Allow /licenses2/new to default to countdown keys without adding new wrapper components.
   const initialLicenseType: FormValues["license_type"] =
@@ -74,6 +100,10 @@ export function LicenseCreatePage() {
     },
   });
 
+  const currentUnit = form.watch("duration_unit");
+  const currentType = form.watch("license_type");
+  const userMaxDateTime = useMemo(() => localMaxDateTimeFromNow(USER_MAX_SECONDS), []);
+
   useEffect(() => {
     const keyParam = searchParams.get("key");
     if (!keyParam) return;
@@ -93,6 +123,25 @@ export function LicenseCreatePage() {
       const expiresIso = !startOnFirstUse ? localToIso(values.expires_at || "") : null;
 
       const durationSeconds = startOnFirstUse ? fieldsToSeconds(values) : null;
+
+      if (!isAdmin) {
+        if (startOnFirstUse) {
+          if (!durationSeconds || durationSeconds > USER_MAX_SECONDS) {
+            throw new Error("USER_MAX_30_DAYS");
+          }
+        } else {
+          if (!expiresIso) {
+            throw new Error("FIXED_EXPIRY_REQUIRED");
+          }
+          const expMs = new Date(expiresIso).getTime();
+          if (!Number.isFinite(expMs) || expMs <= Date.now()) {
+            throw new Error("EXPIRY_MUST_BE_FUTURE");
+          }
+          if (expMs > Date.now() + USER_MAX_SECONDS * 1000) {
+            throw new Error("USER_MAX_30_DAYS");
+          }
+        }
+      }
 
       return await createLicense({
         key: values.key.toUpperCase(),
@@ -119,6 +168,20 @@ export function LicenseCreatePage() {
         <h1 className="text-2xl font-semibold">Create license</h1>
         <p className="mt-2 text-sm text-muted-foreground">Generate server-side or paste a key, then save.</p>
       </header>
+
+
+
+      {!isAdmin ? (
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">User sale</Badge>
+            <span className="font-medium">Tài khoản này chỉ tạo được key tối đa {secondsToText(USER_MAX_SECONDS)}.</span>
+          </div>
+          <div className="mt-2 text-muted-foreground">
+            Fixed expiry bắt buộc phải có ngày hết hạn và không được vượt quá 30 ngày. Countdown cũng không được vượt quá 30 ngày.
+          </div>
+        </div>
+      ) : null}
 
       <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit((v) => createMutation.mutate(v))}>
         <div className="space-y-2">
@@ -155,11 +218,11 @@ export function LicenseCreatePage() {
           </div>
         </div>
 
-        {form.watch("license_type") === "first_use" ? (
+        {currentType === "first_use" ? (
           <div className="space-y-2">
             <Label>Duration</Label>
             <div className="grid gap-3 md:grid-cols-2">
-              <Input id="duration_value" type="number" min={1} max={999999} {...form.register("duration_value")} />
+              <Input id="duration_value" type="number" min={1} max={isAdmin ? 999999 : userMaxValueForUnit(currentUnit)} {...form.register("duration_value")} />
               <Select
                 value={form.watch("duration_unit")}
                 onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
@@ -178,14 +241,14 @@ export function LicenseCreatePage() {
             {form.formState.errors.duration_value ? (
               <div className="text-sm text-destructive">{getErrorMessage((form.formState.errors as any).duration_value?.message)}</div>
             ) : null}
-            <div className="text-xs text-muted-foreground">Countdown starts on the first successful verify.</div>
+            <div className="text-xs text-muted-foreground">{isAdmin ? "Countdown starts on the first successful verify." : `Countdown tối đa ${secondsToText(USER_MAX_SECONDS)}.`}</div>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="expires_at">Expires at</Label>
-              <Input id="expires_at" type="datetime-local" {...form.register("expires_at")} />
-              <div className="text-xs text-muted-foreground">Leave empty = Never expires.</div>
+              <Input id="expires_at" type="datetime-local" max={isAdmin ? undefined : userMaxDateTime} {...form.register("expires_at")} />
+              <div className="text-xs text-muted-foreground">{isAdmin ? "Leave empty = Never expires." : `Bắt buộc nhập ngày hết hạn, tối đa ${secondsToText(USER_MAX_SECONDS)} từ hiện tại.`}</div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="max_devices">Max devices</Label>
@@ -197,7 +260,7 @@ export function LicenseCreatePage() {
           </div>
         )}
 
-        {form.watch("license_type") === "first_use" ? (
+        {currentType === "first_use" ? (
           <div className="space-y-2">
             <Label htmlFor="max_devices_first_use">Max devices</Label>
             <Input id="max_devices_first_use" type="number" min={1} {...form.register("max_devices")} />
@@ -221,7 +284,13 @@ export function LicenseCreatePage() {
         </div>
 
         {createMutation.error ? (
-          <div className="text-sm text-destructive">{getErrorMessage(createMutation.error)}</div>
+          <div className="text-sm text-destructive">{(() => {
+            const msg = getErrorMessage(createMutation.error);
+            if (msg.includes("USER_MAX_30_DAYS")) return "Tài khoản user chỉ tạo được key tối đa 30 ngày.";
+            if (msg.includes("FIXED_EXPIRY_REQUIRED")) return "Key Fixed expiry bắt buộc phải có ngày hết hạn.";
+            if (msg.includes("EXPIRY_MUST_BE_FUTURE")) return "Ngày hết hạn phải lớn hơn thời điểm hiện tại.";
+            return msg;
+          })()}</div>
         ) : null}
 
         <div className="flex gap-2">

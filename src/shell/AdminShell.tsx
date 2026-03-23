@@ -10,6 +10,7 @@ import {
   Ticket,
   Building2,
   SlidersHorizontal,
+  History,
 } from "lucide-react";
 
 import {
@@ -25,6 +26,7 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/auth/AuthProvider";
 import { usePanelRole } from "@/hooks/use-panel-role";
@@ -56,9 +58,12 @@ export function AdminShell() {
       <Sidebar variant="inset" collapsible="icon">
         <SidebarHeader>
           <div className="flex items-center justify-between gap-2 px-2 py-1">
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-1">
               <div className="truncate text-sm font-semibold">SUNNY Key Panel</div>
-              <div className="truncate text-xs text-muted-foreground">{roleLabel}</div>
+              <div className="flex items-center gap-2">
+                <Badge variant={isAdmin ? "default" : "secondary"}>{roleLabel}</Badge>
+                {!isAdmin ? <span className="truncate text-xs text-muted-foreground">Quyền hạn giới hạn</span> : null}
+              </div>
             </div>
             <SidebarTrigger />
           </div>
@@ -145,6 +150,15 @@ export function AdminShell() {
                     <NavLink to="/settings/reset-key" activeClassName="data-[active=true]">
                       <SlidersHorizontal />
                       <span>Reset Settings</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Reset Logs">
+                    <NavLink to="/settings/reset-logs" activeClassName="data-[active=true]">
+                      <History />
+                      <span>Reset Logs</span>
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

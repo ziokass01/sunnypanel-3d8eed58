@@ -28,6 +28,7 @@ import { RentPortalPage } from "@/pages/RentPortal";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
 import { ResetKeyPage } from "@/pages/ResetKey";
 import { ResetSettingsPage } from "@/pages/ResetSettings";
+import { ResetLogsPage } from "@/pages/ResetLogs";
 
 const queryClient = new QueryClient();
 
@@ -131,6 +132,14 @@ const App = () => {
                     element={
                       <AdminRoute>
                         <ResetSettingsPage />
+                      </AdminRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/reset-logs"
+                    element={
+                      <AdminRoute>
+                        <ResetLogsPage />
                       </AdminRoute>
                     }
                   />

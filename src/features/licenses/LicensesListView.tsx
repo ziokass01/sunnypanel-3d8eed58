@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,6 +52,10 @@ function computeRemainingLabel(row: any, nowMs: number) {
   }
 
   return formatRemainingFromExpires(row.expires_at, nowMs) ?? "—";
+}
+
+function getKeyKind(row: any) {
+  return String(row?.note ?? "").toUpperCase().startsWith("FREE") ? "FREE" : "PAID";
 }
 
 function computeExpiresLabel(row: any) {
@@ -196,7 +201,10 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
                 return (
                   <TableRow key={row.id}>
                     <TableCell>
-                      <div className="font-mono text-xs md:text-sm break-all">{row.key}</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-mono text-xs md:text-sm break-all">{row.key}</div>
+                        <Badge variant={getKeyKind(row) === "FREE" ? "secondary" : "outline"}>{getKeyKind(row)}</Badge>
+                      </div>
                       <div className="mt-1 text-xs text-muted-foreground md:hidden">Remaining: {remaining}</div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">{getLicenseType(row)}</TableCell>
