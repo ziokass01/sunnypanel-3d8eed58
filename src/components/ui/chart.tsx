@@ -6,6 +6,25 @@ import { cn } from "@/lib/utils";
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
 
+function sanitizeCssToken(value: string, fallback: string) {
+  const normalized = String(value || "").replace(/[^A-Za-z0-9_-]/g, "");
+  return normalized || fallback;
+}
+
+function isSafeCssToken(value: string) {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isSafeCssColor(value: string) {
+  const color = String(value || "").trim();
+  return (
+    /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(color) ||
+    /^rgba?\(\s*[\d.%\s,]+\)$/.test(color) ||
+    /^hsla?\(\s*[\d.%\s,]+\)$/.test(color) ||
+    /^var\(--[A-Za-z0-9_-]+\)$/.test(color)
+  );
+}
+
 export type ChartConfig = {
   [k in string]: {
     label?: React.ReactNode;
@@ -37,7 +56,7 @@ const ChartContainer = React.forwardRef<
   }
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
-  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const chartId = sanitizeCssToken(`chart-${id || uniqueId.replace(/:/g, "")}`, "chart-default");
 
   return (
     <ChartContext.Provider value={{ config }}>
@@ -59,7 +78,11 @@ const ChartContainer = React.forwardRef<
 ChartContainer.displayName = "Chart";
 
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
-  const colorConfig = Object.entries(config).filter(([_, config]) => config.theme || config.color);
+  const safeId = sanitizeCssToken(id, "chart-default");
+  const colorConfig = Object.entries(config)
+    .filter(([key]) => isSafeCssToken(key))
+    .map(([key, itemConfig]) => ({ key, itemConfig }))
+    .filter(({ itemConfig }) => itemConfig.theme || itemConfig.color);
 
   if (!colorConfig.length) {
     return null;
@@ -69,18 +92,23 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     <style
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
+          .map(([theme, prefix]) => {
+            const lines = colorConfig
+              .map(({ key, itemConfig }) => {
+                const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
+                return color && isSafeCssColor(color) ? `  --color-${key}: ${color};` : null;
+              })
+              .filter(Boolean);
+
+            if (!lines.length) return null;
+
+            return `
+${prefix} [data-chart="${safeId}"] {
+${lines.join("\n")}
 }
-`,
-          )
+`;
+          })
+          .filter(Boolean)
           .join("\n"),
       }}
     />

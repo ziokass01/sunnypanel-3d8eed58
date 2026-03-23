@@ -10,6 +10,78 @@ function inferBaseUrl(req: Request) {
   return "";
 }
 
+
+function getClientIp(req: Request) {
+  return req.headers.get("cf-connecting-ip")
+    ?? req.headers.get("x-real-ip")
+    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    ?? "0.0.0.0";
+}
+
+function toHex(bytes: ArrayBuffer) {
+  return Array.from(new Uint8Array(bytes))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256Hex(input: string) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return toHex(digest);
+}
+
+
+function sanitizeNoticeMode(value: unknown): "modal" | "inline" {
+  return String(value ?? "").trim().toLowerCase() === "inline" ? "inline" : "modal";
+}
+
+function sanitizeExternalUrl(value: unknown): string | null {
+  const url = String(value ?? "").trim();
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+function sanitizeDownloadCards(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((raw: any) => {
+      const title = String(raw?.title ?? "").trim() || null;
+      const description = String(raw?.description ?? "").trim() || null;
+      const url = sanitizeExternalUrl(raw?.url);
+      const button_label = String(raw?.button_label ?? "").trim() || null;
+      const badge = String(raw?.badge ?? "").trim() || null;
+      const icon_url = sanitizeExternalUrl(raw?.icon_url);
+      const enabled = Boolean(raw?.enabled ?? true);
+      if (!(title || description || url || button_label || badge || icon_url)) return null;
+      return { enabled, title, description, url, button_label, badge, icon_url };
+    })
+    .filter(Boolean);
+}
+
+function getVietnamDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((x) => x.type === "year")?.value;
+  const month = parts.find((x) => x.type === "month")?.value;
+  const day = parts.find((x) => x.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function getVietnamDayRangeUtc(day: string) {
+  const [year, month, date] = day.split("-").map((v) => Number(v));
+  const utcOffsetMs = 7 * 60 * 60 * 1000;
+  const startMs = Date.UTC(year, month - 1, date, 0, 0, 0, 0) - utcOffsetMs;
+  const nextStartMs = startMs + 24 * 60 * 60 * 1000;
+  return {
+    startUtcIso: new Date(startMs).toISOString(),
+    nextStartUtcIso: new Date(nextStartMs).toISOString(),
+  };
+}
+
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
@@ -39,6 +111,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders, status: 204 });
   }
 
+  try {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
@@ -58,9 +131,7 @@ Deno.serve(async (req) => {
   // Load settings row id=1
   const { data: settings, error: sErr } = await sb
     .from("licenses_free_settings")
-    .select(
-      "free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links",
-    )
+    .select("*")
     .eq("id", 1)
     .maybeSingle();
 
@@ -70,19 +141,77 @@ Deno.serve(async (req) => {
 
   const rawOutbound = settings?.free_outbound_url;
   const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
+  const rawOutboundPass2 = (settings as any)?.free_outbound_url_pass2;
+  const free_outbound_url_pass2 = String(rawOutboundPass2 ?? "").trim() || free_outbound_url;
   const free_enabled = Boolean(settings?.free_enabled ?? true);
   const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
   const free_min_delay_seconds = Math.max(0, Number(settings?.free_min_delay_seconds ?? 0));
+  const free_min_delay_seconds_pass2 = Math.max(0, Number((settings as any)?.free_min_delay_seconds_pass2 ?? free_min_delay_seconds));
+  const free_gate_antibypass_enabled = Boolean((settings as any)?.free_gate_antibypass_enabled ?? false);
+  const free_gate_antibypass_seconds = Math.max(0, Number((settings as any)?.free_gate_antibypass_seconds ?? 0));
+  const free_link4m_rotate_days = Math.max(1, Number((settings as any)?.free_link4m_rotate_days ?? 7));
+  const free_session_waiting_limit = Math.max(1, Number((settings as any)?.free_session_waiting_limit ?? 2));
+  const free_link4m_rotate_nonce_pass1 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass1 ?? 0));
+  const free_link4m_rotate_nonce_pass2 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass2 ?? 0));
   const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
-  const free_daily_limit_per_fingerprint = Math.max(1, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  const free_daily_limit_per_fingerprint = Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  const free_daily_limit_per_ip = Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0));
+  const free_gate_require_ip_match = Boolean((settings as any)?.free_gate_require_ip_match ?? true);
+  const free_gate_require_ua_match = Boolean((settings as any)?.free_gate_require_ua_match ?? true);
   const free_require_link4m_referrer = Boolean(settings?.free_require_link4m_referrer ?? false);
   const free_public_note = String(settings?.free_public_note ?? "");
   const free_public_links = Array.isArray(settings?.free_public_links) ? settings?.free_public_links : [];
+  const free_download_enabled = Boolean((settings as any)?.free_download_enabled ?? false);
+  const free_download_name = String((settings as any)?.free_download_name ?? "").trim() || null;
+  const free_download_info = String((settings as any)?.free_download_info ?? "").trim() || null;
+  const free_download_url = String((settings as any)?.free_download_url ?? "").trim() || null;
+  const free_download_size = Math.max(0, Number((settings as any)?.free_download_size ?? 0)) || null;
+  const free_notice_title = String((settings as any)?.free_notice_title ?? "").trim() || null;
+  const free_notice_content = String((settings as any)?.free_notice_content ?? "").trim() || null;
+  const free_notice_enabled = Boolean((settings as any)?.free_notice_enabled ?? false) && Boolean(free_notice_content);
+  const free_notice_mode = sanitizeNoticeMode((settings as any)?.free_notice_mode);
+  const free_notice_closable = Boolean((settings as any)?.free_notice_closable ?? true);
+  const free_notice_show_once = Boolean((settings as any)?.free_notice_show_once ?? false);
+  const free_external_download_url = sanitizeExternalUrl((settings as any)?.free_external_download_url);
+  const free_external_download_enabled = Boolean((settings as any)?.free_external_download_enabled ?? false) && Boolean(free_external_download_url);
+  const free_external_download_title = String((settings as any)?.free_external_download_title ?? "").trim() || null;
+  const free_external_download_description = String((settings as any)?.free_external_download_description ?? "").trim() || null;
+  const free_external_download_button_label = String((settings as any)?.free_external_download_button_label ?? "").trim() || null;
+  const free_external_download_badge = String((settings as any)?.free_external_download_badge ?? "").trim() || null;
+  const free_external_download_icon_url = sanitizeExternalUrl((settings as any)?.free_external_download_icon_url);
+let free_download_cards = sanitizeDownloadCards((settings as any)?.free_download_cards);
+if (!free_download_cards.length) {
+  const legacyCards: any[] = [];
+  if (free_download_enabled && free_download_url) {
+    legacyCards.push({
+      enabled: true,
+      title: free_download_name ?? "Tệp tải xuống",
+      description: free_download_info,
+      url: free_download_url,
+      button_label: "Mở liên kết",
+      badge: "Link 1",
+      icon_url: null,
+    });
+  }
+  if (free_external_download_enabled && free_external_download_url) {
+    legacyCards.push({
+      enabled: true,
+      title: free_external_download_title ?? "Liên kết tải thêm",
+      description: free_external_download_description,
+      url: free_external_download_url,
+      button_label: free_external_download_button_label,
+      badge: free_external_download_badge,
+      icon_url: free_external_download_icon_url,
+    });
+  }
+  free_download_cards = legacyCards;
+}
+
 
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,kind,value,duration_seconds,sort_order,enabled")
+    .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate")
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
@@ -111,6 +240,41 @@ Deno.serve(async (req) => {
 
   const destination_gate_url = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
 
+  const ip = getClientIp(req);
+  const ipHash = await sha256Hex(ip);
+  const fpRaw = String(req.headers.get("x-fp") ?? "").trim();
+
+  const dayKey = getVietnamDateKey();
+  const dayRange = getVietnamDayRangeUtc(dayKey);
+  const fpHash = fpRaw ? await sha256Hex(fpRaw) : "";
+
+  let fpUsedToday = 0;
+  if (fpHash) {
+    const fpQuota = await sb
+      .from("licenses_free_issues")
+      .select("issue_id", { count: "exact", head: true })
+      .gte("created_at", dayRange.startUtcIso)
+      .lt("created_at", dayRange.nextStartUtcIso)
+      .eq("fingerprint_hash", fpHash);
+    fpUsedToday = Number(fpQuota.count ?? 0);
+  }
+
+  const ipQuota = await sb
+    .from("licenses_free_issues")
+    .select("issue_id", { count: "exact", head: true })
+    .gte("created_at", dayRange.startUtcIso)
+    .lt("created_at", dayRange.nextStartUtcIso)
+    .eq("ip_hash", ipHash);
+  const ipUsedToday = Number(ipQuota.count ?? 0);
+
+  const fpRemaining = free_daily_limit_per_fingerprint <= 0
+    ? null
+    : Math.max(0, free_daily_limit_per_fingerprint - fpUsedToday);
+  const ipRemaining = free_daily_limit_per_ip <= 0
+    ? null
+    : Math.max(0, free_daily_limit_per_ip - ipUsedToday);
+  const remainingToday = [fpRemaining, ipRemaining].filter((v) => v !== null).reduce((m, v) => Math.min(m, Number(v)), Number.POSITIVE_INFINITY);
+
   const body = {
     ok: true,
 
@@ -125,12 +289,49 @@ Deno.serve(async (req) => {
     free_disabled_message,
     free_outbound_url,
     free_min_delay_seconds,
+    free_min_delay_seconds_pass2,
+    free_link4m_rotate_days,
+    free_session_waiting_limit,
+    free_link4m_rotate_nonce_pass1,
+    free_link4m_rotate_nonce_pass2,
+    free_outbound_url_pass2,
+    free_gate_antibypass_enabled,
+    free_gate_antibypass_seconds,
     free_return_seconds,
     free_daily_limit_per_fingerprint,
+    free_daily_limit_per_ip,
+    free_gate_require_ip_match,
+    free_gate_require_ua_match,
     free_require_link4m_referrer,
+    free_quota_timezone: "Asia/Ho_Chi_Minh",
+    free_quota_day_key: dayKey,
+    free_quota_remaining_today: Number.isFinite(remainingToday) ? remainingToday : null,
 
     free_public_note,
     free_public_links,
+    free_download_enabled,
+    free_download_name,
+    free_download_info,
+    free_download_url,
+    free_download_size,
+    free_download_cards,
+    free_notice: {
+      enabled: free_notice_enabled,
+      title: free_notice_title,
+      content: free_notice_content,
+      mode: free_notice_mode,
+      closable: free_notice_closable,
+      showOnce: free_notice_show_once,
+    },
+    free_external_download: {
+      enabled: free_external_download_enabled,
+      title: free_external_download_title,
+      description: free_external_download_description,
+      url: free_external_download_url,
+      button_label: free_external_download_button_label,
+      badge: free_external_download_badge,
+      icon_url: free_external_download_icon_url,
+    },
 
     key_types: (keyTypes ?? []).map((k) => ({
       code: k.code,
@@ -138,6 +339,7 @@ Deno.serve(async (req) => {
       kind: k.kind,
       value: k.value,
       duration_seconds: k.duration_seconds,
+      requires_double_gate: Boolean((k as any).requires_double_gate ?? false),
     })),
 
     turnstile_enabled,
@@ -147,4 +349,12 @@ Deno.serve(async (req) => {
   };
 
   return jsonResponse(body, 200);
+  } catch (e) {
+    console.error("free-config unexpected error", e);
+    return jsonResponse(
+      { ok: false, code: "INTERNAL", error: "Internal server error" },
+      500,
+    );
+  }
+
 });

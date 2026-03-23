@@ -1,14 +1,54 @@
 import { Outlet, useNavigate } from "react-router-dom";
-import { LogOut, KeyRound, LayoutDashboard, Trash2, ScrollText, KeySquare, Gift, Ticket } from "lucide-react";
+import {
+  LogOut,
+  KeyRound,
+  LayoutDashboard,
+  Trash2,
+  ScrollText,
+  KeySquare,
+  Gift,
+  Ticket,
+  Building2,
+} from "lucide-react";
 
-import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarTrigger,
+  SidebarFooter,
+} from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/auth/AuthProvider";
+import { usePanelRole } from "@/hooks/use-panel-role";
+import { toast } from "@/hooks/use-toast";
 
 export function AdminShell() {
   const { signOut } = useAuth();
+  const { role, isAdmin } = usePanelRole();
   const navigate = useNavigate();
+
+  const roleLabel =
+    role === "admin"
+      ? "Admin"
+      : role === "moderator"
+        ? "Moderator"
+        : role === "user"
+          ? "User"
+          : "Panel";
+
+  const showLockedToast = (section: string) => {
+    toast({
+      title: "Quyền truy cập bị giới hạn",
+      description: `Tài khoản của bạn đang dùng quyền giới hạn. Mục ${section} chỉ dành cho quản trị viên.`,
+    });
+  };
 
   return (
     <SidebarProvider>
@@ -17,7 +57,7 @@ export function AdminShell() {
           <div className="flex items-center justify-between gap-2 px-2 py-1">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">SUNNY Key Panel</div>
-              <div className="truncate text-xs text-muted-foreground">Admin</div>
+              <div className="truncate text-xs text-muted-foreground">{roleLabel}</div>
             </div>
             <SidebarTrigger />
           </div>
@@ -27,11 +67,7 @@ export function AdminShell() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="Dashboard">
-                <NavLink
-                  to="/dashboard"
-                  className=""
-                  activeClassName="data-[active=true]"
-                >
+                <NavLink to="/dashboard" activeClassName="data-[active=true]">
                   <LayoutDashboard />
                   <span>Dashboard</span>
                 </NavLink>
@@ -40,7 +76,7 @@ export function AdminShell() {
 
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="Licenses">
-                <NavLink to="/licenses">
+                <NavLink to="/licenses" activeClassName="data-[active=true]">
                   <KeyRound />
                   <span>Licenses</span>
                 </NavLink>
@@ -49,48 +85,98 @@ export function AdminShell() {
 
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="Licenses 2">
-                <NavLink to="/licenses2">
+                <NavLink to="/licenses2" activeClassName="data-[active=true]">
                   <KeySquare />
                   <span>Licenses 2</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Free Licenses">
-                <NavLink to="/free-licenses">
-                  <Ticket />
-                  <span>Free Licenses</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {isAdmin ? (
+              <>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Free Licenses">
+                    <NavLink to="/free-licenses" activeClassName="data-[active=true]">
+                      <Ticket />
+                      <span>Free Licenses</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Trash">
-                <NavLink to="/licenses/trash">
-                  <Trash2 />
-                  <span>Trash</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Trash">
+                    <NavLink to="/licenses/trash" activeClassName="data-[active=true]">
+                      <Trash2 />
+                      <span>Trash</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Audit logs">
-                <NavLink to="/audit">
-                  <ScrollText />
-                  <span>Audit logs</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Audit logs">
+                    <NavLink to="/audit" activeClassName="data-[active=true]">
+                      <ScrollText />
+                      <span>Audit logs</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Free keys">
-                <NavLink to="/admin/free-keys">
-                  <Gift />
-                  <span>Free keys</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Free keys">
+                    <NavLink to="/admin/free-keys" activeClassName="data-[active=true]">
+                      <Gift />
+                      <span>Free keys</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Thuê Website">
+                    <NavLink to="/rent" activeClassName="data-[active=true]">
+                      <Building2 />
+                      <span>Thuê Website</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </>
+            ) : (
+              <>
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Free Licenses" className="opacity-60" onClick={() => showLockedToast("Free Licenses")}>
+                    <Ticket />
+                    <span>Free Licenses</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Trash" className="opacity-60" onClick={() => showLockedToast("Trash")}>
+                    <Trash2 />
+                    <span>Trash</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Audit logs" className="opacity-60" onClick={() => showLockedToast("Audit logs")}>
+                    <ScrollText />
+                    <span>Audit logs</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Free keys" className="opacity-60" onClick={() => showLockedToast("Free keys")}>
+                    <Gift />
+                    <span>Free keys</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Thuê Website" className="opacity-60" onClick={() => showLockedToast("Thuê Website")}>
+                    <Building2 />
+                    <span>Thuê Website</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </>
+            )}
           </SidebarMenu>
         </SidebarContent>
 

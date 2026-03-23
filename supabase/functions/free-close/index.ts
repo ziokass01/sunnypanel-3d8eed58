@@ -61,6 +61,20 @@ Deno.serve(async (req) => {
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
   const outHash = await sha256Hex(parsed.data.out_token);
 
+  // VIP pass2 sessions may carry a dedicated out_token hash.
+  // Resolve one concrete session first, then close by session_id.
+  const { data: sessionMatch } = await sb
+    .from("licenses_free_sessions")
+    .select("session_id")
+    .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!sessionMatch?.session_id) {
+    return jsonResponse({ ok: true }, 200);
+  }
+
   // Close session.
   // Some deployments may not have newer optional columns yet (e.g. claim_token_plain),
   // so we try the full update first, then fall back to a minimal update if needed.
@@ -74,7 +88,7 @@ Deno.serve(async (req) => {
       claim_token_plain: null,
       out_expires_at: new Date().toISOString(),
     })
-    .eq("out_token_hash", outHash);
+    .eq("session_id", sessionMatch.session_id);
 
   if (fullUpd.error) {
     const msg = String(fullUpd.error.message || "");
@@ -88,7 +102,7 @@ Deno.serve(async (req) => {
           claim_expires_at: null,
           out_expires_at: new Date().toISOString(),
         })
-        .eq("out_token_hash", outHash);
+        .eq("session_id", sessionMatch.session_id);
     }
   }
 

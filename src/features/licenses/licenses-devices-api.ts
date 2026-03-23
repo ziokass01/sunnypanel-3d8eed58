@@ -27,3 +27,11 @@ export async function resetLicenseDevices(licenseId: string) {
   const { error } = await supabase.from("license_devices").delete().eq("license_id", licenseId);
   if (error) throw error;
 }
+
+export async function resetLicenseDevicesPenalty(licenseId: string) {
+  const { data, error } = await supabase.rpc("admin_reset_devices_penalty", {
+    p_license_id: licenseId,
+  });
+  if (error) throw error;
+  return data as any;
+}

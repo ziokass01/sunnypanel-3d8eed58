@@ -4,6 +4,33 @@
 -- 1) Extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- 1.5) Drop legacy views that used these table names (from older migrations)
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN
+    SELECT c.relname, c.relkind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname IN (
+        'licenses_free_ip_rate_limits',
+        'licenses_free_fp_rate_limits',
+        'free_ip_rate_limits',
+        'free_fp_rate_limits'
+      )
+      AND c.relkind IN ('v','m')
+  LOOP
+    IF r.relkind = 'm' THEN
+      EXECUTE format('DROP MATERIALIZED VIEW IF EXISTS public.%I CASCADE', r.relname);
+    ELSE
+      EXECUTE format('DROP VIEW IF EXISTS public.%I CASCADE', r.relname);
+    END IF;
+  END LOOP;
+END $$;
+
+
 -- 2) Tables (preferred names requested)
 CREATE TABLE IF NOT EXISTS public.licenses_free_ip_rate_limits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,6 +60,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_licenses_free_fp_rate_limits
 
 -- Keep compatibility with existing installations that already have free_ip_rate_limits/free_fp_rate_limits
 -- by creating them if missing.
+-- LEGACY VIEW GUARD: drop legacy views before creating TABLEs / indexes
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'free_ip_rate_limits' AND c.relkind IN ('v','m')
+  ) THEN
+    EXECUTE 'DROP VIEW public.free_ip_rate_limits CASCADE';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'free_fp_rate_limits' AND c.relkind IN ('v','m')
+  ) THEN
+    EXECUTE 'DROP VIEW public.free_fp_rate_limits CASCADE';
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.free_ip_rate_limits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ip_hash text NOT NULL,
@@ -42,8 +91,16 @@ CREATE TABLE IF NOT EXISTS public.free_ip_rate_limits (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_free_ip_rate_limits
-  ON public.free_ip_rate_limits (ip_hash, route, window_start);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname='public' AND c.relname='free_ip_rate_limits' AND c.relkind IN ('r','p')
+  ) THEN
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS ux_free_ip_rate_limits ON public.free_ip_rate_limits (ip_hash, route, window_start)';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.free_fp_rate_limits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -54,8 +111,16 @@ CREATE TABLE IF NOT EXISTS public.free_fp_rate_limits (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_free_fp_rate_limits
-  ON public.free_fp_rate_limits (fp_hash, route, window_start);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname='public' AND c.relname='free_fp_rate_limits' AND c.relkind IN ('r','p')
+  ) THEN
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS ux_free_fp_rate_limits ON public.free_fp_rate_limits (fp_hash, route, window_start)';
+  END IF;
+END $$;
 
 -- 3) RLS (deny-by-default; RPCs are SECURITY DEFINER)
 ALTER TABLE public.licenses_free_ip_rate_limits ENABLE ROW LEVEL SECURITY;
@@ -158,7 +223,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.check_free_ip_rate_limit(
   p_ip_hash text,
-  p_route text,
+  p_route text DEFAULT 'free-start',
   p_limit integer DEFAULT 60,
   p_window_seconds integer DEFAULT 60
 )
@@ -206,7 +271,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.check_free_fp_rate_limit(
   p_fp_hash text,
-  p_route text,
+  p_route text DEFAULT 'free-start',
   p_limit integer DEFAULT 60,
   p_window_seconds integer DEFAULT 60
 )

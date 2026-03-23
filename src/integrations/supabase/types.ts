@@ -271,6 +271,53 @@ export type Database = {
         }
         Relationships: []
       }
+      licenses_free_gate_logs: {
+        Row: {
+          created_at: string
+          detail: Json | null
+          event_code: string
+          fingerprint_hash: string | null
+          id: number
+          ip_hash: string | null
+          key_type_code: string | null
+          pass_no: number | null
+          session_id: string | null
+          ua_hash: string | null
+        }
+        Insert: {
+          created_at?: string
+          detail?: Json | null
+          event_code: string
+          fingerprint_hash?: string | null
+          id?: number
+          ip_hash?: string | null
+          key_type_code?: string | null
+          pass_no?: number | null
+          session_id?: string | null
+          ua_hash?: string | null
+        }
+        Update: {
+          created_at?: string
+          detail?: Json | null
+          event_code?: string
+          fingerprint_hash?: string | null
+          id?: number
+          ip_hash?: string | null
+          key_type_code?: string | null
+          pass_no?: number | null
+          session_id?: string | null
+          ua_hash?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "licenses_free_gate_logs_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "licenses_free_sessions"
+            referencedColumns: ["session_id"]
+          },
+        ]
+      }
       licenses_free_issues: {
         Row: {
           created_at: string
@@ -422,13 +469,21 @@ export type Database = {
           free_daily_limit_per_fingerprint: number
           free_disabled_message: string
           free_enabled: boolean
+          free_gate_antibypass_enabled: boolean
+          free_gate_antibypass_seconds: number
+          free_link4m_rotate_days: number
+          free_link4m_rotate_nonce_pass1: number
+          free_link4m_rotate_nonce_pass2: number
           free_min_delay_enabled: boolean
           free_min_delay_seconds: number
+          free_min_delay_seconds_pass2: number
           free_outbound_url: string | null
+          free_outbound_url_pass2: string | null
           free_public_links: Json
           free_public_note: string
           free_require_link4m_referrer: boolean
           free_return_seconds: number
+          free_session_waiting_limit: number
           id: number
           updated_at: string
           updated_by: string | null
@@ -437,13 +492,21 @@ export type Database = {
           free_daily_limit_per_fingerprint?: number
           free_disabled_message?: string
           free_enabled?: boolean
+          free_gate_antibypass_enabled?: boolean
+          free_gate_antibypass_seconds?: number
+          free_link4m_rotate_days?: number
+          free_link4m_rotate_nonce_pass1?: number
+          free_link4m_rotate_nonce_pass2?: number
           free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
+          free_min_delay_seconds_pass2?: number
           free_outbound_url?: string | null
+          free_outbound_url_pass2?: string | null
           free_public_links?: Json
           free_public_note?: string
           free_require_link4m_referrer?: boolean
           free_return_seconds?: number
+          free_session_waiting_limit?: number
           id: number
           updated_at?: string
           updated_by?: string | null
@@ -452,16 +515,21 @@ export type Database = {
           free_daily_limit_per_fingerprint?: number
           free_disabled_message?: string
           free_enabled?: boolean
+          free_gate_antibypass_enabled?: boolean
+          free_gate_antibypass_seconds?: number
+          free_link4m_rotate_days?: number
+          free_link4m_rotate_nonce_pass1?: number
+          free_link4m_rotate_nonce_pass2?: number
           free_min_delay_enabled?: boolean
           free_min_delay_seconds?: number
+          free_min_delay_seconds_pass2?: number
           free_outbound_url?: string | null
+          free_outbound_url_pass2?: string | null
           free_public_links?: Json
           free_public_note?: string
           free_require_link4m_referrer?: boolean
           free_return_seconds?: number
-          id?: number
-          updated_at?: string
-          updated_by?: string | null
+          free_session_waiting_limit?: number
         }
         Relationships: []
       }

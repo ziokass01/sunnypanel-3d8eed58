@@ -19,8 +19,10 @@ import {
 import { NavLink } from "@/components/NavLink";
 import { toast } from "@/hooks/use-toast";
 import { useNow } from "@/hooks/use-now";
+import { usePanelRole } from "@/hooks/use-panel-role";
 import { fetchLicenses, softDeleteLicense } from "@/features/licenses/licenses-api";
 import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
+import { getErrorMessage } from "@/lib/error-message";
 
 type FilterMode = "all" | "start_on_first_use";
 
@@ -42,12 +44,9 @@ function computeRemainingLabel(row: any, nowMs: number) {
   const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
 
   if (notStarted) return `Not started • ${formatDurationForRow(row)}`;
-
   if (badState) return "BAD STATE (expires cleared)";
 
   if (!row?.expires_at) {
-    // Fixed key with expires_at=NULL => never expires
-    // For start-on-first-use, expires_at should be set once started; if missing, keep it neutral.
     return startOnFirstUse ? "—" : "Never expires";
   }
 
@@ -71,8 +70,8 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
   const [type, setType] = useState<"all" | "fixed" | "first_use">(props.filterMode === "start_on_first_use" ? "first_use" : "all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
+  const { isAdmin } = usePanelRole();
 
-  // Live countdown (list can be less frequent than detail)
   const nowMs = useNow(10_000);
 
   const queryKey = useMemo(() => ["licenses", { q, status }] as const, [q, status]);
@@ -103,9 +102,22 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{props.title}</h1>
         <div className="flex gap-2">
-          <Button variant="soft" asChild>
-            <NavLink to="/licenses/trash">View Trash</NavLink>
-          </Button>
+          {isAdmin ? (
+            <Button variant="soft" asChild>
+              <NavLink to="/licenses/trash">View Trash</NavLink>
+            </Button>
+          ) : (
+            <Button
+              variant="soft"
+              onClick={() =>
+                toast({
+                  title: "Quyền truy cập bị giới hạn",
+                  description: "Tài khoản của bạn đang dùng quyền giới hạn. Mục Thùng rác chỉ dành cho quản trị viên.",
+                })}
+            >
+              View Trash
+            </Button>
+          )}
           <Button asChild>
             <NavLink to={props.filterMode === "start_on_first_use" ? "/licenses2/new" : "/licenses/new"}>
               Create license
@@ -147,7 +159,7 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
         </Select>
       </div>
 
-      {error ? <div className="text-sm text-destructive">{String(error)}</div> : null}
+      {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}
 
       <div className="rounded-lg border">
         <Table>

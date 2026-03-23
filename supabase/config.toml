@@ -1,4 +1,4 @@
-project_id = "cbdokxhoucczyrpcjvxf"
+project_id = "ijvhlhdrncxtxosmnbtt"
 
 [functions.verify-key]
 verify_jwt = false
@@ -34,4 +34,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-free-delete-issued]
+verify_jwt = false
+
+[functions.admin-rent]
+verify_jwt = false
+
+[functions.rent-user]
+verify_jwt = false
+
+[functions.rent-verify-key]
 verify_jwt = false

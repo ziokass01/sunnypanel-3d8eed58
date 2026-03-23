@@ -34,7 +34,7 @@ export type LicenseDeviceRow = {
   last_seen: string;
 };
 
-export { fetchLicenseDevices, deleteLicenseDevice, resetLicenseDevices } from "./licenses-devices-api";
+export { fetchLicenseDevices, deleteLicenseDevice, resetLicenseDevices, resetLicenseDevicesPenalty } from "./licenses-devices-api";
 
 // Note: backend schema evolved (deleted_at). Types file may lag, so we intentionally loosen typing here.
 const licensesTable = "licenses" as any;

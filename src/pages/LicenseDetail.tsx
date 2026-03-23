@@ -29,11 +29,14 @@ import {
   fetchLicenseDevices,
   reactivateOrRenewLicense,
   resetLicenseDevices,
+  resetLicenseDevicesPenalty,
   softDeleteLicense,
   updateLicense,
 } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
+import { getErrorMessage } from "@/lib/error-message";
+import { usePanelRole } from "@/hooks/use-panel-role";
 
 function computeStatus(lic: {
   is_active: boolean;
@@ -60,25 +63,21 @@ function formatDurationSecondsOrDays(lic: any) {
   return formatDurationDHMS(dSecs ?? dDays);
 }
 
-function formatDurationDays(days: number | null | undefined) {
-  const d = typeof days === "number" && days > 0 ? days : null;
-  if (!d) return "—";
-  return `${d} day${d === 1 ? "" : "s"}`;
-}
-
 export function LicenseDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isAdmin } = usePanelRole();
+
   const licenseId = id ?? "";
   const [removeTarget, setRemoveTarget] = useState<{ id: string; device_id: string } | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
+  const [resetPenaltyOpen, setResetPenaltyOpen] = useState(false);
   const [reactivateOpen, setReactivateOpen] = useState(false);
   const [resetActivationOpen, setResetActivationOpen] = useState(false);
   const [reactivateResetDevices, setReactivateResetDevices] = useState(false);
   const [reactivateExpiresLocal, setReactivateExpiresLocal] = useState<string>("");
 
-  // Live countdown (1s)
   const nowMs = useNow(1_000);
 
   const licQuery = useQuery({
@@ -108,7 +107,7 @@ export function LicenseDetailPage() {
       setRemoveTarget(null);
     },
     onError: (err) => {
-      toast({ title: "Failed to remove device", description: String(err), variant: "destructive" });
+      toast({ title: "Failed to remove device", description: getErrorMessage(err), variant: "destructive" });
     },
   });
 
@@ -120,7 +119,36 @@ export function LicenseDetailPage() {
       setResetOpen(false);
     },
     onError: (err) => {
-      toast({ title: "Failed to reset devices", description: String(err), variant: "destructive" });
+      toast({ title: "Failed to reset devices", description: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
+  const resetDevicesPenaltyMutation = useMutation({
+    mutationFn: async () => resetLicenseDevicesPenalty(licenseId),
+    onSuccess: async (result: any) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+      ]);
+
+      const remainingText =
+        typeof result?.remaining_seconds === "number"
+          ? formatDurationDHMS(result.remaining_seconds)
+          : null;
+
+      toast({
+        title: "Devices reset with penalty rule",
+        description: remainingText ? `Remaining time: ${remainingText}` : undefined,
+      });
+
+      setResetPenaltyOpen(false);
+    },
+    onError: (err) => {
+      toast({
+        title: "Failed to reset devices with penalty",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
     },
   });
 
@@ -131,7 +159,6 @@ export function LicenseDetailPage() {
 
       const expires_at = reactivateExpiresLocal ? localToIso(reactivateExpiresLocal) : null;
 
-      // Countdown licenses: do not allow clearing expires_at while started.
       if (startOnFirstUse && firstUsedAt && !expires_at) {
         throw new Error("CANNOT_CLEAR_EXPIRES");
       }
@@ -151,7 +178,7 @@ export function LicenseDetailPage() {
       setReactivateOpen(false);
     },
     onError: (err) => {
-      const msg = String(err);
+      const msg = getErrorMessage(err);
       toast({
         title: "Failed to reactivate/renew",
         description: msg.includes("CANNOT_CLEAR_EXPIRES")
@@ -179,7 +206,6 @@ export function LicenseDetailPage() {
       await updateLicense(licenseId, {
         first_used_at: null,
         expires_at: null,
-        // Keep legacy mirror in sync for older UIs
         activated_at: null,
       } as any);
     },
@@ -189,7 +215,7 @@ export function LicenseDetailPage() {
       setResetActivationOpen(false);
     },
     onError: (err) => {
-      toast({ title: "Failed to reset activation", description: String(err), variant: "destructive" });
+      toast({ title: "Failed to reset activation", description: getErrorMessage(err), variant: "destructive" });
     },
   });
 
@@ -217,9 +243,11 @@ export function LicenseDetailPage() {
           >
             Copy key
           </Button>
+
           <Button variant="soft" onClick={() => navigate(`/licenses/${licenseId}/edit`)} disabled={!licenseId}>
             Edit
           </Button>
+
           <Button
             variant="soft"
             onClick={() => {
@@ -233,6 +261,7 @@ export function LicenseDetailPage() {
           >
             Reactivate/Renew
           </Button>
+
           <Button
             variant="soft"
             onClick={() => setResetOpen(true)}
@@ -240,11 +269,23 @@ export function LicenseDetailPage() {
           >
             Reset devices
           </Button>
+
+          {isAdmin ? (
+            <Button
+              variant="destructive"
+              onClick={() => setResetPenaltyOpen(true)}
+              disabled={!licenseId || resetDevicesPenaltyMutation.isPending}
+            >
+              Reset devices -20%
+            </Button>
+          ) : null}
+
           {Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use) ? (
             <Button variant="soft" onClick={() => setResetActivationOpen(true)} disabled={!licQuery.data}>
               Reset activation
             </Button>
           ) : null}
+
           <Button
             variant="destructive"
             onClick={() => {
@@ -298,6 +339,7 @@ export function LicenseDetailPage() {
           </Card>
         </div>
       ) : null}
+
       {licQuery.error ? <div className="text-sm text-destructive">{String(licQuery.error)}</div> : null}
       {!licQuery.isLoading && !licQuery.error && !licQuery.data ? (
         <div className="text-sm text-muted-foreground">Not found.</div>
@@ -314,7 +356,9 @@ export function LicenseDetailPage() {
                 <div className="text-xs text-muted-foreground">Key</div>
                 <div className="font-mono text-sm break-all">{licQuery.data.key}</div>
               </div>
+
               <Separator />
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Expires</div>
@@ -328,6 +372,7 @@ export function LicenseDetailPage() {
                     })()}
                   </div>
                 </div>
+
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Type</div>
                   <div className="text-sm">
@@ -336,14 +381,14 @@ export function LicenseDetailPage() {
                       : "Fixed"}
                   </div>
                 </div>
+
                 {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
                   <div className="space-y-1">
                     <div className="text-xs text-muted-foreground">Duration</div>
-                    <div className="text-sm">
-                      {formatDurationSecondsOrDays(licQuery.data)}
-                    </div>
+                    <div className="text-sm">{formatDurationSecondsOrDays(licQuery.data)}</div>
                   </div>
                 ) : null}
+
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Remaining time</div>
                   <div className="text-sm">
@@ -370,14 +415,17 @@ export function LicenseDetailPage() {
                     </div>
                   );
                 })()}
+
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Max devices</div>
                   <div className="text-sm">{licQuery.data.max_devices}</div>
                 </div>
+
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Active</div>
                   <div className="text-sm">{licQuery.data.is_active ? "Yes" : "No"}</div>
                 </div>
+
                 {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
                   <div className="space-y-1">
                     <div className="text-xs text-muted-foreground">First used at</div>
@@ -388,22 +436,27 @@ export function LicenseDetailPage() {
                     </div>
                   </div>
                 ) : null}
+
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Devices</div>
                   <div className="text-sm">{currentDevicesCount}</div>
                 </div>
               </div>
+
               <Separator />
+
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Created</div>
                 <div className="text-sm">{new Date(licQuery.data.created_at).toLocaleString()}</div>
               </div>
+
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Deleted at</div>
                 <div className="text-sm">
                   {licQuery.data.deleted_at ? new Date(licQuery.data.deleted_at).toLocaleString() : "—"}
                 </div>
               </div>
+
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Note</div>
                 <div className="text-sm whitespace-pre-wrap break-words">{licQuery.data.note ?? "—"}</div>
@@ -524,6 +577,26 @@ export function LicenseDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={resetPenaltyOpen} onOpenChange={setResetPenaltyOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset devices with penalty?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Lần 1 chỉ đưa thiết bị về 0. Từ lần 2 trở đi hệ thống sẽ trừ 20% thời gian còn lại rồi mới reset thiết bị.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetDevicesPenaltyMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => resetDevicesPenaltyMutation.mutate()}
+              disabled={resetDevicesPenaltyMutation.isPending}
+            >
+              {resetDevicesPenaltyMutation.isPending ? "Resetting…" : "Reset devices -20%"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={reactivateOpen} onOpenChange={setReactivateOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -568,7 +641,6 @@ export function LicenseDetailPage() {
                 if (reactivateMutation.isPending) return true;
                 const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
                 const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
-                // Prevent clearing expires_at for countdown licenses that have started.
                 if (startOnFirstUse && firstUsedAt && !reactivateExpiresLocal) return true;
                 return false;
               })()}
@@ -599,4 +671,3 @@ export function LicenseDetailPage() {
     </section>
   );
 }
-

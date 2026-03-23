@@ -1,4 +1,39 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resolveCorsOrigin } from "./cors.ts";
+
+function mustEnv(name: string) {
+  const v = Deno.env.get(name);
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+/**
+ * Service-role client for DB operations inside Edge Functions.
+ * Never expose SUPABASE_SERVICE_ROLE_KEY to the frontend.
+ */
+export function createAdminClient() {
+  const supabaseUrl = mustEnv("SUPABASE_URL");
+  const serviceRoleKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+    global: { headers: { "X-Client-Info": "sunnypanel-edge-admin" } },
+  });
+}
+
+export function json(status: number, body: unknown, origin?: string | null) {
+  const allowOrigin = resolveCorsOrigin(String(origin ?? ""), Deno.env.get("PUBLIC_BASE_URL") ?? "");
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": allowOrigin,
+      "access-control-allow-headers": "authorization, x-client-info, apikey, content-type, x-fp",
+      "access-control-allow-methods": "POST,OPTIONS",
+      "access-control-max-age": "86400",
+      "vary": "origin",
+    },
+  });
+}
 
 function parseAdminEmails(raw: string | undefined | null): Set<string> {
   return new Set(
