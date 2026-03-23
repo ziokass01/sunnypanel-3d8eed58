@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
-import { FreeNotice } from "@/features/free/FreeNotice";
-import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { PublicInfo } from "@/features/free/PublicInfo";
-import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -20,22 +14,15 @@ import {
   setSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/hooks/use-toast";
-import ZaloGetKeyBubble from "../components/ZaloGetKeyBubble";
 
 type StartOk = {
   ok: true;
   out_token: string;
-  out_token_pass2?: string | null;
   session_id?: string;
   outbound_url: string;
-  outbound_url_pass2?: string | null;
   gate_url: string;
-  gate_url_pass2?: string | null;
   claim_base_url: string;
   min_delay_seconds: number;
-  min_delay_seconds_pass2?: number;
-  passes_required?: number;
 };
 type StartErr = { ok: false; msg: string; code?: string; detail?: any };
 type LastFreeKey = {
@@ -76,18 +63,8 @@ export function FreeLandingPage() {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
-  const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
-  const [showClosedDialog, setShowClosedDialog] = useState(false);
-
-  const isPendingSessionError = useMemo(() => {
-    const message = String(err ?? "").toLowerCase();
-    return (
-      message.includes("quá nhiều phiên")
-      || message.includes("đang chờ xác thực")
-      || message.includes("pending")
-      || message.includes("session_pending_limit")
-    );
-  }, [err]);
+  const [debugStart, setDebugStart] = useState<any>(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   useEffect(() => {
     try {
@@ -99,26 +76,11 @@ export function FreeLandingPage() {
     } catch {
       // ignore
     }
-    setDeviceHistory(readFreeDeviceHistory());
   }, []);
 
   useEffect(() => {
-    if (!err || !isPendingSessionError) return;
-    toast({
-      variant: "destructive",
-      title: (
-        <span className="inline-flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4" />
-          Cảnh báo xác thực
-        </span>
-      ),
-      description: "Thiết bị đang có phiên xác thực chờ xử lý. Hãy hoàn tất tab trước hoặc chờ vài phút rồi thử lại.",
-    });
-  }, [err, isPendingSessionError]);
-
-  useEffect(() => {
     let cancelled = false;
-    Promise.resolve(fetchFreeConfig({ fingerprint: getOrCreateFingerprint() }))
+    fetchFreeConfig()
       .then((c) => {
         if (cancelled) return;
         setCfg(c);
@@ -150,57 +112,28 @@ export function FreeLandingPage() {
     return m.length ? m.join(", ") : null;
   }, [cfg]);
 
-  const debugMode = useMemo(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "1", []);
+  const debugMode = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
   // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
-  const canGet = hasTypes && !loading && !missingText;
+  const canGet = hasTypes && !isClosed && !loading && !missingText;
 
   return (
-    <>
-      <div className="min-h-svh bg-background">
-        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+    <div className="min-h-svh bg-background">
+      <main className="mx-auto flex min-h-svh max-w-lg items-center p-4">
         <Card className="w-full">
-          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
+          <CardHeader className="space-y-3">
             <div className="flex items-center gap-3">
-              <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
-              <div className="space-y-1">
-                <CardTitle className="text-xl">Get Key 🔑</CardTitle>
-                <p className="text-sm text-muted-foreground">Chào mừng mọi người đến với trang web của Sunny Mod.</p>
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Flow</div>
-                <div className="mt-1 text-sm font-semibold">4 bước rõ ràng</div>
-              </div>
-              <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thiết bị</div>
-                <div className="mt-1 text-sm font-semibold">Giữ đúng một phiên</div>
-              </div>
-              <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
-                <div className="mt-1 text-sm font-semibold">Tự chuyển bước</div>
+              <img src="/brand.png" alt="SUNNY" className="h-10 w-10 rounded-xl" />
+              <div>
+                <CardTitle>Get key free</CardTitle>
               </div>
             </div>
           </CardHeader>
 
           <CardContent className="space-y-4">
-            <FreeFlowSteps current={1} />
-
-            <FreeNotice notice={cfg?.free_notice} />
-
-            <div className="rounded-2xl border bg-gradient-to-br from-muted/50 to-background p-4 text-sm text-muted-foreground shadow-sm">
-              <div className="font-semibold text-foreground">Cách dùng nhanh</div>
-              <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
-            </div>
-
-            {err && !isPendingSessionError ? (
-              <div className="space-y-2">
-                <div className="text-sm text-destructive">{err}</div>
-              </div>
-            ) : null}
+            {err ? <div className="text-sm text-destructive">{err}</div> : null}
 
             {missingText ? (
               <div className="rounded-md border p-3 text-sm">
@@ -211,16 +144,18 @@ export function FreeLandingPage() {
               </div>
             ) : null}
 
+            {cfg && isClosed ? (
+              <div className="rounded-md border p-3 text-sm">
+                <div className="font-medium">Tạm đóng</div>
+                <div className="text-muted-foreground">{cfg.free_disabled_message}</div>
+              </div>
+            ) : null}
+
             <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
-            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} />
-
-            <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold">Chọn loại key</div>
-                <Badge variant="outline" className="rounded-full">Bước 1</Badge>
-              </div>
-              <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || loading}>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Chọn loại key</div>
+              <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || isClosed || loading}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"} />
                 </SelectTrigger>
@@ -235,21 +170,14 @@ export function FreeLandingPage() {
             </div>
 
             <Button
-              className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
+              className="w-full"
               size="lg"
               disabled={!canGet}
               onClick={async () => {
-                if (isClosed) {
-                  setShowClosedDialog(true);
-                  return;
-                }
-
                 if (!selected) return;
 
                 // Start a new flow atomically: clear old bundle first (avoid mixing tokens across sessions)
                 clearBundle();
-                markFreeAttempt();
-                setDeviceHistory(readFreeDeviceHistory());
 
                 setLoading(true);
                 setErr(null);
@@ -283,22 +211,12 @@ export function FreeLandingPage() {
                   if (!res.ok) {
                     const r = res as StartErr;
                     if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
-                      markFreeAttemptFail(r.code);
-                      setDeviceHistory(readFreeDeviceHistory());
                       setErr(`${r.code}: ${r.msg}`);
                       return;
                     }
                     if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
-                      markFreeAttemptFail(r.code);
-                      setDeviceHistory(readFreeDeviceHistory());
                       setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
-                    } else if (r.code === "SESSION_PENDING_LIMIT") {
-                      markFreeAttemptFail(r.code);
-                      setDeviceHistory(readFreeDeviceHistory());
-                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
                     } else {
-                      markFreeAttemptFail(r.code || r.msg || "START_FAILED");
-                      setDeviceHistory(readFreeDeviceHistory());
                       setErr(r.msg || "Start failed");
                     }
                     return;
@@ -320,6 +238,14 @@ export function FreeLandingPage() {
                     startedAtMs: Date.now(),
                     minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
                   });
+                  setDebugStart({
+                    session_id: (res as any).session_id ?? null,
+                    gate_url: res.gate_url,
+                    outbound_url: res.outbound_url,
+                    min_delay_seconds: res.min_delay_seconds,
+                    started_at_ms: Date.now(),
+                  });
+
                   try {
                     // Keep backward compat, but ensure current key is used by FreeGate fallbacks.
                     localStorage.setItem("free_out_token_v1", String(res.out_token));
@@ -335,10 +261,6 @@ export function FreeLandingPage() {
                     localStorage.setItem("free_started_at_ms", String(Date.now()));
                     localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
                     localStorage.setItem("free_key_type_code", String(selected));
-                    const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
-                    if (pass2Tok) localStorage.setItem("free_out_token_pass2", pass2Tok);
-                    const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
-                    if (pass2Outbound) localStorage.setItem("free_outbound_url_pass2", pass2Outbound);
                   } catch {
                     // ignore
                   }
@@ -377,41 +299,22 @@ export function FreeLandingPage() {
                     setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
                     return;
                   }
-                  if (code === "SESSION_PENDING_LIMIT") {
-                    setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
-                    return;
-                  }
-                  markFreeAttemptFail(code || e?.message || "START_FAILED");
-                  setDeviceHistory(readFreeDeviceHistory());
                   setErr(e?.message ?? "Start failed");
                 } finally {
                   setLoading(false);
                 }
               }}
             >
-              {loading ? "Đang chuyển hướng…" : "Get Key 🔑"}
+              {loading ? "Đang chuyển hướng…" : "Get Key"}
             </Button>
 
             {lastFreeKey ? (
-              <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold">Key 🔑 vừa nhận</div>
-                    <div className="text-xs text-muted-foreground">Lưu nhanh để bạn dễ copy lại khi cần.</div>
-                  </div>
-                  <Badge className="rounded-full">Đã nhận</Badge>
-                </div>
-                <div className="rounded-xl border bg-background px-3 py-3 font-mono text-sm break-all">{lastFreeKey.key}</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Loại key: <span className="font-medium text-foreground">{lastFreeKey.key_type || "-"}</span></div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Hết hạn: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.expires_at)}</span></div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Tạo lúc: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.created_at)}</span></div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Session: <span className="font-medium text-foreground">{shortHash(lastFreeKey.session_id, 12)}</span></div>
-                </div>
+              <div className="rounded-md border p-3 space-y-2">
+                <div className="text-sm font-semibold">Key vừa nhận</div>
+                <div className="break-all font-mono text-sm">{lastFreeKey.key}</div>
                 <Button
                   type="button"
                   variant="secondary"
-                  className="rounded-2xl"
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(lastFreeKey.key);
@@ -422,67 +325,32 @@ export function FreeLandingPage() {
                 >
                   Copy key
                 </Button>
-                <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
+                <div className="text-xs text-muted-foreground">Loại key: {lastFreeKey.key_type || "-"}</div>
+                <div className="text-xs text-muted-foreground">Tạo lúc: {formatVnDateTime(lastFreeKey.created_at)}</div>
+                <div className="text-xs text-muted-foreground">Hết hạn: {formatVnDateTime(lastFreeKey.expires_at)}</div>
+                <div className="text-xs text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
+                <div className="text-xs text-muted-foreground">Session: {shortHash(lastFreeKey.session_id, 12)}</div>
               </div>
             ) : null}
-            <FreeDownloadCards cfg={cfg} />
 
+            {debugMode ? (
+              <div className="rounded-md border p-3 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">Advanced / Debug</div>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowDebug((v) => !v)}>
+                    {showDebug ? "Hide" : "Show"}
+                  </Button>
+                </div>
+                {showDebug ? (
+                  <pre className="whitespace-pre-wrap break-words">{JSON.stringify(debugStart, null, 2)}</pre>
+                ) : (
+                  <div className="text-muted-foreground">(Bật để xem session_id / gate_url / outbound_url)</div>
+                )}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
-        </main>
-      </div>
-
-      <Dialog open={showClosedDialog} onOpenChange={setShowClosedDialog}>
-        <DialogContent
-          hideCloseButton
-          className="w-[calc(100vw-2.5rem)] max-w-[24rem] overflow-hidden rounded-[28px] border border-primary/20 bg-[#101010]/95 p-0 text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:max-w-md"
-        >
-          <div className="bg-gradient-to-r from-primary/18 via-primary/8 to-transparent px-5 py-4">
-            <DialogHeader className="space-y-0">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
-                    <AlertTriangle className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-primary/80">Thông báo</div>
-                    <DialogTitle className="mt-1 text-left text-base font-semibold sm:text-lg">
-                      Tạm đóng Get Key
-                    </DialogTitle>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowClosedDialog(false)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-primary/20 bg-background/70 text-muted-foreground transition hover:text-foreground"
-                  aria-label="Đóng thông báo"
-                >
-                  <span className="text-lg leading-none">×</span>
-                </button>
-              </div>
-            </DialogHeader>
-          </div>
-
-          <div className="px-5 pb-5 pt-4">
-            <div className="rounded-[22px] border border-primary/15 bg-primary/5 px-4 py-4 text-sm leading-6 text-muted-foreground">
-              {String(cfg?.free_disabled_message ?? "Trang Get Key đang tạm đóng.")
-                .split(/\n+/)
-                .filter(Boolean)
-                .map((line, index) => (
-                  <p key={`${index}-${line.slice(0, 24)}`}>{line}</p>
-                ))}
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <Button type="button" variant="secondary" className="rounded-2xl" onClick={() => setShowClosedDialog(false)}>
-                Đã hiểu
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <ZaloGetKeyBubble />
-    </>
+      </main>
+    </div>
   );
 }

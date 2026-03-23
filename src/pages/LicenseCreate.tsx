@@ -13,7 +13,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { createLicense, generateLicenseKey } from "@/features/licenses/licenses-api";
 import { localToIso } from "@/features/licenses/license-utils";
-import { getErrorMessage } from "@/lib/error-message";
 
 const schema = z
   .object({
@@ -25,7 +24,7 @@ const schema = z
       .max(64)
       .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "Format: SUNNY-XXXX-XXXX-XXXX"),
     expires_at: z.string().optional(),
-    duration_value: z.coerce.number().int().min(1).max(999999).optional(),
+    duration_value: z.coerce.number().int().min(1).max(3650).optional(),
     duration_unit: z.enum(["minutes", "hours", "days"]).default("hours"),
     max_devices: z.coerce.number().int().min(1),
     is_active: z.boolean(),
@@ -159,7 +158,7 @@ export function LicenseCreatePage() {
           <div className="space-y-2">
             <Label>Duration</Label>
             <div className="grid gap-3 md:grid-cols-2">
-              <Input id="duration_value" type="number" min={1} max={999999} {...form.register("duration_value")} />
+              <Input id="duration_value" type="number" min={1} max={3650} {...form.register("duration_value")} />
               <Select
                 value={form.watch("duration_unit")}
                 onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
@@ -176,7 +175,7 @@ export function LicenseCreatePage() {
             </div>
 
             {form.formState.errors.duration_value ? (
-              <div className="text-sm text-destructive">{getErrorMessage((form.formState.errors as any).duration_value?.message)}</div>
+              <div className="text-sm text-destructive">{String((form.formState.errors as any).duration_value?.message)}</div>
             ) : null}
             <div className="text-xs text-muted-foreground">Countdown starts on the first successful verify.</div>
           </div>
@@ -221,7 +220,7 @@ export function LicenseCreatePage() {
         </div>
 
         {createMutation.error ? (
-          <div className="text-sm text-destructive">{getErrorMessage(createMutation.error)}</div>
+          <div className="text-sm text-destructive">{String(createMutation.error)}</div>
         ) : null}
 
         <div className="flex gap-2">

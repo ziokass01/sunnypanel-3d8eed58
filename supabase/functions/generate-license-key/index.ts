@@ -30,8 +30,6 @@ function isOriginAllowed(origin: string, extraAllowed: string[]) {
   const exactAllowed = new Set([
     "https://mityangho.id.vn",
     "https://www.mityangho.id.vn",
-    "https://admin.mityangho.id.vn",
-    "https://www.admin.mityangho.id.vn",
     "https://sunnypanel.lovable.app",
   ]);
   if (exactAllowed.has(o)) return true;

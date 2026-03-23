@@ -44,7 +44,7 @@ export function PublicInfo({
                 key={`${l.url}-${idx}`}
                 variant="outline"
                 className="h-auto justify-start gap-2 whitespace-normal py-2"
-                onClick={() => window.open(l.url, "_blank", "noopener")}
+                onClick={() => window.open(l.url, "_blank", "noopener,noreferrer")}
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 <span className="text-left text-sm leading-tight">{l.label}</span>

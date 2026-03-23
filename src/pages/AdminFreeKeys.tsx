@@ -2,13 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, Filter, Trash2, Download, Plus, Image as ImageIcon } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,46 +23,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type SettingsRow = {
   id: number;
   free_outbound_url: string | null;
-  free_outbound_url_pass2?: string | null;
-  free_min_delay_seconds_pass2?: number;
-  free_gate_antibypass_enabled?: boolean;
-  free_gate_antibypass_seconds?: number;
-  free_link4m_rotate_days?: number;
-  free_session_waiting_limit?: number;
-  free_link4m_rotate_nonce_pass1?: number;
-  free_link4m_rotate_nonce_pass2?: number;
   free_enabled: boolean;
   free_disabled_message: string;
   free_min_delay_seconds: number;
   free_min_delay_enabled?: boolean;
   free_return_seconds: number;
   free_daily_limit_per_fingerprint: number;
-  free_daily_limit_per_ip?: number;
-  free_gate_require_ip_match?: boolean;
-  free_gate_require_ua_match?: boolean;
   free_require_link4m_referrer: boolean;
   free_public_note: string;
   free_public_links: any;
-  free_download_enabled?: boolean;
-  free_download_name?: string | null;
-  free_download_info?: string | null;
-  free_download_path?: string | null;
-  free_download_url?: string | null;
-  free_download_size?: number | null;
-  free_download_cards?: any;
-  free_notice_enabled?: boolean;
-  free_notice_title?: string | null;
-  free_notice_content?: string | null;
-  free_notice_mode?: "modal" | "inline" | null;
-  free_notice_closable?: boolean;
-  free_notice_show_once?: boolean;
-  free_external_download_enabled?: boolean;
-  free_external_download_title?: string | null;
-  free_external_download_description?: string | null;
-  free_external_download_url?: string | null;
-  free_external_download_button_label?: string | null;
-  free_external_download_badge?: string | null;
-  free_external_download_icon_url?: string | null;
   updated_at: string;
   updated_by: string | null;
 };
@@ -77,7 +44,6 @@ type KeyTypeRow = {
   duration_seconds: number;
   sort_order: number;
   enabled: boolean;
-  requires_double_gate?: boolean;
   updated_at: string;
 };
 
@@ -99,19 +65,6 @@ type SessionRow = {
   claim_token_hash: string | null;
 };
 
-type GateLogRow = {
-  id: number;
-  created_at: string;
-  session_id: string | null;
-  key_type_code: string | null;
-  pass_no: number | null;
-  event_code: string;
-  detail: any;
-  ip_hash: string | null;
-  fingerprint_hash: string | null;
-  ua_hash: string | null;
-};
-
 type IssueRow = {
   issue_id: string;
   created_at: string;
@@ -130,16 +83,6 @@ type PublicLink = {
   icon?: string | null;
 };
 
-type DownloadCardEditorItem = {
-  id: string;
-  enabled: boolean;
-  title: string;
-  description: string;
-  url: string;
-  button_label: string;
-  icon_url: string;
-};
-
 type AdminTestResult = {
   ok: boolean;
   key?: string;
@@ -150,95 +93,11 @@ type AdminTestResult = {
   message?: string;
 };
 
-function nextDownloadCardId() {
-  return `dl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createEditorDownloadCard(value?: Partial<DownloadCardEditorItem> & Record<string, any>): DownloadCardEditorItem {
-  return {
-    id: String(value?.id ?? nextDownloadCardId()),
-    enabled: Boolean(value?.enabled ?? true),
-    title: String(value?.title ?? ""),
-    description: String(value?.description ?? ""),
-    url: String(value?.url ?? ""),
-    button_label: String(value?.button_label ?? ""),
-    icon_url: String(value?.icon_url ?? ""),
-  };
-}
-
-function createEmptyDownloadCard(): DownloadCardEditorItem {
-  return createEditorDownloadCard({
-    enabled: true,
-    title: "",
-    description: "",
-    url: "",
-    button_label: "Mở liên kết",
-    icon_url: "",
-  });
-}
-
-function buildDownloadCardsFromSettings(settings?: Partial<SettingsRow> | null): DownloadCardEditorItem[] {
-  const rawCards = Array.isArray((settings as any)?.free_download_cards) ? (settings as any)?.free_download_cards : [];
-  const cards = rawCards
-    .map((card: any) => createEditorDownloadCard(card))
-    .filter((card: DownloadCardEditorItem) => card.title || card.description || card.url || card.button_label || card.icon_url);
-
-  if (cards.length) return cards;
-
-  const fallback: DownloadCardEditorItem[] = [];
-  const primaryUrl = String((settings as any)?.free_download_url ?? "").trim();
-  const externalUrl = String((settings as any)?.free_external_download_url ?? "").trim();
-
-  if (primaryUrl || (settings as any)?.free_download_name || (settings as any)?.free_download_info) {
-    fallback.push(createEditorDownloadCard({
-      enabled: Boolean((settings as any)?.free_download_enabled ?? true),
-      title: String((settings as any)?.free_download_name ?? ""),
-      description: String((settings as any)?.free_download_info ?? ""),
-      url: primaryUrl,
-      button_label: "Mở liên kết",
-      badge: "Link 1",
-      icon_url: "",
-    }));
-  }
-
-  if (externalUrl || (settings as any)?.free_external_download_title || (settings as any)?.free_external_download_description) {
-    fallback.push(createEditorDownloadCard({
-      enabled: Boolean((settings as any)?.free_external_download_enabled ?? true),
-      title: String((settings as any)?.free_external_download_title ?? ""),
-      description: String((settings as any)?.free_external_download_description ?? ""),
-      url: externalUrl,
-      button_label: String((settings as any)?.free_external_download_button_label ?? "Mở liên kết"),
-      badge: String((settings as any)?.free_external_download_badge ?? "Link 2"),
-      icon_url: String((settings as any)?.free_external_download_icon_url ?? ""),
-    }));
-  }
-
-  return fallback.length ? fallback : [createEmptyDownloadCard()];
-}
-
-function getVietnamDateKey(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-
-  const year = parts.find((p) => p.type === "year")?.value;
-  const month = parts.find((p) => p.type === "month")?.value;
-  const day = parts.find((p) => p.type === "day")?.value;
-  return `${year}-${month}-${day}`;
-}
-
-function getVietnamDayRangeUtc(day: string) {
-  const [year, month, date] = day.split("-").map((v) => Number(v));
-  const utcOffsetMs = 7 * 60 * 60 * 1000;
-  const startMs = Date.UTC(year, month - 1, date, 0, 0, 0, 0) - utcOffsetMs;
-  const nextStartMs = startMs + 24 * 60 * 60 * 1000;
-  return {
-    startUtcIso: new Date(startMs).toISOString(),
-    nextStartUtcIso: new Date(nextStartMs).toISOString(),
-  };
+function utcDayRange(day: string) {
+  // day = YYYY-MM-DD in UTC
+  const from = `${day}T00:00:00.000Z`;
+  const to = `${day}T23:59:59.999Z`;
+  return { from, to };
 }
 
 function pad2(n: number) {
@@ -266,24 +125,6 @@ function shortText(v?: string | null, n = 10) {
   return x.length > n ? `${x.slice(0, n)}…` : x;
 }
 
-function statusBadgeVariant(status?: string | null): "default" | "secondary" | "destructive" | "outline" {
-  const v = String(status ?? "").toLowerCase();
-  if (["revealed", "gate_ok", "pass1_ok", "reveal_ok", "ok"].includes(v)) return "default";
-  if (["gate_fail", "closed", "blocked", "auto_blocked", "bad_referrer", "out_token_mismatch", "claim_invalid"].includes(v)) return "destructive";
-  if (["started", "init", "pending"].includes(v)) return "secondary";
-  return "outline";
-}
-
-function statusLabel(status?: string | null) {
-  const v = String(status ?? "").trim();
-  return v || "-";
-}
-
-function compactJson(value: any) {
-  const text = JSON.stringify(value ?? {}, null, 2);
-  return text.length > 240 ? `${text.slice(0, 240)}…` : text;
-}
-
 function toLinksText(value: any): string {
   if (!Array.isArray(value)) return "";
   return value
@@ -297,6 +138,8 @@ function toLinksText(value: any): string {
     .filter(Boolean)
     .join("\n");
 }
+
+
 
 function isFreeSchemaMissingError(message: string) {
   const msg = String(message || "").toLowerCase();
@@ -323,41 +166,11 @@ function parseLinksText(text: string): PublicLink[] {
     const url = (urlRaw ?? "").trim();
     const icon = (iconRaw ?? "").trim();
     if (!label || !url) continue;
+    // Very light url sanity
     if (!/^https?:\/\//i.test(url)) continue;
     out.push({ label, url, icon: icon || null });
   }
   return out.slice(0, 8);
-}
-
-const NEW_FREE_SETTINGS_COLUMNS = [
-  "free_daily_limit_per_ip",
-  "free_gate_require_ip_match",
-  "free_gate_require_ua_match",
-  "free_notice_enabled",
-  "free_notice_title",
-  "free_notice_content",
-  "free_notice_mode",
-  "free_notice_closable",
-  "free_notice_show_once",
-  "free_external_download_enabled",
-  "free_external_download_title",
-  "free_external_download_description",
-  "free_external_download_url",
-  "free_external_download_button_label",
-  "free_external_download_badge",
-  "free_external_download_icon_url",
-  "free_download_cards",
-] as const;
-
-function isMissingFreeSettingsColumnError(error: any) {
-  const msg = String(error?.message || error?.details || error?.hint || "");
-  return NEW_FREE_SETTINGS_COLUMNS.some((col) => msg.includes(col));
-}
-
-function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
-  const legacyPatch = { ...patch } as Record<string, any>;
-  for (const col of NEW_FREE_SETTINGS_COLUMNS) delete legacyPatch[col];
-  return legacyPatch;
 }
 
 export function AdminFreeKeysPage() {
@@ -370,7 +183,7 @@ export function AdminFreeKeysPage() {
 
   const openUrl = (u: string) => {
     if (!u) return;
-    window.open(u, "_blank", "noopener");
+    window.open(u, "_blank", "noopener,noreferrer");
   };
 
   const copyText = async (t: string) => {
@@ -382,12 +195,15 @@ export function AdminFreeKeysPage() {
     }
   };
 
+  // -------- Settings (admin-controlled) --------
   const settingsQuery = useQuery({
     queryKey: ["free-settings"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("licenses_free_settings")
-        .select("*")
+        .select(
+          "id,free_outbound_url,free_enabled,free_disabled_message,free_min_delay_seconds,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_require_link4m_referrer,free_public_note,free_public_links,updated_at,updated_by",
+        )
         .eq("id", 1)
         .maybeSingle();
       if (error) throw error;
@@ -396,208 +212,55 @@ export function AdminFreeKeysPage() {
   });
 
   const [outboundUrl, setOutboundUrl] = useState("");
-  const [outboundUrlPass2, setOutboundUrlPass2] = useState("");
-  const [rotateDays, setRotateDays] = useState(7);
-  const [sessionWaitingLimit, setSessionWaitingLimit] = useState(2);
-  const [rotateNoncePass1, setRotateNoncePass1] = useState(0);
-  const [rotateNoncePass2, setRotateNoncePass2] = useState(0);
-
   const [freeEnabled, setFreeEnabled] = useState(true);
   const [disabledMessage, setDisabledMessage] = useState("Trang GetKey đang tạm đóng.");
   const [minDelayEnabled, setMinDelayEnabled] = useState(true);
   const [minDelay, setMinDelay] = useState(25);
-  const [minDelayPass2, setMinDelayPass2] = useState(25);
-  const [gateAntiBypassEnabled, setGateAntiBypassEnabled] = useState(false);
-  const [gateAntiBypassSeconds, setGateAntiBypassSeconds] = useState(0);
   const [returnSeconds, setReturnSeconds] = useState(10);
   const [dailyLimit, setDailyLimit] = useState(1);
-  const [dailyLimitPerIp, setDailyLimitPerIp] = useState(0);
-  const [gateRequireIpMatch, setGateRequireIpMatch] = useState(true);
-  const [gateRequireUaMatch, setGateRequireUaMatch] = useState(true);
   const [requireRef, setRequireRef] = useState(false);
   const [publicNote, setPublicNote] = useState("");
   const [publicLinksText, setPublicLinksText] = useState("");
-  const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
-  const [downloadCards, setDownloadCards] = useState<DownloadCardEditorItem[]>([createEmptyDownloadCard()]);
-  const [uploadingIconId, setUploadingIconId] = useState<string | null>(null);
-  const [noticeEnabled, setNoticeEnabled] = useState(false);
-  const [noticeTitle, setNoticeTitle] = useState("");
-  const [noticeContent, setNoticeContent] = useState("");
-  const [noticeMode, setNoticeMode] = useState<"modal" | "inline">("modal");
-  const [noticeClosable, setNoticeClosable] = useState(true);
-  const [noticeShowOnce, setNoticeShowOnce] = useState(false);
 
   useEffect(() => {
     const s = settingsQuery.data;
     if (!s) return;
     setOutboundUrl(s.free_outbound_url ?? "");
-    setOutboundUrlPass2((s as any).free_outbound_url_pass2 ?? "");
-    setRotateDays(Number((s as any).free_link4m_rotate_days ?? 7));
-    setSessionWaitingLimit(Number((s as any).free_session_waiting_limit ?? 2));
-    setRotateNoncePass1(Number((s as any).free_link4m_rotate_nonce_pass1 ?? 0));
-    setRotateNoncePass2(Number((s as any).free_link4m_rotate_nonce_pass2 ?? 0));
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
     setMinDelayEnabled(Boolean((s as any).free_min_delay_enabled ?? true));
     setMinDelay(Number(s.free_min_delay_seconds ?? 25));
-    setMinDelayPass2(Number((s as any).free_min_delay_seconds_pass2 ?? s.free_min_delay_seconds ?? 25));
-    setGateAntiBypassEnabled(Boolean((s as any).free_gate_antibypass_enabled ?? false));
-    setGateAntiBypassSeconds(Math.max(0, Number((s as any).free_gate_antibypass_seconds ?? 0)));
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
-    setDailyLimitPerIp(Math.max(0, Number((s as any).free_daily_limit_per_ip ?? 0)));
-    setGateRequireIpMatch(Boolean((s as any).free_gate_require_ip_match ?? true));
-    setGateRequireUaMatch(Boolean((s as any).free_gate_require_ua_match ?? true));
     setRequireRef(Boolean(s.free_require_link4m_referrer));
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
-    setDownloadCards(buildDownloadCardsFromSettings(s));
-    setNoticeEnabled(Boolean((s as any).free_notice_enabled ?? false));
-    setNoticeTitle(String((s as any).free_notice_title ?? ""));
-    setNoticeContent(String((s as any).free_notice_content ?? ""));
-    setNoticeMode(String((s as any).free_notice_mode ?? "").trim().toLowerCase() === "inline" ? "inline" : "modal");
-    setNoticeClosable(Boolean((s as any).free_notice_closable ?? true));
-    setNoticeShowOnce(Boolean((s as any).free_notice_show_once ?? false));
   }, [settingsQuery.data]);
-
-  const addDownloadCard = () => {
-    setDownloadCards((prev) => [...prev, createEmptyDownloadCard()]);
-    setDownloadPanelOpen(true);
-  };
-
-  const updateDownloadCard = (id: string, patch: Partial<DownloadCardEditorItem>) => {
-    setDownloadCards((prev) => prev.map((card) => (card.id === id ? { ...card, ...patch } : card)));
-  };
-
-  const removeDownloadCard = (id: string) => {
-    setDownloadCards((prev) => {
-      const next = prev.filter((card) => card.id !== id);
-      return next.length ? next : [createEmptyDownloadCard()];
-    });
-  };
-
-  const moveDownloadCard = (id: string, direction: -1 | 1) => {
-    setDownloadCards((prev) => {
-      const index = prev.findIndex((card) => card.id === id);
-      if (index < 0) return prev;
-
-      const target = index + direction;
-      if (target < 0 || target >= prev.length) return prev;
-
-      const next = [...prev];
-      const temp = next[index];
-      next[index] = next[target];
-      next[target] = temp;
-      return next;
-    });
-  };
-
-  const uploadCardIcon = async (id: string, file?: File | null) => {
-    if (!file) return;
-    setUploadingIconId(id);
-    try {
-      const ext = file.name.includes(".") ? file.name.split(".").pop() : "png";
-      const safeBase = file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/-+/g, "-").slice(0, 40) || "icon";
-      const path = `free-icons/${Date.now()}-${safeBase}.${ext || "png"}`;
-      const storage = supabase.storage.from("free-downloads") as any;
-      const { error: uploadErr } = await storage.upload(path, file, {
-        upsert: true,
-        cacheControl: "3600",
-        contentType: file.type || "image/png",
-      });
-      if (uploadErr) throw uploadErr;
-      const { data } = storage.getPublicUrl(path);
-      const publicUrl = String(data?.publicUrl || "").trim();
-      if (!publicUrl) throw new Error("ICON_URL_EMPTY");
-      updateDownloadCard(id, { icon_url: publicUrl });
-      toast({ title: "Đã upload icon", description: "Ảnh icon đã được gán vào box." });
-    } catch (e: any) {
-      toast({ title: "Upload icon failed", description: e?.message ?? "Không thể upload icon.", variant: "destructive" });
-    } finally {
-      setUploadingIconId(null);
-    }
-  };
 
   const saveSettings = useMutation({
     mutationFn: async () => {
-      const normalizedDownloadCards = downloadCards
-        .map((card) => ({
-          enabled: Boolean(card.enabled),
-          title: card.title.trim(),
-          description: card.description.trim(),
-          url: card.url.trim(),
-          button_label: card.button_label.trim(),
-          icon_url: card.icon_url.trim(),
-        }))
-        .filter((card) => card.title || card.description || card.url || card.button_label || card.icon_url);
-
-      const legacyVisibleCards = normalizedDownloadCards.filter((card) => card.enabled && /^https?:\/\//i.test(card.url));
-      const legacyPrimaryCard = legacyVisibleCards[0] ?? null;
-      const legacySecondaryCard = legacyVisibleCards[1] ?? null;
-
       const patch = {
         free_outbound_url: outboundUrl.trim() || null,
-        free_outbound_url_pass2: outboundUrlPass2.trim() || null,
-        free_link4m_rotate_days: Math.max(1, Math.floor(Number(rotateDays) || 7)),
-        free_session_waiting_limit: Math.max(1, Math.floor(Number(sessionWaitingLimit) || 2)),
-        free_link4m_rotate_nonce_pass1: Math.max(0, Math.floor(Number(rotateNoncePass1) || 0)),
-        free_link4m_rotate_nonce_pass2: Math.max(0, Math.floor(Number(rotateNoncePass2) || 0)),
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
         free_min_delay_enabled: Boolean(minDelayEnabled),
+        // IMPORTANT: when delay is disabled, force seconds = 0 (not 5/25)
         free_min_delay_seconds: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelay) || 25)) : 0,
-        free_min_delay_seconds_pass2: minDelayEnabled ? Math.max(5, Math.floor(Number(minDelayPass2) || 25)) : 0,
-        free_gate_antibypass_enabled: Boolean(gateAntiBypassEnabled),
-        free_gate_antibypass_seconds: gateAntiBypassEnabled ? Math.max(0, Math.floor(Number(gateAntiBypassSeconds) || 0)) : 0,
         free_return_seconds: Math.max(10, Math.floor(Number(returnSeconds) || 10)),
-        free_daily_limit_per_fingerprint: Math.max(0, Math.floor(Number(dailyLimit) || 0)),
-        free_daily_limit_per_ip: Math.max(0, Math.floor(Number(dailyLimitPerIp) || 0)),
-        free_gate_require_ip_match: Boolean(gateRequireIpMatch),
-        free_gate_require_ua_match: Boolean(gateRequireUaMatch),
+        free_daily_limit_per_fingerprint: Math.max(1, Math.floor(Number(dailyLimit) || 1)),
         free_require_link4m_referrer: Boolean(requireRef),
         free_public_note: publicNote,
         free_public_links: parseLinksText(publicLinksText),
-        free_download_enabled: Boolean(legacyPrimaryCard?.enabled && legacyPrimaryCard?.url),
-        free_download_name: legacyPrimaryCard?.title || null,
-        free_download_info: legacyPrimaryCard?.description || null,
-        free_download_path: null,
-        free_download_url: legacyPrimaryCard?.url || null,
-        free_download_size: null,
-        free_download_cards: normalizedDownloadCards,
-        free_notice_enabled: Boolean(noticeEnabled && noticeContent.trim()),
-        free_notice_title: noticeTitle.trim() || null,
-        free_notice_content: noticeContent.trim() || null,
-        free_notice_mode: noticeMode === "inline" ? "inline" : "modal",
-        free_notice_closable: Boolean(noticeClosable),
-        free_notice_show_once: Boolean(noticeShowOnce),
-        free_external_download_enabled: Boolean(legacySecondaryCard?.enabled && legacySecondaryCard?.url),
-        free_external_download_title: legacySecondaryCard?.title || null,
-        free_external_download_description: legacySecondaryCard?.description || null,
-        free_external_download_url: legacySecondaryCard?.url || null,
-        free_external_download_button_label: legacySecondaryCard?.button_label || null,
-        free_external_download_badge: null,
-        free_external_download_icon_url: legacySecondaryCard?.icon_url || null,
       };
 
-      const query: any = supabase.from("licenses_free_settings");
-      const attempt = await query
+      const { data, error } = await supabase
+        .from("licenses_free_settings")
         .upsert({ id: 1, ...patch }, { onConflict: "id" })
         .select("id")
         .single();
 
-      if (!attempt.error) return attempt.data;
-      if (!isMissingFreeSettingsColumnError(attempt.error)) throw attempt.error;
-
-      const legacyPatch = omitNewFreeSettingsColumns(patch);
-
-      const legacyAttempt = await supabase
-        .from("licenses_free_settings")
-        .upsert({ id: 1, ...legacyPatch }, { onConflict: "id" })
-        .select("id")
-        .single();
-
-      if (legacyAttempt.error) throw legacyAttempt.error;
-      return legacyAttempt.data;
+      if (error) throw error;
+      return data;
     },
     onSuccess: async () => {
       toast({ title: "Saved", description: "Free settings updated." });
@@ -608,30 +271,13 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const rotateNow = useMutation({
-    mutationFn: async (passNo: 1 | 2) => {
-      const field = passNo === 1 ? "free_link4m_rotate_nonce_pass1" : "free_link4m_rotate_nonce_pass2";
-      const current = passNo === 1 ? rotateNoncePass1 : rotateNoncePass2;
-      const { error } = await supabase
-        .from("licenses_free_settings")
-        .update({ [field]: current + 1 })
-        .eq("id", 1);
-      if (error) throw error;
-      return true;
-    },
-    onSuccess: async () => {
-      toast({ title: "Rotated", description: "Đã đổi bucket ngay lập tức." });
-      await settingsQuery.refetch();
-    },
-    onError: (e: any) => toast({ title: "Rotate failed", description: e?.message ?? "Error", variant: "destructive" }),
-  });
-
+  // -------- Key types --------
   const keyTypesQuery = useQuery({
     queryKey: ["free-key-types"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("licenses_free_key_types")
-        .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate,updated_at")
+        .select("code,label,kind,value,duration_seconds,sort_order,enabled,updated_at")
         .order("sort_order", { ascending: true });
       if (error) throw error;
       return (data ?? []) as any as KeyTypeRow[];
@@ -655,23 +301,7 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const toggleVipKeyType = useMutation({
-    mutationFn: async (args: { code: string; requires_double_gate: boolean }) => {
-      const { error } = await supabase
-        .from("licenses_free_key_types")
-        .update({ requires_double_gate: args.requires_double_gate })
-        .eq("code", args.code);
-      if (error) throw error;
-      return true;
-    },
-    onError: (e: any) => {
-      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
-    },
-    onSuccess: async () => {
-      await keyTypesQuery.refetch();
-    },
-  });
-
+  
   const deleteKeyType = useMutation({
     mutationFn: async (code: string) => {
       const { error } = await supabase.from("licenses_free_key_types").delete().eq("code", code);
@@ -687,8 +317,10 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const disableAllKeyTypes = useMutation({
+const disableAllKeyTypes = useMutation({
     mutationFn: async () => {
+      // Some PostgREST/Supabase setups reject UPDATE without a WHERE clause.
+      // Keep behavior (disable all) while satisfying that requirement.
       const { error } = await supabase
         .from("licenses_free_key_types")
         .update({ enabled: false })
@@ -705,6 +337,7 @@ export function AdminFreeKeysPage() {
     },
   });
 
+  // Create/enable a key type (hours: 1..24, days: 1..30)
   const [newKind, setNewKind] = useState<"hour" | "day">("hour");
   const [newValue, setNewValue] = useState<number>(1);
   const [newLabel, setNewLabel] = useState<string>("");
@@ -753,7 +386,6 @@ export function AdminFreeKeysPage() {
 
   const [pingResult, setPingResult] = useState<any>(null);
   const [pingError, setPingError] = useState<string | null>(null);
-  const [showMonitorFilters, setShowMonitorFilters] = useState(false);
 
   useEffect(() => {
     if (!keyTypesQuery.data?.length) return;
@@ -802,7 +434,7 @@ export function AdminFreeKeysPage() {
       toast({
         title: "Test failed",
         description: isFetch
-          ? `${msg}. Gợi ý: (1) CORS/OPTIONS bị chặn, (2) deploy sai tên function (/admin-free-test vs /free-admin-test), (3) backend URL/project mismatch.`
+          ? `${msg}. Gợi ý: (1) CORS/OPTIONS bị chặn, (2) deploy sai tên function (/admin-free-test vs /free-admin-test), (3) backend URL/project mismatch. (tried URLs thường nằm trong message)`
           : msg.includes("MISCONFIG")
             ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)`
             : msg,
@@ -811,22 +443,24 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const [day, setDay] = useState(() => getVietnamDateKey());
+  // -------- Sessions / Issues --------
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const [day, setDay] = useState(todayUtc);
   const [status, setStatus] = useState<string>("all");
   const [ipHash, setIpHash] = useState<string>("");
 
-  const range = useMemo(() => getVietnamDayRangeUtc(day), [day]);
+  const range = useMemo(() => utcDayRange(day), [day]);
 
   const sessionsQuery = useQuery({
-    queryKey: ["free-sessions", range.startUtcIso, range.nextStartUtcIso, status, ipHash],
+    queryKey: ["free-sessions", range.from, range.to, status, ipHash],
     queryFn: async () => {
       let q = supabase
         .from("licenses_free_sessions")
         .select(
           "session_id,created_at,status,reveal_count,ip_hash,ua_hash,fingerprint_hash,last_error,started_at,gate_ok_at,revealed_at,key_type_code,duration_seconds,out_token_hash,claim_token_hash",
         )
-        .gte("created_at", range.startUtcIso)
-        .lt("created_at", range.nextStartUtcIso)
+        .gte("created_at", range.from)
+        .lte("created_at", range.to)
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -840,13 +474,13 @@ export function AdminFreeKeysPage() {
   });
 
   const issuesQuery = useQuery({
-    queryKey: ["free-issues", range.startUtcIso, range.nextStartUtcIso, ipHash],
+    queryKey: ["free-issues", range.from, range.to, ipHash],
     queryFn: async () => {
       let q = supabase
         .from("licenses_free_issues")
         .select("issue_id,created_at,expires_at,license_id,key_mask,session_id,ip_hash,fingerprint_hash,ua_hash")
-        .gte("created_at", range.startUtcIso)
-        .lt("created_at", range.nextStartUtcIso)
+        .gte("created_at", range.from)
+        .lte("created_at", range.to)
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -857,37 +491,18 @@ export function AdminFreeKeysPage() {
     },
   });
 
-  const gateLogsQuery = useQuery({
-    queryKey: ["free-gate-logs", range.startUtcIso, range.nextStartUtcIso, ipHash],
-    queryFn: async () => {
-      let q = supabase
-        .from("licenses_free_gate_logs")
-        .select("id,created_at,session_id,key_type_code,pass_no,event_code,detail,ip_hash,fingerprint_hash,ua_hash")
-        .gte("created_at", range.startUtcIso)
-        .lt("created_at", range.nextStartUtcIso)
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (ipHash.trim()) q = q.eq("ip_hash", ipHash.trim());
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []) as any as GateLogRow[];
-    },
-  });
-
   const freeSchemaHint = useMemo(() => {
     const errs = [
       settingsQuery.error,
       keyTypesQuery.error,
       sessionsQuery.error,
       issuesQuery.error,
-      gateLogsQuery.error,
     ]
       .map((e: any) => String(e?.message ?? ""))
       .filter(Boolean);
     const hit = errs.find((m) => isFreeSchemaMissingError(m));
     return hit ?? null;
-  }, [settingsQuery.error, keyTypesQuery.error, sessionsQuery.error, issuesQuery.error, gateLogsQuery.error]);
+  }, [settingsQuery.error, keyTypesQuery.error, sessionsQuery.error, issuesQuery.error]);
 
   const revokeLicense = useMutation({
     mutationFn: async (args: { issueId: string; licenseId: string }) => {
@@ -969,121 +584,22 @@ export function AdminFreeKeysPage() {
     onError: (e: any) => toast({ title: "Delete failed", description: e?.message ?? "Error", variant: "destructive" }),
   });
 
-  const dashboardStats = useMemo(() => {
-    const gateLogs = gateLogsQuery.data ?? [];
-    const topError = gateLogs.reduce<Record<string, number>>((acc, row) => {
-      const key = String(row.event_code || "UNKNOWN");
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    const topErrorLabel = Object.entries(topError).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
-    return {
-      sessionCount: 0,
-      issueCount: 0,
-      verifyFail: 0,
-      activeBlocks: 0,
-      pass1Hits: 0,
-      pass2Hits: 0,
-      topErrorLabel,
-    };
-  }, [gateLogsQuery.data]);
-
-  const dashboardStatsQuery = useQuery({
-    queryKey: ["free-dashboard-stats", range.startUtcIso, range.nextStartUtcIso, status, ipHash],
-    queryFn: async () => {
-      const baseSessions = () => {
-        let query = supabase
-          .from("licenses_free_sessions")
-          .select("session_id", { count: "exact", head: true })
-          .gte("created_at", range.startUtcIso)
-          .lt("created_at", range.nextStartUtcIso);
-        if (status !== "all") query = query.eq("status", status);
-        if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
-        return query;
-      };
-
-      const baseIssues = () => {
-        let query = supabase
-          .from("licenses_free_issues")
-          .select("issue_id", { count: "exact", head: true })
-          .gte("created_at", range.startUtcIso)
-          .lt("created_at", range.nextStartUtcIso);
-        if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
-        return query;
-      };
-
-      const baseGateLogs = () => {
-        let query = supabase
-          .from("licenses_free_gate_logs")
-          .select("id", { count: "exact", head: true })
-          .gte("created_at", range.startUtcIso)
-          .lt("created_at", range.nextStartUtcIso);
-        if (ipHash.trim()) query = query.eq("ip_hash", ipHash.trim());
-        return query;
-      };
-
-      const [sessionsRes, issuesRes, verifyFailRes, activeBlocksRes, pass1Res, pass2Res] = await Promise.all([
-        baseSessions(),
-        baseIssues(),
-        baseGateLogs().or("event_code.ilike.%FAIL%,event_code.ilike.%MISMATCH%,event_code.ilike.%EARLY%,event_code.ilike.%BLOCKED%,event_code.ilike.BAD_%"),
-        baseGateLogs().eq("event_code", "AUTO_BLOCKED"),
-        baseGateLogs().eq("pass_no", 1),
-        baseGateLogs().eq("pass_no", 2),
-      ]);
-
-      if (sessionsRes.error) throw sessionsRes.error;
-      if (issuesRes.error) throw issuesRes.error;
-      if (verifyFailRes.error) throw verifyFailRes.error;
-      if (activeBlocksRes.error) throw activeBlocksRes.error;
-      if (pass1Res.error) throw pass1Res.error;
-      if (pass2Res.error) throw pass2Res.error;
-
-      return {
-        sessionCount: sessionsRes.count ?? 0,
-        issueCount: issuesRes.count ?? 0,
-        verifyFail: verifyFailRes.count ?? 0,
-        activeBlocks: activeBlocksRes.count ?? 0,
-        pass1Hits: pass1Res.count ?? 0,
-        pass2Hits: pass2Res.count ?? 0,
-      };
-    },
-  });
-
-  const dashboardStatsView = {
-    ...dashboardStats,
-    ...(dashboardStatsQuery.data ?? {}),
-  };
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-5">
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.issueCount}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.sessionCount}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Verify fail</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.verifyFail}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Auto blocked</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.activeBlocks}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStatsView.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStatsView.pass1Hits} · Pass2: {dashboardStatsView.pass2Hits}</div></CardContent></Card>
-      </div>
-
+    <div className="space-y-4">
       <Card>
-        <CardHeader className="space-y-3 pb-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle className="text-xl">Free GetKey Settings</CardTitle>
-              <CardDescription>
-                Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint. Phần trên cùng là dashboard nhanh để bạn nhìn tình hình trong ngày.
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
-                Open GetKey
-              </Button>
-              <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
-                Copy GetKey URL
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setDownloadPanelOpen((v) => !v)}>
-                Download links
-              </Button>
-            </div>
+        <CardHeader>
+          <CardTitle>Free GetKey Settings</CardTitle>
+          <CardDescription>
+            Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint.
+          </CardDescription>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
+              Open GetKey
+            </Button>
+            <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
+              Copy GetKey URL
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1100,122 +616,6 @@ export function AdminFreeKeysPage() {
             </div>
           ) : null}
 
-          <Collapsible open={downloadPanelOpen} onOpenChange={setDownloadPanelOpen}>
-            <CollapsibleTrigger asChild>
-              <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
-                <span className="flex items-center gap-2"><Download className="h-4 w-4" /> Download links</span>
-                <ChevronDown className={`h-4 w-4 transition-transform ${downloadPanelOpen ? "rotate-180" : ""}`} />
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-3">
-              <div className="rounded-2xl border bg-background/60 p-4 space-y-4">
-                <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                  Không upload file vào Supabase nữa. Phần này chỉ dùng link ngoài để tránh tốn bộ nhớ. Mỗi box là một link tải riêng, có thể thêm nhiều box.
-                </div>
-
-                <div className="space-y-4">
-                  {downloadCards.map((card, index) => (
-                    <div key={card.id} className="rounded-2xl border bg-muted/20 p-4 space-y-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="font-medium">Box tải {index + 1}</div>
-                          <div className="text-xs text-muted-foreground">Card tải xuống hiển thị ở trang free.</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">Hiện</span>
-                          <Switch checked={card.enabled} onCheckedChange={(v) => updateDownloadCard(card.id, { enabled: Boolean(v) })} />
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => moveDownloadCard(card.id, -1)}
-                            disabled={index === 0}
-                            title="Đưa box lên trên"
-                          >
-                            <span className="text-sm leading-none">↑</span>
-                          </Button>
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => moveDownloadCard(card.id, 1)}
-                            disabled={index === downloadCards.length - 1}
-                            title="Đưa box xuống dưới"
-                          >
-                            <span className="text-sm leading-none">↓</span>
-                          </Button>
-
-                          {downloadCards.length > 1 ? (
-                            <Button type="button" variant="ghost" size="icon" onClick={() => removeDownloadCard(card.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Tên app / file</div>
-                          <Input value={card.title} onChange={(e) => updateDownloadCard(card.id, { title: e.target.value })} placeholder="Ví dụ: SunnyMod V4" />
-                        </div>
-
-
-                        <div className="space-y-2 sm:col-span-2">
-                          <div className="text-sm font-medium">Link tải</div>
-                          <Input value={card.url} onChange={(e) => updateDownloadCard(card.id, { url: e.target.value })} placeholder="https://example.com/download" />
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Nhãn nút</div>
-                          <Input value={card.button_label} onChange={(e) => updateDownloadCard(card.id, { button_label: e.target.value })} placeholder="Mở liên kết" />
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Ảnh / icon URL</div>
-                          <Input value={card.icon_url} onChange={(e) => updateDownloadCard(card.id, { icon_url: e.target.value })} placeholder="https://example.com/icon.png" />
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => document.getElementById(`icon-upload-${card.id}`)?.click()}
-                              disabled={uploadingIconId === card.id}
-                            >
-                              <ImageIcon className="mr-2 h-4 w-4" />
-                              {uploadingIconId === card.id ? "Đang upload..." : "Upload icon"}
-                            </Button>
-                            <input
-                              id={`icon-upload-${card.id}`}
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0] ?? null;
-                                void uploadCardIcon(card.id, file);
-                                e.currentTarget.value = "";
-                              }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 sm:col-span-2">
-                          <div className="text-sm font-medium">Mô tả</div>
-                          <Textarea value={card.description} onChange={(e) => updateDownloadCard(card.id, { description: e.target.value })} rows={3} placeholder="Mô tả ngắn gọn cho box tải này..." />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <Button type="button" variant="outline" className="rounded-2xl" onClick={addDownloadCard}>
-                  <Plus className="mr-2 h-4 w-4" /> Add box
-                </Button>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-
           <div className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div>
               <div className="font-medium">Bật/tắt trang GetKey</div>
@@ -1230,7 +630,7 @@ export function AdminFreeKeysPage() {
               <Input
                 value={outboundUrl}
                 onChange={(e) => setOutboundUrl(e.target.value)}
-                placeholder="https://link4m.co/st?api=YOUR_TOKEN&url=..."
+                placeholder="https://link4m.com/xxxx"
                 inputMode="url"
               />
               <div className="text-xs text-muted-foreground">
@@ -1238,44 +638,8 @@ export function AdminFreeKeysPage() {
                 <div className="mt-1 font-mono text-xs">
                   • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
                 </div>
-                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
-                <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL.</div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
-                <Input
-                  value={outboundUrlPass2}
-                  onChange={(e) => setOutboundUrlPass2(e.target.value)}
-                  placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..."
-                  inputMode="url"
-                />
-                <div className="text-xs text-muted-foreground">
-                  Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Nên dùng placeholder <span className="font-mono">{"{GATE_URL_ENC}"}</span>.
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
-                <Input
-                  type="number"
-                  value={rotateDays}
-                  onChange={(e) => setRotateDays(Number(e.target.value))}
-                  min={1}
-                />
-                <div className="text-xs text-muted-foreground">
-                  Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới.
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(1)} disabled={rotateNow.isPending}>Rotate pass1 now</Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(2)} disabled={rotateNow.isPending}>Rotate pass2 now</Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
-                <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
-                <div className="text-xs text-muted-foreground">Nếu 1 thiết bị tạo quá nhiều phiên đang chờ trong 15 phút, hệ thống sẽ chặn tạo thêm.</div>
+                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.com/PkY7X?url={"{GATE_URL_ENC}"}</div>
+                <div className="mt-1">Nếu là Link4M mà thiếu placeholder, backend sẽ báo lỗi <span className="font-mono">OUTBOUND_URL_TEMPLATE_INVALID</span> để bạn sửa template.</div>
               </div>
             </div>
 
@@ -1286,7 +650,7 @@ export function AdminFreeKeysPage() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-4">
-                <div className="text-sm font-medium">Delay tối thiểu Pass1 (giây)</div>
+                <div className="text-sm font-medium">Delay tối thiểu (giây)</div>
                 <div className="flex items-center gap-2">
                   <div className="text-xs text-muted-foreground">Bật</div>
                   <Switch checked={minDelayEnabled} onCheckedChange={setMinDelayEnabled} />
@@ -1307,42 +671,6 @@ export function AdminFreeKeysPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium">Delay tối thiểu Pass2 (giây)</div>
-              <Input
-                type="number"
-                value={minDelayPass2}
-                onChange={(e) => setMinDelayPass2(Number(e.target.value))}
-                min={5}
-                disabled={!minDelayEnabled}
-              />
-              <div className="text-xs text-muted-foreground">
-                VIP 2-pass: Pass2 chỉ hợp lệ sau thời gian này.
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-4">
-                <div className="text-sm font-medium">Time anti bypass Gate (giây)</div>
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-muted-foreground">Bật</div>
-                  <Switch checked={gateAntiBypassEnabled} onCheckedChange={setGateAntiBypassEnabled} />
-                </div>
-              </div>
-              <Input
-                type="number"
-                value={gateAntiBypassSeconds}
-                onChange={(e) => setGateAntiBypassSeconds(Number(e.target.value))}
-                min={0}
-                disabled={!gateAntiBypassEnabled}
-              />
-              <div className="text-xs text-muted-foreground">
-                {gateAntiBypassEnabled
-                  ? "Nếu người dùng mở /free/gate quá sớm so với thời gian này, phiên sẽ bị hủy ngay."
-                  : "Đang tắt: không kiểm tra mốc anti bypass riêng ở /free/gate."}
-              </div>
-            </div>
-
-            <div className="space-y-2">
               <div className="text-sm font-medium">Tự quay lại /free (giây)</div>
               <Input
                 type="number"
@@ -1354,49 +682,26 @@ export function AdminFreeKeysPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium">Giới hạn / ngày VN (theo fingerprint)</div>
+              <div className="text-sm font-medium">Giới hạn / 24h (theo fingerprint)</div>
               <Input
                 type="number"
                 value={dailyLimit}
                 onChange={(e) => setDailyLimit(Number(e.target.value))}
-                min={0}
+                min={1}
               />
-              <div className="text-xs text-muted-foreground">0 = tắt. Reset lúc 00:00 Asia/Ho_Chi_Minh.</div>
+              <div className="text-xs text-muted-foreground">Chặn spam tạo key vô hạn trên 1 thiết bị.</div>
             </div>
 
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Giới hạn / ngày VN (theo IP)</div>
-              <Input
-                type="number"
-                value={dailyLimitPerIp}
-                onChange={(e) => setDailyLimitPerIp(Number(e.target.value))}
-                min={0}
-              />
-              <div className="text-xs text-muted-foreground">0 = tắt (mặc định an toàn). Dùng để giảm spam khi cần.</div>
-            </div>
-
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="text-sm font-medium">Ràng buộc thiết bị ở /free/gate (VIP 2-pass)</div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">Bắt buộc khớp IP</span>
-                <Switch checked={gateRequireIpMatch} onCheckedChange={setGateRequireIpMatch} />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">Bắt buộc khớp UA</span>
-                <Switch checked={gateRequireUaMatch} onCheckedChange={setGateRequireUaMatch} />
-              </div>
-              <div className="text-xs text-muted-foreground">Mặc định đang bật để tương thích ngược.</div>
-            </div>
-
-            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-              <div>
-                <div className="font-medium">Yêu cầu referrer Link4M</div>
-                <div className="text-xs text-muted-foreground">
-                  Nếu bật: gate sẽ ưu tiên kiểm tra document.referrer có host chứa link4m.
-                </div>
-              </div>
-              <Switch checked={requireRef} onCheckedChange={setRequireRef} />
-            </div>
+             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+               <div>
+                 <div className="font-medium">Yêu cầu referrer Link4M</div>
+                 <div className="text-xs text-muted-foreground">
+                   Nếu bật: gate sẽ ưu tiên kiểm tra <span className="font-mono">document.referrer</span> có host chứa <span className="font-mono">link4m</span>.
+                   Lưu ý: referrer có thể bị browser/shortlink chặn (policy/redirect). Hệ thống sẽ fallback cho qua nếu URL gate có token hợp lệ.
+                 </div>
+               </div>
+               <Switch checked={requireRef} onCheckedChange={setRequireRef} />
+             </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -1421,47 +726,6 @@ export function AdminFreeKeysPage() {
               />
               <div className="text-xs text-muted-foreground">
                 Format: <span className="font-mono">label|url|icon</span> (icon optional: zalo/youtube/telegram).
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 rounded-md border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">Thông báo quan trọng</div>
-                <div className="text-xs text-muted-foreground">Hiển thị trên /free theo dạng popup hoặc banner, không ảnh hưởng flow hiện tại.</div>
-              </div>
-              <Switch checked={noticeEnabled} onCheckedChange={setNoticeEnabled} />
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
-                <div className="text-sm font-medium">Tiêu đề</div>
-                <Input value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="Thông báo quan trọng" />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <div className="text-sm font-medium">Nội dung</div>
-                <Textarea value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} rows={5} placeholder="Nhập nội dung nhiều dòng nếu cần..." />
-              </div>
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Kiểu hiển thị</div>
-                <Select value={noticeMode} onValueChange={(v) => setNoticeMode(v === "inline" ? "inline" : "modal")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="modal">Modal popup</SelectItem>
-                    <SelectItem value="inline">Inline banner/card</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-3 rounded-md border p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">Cho phép đóng</span>
-                  <Switch checked={noticeClosable} onCheckedChange={setNoticeClosable} />
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">Chỉ hiển thị 1 lần mỗi trình duyệt</span>
-                  <Switch checked={noticeShowOnce} onCheckedChange={setNoticeShowOnce} />
-                </div>
               </div>
             </div>
           </div>
@@ -1528,7 +792,7 @@ export function AdminFreeKeysPage() {
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
           <div>
             <CardTitle>Key types (giờ/ngày)</CardTitle>
             <CardDescription>Chỉ loại nào bật thì trang /free mới hiện lựa chọn.</CardDescription>
@@ -1546,7 +810,7 @@ export function AdminFreeKeysPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3 text-xs md:text-sm">
+        <CardContent className="text-xs md:text-sm">
           <div className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
@@ -1595,129 +859,91 @@ export function AdminFreeKeysPage() {
 
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>On</TableHead>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Value</TableHead>
-                  <TableHead>Seconds</TableHead>
-                  <TableHead>VIP 2-pass</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead>On</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead>Label</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Value</TableHead>
+                <TableHead>Seconds</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(keyTypesQuery.data ?? []).map((k) => (
+                <TableRow key={k.code}>
+                  <TableCell className="w-16">
+                    <Switch
+                      checked={k.enabled}
+                      onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono">{k.code}</TableCell>
+                  <TableCell>{k.label}</TableCell>
+                  <TableCell>{k.kind}</TableCell>
+                  <TableCell>{k.value}</TableCell>
+                  <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Delete"
+                      onClick={() => {
+                        const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
+                        if (ok) deleteKeyType.mutate(k.code);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(keyTypesQuery.data ?? []).map((k) => (
-                  <TableRow key={k.code}>
-                    <TableCell className="w-16">
-                      <Switch
-                        checked={k.enabled}
-                        onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono">{k.code}</TableCell>
-                    <TableCell>{k.label}</TableCell>
-                    <TableCell>{k.kind}</TableCell>
-                    <TableCell>{k.value}</TableCell>
-                    <TableCell className="font-mono">{k.duration_seconds}</TableCell>
-                    <TableCell className="w-24">
-                      <Switch
-                        checked={Boolean((k as any).requires_double_gate ?? false)}
-                        onCheckedChange={(v) => toggleVipKeyType.mutate({ code: k.code, requires_double_gate: Boolean(v) })}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Delete"
-                        onClick={() => {
-                          const ok = window.confirm(`Delete key type ${k.code}? This cannot be undone.`);
-                          if (ok) deleteKeyType.mutate(k.code);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!keyTypesQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
+              ))}
+              {!keyTypesQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="space-y-3 pb-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle>Free keys monitor</CardTitle>
-              <CardDescription>Log sessions + keys đã phát.</CardDescription>
-            </div>
-            <Collapsible open={showMonitorFilters} onOpenChange={setShowMonitorFilters}>
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Filter className="h-4 w-4" />
-                  Bộ lọc
-                  <ChevronDown className={`h-4 w-4 transition-transform ${showMonitorFilters ? "rotate-180" : ""}`} />
-                </Button>
-              </CollapsibleTrigger>
-            </Collapsible>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Badge variant="secondary">Ngày: {day}</Badge>
-            <Badge variant="outline">Trạng thái: {statusLabel(status)}</Badge>
-            <Badge variant="outline">IP: {ipHash.trim() ? shortText(ipHash, 14) : "tất cả"}</Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant={status === "all" ? "default" : "outline"} onClick={() => setStatus("all")}>Tất cả</Button>
-            <Button size="sm" variant={status === "started" ? "default" : "outline"} onClick={() => setStatus("started")}>Đang chờ gate</Button>
-            <Button size="sm" variant={status === "gate_ok" ? "default" : "outline"} onClick={() => setStatus("gate_ok")}>Gate OK</Button>
-            <Button size="sm" variant={status === "gate_fail" ? "default" : "outline"} onClick={() => setStatus("gate_fail")}>Gate fail</Button>
-            <Button size="sm" variant={status === "revealed" ? "default" : "outline"} onClick={() => setStatus("revealed")}>Đã reveal</Button>
-          </div>
+        <CardHeader>
+          <CardTitle>Free keys monitor</CardTitle>
+          <CardDescription>Log sessions + keys đã phát.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 pt-0">
-          <Collapsible open={showMonitorFilters} onOpenChange={setShowMonitorFilters}>
-            <CollapsibleContent className="rounded-xl border bg-muted/20 p-3">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Day (UTC)</div>
-                  <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Status</div>
-                  <Select value={status} onValueChange={setStatus}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="started">started</SelectItem>
-                      <SelectItem value="gate_ok">gate_ok</SelectItem>
-                      <SelectItem value="gate_fail">gate_fail</SelectItem>
-                      <SelectItem value="revealed">revealed</SelectItem>
-                      <SelectItem value="closed">closed</SelectItem>
-                      <SelectItem value="init">init (legacy)</SelectItem>
-                      <SelectItem value="gate_returned">gate_returned (legacy)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">IP hash</div>
-                  <Input value={ipHash} onChange={(e) => setIpHash(e.target.value)} placeholder="sha256(ip)" />
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Day (UTC)</div>
+            <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Status</div>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="started">started</SelectItem>
+                <SelectItem value="gate_ok">gate_ok</SelectItem>
+                <SelectItem value="gate_fail">gate_fail</SelectItem>
+                <SelectItem value="revealed">revealed</SelectItem>
+                <SelectItem value="closed">closed</SelectItem>
+                <SelectItem value="init">init (legacy)</SelectItem>
+                <SelectItem value="gate_returned">gate_returned (legacy)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">IP hash</div>
+            <Input value={ipHash} onChange={(e) => setIpHash(e.target.value)} placeholder="sha256(ip)" />
+          </div>
         </CardContent>
       </Card>
 
@@ -1725,10 +951,10 @@ export function AdminFreeKeysPage() {
         <CardHeader>
           <CardTitle>🧪 Admin Test GetKey</CardTitle>
           <CardDescription>
-            Chạy test server-side để kiểm tra flow phát key. Dùng thêm “Ping backend” để xem backend có phản hồi.
+            Chạy test server-side để kiểm tra flow phát key. Dùng thêm “Ping backend” để xem backend có phản hồi / CORS có ổn.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -1808,209 +1034,106 @@ export function AdminFreeKeysPage() {
               <div>Message: {adminTestResult.message || "-"}</div>
               <div>Key: {adminTestResult.key || "-"}</div>
               <div>Expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
-              <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>
-              <div>FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span></div>
-              <div>Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span></div>
+              <div>
+                IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span>
+              </div>
+              <div>
+                FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span>
+              </div>
+              <div>
+                Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span>
+              </div>
             </div>
           ) : null}
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
-          <div className="space-y-1">
-            <CardTitle>Sessions</CardTitle>
-            <CardDescription>{sessionsQuery.data?.length ?? 0} phiên gần nhất theo bộ lọc hiện tại.</CardDescription>
-          </div>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <CardTitle>Sessions</CardTitle>
           <Button variant="secondary" onClick={() => sessionsQuery.refetch()} disabled={sessionsQuery.isFetching}>
             Refresh
           </Button>
         </CardHeader>
-        <CardContent className="space-y-3 pt-0 text-xs md:text-sm">
-          <div className="grid gap-3 md:hidden">
-            {(sessionsQuery.data ?? []).map((s) => (
-              <div key={s.session_id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-xs text-muted-foreground">{formatVnDateTime(s.created_at)}</div>
-                    <div className="font-mono text-sm">{s.key_type_code ?? "-"}</div>
-                  </div>
-                  <Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>Reveal: {s.reveal_count}</div>
-                  <div>IP: <span className="font-mono">{shortText(s.ip_hash, 12)}</span></div>
-                  <div>FP: <span className="font-mono">{shortText(s.fingerprint_hash, 12)}</span></div>
-                  <div className="truncate">Error: {s.last_error ?? "-"}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? ""; if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason }); }}>Block IP</Button>
-                  <Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? ""; if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason }); }}>Block FP</Button>
-                  <Button size="sm" variant="destructive" onClick={() => { const ok = window.confirm("Delete session này?"); if (ok) deleteSession.mutate(s.session_id); }}>Delete</Button>
-                </div>
-              </div>
-            ))}
-            {!sessionsQuery.data?.length ? (
-              <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">No rows</div>
-            ) : null}
-          </div>
-          <div className="hidden overflow-x-auto md:block">
+        <CardContent className="text-xs md:text-sm">
+          <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Reveal</TableHead>
-                  <TableHead>IP hash</TableHead>
-                  <TableHead>FP hash</TableHead>
-                  <TableHead>Error</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Reveal</TableHead>
+                <TableHead>IP hash</TableHead>
+                <TableHead>FP hash</TableHead>
+                <TableHead>Error</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(sessionsQuery.data ?? []).map((s) => (
+                <TableRow key={s.session_id}>
+                  <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
+                  <TableCell>{s.status}</TableCell>
+                  <TableCell className="font-mono">
+                    {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
+                  </TableCell>
+                  <TableCell>{s.reveal_count}</TableCell>
+                  <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
+                  <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
+                  <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? "";
+                          if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason });
+                        }}
+                      >
+                        Block IP
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? "";
+                          if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason });
+                        }}
+                      >
+                        Block FP
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          const ok = window.confirm("Delete session này?");
+                          if (ok) deleteSession.mutate(s.session_id);
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(sessionsQuery.data ?? []).map((s) => (
-                  <TableRow key={s.session_id}>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
-                    <TableCell><Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
-                    <TableCell className="font-mono">
-                      {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
-                    </TableCell>
-                    <TableCell>{s.reveal_count}</TableCell>
-                    <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
-                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? "";
-                            if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason });
-                          }}
-                        >
-                          Block IP
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            const reason = window.prompt("Lý do block FP (optional):", "manual block") ?? "";
-                            if (s.fingerprint_hash) blockFp.mutate({ fpHash: s.fingerprint_hash, reason });
-                          }}
-                        >
-                          Block FP
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => {
-                            const ok = window.confirm("Delete session này?");
-                            if (ok) deleteSession.mutate(s.session_id);
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!sessionsQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
+              ))}
+              {!sessionsQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
-          <div className="space-y-1">
-            <CardTitle>Gate / Claim logs</CardTitle>
-            <CardDescription>Log anti-bypass, lỗi xác thực, và auto-block 5 lần fail trong 10 phút.</CardDescription>
-          </div>
-          <Button variant="secondary" onClick={() => gateLogsQuery.refetch()} disabled={gateLogsQuery.isFetching}>
-            Refresh
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-0 text-xs md:text-sm">
-          <div className="grid gap-3 md:hidden">
-            {(gateLogsQuery.data ?? []).map((row) => (
-              <div key={row.id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-xs text-muted-foreground">{formatVnDateTime(row.created_at)}</div>
-                    <div className="font-mono text-sm">{row.key_type_code ?? "-"}</div>
-                  </div>
-                  <Badge variant={statusBadgeVariant(row.event_code)}>{row.event_code}</Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>Pass: {row.pass_no ?? "-"}</div>
-                  <div>Session: <span className="font-mono">{shortText(row.session_id, 12)}</span></div>
-                  <div>IP: <span className="font-mono">{shortText(row.ip_hash, 12)}</span></div>
-                  <div>FP: <span className="font-mono">{shortText(row.fingerprint_hash, 12)}</span></div>
-                </div>
-                <pre className="rounded-lg bg-background/70 p-2 text-[11px] whitespace-pre-wrap break-words">{compactJson(row.detail)}</pre>
-              </div>
-            ))}
-            {!gateLogsQuery.data?.length ? (
-              <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">No rows</div>
-            ) : null}
-          </div>
-          <div className="hidden overflow-x-auto md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Pass</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>IP hash</TableHead>
-                  <TableHead>FP hash</TableHead>
-                  <TableHead>Detail</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(gateLogsQuery.data ?? []).map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(row.created_at)}</TableCell>
-                    <TableCell><Badge variant={statusBadgeVariant(row.event_code)}>{row.event_code}</Badge></TableCell>
-                    <TableCell className="font-mono">{row.key_type_code ?? "-"}</TableCell>
-                    <TableCell>{row.pass_no ?? "-"}</TableCell>
-                    <TableCell className="font-mono">{shortText(row.session_id, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(row.ip_hash, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(row.fingerprint_hash, 12)}</TableCell>
-                    <TableCell className="text-xs">
-                      <pre className="max-w-[26rem] whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2">{compactJson(row.detail)}</pre>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!gateLogsQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
-          <div className="space-y-1">
-            <CardTitle>Issued keys</CardTitle>
-            <CardDescription>{issuesQuery.data?.length ?? 0} key đã phát theo bộ lọc hiện tại.</CardDescription>
-          </div>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <CardTitle>Issued keys</CardTitle>
           <Button variant="secondary" onClick={() => issuesQuery.refetch()} disabled={issuesQuery.isFetching}>
             Refresh
           </Button>
@@ -2018,65 +1141,65 @@ export function AdminFreeKeysPage() {
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Key</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>IP hash</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Session</TableHead>
+                <TableHead>IP hash</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(issuesQuery.data ?? []).map((i) => (
+                <TableRow key={i.issue_id}>
+                  <TableCell className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
+                  <TableCell className="font-mono">{i.key_mask}</TableCell>
+                  <TableCell className="font-mono">{shortText(i.session_id, 12)}</TableCell>
+                  <TableCell className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
+                        Open
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={revokeLicense.isPending}
+                        onClick={() => {
+                          const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
+                          if (ok) revokeLicense.mutate({ issueId: i.issue_id, licenseId: i.license_id });
+                        }}
+                      >
+                        Revoke
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deleteIssuedKey.isPending}
+                        onClick={() => {
+                          const ok = window.confirm("Delete issued key record này? Key sẽ bị revoke trước khi xóa log.");
+                          if (!ok) return;
+                          const reason = window.prompt("Reason (optional):", "admin delete") ?? "";
+                          deleteIssuedKey.mutate({ issueId: i.issue_id, licenseId: i.license_id, reason });
+                        }}
+                      >
+                        Delete key
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(issuesQuery.data ?? []).map((i) => (
-                  <TableRow key={i.issue_id}>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
-                    <TableCell className="font-mono">{i.key_mask}</TableCell>
-                    <TableCell className="font-mono">{shortText(i.session_id, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
-                          Open
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          disabled={revokeLicense.isPending}
-                          onClick={() => {
-                            const ok = window.confirm("Chặn key này? (is_active=false + expires_at=now)");
-                            if (ok) revokeLicense.mutate({ issueId: i.issue_id, licenseId: i.license_id });
-                          }}
-                        >
-                          Revoke
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={deleteIssuedKey.isPending}
-                          onClick={() => {
-                            const ok = window.confirm("Delete issued key record này? Key sẽ bị revoke trước khi xóa log.");
-                            if (!ok) return;
-                            const reason = window.prompt("Reason (optional):", "admin delete") ?? "";
-                            deleteIssuedKey.mutate({ issueId: i.issue_id, licenseId: i.license_id, reason });
-                          }}
-                        >
-                          Delete key
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!issuesQuery.data?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
-                      No rows
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
+              ))}
+              {!issuesQuery.data?.length ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                    No rows
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
             </Table>
           </div>
         </CardContent>

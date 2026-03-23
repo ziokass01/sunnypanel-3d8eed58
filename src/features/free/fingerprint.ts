@@ -86,7 +86,7 @@ export function getSelectedKeyTypeCode(): string {
   }
 }
 
-export function setFreeStartMeta(data: { startedAtMs: number; minDelaySeconds: number; pass?: number; passesRequired?: number; minDelaySecondsPass2?: number }) {
+export function setFreeStartMeta(data: { startedAtMs: number; minDelaySeconds: number }) {
   try {
     localStorage.setItem(FREE_START_META_KEY, JSON.stringify(data));
   } catch {
@@ -94,7 +94,7 @@ export function setFreeStartMeta(data: { startedAtMs: number; minDelaySeconds: n
   }
 }
 
-export function getFreeStartMeta(): { startedAtMs: number; minDelaySeconds: number; pass?: number; passesRequired?: number; minDelaySecondsPass2?: number } | null {
+export function getFreeStartMeta(): { startedAtMs: number; minDelaySeconds: number } | null {
   try {
     const raw = localStorage.getItem(FREE_START_META_KEY);
     if (!raw) return null;

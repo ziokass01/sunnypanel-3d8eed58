@@ -29,8 +29,8 @@ Trong Admin -> Free settings -> `free_outbound_url`:
   - hoặc `{GATE_URL}`
 
 Ví dụ:
-- `https://link4m.co/st?api=YOUR_TOKEN&url={GATE_URL_ENC}`
-- `https://link4m.co/st?api=YOUR_TOKEN&url=?redirect={GATE_URL_ENC}`
+- `https://link4m.com/PkY7X?url={GATE_URL_ENC}`
+- `https://link4m.com/PkY7X?redirect={GATE_URL_ENC}`
 
 Nếu URL là Link4M nhưng thiếu placeholder, backend sẽ trả lỗi:
 - `OUTBOUND_URL_TEMPLATE_INVALID`

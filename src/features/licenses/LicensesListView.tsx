@@ -21,7 +21,6 @@ import { toast } from "@/hooks/use-toast";
 import { useNow } from "@/hooks/use-now";
 import { fetchLicenses, softDeleteLicense } from "@/features/licenses/licenses-api";
 import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
-import { getErrorMessage } from "@/lib/error-message";
 
 type FilterMode = "all" | "start_on_first_use";
 
@@ -148,7 +147,7 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
         </Select>
       </div>
 
-      {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}
+      {error ? <div className="text-sm text-destructive">{String(error)}</div> : null}
 
       <div className="rounded-lg border">
         <Table>

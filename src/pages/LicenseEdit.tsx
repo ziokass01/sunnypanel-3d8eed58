@@ -13,11 +13,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchLicense, updateLicense } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
-import { getErrorMessage } from "@/lib/error-message";
 
 const schema = z.object({
   expires_at: z.string().optional(),
-  duration_value: z.coerce.number().int().min(1).max(999999).optional(),
+  duration_value: z.coerce.number().int().min(1).max(3650).optional(),
   duration_unit: z.enum(["minutes", "hours", "days"]).default("days"),
   max_devices: z.coerce.number().int().min(1),
   is_active: z.boolean(),
@@ -118,7 +117,7 @@ export function LicenseEditPage() {
       </header>
 
       {isLoading ? <div className="mt-4 text-sm text-muted-foreground">Loading…</div> : null}
-      {error ? <div className="mt-4 text-sm text-destructive">{getErrorMessage(error)}</div> : null}
+      {error ? <div className="mt-4 text-sm text-destructive">{String(error)}</div> : null}
 
       {data ? (
         <form className="mt-6 max-w-xl space-y-4" onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))}>
@@ -135,7 +134,7 @@ export function LicenseEditPage() {
                   id="duration_value"
                   type="number"
                   min={1}
-                  max={999999}
+                  max={3650}
                   disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
                   {...form.register("duration_value")}
                 />
@@ -186,7 +185,7 @@ export function LicenseEditPage() {
           </div>
 
           {saveMutation.error ? (
-            <div className="text-sm text-destructive">{getErrorMessage(saveMutation.error)}</div>
+            <div className="text-sm text-destructive">{String(saveMutation.error)}</div>
           ) : null}
 
           <div className="flex gap-2">
