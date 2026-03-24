@@ -17,17 +17,15 @@ function getAnonJwt() {
   return parts.length === 3 ? anonJwt : undefined;
 }
 
-function shouldSkipAnonJwtFallback(path?: string) {
-  const normalized = String(path ?? "").trim();
+function shouldSkipAnonJwtFallback(path: string) {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
   return normalized === "/reset-key" || normalized === "/free-config";
 }
 
-function buildAuthHeader(path?: string, authToken?: string | null) {
+function buildAuthHeader(path: string, authToken?: string | null) {
   const token = String(authToken ?? "").trim();
   if (token) return { Authorization: `Bearer ${token}` };
 
-  // Public functions like /reset-key and /free-config must not receive a fallback Authorization header.
-  // They rely on apikey only, otherwise gateway/runtime can reject malformed or unnecessary bearer auth.
   if (shouldSkipAnonJwtFallback(path)) return {};
 
   // Some edge functions still rely on anon JWT when verify_jwt=true.
@@ -107,7 +105,7 @@ export async function postFunction<T>(
 
   const doFetch = async (u: string) => {
     triedUrls.push(u);
-    const authHeader = buildAuthHeader(path, opts?.authToken);
+    const authHeader = buildAuthHeader(opts?.authToken);
     return await fetch(u, {
       method: "POST",
       headers: {
