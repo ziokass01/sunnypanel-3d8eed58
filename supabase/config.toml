@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.rent-verify-key]
 verify_jwt = false
+
+[functions.reset-key]
+verify_jwt = false

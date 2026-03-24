@@ -12,7 +12,8 @@ export function NotAuthorizedPage() {
           <CardHeader>
             <CardTitle>Not authorized</CardTitle>
             <CardDescription>
-              Your account is signed in, but it doesn’t have permission to access the admin panel.
+              Tài khoản đã đăng nhập nhưng chưa có quyền vào panel. Hãy kiểm tra role trong <code>public.user_roles</code>
+              hoặc <code>app_metadata.panel_role</code> / <code>app_metadata.role</code>.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
