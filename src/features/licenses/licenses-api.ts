@@ -244,10 +244,11 @@ export async function hardDeleteLicense(id: string) {
   const { error: devicesErr } = await supabase.from("license_devices").delete().eq("license_id", id);
   if (devicesErr) throw devicesErr;
 
+  // Log before the physical delete while ownership checks can still see the license row.
+  await logAudit("HARD_DELETE", before.key, { license_id: id, hard_deleted: true });
+
   const { error } = await (supabase.from(licensesTable) as any).delete().eq("id", id);
   if (error) throw error;
-
-  await logAudit("HARD_DELETE", before.key, { license_id: id, hard_deleted: true });
 }
 
 export async function reactivateOrRenewLicense(id: string, params: { expires_at: string | null }) {

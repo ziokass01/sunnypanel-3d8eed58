@@ -19,7 +19,7 @@ function auditVariant(action?: string, detail?: any) {
     return detail?.ok === false ? ("destructive" as const) : ("default" as const);
   }
   if (["CREATE", "RESTORE"].includes(v)) return "default" as const;
-  if (["DELETE", "HARD_DELETE"].includes(v)) return "destructive" as const;
+  if (["SOFT_DELETE", "DELETE", "HARD_DELETE"].includes(v)) return "destructive" as const;
   if (["UPDATE"].includes(v)) return "secondary" as const;
   return "outline" as const;
 }
@@ -88,7 +88,7 @@ export function AuditLogsPage() {
         if (quick === "verify_fail") next = next.eq("action", "VERIFY").contains("detail", { ok: false });
         if (quick === "verify_ok") next = next.eq("action", "VERIFY").not("detail", "cs", { ok: false } as any);
         if (quick === "mutations") next = next.in("action", ["CREATE", "UPDATE", "RESTORE"]);
-        if (quick === "destructive") next = next.or("action.in.(DELETE,HARD_DELETE),and(action.eq.VERIFY,detail.cs.{\"ok\":false})");
+        if (quick === "destructive") next = next.or("action.in.(SOFT_DELETE,DELETE,HARD_DELETE),and(action.eq.VERIFY,detail.cs.{\"ok\":false})");
         if (quick === "blocked") next = next.or("action.ilike.%BLOCK%,detail::text.ilike.%BLOCK%");
         if (quick === "today") next = next.gte("created_at", todayStart);
         if (quick === "last_10m") next = next.gte("created_at", last10m);
@@ -98,7 +98,7 @@ export function AuditLogsPage() {
       const countQuery = () => applyFilters(supabase.from("audit_logs").select("id", { count: "exact", head: true }));
       const verifyFailQuery = () => countQuery().eq("action", "VERIFY").contains("detail", { ok: false });
       const verifyTotalQuery = () => countQuery().eq("action", "VERIFY");
-      const destructiveQuery = () => countQuery().in("action", ["DELETE", "HARD_DELETE"]);
+      const destructiveQuery = () => countQuery().in("action", ["SOFT_DELETE", "DELETE", "HARD_DELETE"]);
 
       const [totalRes, verifyFailRes, verifyTotalRes, destructiveRes] = await Promise.all([
         countQuery(),
@@ -128,7 +128,7 @@ export function AuditLogsPage() {
       if (quick === "verify_fail") return actionUpper === "VERIFY" && row.detail?.ok === false;
       if (quick === "verify_ok") return actionUpper === "VERIFY" && row.detail?.ok !== false;
       if (quick === "mutations") return ["CREATE", "UPDATE", "RESTORE"].includes(actionUpper);
-      if (quick === "destructive") return ["DELETE", "HARD_DELETE"].includes(actionUpper) || row.detail?.ok === false;
+      if (quick === "destructive") return ["SOFT_DELETE", "DELETE", "HARD_DELETE"].includes(actionUpper) || row.detail?.ok === false;
       if (quick === "blocked") return JSON.stringify(row.detail ?? {}).includes("BLOCK") || actionUpper.includes("BLOCK");
       if (quick === "today") return new Date(row.created_at).toDateString() === new Date().toDateString();
       if (quick === "last_10m") return created >= Date.now() - 10 * 60 * 1000;
@@ -236,6 +236,7 @@ export function AuditLogsPage() {
                   <SelectItem value="VERIFY">VERIFY</SelectItem>
                   <SelectItem value="CREATE">CREATE</SelectItem>
                   <SelectItem value="UPDATE">UPDATE</SelectItem>
+                  <SelectItem value="SOFT_DELETE">SOFT_DELETE</SelectItem>
                   <SelectItem value="DELETE">DELETE</SelectItem>
                   <SelectItem value="RESTORE">RESTORE</SelectItem>
                   <SelectItem value="HARD_DELETE">HARD_DELETE</SelectItem>

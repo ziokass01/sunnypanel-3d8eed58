@@ -2,24 +2,26 @@
 
 ## Files changed
 - `src/lib/functions.ts`
-  - fixed `postFunction()` to pass both `(path, authToken)` into `buildAuthHeader()`
-  - skipped anon JWT fallback for public free/reset functions: `/free-start`, `/free-gate`, `/free-reveal`, `/free-close`, `/free-config`, `/reset-key`
+  - giữ đúng cơ chế public function cho `/free-start`, `/free-gate`, `/free-reveal`, `/free-close`, `/free-config`, `/reset-key`
+  - không tự gắn bearer JWT anon sai định dạng vào public function
 - `src/shell/AdminShell.tsx`
-  - user-like accounts now see and can access `Trash` and `Audit logs`
-  - remaining sensitive sections stay admin-only
-- `src/test/functions-auth-header.test.ts`
-  - added regression test for `/free-start` public function auth header behavior
+  - user-like accounts thấy được `Trash` và `Audit logs`
+- `src/features/licenses/licenses-api.ts`
+  - sửa `hardDeleteLicense()` để ghi audit trước khi xoá vật lý license
+  - tránh lỗi quyền khi key đã bị xoá khỏi bảng nhưng vẫn cần ghi `HARD_DELETE`
+- `src/pages/AuditLogs.tsx`
+  - thêm nhận diện `SOFT_DELETE` vào bộ lọc / thống kê / badge destructive
+  - giúp log trash hiển thị đúng hơn
 
 ## Files added
 - `supabase/migrations/20260324194500_user_audit_trash_and_public_free_fix.sql`
-  - drops legacy restrictive admin-only select policies on `audit_logs`, `licenses`, `license_devices`
-  - adds scoped read policy for own audit logs
-  - updates `public.log_audit()` to allow `RESTORE` and `HARD_DELETE` for owned licenses
+  - gỡ restrictive policy admin-only cũ trên `audit_logs`, `licenses`, `license_devices`
+  - thêm policy cho user/moderator đọc audit log của key họ sở hữu
+  - mở rộng `public.log_audit()` để user-like account ghi được `RESTORE`, `HARD_DELETE`
 - `USER_AUDIT_TRASH_SETUP.sql`
-  - helper SQL to assign panel role `user` to a helper account
-- `FIX_SUMMARY_20260324.md`
+  - helper SQL để gán panel role `user` cho tài khoản helper
 
 ## Next steps
-1. Apply the new migration.
-2. Run `USER_AUDIT_TRASH_SETUP.sql` after replacing `HELPER_EMAIL`.
-3. Redeploy frontend.
+1. Chạy migration mới `20260324194500_user_audit_trash_and_public_free_fix.sql`.
+2. Nếu cần tài khoản phụ trợ, sửa email trong `USER_AUDIT_TRASH_SETUP.sql` rồi chạy file đó.
+3. Redeploy frontend + migrate DB + deploy lại edge functions nếu production đang chạy bản cũ.
