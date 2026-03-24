@@ -34,7 +34,7 @@ import { Badge } from "@/components/ui/badge";
 
 export function AdminShell() {
   const { signOut } = useAuth();
-  const { role, isAdmin } = usePanelRole();
+  const { role, isAdmin, isUserLike } = usePanelRole();
   const navigate = useNavigate();
 
   const roleLabel =
@@ -98,17 +98,8 @@ export function AdminShell() {
               </SidebarMenuButton>
             </SidebarMenuItem>
 
-            {isAdmin ? (
+            {isUserLike ? (
               <>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Free Licenses">
-                    <NavLink to="/free-licenses" activeClassName="data-[active=true]">
-                      <Ticket />
-                      <span>Free Licenses</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild tooltip="Trash">
                     <NavLink to="/licenses/trash" activeClassName="data-[active=true]">
@@ -123,6 +114,19 @@ export function AdminShell() {
                     <NavLink to="/audit" activeClassName="data-[active=true]">
                       <ScrollText />
                       <span>Audit logs</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </>
+            ) : null}
+
+            {isAdmin ? (
+              <>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Free Licenses">
+                    <NavLink to="/free-licenses" activeClassName="data-[active=true]">
+                      <Ticket />
+                      <span>Free Licenses</span>
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -169,20 +173,6 @@ export function AdminShell() {
                   <SidebarMenuButton tooltip="Free Licenses" className="opacity-60" onClick={() => showLockedToast("Free Licenses")}>
                     <Ticket />
                     <span>Free Licenses</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Trash" className="opacity-60" onClick={() => showLockedToast("Trash")}>
-                    <Trash2 />
-                    <span>Trash</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Audit logs" className="opacity-60" onClick={() => showLockedToast("Audit logs")}>
-                    <ScrollText />
-                    <span>Audit logs</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
