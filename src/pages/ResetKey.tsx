@@ -148,10 +148,7 @@ export function ResetKeyPage() {
         <CardContent className="space-y-4">
           <Input
             value={key}
-            onChange={(e) => {
-              setKey(e.target.value.toUpperCase());
-              setResult(null);
-            }}
+            onChange={(e) => setKey(e.target.value.toUpperCase())}
             placeholder="SUNNY-XXXX-XXXX-XXXX"
             className="font-mono"
           />
