@@ -26,6 +26,36 @@ jobs:
         with:
           version: latest
 
+      - name: Validate project ref and secret presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_PROJECT_REF=$(sed -n 's/^project_id = "\([^"]\+\)"//p' supabase/config.toml | head -n1)
+          if [ -z "${EXPECTED_PROJECT_REF}" ]; then
+            echo "supabase/config.toml is missing project_id"
+            exit 1
+          fi
+          if [ -z "${PROJECT_REF}" ]; then
+            echo "GitHub secret SUPABASE_PROJECT_REF is empty"
+            exit 1
+          fi
+          if [ "${PROJECT_REF}" != "${EXPECTED_PROJECT_REF}" ]; then
+            echo "Project ref mismatch"
+            echo "config.toml: ${EXPECTED_PROJECT_REF}"
+            echo "GitHub secret SUPABASE_PROJECT_REF: ${PROJECT_REF}"
+            exit 1
+          fi
+
+          [ -n "${SUPABASE_ACCESS_TOKEN}" ] || { echo "Missing SUPABASE_ACCESS_TOKEN"; exit 1; }
+          [ -n "${SUPABASE_DB_PASSWORD}" ] || { echo "Missing SUPABASE_DB_PASSWORD"; exit 1; }
+
+          echo "Deploy target project: ${PROJECT_REF}"
+          if [ -n "${{ secrets.TURNSTILE_SITE_KEY }}" ] && [ -n "${{ secrets.TURNSTILE_SECRET_KEY }}" ]; then
+            echo "Turnstile secrets: present"
+          else
+            echo "Turnstile secrets: missing or incomplete"
+          fi
+
       - name: Link project
         run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
 
@@ -36,14 +66,9 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
         run: yes | supabase db push --include-all
 
-      - name: Deploy all Edge Functions
-        run: supabase functions deploy --project-ref "$PROJECT_REF"
-
       - name: Set function secrets
         run: |
-          supabase secrets set \
-            ADMIN_EMAILS="${{ secrets.ADMIN_EMAILS }}" \
-            PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}" \
-            VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
-            TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
-            TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}"
+          supabase secrets set             ADMIN_EMAILS="${{ secrets.ADMIN_EMAILS }}"             PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}"             VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}"             TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}"             TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}"
+
+      - name: Deploy all Edge Functions
+        run: supabase functions deploy --project-ref "$PROJECT_REF"
