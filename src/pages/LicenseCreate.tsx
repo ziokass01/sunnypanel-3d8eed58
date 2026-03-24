@@ -102,7 +102,9 @@ export function LicenseCreatePage() {
 
   const currentUnit = form.watch("duration_unit");
   const currentType = form.watch("license_type");
+  const expiresAtValue = form.watch("expires_at");
   const userMaxDateTime = useMemo(() => localMaxDateTimeFromNow(USER_MAX_SECONDS), []);
+  const submitDisabled = createMutation.isPending || (!isAdmin && currentType === "fixed" && !String(expiresAtValue ?? "").trim());
 
   useEffect(() => {
     const keyParam = searchParams.get("key");
@@ -247,7 +249,13 @@ export function LicenseCreatePage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="expires_at">Expires at</Label>
-              <Input id="expires_at" type="datetime-local" max={isAdmin ? undefined : userMaxDateTime} {...form.register("expires_at")} />
+              <Input
+                id="expires_at"
+                type="datetime-local"
+                max={isAdmin ? undefined : userMaxDateTime}
+                required={!isAdmin}
+                {...form.register("expires_at")}
+              />
               <div className="text-xs text-muted-foreground">{isAdmin ? "Leave empty = Never expires." : `Bắt buộc nhập ngày hết hạn, tối đa ${secondsToText(USER_MAX_SECONDS)} từ hiện tại.`}</div>
             </div>
             <div className="space-y-2">
@@ -294,7 +302,7 @@ export function LicenseCreatePage() {
         ) : null}
 
         <div className="flex gap-2">
-          <Button type="submit" disabled={createMutation.isPending}>
+          <Button type="submit" disabled={submitDisabled}>
             {createMutation.isPending ? "Saving…" : "Save"}
           </Button>
           <Button type="button" variant="soft" onClick={() => navigate(cancelTo)}>
