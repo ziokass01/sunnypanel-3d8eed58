@@ -42,6 +42,42 @@ async function verifyTurnstile(secret: string, token: string, remoteIp?: string)
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function logRpcError(fn: string, error: any, context?: Record<string, unknown>) {
+  console.error("[reset-key] rpc_error", {
+    function: fn,
+    message: error?.message ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+    code: error?.code ?? null,
+    context: context ?? null,
+  });
+}
+
+function mapRpcError(error: any) {
+  const raw = String(error?.message ?? "").toUpperCase();
+  const code = String(error?.code ?? "").toUpperCase();
+  const details = String(error?.details ?? "").toUpperCase();
+  const hint = String(error?.hint ?? "").toUpperCase();
+  const joined = `${raw} ${details} ${hint}`;
+
+  if (joined.includes("NOT_AUTHORIZED") || code === "42501") {
+    return { status: 500, msg: "RPC_PERMISSION_DENIED" };
+  }
+
+  if (joined.includes("DOES NOT EXIST") || code === "42883") {
+    return { status: 500, msg: "RPC_NOT_DEPLOYED" };
+  }
+
+  if (code === "P0001") {
+    if (joined.includes("KEY_NOT_FOUND")) return { status: 200, msg: "KEY_UNAVAILABLE" };
+    if (joined.includes("KEY_BLOCKED")) return { status: 200, msg: "KEY_UNAVAILABLE" };
+    if (joined.includes("KEY_EXPIRED")) return { status: 200, msg: "KEY_UNAVAILABLE" };
+    if (joined.includes("RESET_DISABLED")) return { status: 200, msg: "RESET_DISABLED" };
+  }
+
+  return { status: 500, msg: "SERVER_ERROR" };
+}
+
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
@@ -158,7 +194,9 @@ Deno.serve(async (req) => {
     const info = Array.isArray(infoRes.data) ? infoRes.data[0] : infoRes.data;
 
     if (infoRes.error) {
-      return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+      logRpcError("get_public_key_info", infoRes.error, { action, ip, key_prefix: key.slice(0, 9) });
+      const mapped = mapRpcError(infoRes.error);
+      return json({ ok: false, msg: mapped.msg }, mapped.status);
     }
 
     if (!info) {
@@ -178,10 +216,17 @@ Deno.serve(async (req) => {
 
   const resetRes = await db.rpc("public_reset_key", { p_key: key });
   if (resetRes.error) {
-    return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+    logRpcError("public_reset_key", resetRes.error, { action, ip, key_prefix: key.slice(0, 9) });
+    const mapped = mapRpcError(resetRes.error);
+    return json({ ok: false, msg: mapped.msg }, mapped.status);
   }
 
   const payload = resetRes.data as Record<string, unknown> | null;
+  if (!payload || typeof payload !== "object") {
+    console.error("[reset-key] invalid_rpc_payload", { function: "public_reset_key", payloadType: typeof resetRes.data });
+    return json({ ok: false, msg: "INVALID_RPC_PAYLOAD" }, 500);
+  }
+
   const msg = String(payload?.msg ?? "");
   if (["KEY_NOT_FOUND", "KEY_BLOCKED", "KEY_EXPIRED"].includes(msg)) {
     await sleep(650);
