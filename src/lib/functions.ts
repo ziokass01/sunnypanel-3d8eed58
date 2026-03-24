@@ -10,6 +10,23 @@ function getAnonKey() {
     undefined;
 }
 
+function getAnonJwt() {
+  const anonJwt = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+  if (!anonJwt) return undefined;
+  const parts = anonJwt.split(".");
+  return parts.length === 3 ? anonJwt : undefined;
+}
+
+function buildAuthHeader(authToken?: string | null) {
+  const token = String(authToken ?? "").trim();
+  if (token) return { Authorization: `Bearer ${token}` };
+
+  // Some edge functions still rely on anon JWT when verify_jwt=true.
+  // Never fall back to publishable key here because it is not a JWT bearer token.
+  const anonJwt = getAnonJwt();
+  return anonJwt ? { Authorization: `Bearer ${anonJwt}` } : {};
+}
+
 export async function getFunction<T>(
   path: string,
   opts?: { authToken?: string | null; withCredentials?: boolean; headers?: Record<string, string> },
@@ -25,7 +42,7 @@ export async function getFunction<T>(
       method: "GET",
       headers: {
         apikey: anonKey,
-        Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+        ...buildAuthHeader(opts?.authToken),
         ...(opts?.headers ?? {}),
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
@@ -81,12 +98,13 @@ export async function postFunction<T>(
 
   const doFetch = async (u: string) => {
     triedUrls.push(u);
+    const authHeader = buildAuthHeader(opts?.authToken);
     return await fetch(u, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         apikey: anonKey,
-        Authorization: `Bearer ${opts?.authToken ? opts.authToken : anonKey}`,
+        ...authHeader,
         ...(opts?.headers ?? {}),
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
