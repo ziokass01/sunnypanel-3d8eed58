@@ -81,6 +81,15 @@ function statusVariant(status?: string) {
   }
 }
 
+function describeResultMessage(result: ResetKeyPayload | null) {
+  const msg = String(result?.msg ?? "");
+  if (msg === "TURNSTILE_REQUIRED") return "Hệ thống đang yêu cầu xác minh Turnstile trước khi tiếp tục.";
+  if (msg === "TURNSTILE_FAILED") return "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.";
+  if (msg === "RATE_LIMIT") return "Bạn thao tác quá nhanh trên cùng IP hoặc cùng key. Vui lòng chờ một lúc rồi thử lại.";
+  if (msg === "KEY_UNAVAILABLE") return "Key không tồn tại, đã bị xóa, bị chặn hoặc đã hết hạn.";
+  return msg;
+}
+
 export function ResetKeyPage() {
   const [key, setKey] = useState("");
   const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(null);
@@ -185,18 +194,11 @@ export function ResetKeyPage() {
               Turnstile chưa được cấu hình ở frontend. Trang vẫn hoạt động bình thường; nếu quản trị viên bật bắt buộc Turnstile ở backend thì bạn sẽ được nhắc bổ sung xác minh.
             </div>
           ) : (
-            <>
-              <TurnstileWidget
-                className="rounded-xl border p-3"
-                siteKey={turnstileSiteKey}
-                onTokenChange={handleTurnstileTokenChange}
-              />
-              {!turnstileToken ? (
-                <div className="text-xs text-muted-foreground">
-                  Nếu phía dưới vẫn trống hoặc báo lỗi mã Turnstile, nguyên nhân thường là site key cũ, hostname sai, hoặc trình duyệt đang chặn <code>challenges.cloudflare.com</code>.
-                </div>
-              ) : null}
-            </>
+            <TurnstileWidget
+              className="rounded-xl border p-3"
+              siteKey={turnstileSiteKey}
+              onTokenChange={handleTurnstileTokenChange}
+            />
           )}
         </CardContent>
       </Card>
@@ -209,13 +211,7 @@ export function ResetKeyPage() {
               <Badge variant={statusVariant(result.status)}>{result.status ?? result.msg}</Badge>
             </div>
             <CardDescription>
-              {result.ok
-                ? "Đã lấy thông tin mới nhất từ hệ thống."
-                : result.msg === "TURNSTILE_REQUIRED"
-                  ? "Hệ thống đang yêu cầu xác minh Turnstile trước khi tiếp tục."
-                  : result.msg === "TURNSTILE_FAILED"
-                    ? "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng thử lại."
-                    : result.msg}
+              {result.ok ? "Đã lấy thông tin mới nhất từ hệ thống." : describeResultMessage(result)}
             </CardDescription>
           </CardHeader>
 
@@ -287,13 +283,7 @@ export function ResetKeyPage() {
               <CardTitle>Không thể lấy thông tin key</CardTitle>
               <Badge variant="destructive">Lỗi</Badge>
             </div>
-            <CardDescription>
-              {result.msg === "TURNSTILE_REQUIRED"
-                ? "Hệ thống đang yêu cầu xác minh Turnstile trước khi tiếp tục."
-                : result.msg === "TURNSTILE_FAILED"
-                  ? "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng thử lại."
-                  : result.msg}
-            </CardDescription>
+            <CardDescription>{describeResultMessage(result)}</CardDescription>
           </CardHeader>
         </Card>
       ) : null}

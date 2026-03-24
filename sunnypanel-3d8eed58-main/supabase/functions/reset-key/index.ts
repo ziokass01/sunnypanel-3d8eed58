@@ -140,43 +140,20 @@ Deno.serve(async (req) => {
   const action = parsed.data.action;
   const keyBucket = await sha256Hex(key);
 
-  const limit = action === "check"
-    ? Number(settings.public_check_limit ?? 8)
-    : Number(settings.public_reset_limit ?? 4);
-
-  const windowSeconds = action === "check"
-    ? Number(settings.public_check_window_seconds ?? 300)
-    : Number(settings.public_reset_window_seconds ?? 600);
-
-  const rl = await db.rpc("check_public_action_rate_limit", {
-    p_action: action.toUpperCase(),
-    p_ip: ip,
-    p_key_bucket: keyBucket,
-    p_limit: Math.max(1, limit),
-    p_window_seconds: Math.max(30, windowSeconds),
-  });
-
-  const rlRow = Array.isArray(rl.data) ? rl.data[0] : null;
-  const allowed = rl.error ? true : Boolean(rlRow?.allowed);
-
-  if (!allowed) {
-    await sleep(700);
-    return json({ ok: false, msg: "RATE_LIMIT" }, 429);
-  }
-
   const TURNSTILE_SITE_KEY = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
   const TURNSTILE_SECRET_KEY = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
   const turnstileConfigured = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+  let turnstileVerified = false;
 
   if (Boolean(settings.require_turnstile) && !turnstileConfigured) {
     return json({ ok: false, msg: "TURNSTILE_NOT_CONFIGURED" }, 500);
   }
 
-  if (Boolean(settings.require_turnstile) && turnstileConfigured) {
-    const token =
-      String(parsed.data.cf_turnstile_response ?? "").trim() ||
-      String(parsed.data.turnstile_token ?? "").trim();
+  const token =
+    String(parsed.data.cf_turnstile_response ?? "").trim() ||
+    String(parsed.data.turnstile_token ?? "").trim();
 
+  if (Boolean(settings.require_turnstile) && turnstileConfigured) {
     if (!token) {
       await sleep(600);
       return json({ ok: false, msg: "TURNSTILE_REQUIRED" }, 200);
@@ -186,6 +163,38 @@ Deno.serve(async (req) => {
     if (!ok) {
       await sleep(600);
       return json({ ok: false, msg: "TURNSTILE_FAILED" }, 200);
+    }
+
+    turnstileVerified = true;
+  } else if (turnstileConfigured && token) {
+    turnstileVerified = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
+  }
+
+  const shouldRateLimit = !(action === "check" && turnstileVerified);
+
+  if (shouldRateLimit) {
+    const limit = action === "check"
+      ? Number(settings.public_check_limit ?? 8)
+      : Number(settings.public_reset_limit ?? 4);
+
+    const windowSeconds = action === "check"
+      ? Number(settings.public_check_window_seconds ?? 300)
+      : Number(settings.public_reset_window_seconds ?? 600);
+
+    const rl = await db.rpc("check_public_action_rate_limit", {
+      p_action: action.toUpperCase(),
+      p_ip: ip,
+      p_key_bucket: keyBucket,
+      p_limit: Math.max(1, limit),
+      p_window_seconds: Math.max(30, windowSeconds),
+    });
+
+    const rlRow = Array.isArray(rl.data) ? rl.data[0] : null;
+    const allowed = rl.error ? true : Boolean(rlRow?.allowed);
+
+    if (!allowed) {
+      await sleep(700);
+      return json({ ok: false, msg: "RATE_LIMIT" }, 429);
     }
   }
 
