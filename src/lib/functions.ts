@@ -19,7 +19,7 @@ function getAnonJwt() {
 
 function shouldSkipAnonJwtFallback(path: string) {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  return normalized === "/reset-key" || normalized === "/free-config";
+  return ["/reset-key", "/free-config", "/free-start", "/free-gate", "/free-reveal", "/free-close"].includes(normalized);
 }
 
 function buildAuthHeader(path: string, authToken?: string | null) {
@@ -105,7 +105,7 @@ export async function postFunction<T>(
 
   const doFetch = async (u: string) => {
     triedUrls.push(u);
-    const authHeader = buildAuthHeader(opts?.authToken);
+    const authHeader = buildAuthHeader(path, opts?.authToken);
     return await fetch(u, {
       method: "POST",
       headers: {
