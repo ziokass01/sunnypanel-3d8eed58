@@ -25,6 +25,7 @@ type ResetKeyPayload = {
   expires_at?: string | null;
   remaining_seconds?: number | null;
   status?: string;
+  http_status?: number;
   device_count?: number;
   max_devices?: number;
   admin_reset_count?: number;
@@ -34,6 +35,7 @@ type ResetKeyPayload = {
   devices_removed?: number;
   reset_enabled?: boolean;
   disabled_message?: string | null;
+  code?: string;
 };
 
 function formatDateTime(value?: string | null) {
@@ -94,12 +96,23 @@ export function ResetKeyPage() {
     return /^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(result.key);
   }, [result]);
 
+  const toUiError = useCallback((e: any): ResetKeyPayload => {
+    const msg = String(e?.message ?? "Có lỗi xảy ra");
+    return {
+      ok: false,
+      msg,
+      code: typeof e?.code === "string" ? e.code : undefined,
+      http_status: typeof e?.status === "number" ? e.status : undefined,
+    };
+  }, []);
+
   const handleTurnstileTokenChange = useCallback((token: string | null) => {
     setTurnstileToken(token);
   }, []);
 
   async function runAction(action: "check" | "reset") {
     if (!normalizedKey) return;
+    setResult(null);
     setLoadingAction(action);
 
     try {
@@ -110,10 +123,7 @@ export function ResetKeyPage() {
       });
       setResult(res);
     } catch (e: any) {
-      setResult({
-        ok: false,
-        msg: String(e?.message ?? "Có lỗi xảy ra"),
-      });
+      setResult(toUiError(e));
     } finally {
       setLoadingAction(null);
     }
