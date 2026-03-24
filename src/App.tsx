@@ -88,8 +88,8 @@ const App = () => {
                   <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
 
                   <Route path="/free-licenses" element={<AdminRoute><FreeLicensesPage /></AdminRoute>} />
-                  <Route path="/licenses/trash" element={<AdminRoute><LicensesTrashPage /></AdminRoute>} />
-                  <Route path="/audit" element={<AdminRoute><AuditLogsPage /></AdminRoute>} />
+                  <Route path="/licenses/trash" element={<LicensesTrashPage />} />
+                  <Route path="/audit" element={<AuditLogsPage />} />
                   <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
                   <Route path="/rent" element={<AdminRoute><RentAdminPage /></AdminRoute>} />
                   <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
