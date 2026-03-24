@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getFunction } from "@/lib/functions";
 
 export type ResetSettingsRow = {
   id: number;
@@ -55,4 +56,24 @@ export async function fetchResetActivities(limit = 30): Promise<ResetActivityRow
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as ResetActivityRow[];
+}
+
+type FreeConfigTurnstilePayload = {
+  ok?: boolean;
+  turnstile_enabled?: boolean;
+};
+
+export async function fetchTurnstileRuntimeStatus() {
+  try {
+    const data = await getFunction<FreeConfigTurnstilePayload>("/free-config");
+    return {
+      ok: Boolean(data?.ok),
+      turnstileEnabled: Boolean(data?.turnstile_enabled),
+    };
+  } catch {
+    return {
+      ok: false,
+      turnstileEnabled: false,
+    };
+  }
 }

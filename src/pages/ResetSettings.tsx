@@ -13,7 +13,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error-message";
-import { fetchResetActivities, fetchResetSettings, updateResetSettings } from "@/features/reset-settings/reset-settings-api";
+import {
+  fetchResetActivities,
+  fetchResetSettings,
+  fetchTurnstileRuntimeStatus,
+  updateResetSettings,
+} from "@/features/reset-settings/reset-settings-api";
 
 function secondsToText(seconds: number) {
   const d = Math.floor(seconds / 86400);
@@ -43,6 +48,11 @@ export function ResetSettingsPage() {
     queryFn: fetchResetSettings,
   });
 
+  const turnstileRuntimeQuery = useQuery({
+    queryKey: ["reset_turnstile_runtime"],
+    queryFn: fetchTurnstileRuntimeStatus,
+  });
+
   const [activityFilter, setActivityFilter] = useState<"all" | "PUBLIC_RESET" | "RESET_DEVICES" | "RESET_DEVICES_PENALTY">("all");
   const [activityQueryText, setActivityQueryText] = useState("");
 
@@ -52,6 +62,7 @@ export function ResetSettingsPage() {
   });
 
   const settings = settingsQuery.data;
+  const turnstileRuntimeEnabled = Boolean(turnstileRuntimeQuery.data?.turnstileEnabled);
 
   const [form, setForm] = useState<any>(null);
 
@@ -80,6 +91,9 @@ export function ResetSettingsPage() {
       if (!currentForm) throw new Error("FORM_NOT_READY");
       if (Boolean(currentForm.require_turnstile) && !turnstileSiteKey) {
         throw new Error("TURNSTILE_SITE_KEY_MISSING");
+      }
+      if (Boolean(currentForm.require_turnstile) && !turnstileRuntimeEnabled) {
+        throw new Error("TURNSTILE_FUNCTION_SECRET_MISSING");
       }
       const payload = {
         enabled: Boolean(currentForm.enabled),
@@ -113,6 +127,8 @@ export function ResetSettingsPage() {
         title: "Lưu settings thất bại",
         description: getErrorMessage(err).includes("TURNSTILE_SITE_KEY_MISSING")
           ? "Chưa có VITE_TURNSTILE_SITE_KEY ở frontend nên chưa thể bật require_turnstile."
+          : getErrorMessage(err).includes("TURNSTILE_FUNCTION_SECRET_MISSING")
+            ? "Supabase function chưa đủ TURNSTILE_SITE_KEY/TURNSTILE_SECRET_KEY nên chưa thể bật require_turnstile."
           : getErrorMessage(err),
         variant: "destructive",
       });
@@ -170,6 +186,17 @@ export function ResetSettingsPage() {
         </Card>
       ) : null}
 
+      {turnstileSiteKey && !turnstileRuntimeEnabled ? (
+        <Card className="border-destructive/40">
+          <CardContent className="flex items-start gap-3 p-4 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
+            <div>
+              Frontend đã có <code>VITE_TURNSTILE_SITE_KEY</code> nhưng Edge Function chưa đủ secret Turnstile. Chưa thể bật <b>require_turnstile</b>.
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader>
@@ -205,13 +232,23 @@ export function ResetSettingsPage() {
                         });
                         return;
                       }
+                      if (v && !turnstileRuntimeEnabled) {
+                        toast({
+                          title: "Thiếu Turnstile secret ở function",
+                          description: "Cần cấu hình TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY cho Supabase Edge Functions trước khi bật require_turnstile.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
                       updateField("require_turnstile", v);
                     }}
                   />
                 </div>
                 <div className="text-xs text-muted-foreground flex items-center gap-2">
                   {turnstileSiteKey ? <ShieldCheck className="h-4 w-4" /> : <ShieldEllipsis className="h-4 w-4" />}
-                  {turnstileSiteKey ? "Frontend site key đã có." : "Frontend site key chưa có."}
+                  {turnstileSiteKey
+                    ? (turnstileRuntimeEnabled ? "Frontend site key đã có, function secret cũng đã sẵn sàng." : "Frontend site key đã có, nhưng function secret còn thiếu.")
+                    : "Frontend site key chưa có."}
                 </div>
               </div>
             </div>

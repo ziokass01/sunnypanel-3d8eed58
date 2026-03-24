@@ -37,7 +37,7 @@ type ResetKeyPayload = {
 };
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "Không giới hạn";
+  if (!value) return "--";
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return value;
   return new Intl.DateTimeFormat("vi-VN", {
@@ -88,6 +88,12 @@ export function ResetKeyPage() {
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
+  const hasValidData = useMemo(() => {
+    if (!result?.ok) return false;
+    if (!result.key || !result.key_kind || !result.status) return false;
+    return /^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(result.key);
+  }, [result]);
+
   const handleTurnstileTokenChange = useCallback((token: string | null) => {
     setTurnstileToken(token);
   }, []);
@@ -178,7 +184,7 @@ export function ResetKeyPage() {
         </CardContent>
       </Card>
 
-      {result ? (
+      {result?.ok && hasValidData ? (
         <Card className="rounded-2xl">
           <CardHeader className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -215,7 +221,7 @@ export function ResetKeyPage() {
 
               <div className="rounded-xl border p-3">
                 <div className="text-xs text-muted-foreground">Hết hạn</div>
-                <div className="mt-1 text-sm">{formatDateTime(result.expires_at)}</div>
+                <div className="mt-1 text-sm">{result.expires_at ? formatDateTime(result.expires_at) : "Không giới hạn"}</div>
               </div>
 
               <div className="rounded-xl border p-3">
@@ -254,6 +260,24 @@ export function ResetKeyPage() {
               </div>
             ) : null}
           </CardContent>
+        </Card>
+      ) : null}
+
+      {result && !hasValidData ? (
+        <Card className="rounded-2xl border-destructive/50">
+          <CardHeader className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Không thể lấy thông tin key</CardTitle>
+              <Badge variant="destructive">Lỗi</Badge>
+            </div>
+            <CardDescription>
+              {result.msg === "TURNSTILE_REQUIRED"
+                ? "Hệ thống đang yêu cầu xác minh Turnstile trước khi tiếp tục."
+                : result.msg === "TURNSTILE_FAILED"
+                  ? "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng thử lại."
+                  : result.msg}
+            </CardDescription>
+          </CardHeader>
         </Card>
       ) : null}
 

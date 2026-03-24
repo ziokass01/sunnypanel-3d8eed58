@@ -132,6 +132,10 @@ Deno.serve(async (req) => {
   const TURNSTILE_SECRET_KEY = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
   const turnstileConfigured = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 
+  if (Boolean(settings.require_turnstile) && !turnstileConfigured) {
+    return json({ ok: false, msg: "TURNSTILE_NOT_CONFIGURED" }, 500);
+  }
+
   if (Boolean(settings.require_turnstile) && turnstileConfigured) {
     const token =
       String(parsed.data.cf_turnstile_response ?? "").trim() ||
