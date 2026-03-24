@@ -143,17 +143,19 @@ Deno.serve(async (req) => {
   const TURNSTILE_SITE_KEY = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
   const TURNSTILE_SECRET_KEY = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
   const turnstileConfigured = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
-  let turnstileVerified = false;
-
-  if (Boolean(settings.require_turnstile) && !turnstileConfigured) {
-    return json({ ok: false, msg: "TURNSTILE_NOT_CONFIGURED" }, 500);
-  }
-
   const token =
     String(parsed.data.cf_turnstile_response ?? "").trim() ||
     String(parsed.data.turnstile_token ?? "").trim();
 
-  if (Boolean(settings.require_turnstile) && turnstileConfigured) {
+  // Chỉ bắt Turnstile cho RESET. CHECK vẫn xem được trạng thái key bình thường.
+  const needsTurnstile = Boolean(settings.require_turnstile) && action === "reset";
+  let turnstileVerified = false;
+
+  if (needsTurnstile && !turnstileConfigured) {
+    return json({ ok: false, msg: "TURNSTILE_NOT_CONFIGURED" }, 500);
+  }
+
+  if (needsTurnstile) {
     if (!token) {
       await sleep(600);
       return json({ ok: false, msg: "TURNSTILE_REQUIRED" }, 200);
@@ -167,6 +169,7 @@ Deno.serve(async (req) => {
 
     turnstileVerified = true;
   } else if (turnstileConfigured && token) {
+    // CHECK có thể verify optional nếu frontend gửi token, nhưng không bắt buộc.
     turnstileVerified = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
   }
 

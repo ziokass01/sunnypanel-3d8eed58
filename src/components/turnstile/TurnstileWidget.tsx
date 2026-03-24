@@ -25,6 +25,27 @@ type Props = {
 const SCRIPT_ID = "cf-turnstile-script";
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
+function waitForTurnstile() {
+  if (typeof window === "undefined") return Promise.reject(new Error("NO_WINDOW"));
+  if (window.turnstile) return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      if (window.turnstile) {
+        resolve();
+        return;
+      }
+      if (Date.now() - started > 10000) {
+        reject(new Error("TURNSTILE_LOAD_TIMEOUT"));
+        return;
+      }
+      window.setTimeout(tick, 50);
+    };
+    tick();
+  });
+}
+
 function ensureTurnstileScript() {
   if (typeof window === "undefined") return Promise.reject(new Error("NO_WINDOW"));
   if (window.turnstile) return Promise.resolve();
@@ -32,8 +53,7 @@ function ensureTurnstileScript() {
   return new Promise<void>((resolve, reject) => {
     const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("TURNSTILE_SCRIPT_FAILED")), { once: true });
+      waitForTurnstile().then(resolve).catch(reject);
       return;
     }
 
@@ -42,7 +62,9 @@ function ensureTurnstileScript() {
     script.src = SCRIPT_SRC;
     script.async = true;
     script.defer = true;
-    script.onload = () => resolve();
+    script.onload = () => {
+      waitForTurnstile().then(resolve).catch(reject);
+    };
     script.onerror = () => reject(new Error("TURNSTILE_SCRIPT_FAILED"));
     document.head.appendChild(script);
   });

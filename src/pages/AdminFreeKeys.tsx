@@ -363,7 +363,17 @@ function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
 
-  const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const envBase = String(import.meta.env.VITE_PUBLIC_BASE_URL || "").trim();
+    if (envBase) return envBase.replace(/\/$/, "");
+
+    const { protocol, hostname, origin } = window.location;
+    if (hostname.startsWith("admin.")) {
+      return `${protocol}//${hostname.replace(/^admin\./, "")}`;
+    }
+    return origin;
+  }, []);
   const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
   const gateUrl = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
   const claimBaseUrl = baseUrl ? `${baseUrl}/free/claim` : "/free/claim";

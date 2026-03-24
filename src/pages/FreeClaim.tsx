@@ -54,6 +54,8 @@ function friendlyRevealError(msg: string) {
   if (m === "GATE_STATUS_INVALID") return "Xác thực chưa hợp lệ hoặc chưa xác thực. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong hôm nay. Vui lòng thử lại sau 00:00 (GMT+7).";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
+  if (m === "TURNSTILE_REQUIRED") return "Bạn cần xác minh Turnstile trước khi nhận key.";
+  if (m === "TURNSTILE_FAILED") return "Turnstile đã hết hạn hoặc token đã được dùng. Vui lòng xác minh lại rồi thử tiếp.";
   if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "SESSION_BIND_MISMATCH") return "Phiên không khớp thiết bị/IP. Vui lòng bắt đầu lại từ trang Get Key 🔑.";
   if (m === "BLOCKED") return "Thiết bị hoặc IP của bạn đã bị chặn.";
@@ -245,7 +247,7 @@ export function FreeClaimPage() {
   // Reset the one-time retry guard when tokens change.
   useEffect(() => {
     didRetryRef.current = false;
-  }, [claimToken, outToken]);
+  }, [configLoaded, claimToken, outToken]);
 
   // Canonical session_id: whenever we have out_token, resolve sid from backend.
   // This repairs missing/incorrect sid due to URL mangling/copy.
@@ -273,6 +275,8 @@ export function FreeClaimPage() {
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileNonce, setTurnstileNonce] = useState(0);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
 
@@ -359,6 +363,7 @@ export function FreeClaimPage() {
   }, [hasBareClaimKey, claimFromUrl, tokenSource, clearAllFreeStorage]);
 
   useEffect(() => {
+    if (!configLoaded) return;
     if (!claimToken) return;
     if (!outToken) {
       setError("Lỗi thiếu xác thực. Hãy quay lại Get Key 🔑 rồi vượt lại.");
@@ -378,10 +383,12 @@ export function FreeClaimPage() {
 
   // Fetch backend config to determine Turnstile requirements.
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const fp = getOrCreateFingerprint();
         const cfg = await fetchFreeConfig({ fingerprint: fp });
+        if (cancelled) return;
         setCfg(cfg);
         const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
         setTurnstileEnabled(enabled);
@@ -389,13 +396,19 @@ export function FreeClaimPage() {
         if (!enabled) setTurnstileToken("");
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
-        // If config cannot be fetched, fail open (do not block claim UI).
+        if (cancelled) return;
+        // Nếu config không tải được, đừng auto reveal ngay để tránh race TURNSTILE_REQUIRED.
         setCfg(null);
         setTurnstileEnabled(false);
         setTurnstileSiteKey(null);
         setTurnstileToken("");
+      } finally {
+        if (!cancelled) setConfigLoaded(true);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const returnSeconds = 10;
@@ -405,18 +418,28 @@ export function FreeClaimPage() {
     return code ? `Key free (${code})` : "Key free";
   }, []);
 
+  const resetFreeTurnstile = useCallback(() => {
+    setTurnstileToken("");
+    setTurnstileNonce((n) => n + 1);
+  }, []);
+
   const canVerify = useMemo(() => {
+    if (!configLoaded) return false;
     if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
     if (turnstileEnabled && !turnstileToken) return false;
     return !loading;
-  }, [claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
+  }, [configLoaded, claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
 
   async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
     if (!outToken) {
       setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
+      return;
+    }
+    if (turnstileEnabled && !turnstileToken) {
+      setError("Bạn cần xác minh Turnstile trước khi nhận key.");
       return;
     }
     if (loading || revealed) return;
@@ -439,7 +462,7 @@ export function FreeClaimPage() {
         out_token: outToken,
         session_id: sid || undefined,
         fingerprint: fp,
-        cf_turnstile_response: turnstileEnabled ? turnstileToken : undefined,
+        cf_turnstile_response: turnstileEnabled ? (turnstileToken || undefined) : undefined,
         debug: debugMode ? 1 : undefined,
       });
 
@@ -469,6 +492,10 @@ export function FreeClaimPage() {
             await revealOnce({ forceSid: nextSid });
             return;
           }
+        }
+
+        if (turnstileEnabled && (code === "TURNSTILE_REQUIRED" || code === "TURNSTILE_FAILED")) {
+          resetFreeTurnstile();
         }
 
         const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
@@ -504,21 +531,27 @@ export function FreeClaimPage() {
       }
     } catch (e: any) {
       const code = String(e?.code || "").trim();
+      if (turnstileEnabled && (code === "TURNSTILE_REQUIRED" || code === "TURNSTILE_FAILED")) {
+        resetFreeTurnstile();
+      }
       const friendly = friendlyRevealError(code || e?.message || "UNAUTHORIZED");
       markFreeAttemptFail(code || e?.message || "REVEAL_FAILED");
       setDeviceHistory(readFreeDeviceHistory());
       setError(debugMode && code ? `${friendly} (${code})` : friendly);
     } finally {
       setLoading(false);
+      if (turnstileEnabled) resetFreeTurnstile();
     }
   }
 
   useEffect(() => {
+    if (!configLoaded) return;
     if (!claimToken || !outToken) return;
     if (revealed) return;
+    if (turnstileEnabled) return;
     void revealOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claimToken, outToken, effectiveSessionId]);
+  }, [configLoaded, claimToken, outToken, effectiveSessionId, turnstileEnabled]);
 
   async function closeAndReturn() {
     try {
@@ -632,6 +665,7 @@ export function FreeClaimPage() {
                 {turnstileEnabled && turnstileSiteKey ? (
                   <div className="rounded-2xl border p-3">
                     <TurnstileWidget
+                      key={turnstileNonce}
                       siteKey={turnstileSiteKey}
                       onToken={setTurnstileToken}
                       onError={(m) => setError(m)}
@@ -655,7 +689,7 @@ export function FreeClaimPage() {
                 </div>
 
                 <Button className="h-12 w-full rounded-2xl text-base font-semibold" disabled={!canVerify || loading} onClick={() => void revealOnce()}>
-                  {loading ? "Đang xác minh…" : "Xác minh"}
+                  {!configLoaded ? "Đang tải cấu hình…" : loading ? "Đang xác minh…" : "Xác minh"}
                 </Button>
               </div>
             ) : (
