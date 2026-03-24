@@ -10,10 +10,10 @@
 Nếu **project mismatch** (frontend gọi 1 project, backend functions/migrations lại ở project khác) thì browser sẽ báo **Failed to fetch**.
 
 ✅ Checklist:
-- Project ref chuẩn (đang dùng): `cbdokxhoucczyrpcjvxf`.
+- Project ref chuẩn (đang dùng): `ijvhlhdrncxtxosmnbtt`.
 - Frontend `.env` phải trùng: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PROJECT_ID` (và `VITE_SUPABASE_ANON_KEY` nếu có; hiện đang dùng `VITE_SUPABASE_PUBLISHABLE_KEY`).
 - CI/CLI phải `link` đúng **cùng project ref** trước khi `db push`/deploy functions.
-- Nếu bạn deploy qua GitHub Actions: đảm bảo secrets `SUPABASE_PROJECT_REF=cbdokxhoucczyrpcjvxf` và workflow log ra project ref đang deploy.
+- Nếu bạn deploy qua GitHub Actions: đảm bảo secrets `SUPABASE_PROJECT_REF=ijvhlhdrncxtxosmnbtt` và workflow log ra project ref đang deploy.
 
 > Gặp “Failed to fetch”: 90% do **CORS** hoặc **deploy nhầm project**.
 

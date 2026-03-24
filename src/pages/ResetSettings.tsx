@@ -78,6 +78,9 @@ export function ResetSettingsPage() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!currentForm) throw new Error("FORM_NOT_READY");
+      if (Boolean(currentForm.require_turnstile) && !turnstileSiteKey) {
+        throw new Error("TURNSTILE_SITE_KEY_MISSING");
+      }
       const payload = {
         enabled: Boolean(currentForm.enabled),
         require_turnstile: Boolean(currentForm.require_turnstile),
@@ -108,7 +111,9 @@ export function ResetSettingsPage() {
     onError: (err) => {
       toast({
         title: "Lưu settings thất bại",
-        description: getErrorMessage(err),
+        description: getErrorMessage(err).includes("TURNSTILE_SITE_KEY_MISSING")
+          ? "Chưa có VITE_TURNSTILE_SITE_KEY ở frontend nên chưa thể bật require_turnstile."
+          : getErrorMessage(err),
         variant: "destructive",
       });
     },
@@ -126,7 +131,8 @@ export function ResetSettingsPage() {
       const actionOk = activityFilter === "all" ? true : row.action === activityFilter;
       if (!actionOk) return false;
       if (!q) return true;
-      return String(row.license_key ?? "").toLowerCase().includes(q);
+      return String(row.license_key ?? "").toLowerCase().includes(q)
+        || JSON.stringify(row.detail ?? {}).toLowerCase().includes(q);
     });
   }, [activityFilter, activityQuery.data, activityQueryText]);
 
@@ -188,7 +194,20 @@ export function ResetSettingsPage() {
                     <div className="font-medium">Bật Turnstile</div>
                     <div className="text-xs text-muted-foreground">Chỉ nên bật khi frontend đã có site key và function đã có secret key.</div>
                   </div>
-                  <Switch checked={Boolean(currentForm?.require_turnstile)} onCheckedChange={(v) => updateField("require_turnstile", v)} />
+                  <Switch
+                    checked={Boolean(currentForm?.require_turnstile)}
+                    onCheckedChange={(v) => {
+                      if (v && !turnstileSiteKey) {
+                        toast({
+                          title: "Thiếu Turnstile site key",
+                          description: "Cần cấu hình VITE_TURNSTILE_SITE_KEY ở frontend trước khi bật require_turnstile.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      updateField("require_turnstile", v);
+                    }}
+                  />
                 </div>
                 <div className="text-xs text-muted-foreground flex items-center gap-2">
                   {turnstileSiteKey ? <ShieldCheck className="h-4 w-4" /> : <ShieldEllipsis className="h-4 w-4" />}

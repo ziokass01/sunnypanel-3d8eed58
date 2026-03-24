@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { postFunction } from "@/lib/functions";
+import { TurnstileWidget } from "@/components/turnstile/TurnstileWidget";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -83,8 +84,13 @@ export function ResetKeyPage() {
   const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(null);
   const [result, setResult] = useState<ResetKeyPayload | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
+  const handleTurnstileTokenChange = useCallback((token: string | null) => {
+    setTurnstileToken(token);
+  }, []);
 
   async function runAction(action: "check" | "reset") {
     if (!normalizedKey) return;
@@ -94,6 +100,7 @@ export function ResetKeyPage() {
       const res = await postFunction<ResetKeyPayload>("/reset-key", {
         action,
         key: normalizedKey,
+        turnstile_token: turnstileToken,
       });
       setResult(res);
     } catch (e: any) {
@@ -156,6 +163,18 @@ export function ResetKeyPage() {
           <div className="rounded-xl border p-3 text-sm text-muted-foreground">
             Vì lý do chống dò key và chống abuse, hệ thống sẽ giới hạn tần suất kiểm tra/reset và có thể trả thông báo chung khi key không khả dụng.
           </div>
+
+          {!turnstileSiteKey ? (
+            <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+              Turnstile chưa được cấu hình ở frontend. Trang vẫn hoạt động bình thường; nếu quản trị viên bật bắt buộc Turnstile ở backend thì bạn sẽ được nhắc bổ sung xác minh.
+            </div>
+          ) : (
+            <TurnstileWidget
+              className="rounded-xl border p-3"
+              siteKey={turnstileSiteKey}
+              onTokenChange={handleTurnstileTokenChange}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -166,7 +185,15 @@ export function ResetKeyPage() {
               <CardTitle>Trạng thái key</CardTitle>
               <Badge variant={statusVariant(result.status)}>{result.status ?? result.msg}</Badge>
             </div>
-            <CardDescription>{result.ok ? "Đã lấy thông tin mới nhất từ hệ thống." : result.msg}</CardDescription>
+            <CardDescription>
+              {result.ok
+                ? "Đã lấy thông tin mới nhất từ hệ thống."
+                : result.msg === "TURNSTILE_REQUIRED"
+                  ? "Hệ thống đang yêu cầu xác minh Turnstile trước khi tiếp tục."
+                  : result.msg === "TURNSTILE_FAILED"
+                    ? "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng thử lại."
+                    : result.msg}
+            </CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-4">
