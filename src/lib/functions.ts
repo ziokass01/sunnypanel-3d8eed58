@@ -17,9 +17,16 @@ function getAnonJwt() {
   return parts.length === 3 ? anonJwt : undefined;
 }
 
-function buildAuthHeader(authToken?: string | null) {
+function shouldSkipAnonJwtFallback(path: string) {
+  const normalizedPath = (path.startsWith("/") ? path.slice(1) : path).trim();
+  return normalizedPath === "reset-key" || normalizedPath === "free-config";
+}
+
+function buildAuthHeader(authToken?: string | null, opts?: { allowAnonJwtFallback?: boolean }) {
   const token = String(authToken ?? "").trim();
   if (token) return { Authorization: `Bearer ${token}` };
+
+  if (opts?.allowAnonJwtFallback === false) return {};
 
   // Some edge functions still rely on anon JWT when verify_jwt=true.
   // Never fall back to publishable key here because it is not a JWT bearer token.
@@ -32,6 +39,7 @@ export async function getFunction<T>(
   opts?: { authToken?: string | null; withCredentials?: boolean; headers?: Record<string, string> },
 ): Promise<T> {
   const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const skipAnonJwtFallback = shouldSkipAnonJwtFallback(path);
 
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
@@ -42,7 +50,7 @@ export async function getFunction<T>(
       method: "GET",
       headers: {
         apikey: anonKey,
-        ...buildAuthHeader(opts?.authToken),
+        ...buildAuthHeader(opts?.authToken, { allowAnonJwtFallback: !skipAnonJwtFallback }),
         ...(opts?.headers ?? {}),
       },
       // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
@@ -82,6 +90,7 @@ export async function postFunction<T>(
 
   const normalizedPath = (path.startsWith("/") ? path.slice(1) : path).trim();
   const isAdminFn = normalizedPath.startsWith("admin-");
+  const skipAnonJwtFallback = shouldSkipAnonJwtFallback(path);
 
   // Admin functions MUST be called with a real user JWT; never fall back to anon.
   if (isAdminFn && !opts?.authToken) {
@@ -98,7 +107,7 @@ export async function postFunction<T>(
 
   const doFetch = async (u: string) => {
     triedUrls.push(u);
-    const authHeader = buildAuthHeader(opts?.authToken);
+    const authHeader = buildAuthHeader(opts?.authToken, { allowAnonJwtFallback: !skipAnonJwtFallback });
     return await fetch(u, {
       method: "POST",
       headers: {
