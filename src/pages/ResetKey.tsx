@@ -61,7 +61,7 @@ function formatRemaining(seconds?: number | null) {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
 
-  const parts = [];
+  const parts: string[] = [];
   if (d > 0) parts.push(`${d} ngày`);
   if (h > 0) parts.push(`${h} giờ`);
   if (m > 0) parts.push(`${m} phút`);
@@ -84,7 +84,7 @@ function statusVariant(status?: string) {
 function describeResultMessage(result: ResetKeyPayload | null) {
   const msg = String(result?.msg ?? "");
   if (msg === "TURNSTILE_REQUIRED") return "Hệ thống đang yêu cầu xác minh Turnstile trước khi tiếp tục.";
-  if (msg === "TURNSTILE_FAILED") return "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.";
+  if (msg === "TURNSTILE_FAILED") return "Token Turnstile đã hết hạn hoặc đã được dùng rồi. Vui lòng xác minh lại rồi thử tiếp.";
   if (msg === "RATE_LIMIT") return "Bạn thao tác quá nhanh trên cùng IP hoặc cùng key. Vui lòng chờ một lúc rồi thử lại.";
   if (msg === "KEY_UNAVAILABLE") return "Key không tồn tại, đã bị xóa, bị chặn hoặc đã hết hạn.";
   return msg;
@@ -96,9 +96,12 @@ export function ResetKeyPage() {
   const [result, setResult] = useState<ResetKeyPayload | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileNonce, setTurnstileNonce] = useState(0);
+
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
+
   const hasValidData = useMemo(() => {
     if (!result?.ok) return false;
     if (!result.key || !result.key_kind || !result.status) return false;
@@ -121,20 +124,38 @@ export function ResetKeyPage() {
 
   async function runAction(action: "check" | "reset") {
     if (!normalizedKey) return;
+
+    if (turnstileSiteKey && !turnstileToken) {
+      setResult({
+        ok: false,
+        msg: "TURNSTILE_REQUIRED",
+      });
+      return;
+    }
+
     setResult(null);
     setLoadingAction(action);
+
+    const tokenToSend = turnstileToken;
 
     try {
       const res = await postFunction<ResetKeyPayload>("/reset-key", {
         action,
         key: normalizedKey,
-        turnstile_token: turnstileToken,
+        turnstile_token: tokenToSend,
       });
       setResult(res);
     } catch (e: any) {
       setResult(toUiError(e));
     } finally {
       setLoadingAction(null);
+
+      // Token Turnstile chỉ dùng được 1 lần.
+      // Gửi request xong là xóa token và render lại widget để lấy token mới.
+      if (turnstileSiteKey) {
+        setTurnstileToken(null);
+        setTurnstileNonce((n) => n + 1);
+      }
     }
   }
 
@@ -154,6 +175,7 @@ export function ResetKeyPage() {
             Key free: mặc định lần đầu trừ 50%. Key mua/admin: mặc định lần đầu không trừ, từ lần sau trừ 20%.
           </CardDescription>
         </CardHeader>
+
         <CardContent className="space-y-4">
           <Input
             value={key}
@@ -166,7 +188,7 @@ export function ResetKeyPage() {
             <Button
               variant="soft"
               disabled={!normalizedKey || loadingAction !== null}
-              onClick={() => runAction("check")}
+              onClick={() => void runAction("check")}
             >
               {loadingAction === "check" ? "Đang kiểm tra..." : "Check key"}
             </Button>
@@ -194,11 +216,17 @@ export function ResetKeyPage() {
               Turnstile chưa được cấu hình ở frontend. Trang vẫn hoạt động bình thường; nếu quản trị viên bật bắt buộc Turnstile ở backend thì bạn sẽ được nhắc bổ sung xác minh.
             </div>
           ) : (
-            <TurnstileWidget
-              className="rounded-xl border p-3"
-              siteKey={turnstileSiteKey}
-              onTokenChange={handleTurnstileTokenChange}
-            />
+            <>
+              <TurnstileWidget
+                key={turnstileNonce}
+                className="rounded-xl border p-3"
+                siteKey={turnstileSiteKey}
+                onTokenChange={handleTurnstileTokenChange}
+              />
+              <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+                Sau mỗi lần bấm Check key hoặc Reset key, Turnstile sẽ tự làm mới. Nếu vừa thao tác xong, vui lòng xác minh lại trước lần tiếp theo.
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -219,7 +247,7 @@ export function ResetKeyPage() {
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-xl border p-3">
                 <div className="text-xs text-muted-foreground">Key</div>
-                <div className="mt-1 font-mono text-sm break-all">{result.key ?? normalizedKey}</div>
+                <div className="mt-1 break-all font-mono text-sm">{result.key ?? normalizedKey}</div>
               </div>
 
               <div className="rounded-xl border p-3">
@@ -296,6 +324,7 @@ export function ResetKeyPage() {
               Hệ thống sẽ xóa toàn bộ thiết bị của key này. Nếu là key free hoặc key đã reset nhiều lần, thời gian còn lại có thể bị trừ theo chính sách hiện tại.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={loadingAction === "reset"}>Hủy</AlertDialogCancel>
             <AlertDialogAction
