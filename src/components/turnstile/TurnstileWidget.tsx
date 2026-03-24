@@ -6,9 +6,15 @@ declare global {
       render: (container: HTMLElement, options: {
         sitekey: string;
         theme?: "light" | "dark" | "auto";
+        size?: "normal" | "flexible" | "compact";
+        appearance?: "always" | "execute" | "interaction-only";
+        retry?: "auto" | "never";
+        language?: string;
         callback?: (token: string) => void;
         "expired-callback"?: () => void;
-        "error-callback"?: () => void;
+        "timeout-callback"?: () => void;
+        "unsupported-callback"?: () => void;
+        "error-callback"?: (errorCode?: string | number) => boolean | void;
       }) => string;
       remove?: (widgetId: string) => void;
       reset?: (widgetId?: string) => void;
@@ -53,6 +59,7 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
   const widgetIdRef = useRef<string | null>(null);
   const [scriptReady, setScriptReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [widgetState, setWidgetState] = useState<"idle" | "ready" | "verified" | "error">("idle");
 
   useEffect(() => {
     onTokenChange(null);
@@ -64,6 +71,7 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
     if (!siteKey) {
       setScriptReady(false);
       setLoadError(null);
+      setWidgetState("idle");
       return;
     }
 
@@ -72,11 +80,13 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
         if (cancelled) return;
         setScriptReady(true);
         setLoadError(null);
+        setWidgetState("ready");
       })
       .catch((err) => {
         if (cancelled) return;
         setScriptReady(false);
         setLoadError(String(err?.message ?? "TURNSTILE_LOAD_FAILED"));
+        setWidgetState("error");
       });
 
     return () => {
@@ -89,17 +99,45 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
 
     containerRef.current.innerHTML = "";
     onTokenChange(null);
+    setLoadError(null);
+    setWidgetState("ready");
 
     try {
       const widgetId = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
         theme: "auto",
-        callback: (token) => onTokenChange(token),
-        "expired-callback": () => onTokenChange(null),
-        "error-callback": () => onTokenChange(null),
+        size: "flexible",
+        appearance: "always",
+        retry: "auto",
+        language: "auto",
+        callback: (token) => {
+          setLoadError(null);
+          setWidgetState("verified");
+          onTokenChange(token);
+        },
+        "expired-callback": () => {
+          setWidgetState("ready");
+          onTokenChange(null);
+        },
+        "timeout-callback": () => {
+          setWidgetState("ready");
+          onTokenChange(null);
+        },
+        "unsupported-callback": () => {
+          setWidgetState("error");
+          setLoadError("TURNSTILE_UNSUPPORTED_BROWSER");
+          onTokenChange(null);
+        },
+        "error-callback": (errorCode) => {
+          setWidgetState("error");
+          setLoadError(`TURNSTILE_${String(errorCode ?? "UNKNOWN")}`);
+          onTokenChange(null);
+          return true;
+        },
       });
       widgetIdRef.current = widgetId;
     } catch (err: any) {
+      setWidgetState("error");
       setLoadError(String(err?.message ?? "TURNSTILE_RENDER_FAILED"));
     }
 
@@ -112,6 +150,7 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
         }
       }
       widgetIdRef.current = null;
+      setWidgetState("idle");
       onTokenChange(null);
     };
   }, [siteKey, scriptReady, onTokenChange]);
@@ -128,10 +167,15 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
 
   return (
     <div className={className}>
-      <div ref={containerRef} />
+      <div ref={containerRef} className="min-h-[65px]" />
+      {!loadError && widgetState !== "verified" ? (
+        <div className="mt-2 text-xs text-muted-foreground">
+          Hoàn tất xác minh Turnstile ở khung trên trước khi bấm Check key hoặc Reset key.
+        </div>
+      ) : null}
       {loadError ? (
         <div className="mt-2 rounded-xl border p-3 text-sm text-destructive">
-          Không tải được Turnstile: {loadError}
+          Không tải được Turnstile: {loadError}. Nếu mã là <code>110100</code>/<code>110110</code> thì site key sai hoặc site đang dùng key cũ. Nếu là <code>110200</code> thì hostname chưa được cấp quyền. Nếu là <code>200500</code> thì iframe/script của Turnstile đang bị chặn.
         </div>
       ) : null}
     </div>

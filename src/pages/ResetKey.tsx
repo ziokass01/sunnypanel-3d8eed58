@@ -185,11 +185,18 @@ export function ResetKeyPage() {
               Turnstile chưa được cấu hình ở frontend. Trang vẫn hoạt động bình thường; nếu quản trị viên bật bắt buộc Turnstile ở backend thì bạn sẽ được nhắc bổ sung xác minh.
             </div>
           ) : (
-            <TurnstileWidget
-              className="rounded-xl border p-3"
-              siteKey={turnstileSiteKey}
-              onTokenChange={handleTurnstileTokenChange}
-            />
+            <>
+              <TurnstileWidget
+                className="rounded-xl border p-3"
+                siteKey={turnstileSiteKey}
+                onTokenChange={handleTurnstileTokenChange}
+              />
+              {!turnstileToken ? (
+                <div className="text-xs text-muted-foreground">
+                  Nếu phía dưới vẫn trống hoặc báo lỗi mã Turnstile, nguyên nhân thường là site key cũ, hostname sai, hoặc trình duyệt đang chặn <code>challenges.cloudflare.com</code>.
+                </div>
+              ) : null}
+            </>
           )}
         </CardContent>
       </Card>
