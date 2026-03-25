@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
@@ -75,18 +76,20 @@ export function LicenseEditPage() {
       is_active: true,
       note: "",
     },
-    values: data
-      ? {
-          expires_at: isoToLocal(data.expires_at),
-          ...(getStartOnFirstUse(data)
-            ? secondsToFields((data as any).duration_seconds ?? ((data as any).duration_days ? (data as any).duration_days * 86400 : null))
-            : { duration_value: 2, duration_unit: "hours" as const }),
-          max_devices: data.max_devices,
-          is_active: data.is_active,
-          note: data.note ?? "",
-        }
-      : undefined,
   });
+
+  useEffect(() => {
+    if (!data) return;
+    form.reset({
+      expires_at: isoToLocal(data.expires_at),
+      ...(getStartOnFirstUse(data)
+        ? secondsToFields((data as any).duration_seconds ?? ((data as any).duration_days ? (data as any).duration_days * 86400 : null))
+        : { duration_value: 2, duration_unit: "hours" as const }),
+      max_devices: data.max_devices,
+      is_active: data.is_active,
+      note: data.note ?? "",
+    });
+  }, [data, form]);
 
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
