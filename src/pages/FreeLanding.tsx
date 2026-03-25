@@ -415,8 +415,9 @@ export function FreeLandingPage() {
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(lastFreeKey.key);
+                      toast({ title: "Copy thành công", description: "Key đã được sao chép vào clipboard." });
                     } catch {
-                      // ignore
+                      toast({ title: "Copy thất bại", description: "Không thể copy key. Hãy copy thủ công.", variant: "destructive" });
                     }
                   }}
                 >

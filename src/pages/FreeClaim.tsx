@@ -15,6 +15,7 @@ import {
   getOutToken,
   getSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
+import { toast } from "@/hooks/use-toast";
 
 type RevealOk = {
   ok: true;
@@ -688,8 +689,9 @@ export function FreeClaimPage() {
                     try {
                       await navigator.clipboard.writeText(revealed.key);
                       setCopied(true);
+                      toast({ title: "Copy thành công", description: "Key đã được sao chép vào clipboard." });
                     } catch {
-                      // ignore
+                      toast({ title: "Copy thất bại", description: "Không thể copy key. Hãy copy thủ công.", variant: "destructive" });
                     }
                     await closeAndReturn();
                   }}
