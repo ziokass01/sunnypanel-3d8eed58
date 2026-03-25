@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
-import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -630,7 +629,6 @@ export function FreeClaimPage() {
               </div>
             ) : null}
 
-            <FreeDownloadCards cfg={cfg} />
 
             {!revealed ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
