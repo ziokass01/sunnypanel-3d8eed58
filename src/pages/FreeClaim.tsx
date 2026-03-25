@@ -246,7 +246,7 @@ export function FreeClaimPage() {
   // Reset the one-time retry guard when tokens change.
   useEffect(() => {
     didRetryRef.current = false;
-  }, [configLoaded, claimToken, outToken]);
+  }, [claimToken, outToken]);
 
   // Canonical session_id: whenever we have out_token, resolve sid from backend.
   // This repairs missing/incorrect sid due to URL mangling/copy.
@@ -272,9 +272,6 @@ export function FreeClaimPage() {
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
-  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState("");
-  const [turnstileNonce, setTurnstileNonce] = useState(0);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
@@ -390,16 +387,12 @@ export function FreeClaimPage() {
         if (cancelled) return;
         setCfg(cfg);
         setTurnstileEnabled(false);
-        setTurnstileSiteKey(null);
-        setTurnstileToken("");
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
         if (cancelled) return;
         // Nếu config không tải được, đừng auto reveal ngay để tránh race TURNSTILE_REQUIRED.
         setCfg(null);
         setTurnstileEnabled(false);
-        setTurnstileSiteKey(null);
-        setTurnstileToken("");
       } finally {
         if (!cancelled) setConfigLoaded(true);
       }
@@ -416,28 +409,18 @@ export function FreeClaimPage() {
     return code ? `Key free (${code})` : "Key free";
   }, []);
 
-  const resetFreeTurnstile = useCallback(() => {
-    setTurnstileToken("");
-    setTurnstileNonce((n) => n + 1);
-  }, []);
-
   const canVerify = useMemo(() => {
     if (!configLoaded) return false;
     if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
-    if (turnstileEnabled && !turnstileToken) return false;
     return !loading;
-  }, [configLoaded, claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
+  }, [configLoaded, claimToken, outToken, revealed, loading]);
 
   async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
     if (!outToken) {
       setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
-      return;
-    }
-    if (turnstileEnabled && !turnstileToken) {
-      setError("Bạn cần xác minh Turnstile trước khi nhận key.");
       return;
     }
     if (loading || revealed) return;
@@ -491,10 +474,6 @@ export function FreeClaimPage() {
           }
         }
 
-        if (turnstileEnabled && (code === "TURNSTILE_REQUIRED" || code === "TURNSTILE_FAILED")) {
-          resetFreeTurnstile();
-        }
-
         const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
         markFreeAttemptFail(code || err.msg || "REVEAL_FAILED");
         setDeviceHistory(readFreeDeviceHistory());
@@ -528,16 +507,12 @@ export function FreeClaimPage() {
       }
     } catch (e: any) {
       const code = String(e?.code || "").trim();
-      if (turnstileEnabled && (code === "TURNSTILE_REQUIRED" || code === "TURNSTILE_FAILED")) {
-        resetFreeTurnstile();
-      }
       const friendly = friendlyRevealError(code || e?.message || "UNAUTHORIZED");
       markFreeAttemptFail(code || e?.message || "REVEAL_FAILED");
       setDeviceHistory(readFreeDeviceHistory());
       setError(debugMode && code ? `${friendly} (${code})` : friendly);
     } finally {
       setLoading(false);
-      if (turnstileEnabled) resetFreeTurnstile();
     }
   }
 
@@ -659,7 +634,6 @@ export function FreeClaimPage() {
 
             {!revealed ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
-
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl border bg-background p-3">
