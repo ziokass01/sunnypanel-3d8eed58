@@ -265,7 +265,12 @@ const tableWrapClass = "hidden rounded-[24px] border border-slate-200/80 bg-whit
 const tabListDesktopClass = "grid h-auto w-full gap-2 rounded-[26px] bg-white/10 p-2";
 const tabTriggerDesktopClass = "justify-start gap-3 rounded-2xl border border-transparent px-3 py-3 text-left text-slate-300 transition-all data-[state=active]:border-amber-300/30 data-[state=active]:bg-white data-[state=active]:text-slate-950 data-[state=active]:shadow-[0_10px_20px_rgba(15,23,42,0.14)]";
 const tabListMobileClass = "inline-flex h-auto min-w-max gap-2 rounded-[22px] bg-white/90 p-1.5 shadow-[0_10px_26px_rgba(15,23,42,0.08)]";
-const tabTriggerMobileClass = "gap-2 rounded-2xl px-3 py-2.5 text-slate-600 data-[state=active]:bg-slate-950 data-[state=active]:text-white data-[state=active]:shadow-[0_10px_20px_rgba(15,23,42,0.18)]";
+const tabTriggerMobileClass = "gap-2 rounded-2xl px-3 py-2.5 text-slate-600 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-[0_10px_20px_rgba(15,23,42,0.16)]";
+const amberButtonClass = "rounded-2xl bg-amber-400 text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.28)] hover:bg-amber-300";
+const softButtonClass = "rounded-2xl border border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200 hover:text-slate-950";
+const slateButtonClass = "rounded-2xl bg-slate-700 text-white shadow-[0_10px_24px_rgba(51,65,85,0.18)] hover:bg-slate-600";
+const subtleCodeClass = "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs leading-6 text-slate-800 shadow-inner break-all";
+const subtlePreClass = "overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-800 shadow-inner";
 
 export function RentPortalPage() {
   const { toast } = useToast();
@@ -745,10 +750,10 @@ export function RentPortalPage() {
                 SUNNY RENT PORTAL
               </div>
               <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-tight">
-                Đăng nhập để vào khu quản lý thuê gọn gàng, sáng sủa và dễ thao tác hơn.
+                Đăng nhập để truy cập khu quản lý tài khoản thuê của bạn.
               </h1>
               <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
-                Giao diện mới ưu tiên nền sáng dịu, chữ rõ, khối thông tin mạch lạc và bớt cảm giác nặng mắt khi dùng lâu trên điện thoại.
+                Trang quản lý được tối ưu lại theo hướng gọn gàng, dễ đọc và dễ thao tác hơn trên điện thoại lẫn máy tính.
               </p>
               <div className="mt-8 grid gap-4 sm:grid-cols-2">
                 <div className="rounded-3xl border border-white bg-white/80 p-5 shadow-sm">
@@ -821,7 +826,7 @@ export function RentPortalPage() {
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-400 text-base font-black text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.35)]">S</div>
                     <div>
                       <div className="text-sm font-semibold tracking-wide text-white">SUNNY Rent Portal</div>
-                      <div className="text-xs text-slate-400">Control deck cho trang thuê</div>
+                      <div className="text-xs text-slate-400">Quản lý key, tài khoản và tệp hỗ trợ</div>
                     </div>
                   </div>
                   <div className="rounded-full border border-white/10 bg-white/5 p-2 text-amber-300"><Sparkles className="h-4 w-4" /></div>
@@ -875,7 +880,7 @@ export function RentPortalPage() {
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-400 text-sm font-black text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.35)]">S</div>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold text-white">SUNNY Rent Portal</div>
-                        <div className="truncate text-xs text-slate-400">Phong cách panel gọn, rõ, bấm thoải mái hơn</div>
+                        <div className="truncate text-xs text-slate-400">Quản lý key, API và tải xuống ở một nơi</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -962,24 +967,24 @@ export function RentPortalPage() {
                     <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900"><Waypoints className="h-3.5 w-3.5" /> Thuê website</div>
                     <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
                       {isActive
-                        ? "Trang thuê được dựng lại theo kiểu panel sáng, gọn và rõ nút bấm hơn trên điện thoại."
-                        : "Trang đang ưu tiên khu kích hoạt để bạn nhìn phát là biết phải thao tác ở đâu."}
+                        ? "Quản lý tài khoản thuê và key trong một giao diện gọn gàng, dễ thao tác."
+                        : "Kích hoạt tài khoản để mở đầy đủ khu quản lý."}
                     </h1>
                     <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
                       {isActive
-                        ? "Mình giữ nguyên logic thật của repo, chỉ đập lại mặt tiền: menu mobile mở từ góc trái, card phân tầng rõ ràng, chữ đậm vừa đủ và ô nhập ép về nền trắng chữ đen để không còn cảnh phải zoom mới đọc được."
-                        : "Khi tài khoản chưa mở, giao diện thu gọn thành một đường băng ngắn gọn để bạn nhập key và kích hoạt nhanh, không bị nhiễu bởi đống khối phụ."}
+                        ? "Theo dõi trạng thái tài khoản, tạo key mới, xem lịch sử sử dụng, audit log và truy cập tệp hỗ trợ ngay trên cùng một trang."
+                        : "Sau khi xác thực thành công, các mục tạo key, lịch sử, audit log và API sẽ hiện đầy đủ trong giao diện."}
                     </p>
                     <div className="mt-6 flex flex-wrap gap-3">
                       {isActive ? (
                         <>
-                          <Button className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setTab("create")}>Tạo key ngay</Button>
-                          <Button variant="outline" className="rounded-2xl border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-950" onClick={() => setTab("history")}>Mở lịch sử key</Button>
+                          <Button className={amberButtonClass} onClick={() => setTab("create")}>Tạo key ngay</Button>
+                          <Button variant="outline" className={softButtonClass} onClick={() => setTab("history")}>Mở lịch sử key</Button>
                         </>
                       ) : (
                         <>
-                          <Button className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setTab("status")}>Mở khu kích hoạt</Button>
-                          <Button variant="outline" className="rounded-2xl border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-950" onClick={() => setActivationKey("")}>Xóa key đang nhập</Button>
+                          <Button className={amberButtonClass} onClick={() => setTab("status")}>Mở khu kích hoạt</Button>
+                          <Button variant="outline" className={softButtonClass} onClick={() => setActivationKey("")}>Xóa key đang nhập</Button>
                         </>
                       )}
                     </div>
@@ -1028,10 +1033,10 @@ export function RentPortalPage() {
                   <Input style={readableFieldStyle} className={fieldClass} value={activationKey} onChange={(e) => setActivationKey(normalizeKeyInput(e.target.value))} placeholder="XXXX-XXXX-XXXX-XXXX" />
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => activateM.mutate()} disabled={activateM.isPending || !activationKey.trim()}>
+                  <Button className={amberButtonClass} onClick={() => activateM.mutate()} disabled={activateM.isPending || !activationKey.trim()}>
                     {activateM.isPending ? "Đang kích hoạt..." : "Kích hoạt"}
                   </Button>
-                  <Button variant="outline" className="rounded-2xl border-slate-300 bg-white text-slate-700 hover:bg-white hover:text-slate-900" onClick={() => setActivationKey("")}>Xóa ô nhập</Button>
+                  <Button variant="outline" className={softButtonClass} onClick={() => setActivationKey("")}>Xóa ô nhập</Button>
                 </div>
               </CardContent>
             </Card>
@@ -1066,10 +1071,10 @@ export function RentPortalPage() {
                 <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Sắp hết hạn</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => setTab("create")}>Tạo key</Button>
-                <Button variant="secondary" onClick={() => setTab("history")}>Lịch sử key</Button>
-                <Button variant="secondary" onClick={() => setTab("audit")}>Audit log</Button>
-                <Button variant="outline" onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
+                <Button className={amberButtonClass} onClick={() => setTab("create")}>Tạo key</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => setTab("history")}>Lịch sử key</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => setTab("audit")}>Audit log</Button>
+                <Button variant="outline" className={softButtonClass} onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
               </div>
             </CardContent>
           </Card>
@@ -1122,19 +1127,19 @@ export function RentPortalPage() {
 
                 <Label>Kiểu chạy📌</Label>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant={keyStartMode === "immediate" ? "default" : "outline"} onClick={() => setKeyStartMode("immediate")}>Kích hoạt ngay</Button>
-                  <Button variant={keyStartMode === "first_use" ? "default" : "outline"} onClick={() => setKeyStartMode("first_use")}>Bắt đầu ở lần dùng đầu</Button>
+                  <Button variant={keyStartMode === "immediate" ? "default" : "outline"} className={keyStartMode === "immediate" ? amberButtonClass : softButtonClass} onClick={() => setKeyStartMode("immediate")}>Kích hoạt ngay</Button>
+                  <Button variant={keyStartMode === "first_use" ? "default" : "outline"} className={keyStartMode === "first_use" ? amberButtonClass : softButtonClass} onClick={() => setKeyStartMode("first_use")}>Bắt đầu ở lần dùng đầu</Button>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => createKeyM.mutate("random")} disabled={createKeyM.isPending}>Tạo ngẫu nhiên</Button>
-                <Button variant="secondary" onClick={() => createKeyM.mutate("custom")} disabled={createKeyM.isPending || !customKey.trim()}>Tạo key tự chọn</Button>
+                <Button className={amberButtonClass} onClick={() => createKeyM.mutate("random")} disabled={createKeyM.isPending}>Tạo ngẫu nhiên</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => createKeyM.mutate("custom")} disabled={createKeyM.isPending || !customKey.trim()}>Tạo key tự chọn</Button>
               </div>
               {lastCreatedKey ? (
                 <div className="rounded-xl border border-slate-200 bg-stone-50/90 p-3 text-sm shadow-sm">
                   <div className="text-xs text-muted-foreground">Key vừa tạo📖</div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <code className="rounded bg-muted px-2 py-1 break-all">{lastCreatedKey}</code>
+                    <code className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-slate-800 break-all">{lastCreatedKey}</code>
                     <Button size="sm" variant="soft" onClick={async () => { const ok = await copyText(lastCreatedKey); toast({ title: ok ? "Đã sao chép" : "Không sao chép được" }); }}>Sao chép</Button>
                     <Button size="sm" variant="ghost" onClick={() => setLastCreatedKey(null)}>Ẩn</Button>
                   </div>
@@ -1156,10 +1161,10 @@ export function RentPortalPage() {
                   <Label>Tìm key / ghi chú / kiểu chạy</Label>
                   <Input style={readableFieldStyle} className={fieldClass} value={keySearch} onChange={(e) => setKeySearch(e.target.value)} placeholder="Tìm kiếm key" />
                 </div>
-                <Button variant={keyStatusFilter === "all" ? "default" : "outline"} onClick={() => setKeyStatusFilter("all")}>Tất cả</Button>
-                <Button variant={keyStatusFilter === "on" ? "default" : "outline"} onClick={() => setKeyStatusFilter("on")}>Đang bật</Button>
-                <Button variant={keyStatusFilter === "off" ? "default" : "outline"} onClick={() => setKeyStatusFilter("off")}>Đang tắt</Button>
-                <Button variant="secondary" onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
+                <Button variant={keyStatusFilter === "all" ? "default" : "outline"} className={keyStatusFilter === "all" ? amberButtonClass : softButtonClass} onClick={() => setKeyStatusFilter("all")}>Tất cả</Button>
+                <Button variant={keyStatusFilter === "on" ? "default" : "outline"} className={keyStatusFilter === "on" ? slateButtonClass : softButtonClass} onClick={() => setKeyStatusFilter("on")}>Đang bật</Button>
+                <Button variant={keyStatusFilter === "off" ? "default" : "outline"} className={keyStatusFilter === "off" ? slateButtonClass : softButtonClass} onClick={() => setKeyStatusFilter("off")}>Đang tắt</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
               </div>
 
               <div className="grid gap-3 md:hidden">
@@ -1344,17 +1349,18 @@ export function RentPortalPage() {
                     <div className="text-sm text-muted-foreground">Dùng để ký <code>sig_user</code>. Master secret đã tích hợp trong server, bạn không cần và cũng không thể gửi từ client.</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={handleOpenHmac}>Xem HMAC</Button>
-                    {showHmac ? <Button variant="ghost" onClick={() => { setShowHmac(false); setHmacSecret(null); setHmacVisibleUntil(null); }}>Ẩn HMAC</Button> : null}
+                    <Button variant="secondary" className={slateButtonClass} onClick={handleOpenHmac}>Xem HMAC</Button>
+                    {showHmac ? <Button variant="ghost" className={softButtonClass} onClick={() => { setShowHmac(false); setHmacSecret(null); setHmacVisibleUntil(null); }}>Ẩn HMAC</Button> : null}
                   </div>
                 </div>
-                <div className="rounded-lg bg-muted/50 p-3 font-mono text-sm break-all">{maskSecret(hmacSecret ?? "", showHmac)}</div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm text-slate-800 shadow-inner break-all">{maskSecret(hmacSecret ?? "", showHmac)}</div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   {showHmac && hmacCountdown > 0 ? <span>Còn {hmacCountdown} giây</span> : null}
                   {lockRemain ? <span>Đang khóa tạm: {lockRemain}</span> : null}
                 </div>
                 {showHmac && hmacCountdown > 0 ? (
                   <Button
+                    className={amberButtonClass}
                     variant="soft"
                     onClick={async () => {
                       const ok = await copyText(hmacSecret ?? "");
@@ -1369,9 +1375,9 @@ export function RentPortalPage() {
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
                 <div className="font-medium">API verify</div>
-                <code className="block rounded-lg bg-muted p-3 text-xs break-all">POST {import.meta.env.VITE_SUPABASE_URL}/functions/v1/rent-verify-key</code>
+                <code className={subtleCodeClass}>POST {import.meta.env.VITE_SUPABASE_URL}/functions/v1/rent-verify-key</code>
                 <div className="text-sm text-muted-foreground">JSON mẫu chỉ dùng <code>sig_user</code>. Master secret đã nằm trong server.</div>
-                <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">{`{
+                <pre className={subtlePreClass}>{`{
   "username": "${account?.username ?? "name"}",
   "key": "XXXX-XXXX-XXXX-XXXX",
   "device_id": "device-name",
@@ -1380,25 +1386,25 @@ export function RentPortalPage() {
 }`}</pre>
               </div>
 
-              <div className="rounded-xl border p-4 space-y-4">
+              <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-4 shadow-sm">
                 <div>
                   <div className="font-medium">Files / Downloads</div>
                   <div className="text-sm text-muted-foreground">Tải các tệp hỗ trợ sử dụng cho app, menu hoặc C++/libcurl.</div>
                 </div>
                 <div className="grid gap-3">
                   {(downloadsQ.data ?? []).map((item) => (
-                    <div key={item.id} className="rounded-lg border p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 flex flex-col gap-3 shadow-sm md:flex-row md:items-center md:justify-between">
                       <div>
                         <div className="font-medium">{item.title}</div>
                         {item.note ? <div className="text-sm text-muted-foreground">{item.note}</div> : null}
                       </div>
-                      <Button asChild>
+                      <Button asChild className={slateButtonClass}>
                         <a href={item.url} target="_blank" rel="noreferrer">Tải xuống</a>
                       </Button>
                     </div>
                   ))}
                 </div>
-                <div className="rounded-lg border p-4 text-sm space-y-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm space-y-2 shadow-sm">
                   <div className="font-medium">Hướng dẫn C++ / libcurl</div>
                   <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
                     <li>Tải file CA pack về máy và giải nén.</li>
