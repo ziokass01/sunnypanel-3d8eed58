@@ -145,6 +145,14 @@ export function markFreeSuccess(args: { keyLabel?: string | null; nextEligibleAt
   });
 }
 
+export function syncFreeNextEligibleAt(nextEligibleAt?: string | null) {
+  const prev = readFreeDeviceHistory();
+  writeHistory({
+    ...prev,
+    nextEligibleAt: nextEligibleAt ?? null,
+  });
+}
+
 export function formatRelativeCountdown(target?: string | null) {
   if (!target) return "-";
   const diffMs = new Date(target).getTime() - Date.now();
@@ -163,7 +171,15 @@ function friendlyFailLabel(code?: string | null) {
   return v.replaceAll("_", " ");
 }
 
-export function FreeDeviceHistoryCard({ history, remainingTodayServer }: { history: FreeFlowDeviceHistory; remainingTodayServer?: number | null }) {
+export function FreeDeviceHistoryCard({ history, remainingTodayServer, lastKeyExpiresAt }: { history: FreeFlowDeviceHistory; remainingTodayServer?: number | null; lastKeyExpiresAt?: string | null }) {
+  const timingTarget = lastKeyExpiresAt ?? history.nextEligibleAt ?? null;
+  const timingTitle = lastKeyExpiresAt ? "Key gần nhất còn lại" : "Có thể thử lại";
+  const timingHint = history.lastFailCode
+    ? `Lỗi gần nhất: ${friendlyFailLabel(history.lastFailCode)}`
+    : lastKeyExpiresAt
+      ? "Đồng bộ theo key gần nhất"
+      : `${history.attemptsToday} lượt đã bắt đầu hôm nay`;
+
   return (
     <Card className="overflow-hidden border-dashed bg-gradient-to-br from-background to-muted/30">
       <CardContent className="space-y-3 p-4">
@@ -193,11 +209,9 @@ export function FreeDeviceHistoryCard({ history, remainingTodayServer }: { histo
             <div className="line-clamp-1 text-xs text-muted-foreground">{history.lastKeyLabel || "Chưa lưu key gần nhất"}</div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Có thể thử lại</div>
-            <div className="mt-1 text-sm font-semibold text-foreground">{formatRelativeCountdown(history.nextEligibleAt)}</div>
-            <div className="line-clamp-1 text-xs text-muted-foreground">
-              {history.lastFailCode ? `Lỗi gần nhất: ${friendlyFailLabel(history.lastFailCode)}` : `${history.attemptsToday} lượt đã bắt đầu hôm nay`}
-            </div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{timingTitle}</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">{formatRelativeCountdown(timingTarget)}</div>
+            <div className="line-clamp-1 text-xs text-muted-foreground">{timingHint}</div>
           </div>
         </div>
       </CardContent>

@@ -58,26 +58,23 @@ export async function fetchResetActivities(limit = 30): Promise<ResetActivityRow
   return (data ?? []) as ResetActivityRow[];
 }
 
-type ResetTurnstileRuntimePayload = {
+type ResetKeyTurnstilePayload = {
   ok?: boolean;
   turnstile_enabled?: boolean;
   configured?: boolean;
-  require_turnstile?: boolean;
 };
 
 export async function fetchTurnstileRuntimeStatus() {
   try {
-    const data = await getFunction<ResetTurnstileRuntimePayload>("/reset-key");
+    const data = await getFunction<ResetKeyTurnstilePayload>("/reset-key");
     return {
       ok: Boolean(data?.ok),
-      turnstileEnabled: Boolean(data?.turnstile_enabled ?? data?.configured),
-      requireTurnstile: Boolean(data?.require_turnstile),
+      turnstileEnabled: Boolean(data?.configured),
     };
   } catch {
     return {
       ok: false,
       turnstileEnabled: false,
-      requireTurnstile: false,
     };
   }
 }

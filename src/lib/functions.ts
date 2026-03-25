@@ -1,34 +1,7 @@
-function normalizeOrigin(raw?: string | null) {
-  const value = String(raw ?? "").trim();
-  if (!value) return "";
-  try {
-    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    return url.origin.replace(/\/$/, "");
-  } catch {
-    return "";
-  }
-}
-
-function getConfiguredSupabaseBaseUrl() {
-  return normalizeOrigin(import.meta.env.VITE_SUPABASE_URL as string | undefined);
-}
-
-function getProjectDerivedBaseUrl() {
-  const projectId = String(import.meta.env.VITE_SUPABASE_PROJECT_ID as string | undefined ?? "").trim();
-  if (!/^[a-z0-9]{10,}$/.test(projectId)) return "";
-  return `https://${projectId}.supabase.co`;
-}
-
 export function getFunctionsBaseUrl() {
-  const base = getConfiguredSupabaseBaseUrl() || getProjectDerivedBaseUrl();
+  const base = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   if (!base) throw new Error("Missing backend URL");
   return `${base}/functions/v1`;
-}
-
-function getFunctionsBaseUrls() {
-  const configured = getConfiguredSupabaseBaseUrl();
-  const derived = getProjectDerivedBaseUrl();
-  return Array.from(new Set([configured, derived].filter(Boolean)));
 }
 
 function getAnonKey() {
@@ -65,36 +38,30 @@ export async function getFunction<T>(
   path: string,
   opts?: { authToken?: string | null; withCredentials?: boolean; headers?: Record<string, string> },
 ): Promise<T> {
-  const urls = getFunctionsBaseUrls().map((base) => `${base}/functions/v1${path.startsWith("/") ? path : `/${path}`}`);
+  const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  let res: Response | null = null;
-  let networkError: unknown = null;
-  for (const url of urls) {
-    try {
-      res = await fetch(url, {
-        method: "GET",
-        headers: {
-          apikey: anonKey,
-          ...buildAuthHeader(path, opts?.authToken),
-          ...(opts?.headers ?? {}),
-        },
-        credentials: opts?.withCredentials ? "include" : "omit",
-      });
-      break;
-    } catch (e) {
-      networkError = e;
-    }
-  }
-
-  if (!res) {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: {
+        apikey: anonKey,
+        ...buildAuthHeader(path, opts?.authToken),
+        ...(opts?.headers ?? {}),
+      },
+      // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
+      credentials: opts?.withCredentials ? "include" : "omit",
+    });
+  } catch (e: any) {
+    // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
     const err = new Error(
       `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
     ) as Error & { code?: string; meta?: Record<string, unknown> };
     err.code = "FETCH_FAILED";
-    err.meta = { path, tried: urls, cause: String((networkError as any)?.message ?? networkError ?? "") };
+    err.meta = { path };
     throw err;
   }
 
@@ -102,7 +69,7 @@ export async function getFunction<T>(
   if (!res.ok) {
     const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
     const err = new Error(String(msg)) as Error & { code?: string; status?: number };
-    if ((data as any)?.code) err.code = String((data as any).code);
+    if (data?.code) err.code = String(data.code);
     err.status = res.status;
     throw err;
   }
@@ -114,8 +81,8 @@ export async function postFunction<T>(
   body: unknown,
   opts?: { authToken?: string | null; headers?: Record<string, string>; withCredentials?: boolean },
 ): Promise<T> {
-  const makeUrls = (p: string) => getFunctionsBaseUrls().map((base) => `${base}/functions/v1${p.startsWith("/") ? p : `/${p}`}`);
-  const primaryUrls = makeUrls(path);
+  const makeUrl = (p: string) => `${getFunctionsBaseUrl()}${p.startsWith("/") ? p : `/${p}`}`;
+  const primaryUrl = makeUrl(path);
 
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
@@ -147,40 +114,36 @@ export async function postFunction<T>(
         ...authHeader,
         ...(opts?.headers ?? {}),
       },
+      // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
       credentials: opts?.withCredentials ? "include" : "omit",
       body: JSON.stringify(body ?? {}),
     });
   };
 
-  let res: Response | null = null;
-  let networkError: unknown = null;
-  for (const url of primaryUrls) {
-    try {
-      res = await doFetch(url);
-      break;
-    } catch (e) {
-      networkError = e;
-    }
-  }
-
-  if (!res && fallbackPath) {
-    for (const url of makeUrls(fallbackPath)) {
+  let res: Response;
+  try {
+    res = await doFetch(primaryUrl);
+  } catch (e: any) {
+    // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
+    if (fallbackPath) {
       try {
-        res = await doFetch(url);
-        break;
-      } catch (e) {
-        networkError = e;
+        res = await doFetch(makeUrl(fallbackPath));
+      } catch {
+        const err = new Error(
+          `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
+        ) as Error & { code?: string; meta?: Record<string, unknown> };
+        err.code = "FETCH_FAILED";
+        err.meta = { path };
+        throw err;
       }
+    } else {
+      const err = new Error(
+        `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
+      ) as Error & { code?: string; meta?: Record<string, unknown> };
+      err.code = "FETCH_FAILED";
+      err.meta = { path };
+      throw err;
     }
-  }
-
-  if (!res) {
-    const err = new Error(
-      `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
-    ) as Error & { code?: string; meta?: Record<string, unknown> };
-    err.code = "FETCH_FAILED";
-    err.meta = { path, tried: triedUrls, cause: String((networkError as any)?.message ?? networkError ?? "") };
-    throw err;
   }
 
   const data = await res.json().catch(() => null);

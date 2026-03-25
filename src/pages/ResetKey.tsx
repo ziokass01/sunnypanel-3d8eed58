@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { postFunction } from "@/lib/functions";
 import { TurnstileWidget } from "@/components/turnstile/TurnstileWidget";
+import { syncFreeNextEligibleAt } from "@/features/free/flow-ux";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +38,8 @@ type ResetKeyPayload = {
   disabled_message?: string | null;
   code?: string;
 };
+
+const LAST_FREE_KEY_STORAGE = "lastFreeKey";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "--";
@@ -83,13 +86,35 @@ function statusVariant(status?: string) {
 
 function describeResultMessage(result: ResetKeyPayload | null) {
   const msg = String(result?.msg ?? "");
-  if (msg === "TURNSTILE_REQUIRED") return "Bật Turnstile chỉ áp dụng khi Reset key. Hãy xác minh rồi bấm Reset.";
-  if (msg === "TURNSTILE_FAILED") return "Token Turnstile đã hết hạn hoặc đã được dùng rồi. Vui lòng xác minh lại rồi thử tiếp.";
-  if (msg === "TURNSTILE_NOT_CONFIGURED") return "Backend đang bật require_turnstile nhưng chưa set đủ TURNSTILE_SITE_KEY và TURNSTILE_SECRET_KEY.";
+  if (msg === "TURNSTILE_REQUIRED") return "Chỉ cần xác minh Turnstile trước khi bấm Reset. Check key không cần Turnstile.";
+  if (msg === "TURNSTILE_FAILED") return "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng xác minh lại rồi thử tiếp.";
   if (msg === "RATE_LIMIT") return "Bạn thao tác quá nhanh trên cùng IP hoặc cùng key. Vui lòng chờ một lúc rồi thử lại.";
   if (msg === "KEY_UNAVAILABLE") return "Key không tồn tại, đã bị xóa, bị chặn hoặc đã hết hạn.";
-  if (msg === "RESET_DISABLED") return "Tính năng reset hiện đang tạm đóng.";
-  return msg || "Có lỗi xảy ra";
+  return msg;
+}
+
+function syncLastFreeKeySnapshot(result: ResetKeyPayload) {
+  const normalizedKey = String(result.key ?? "").trim().toUpperCase();
+  if (!normalizedKey) return;
+
+  try {
+    const raw = localStorage.getItem(LAST_FREE_KEY_STORAGE);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const storedKey = String(parsed?.key ?? "").trim().toUpperCase();
+    if (!storedKey || storedKey !== normalizedKey) return;
+
+    const next = {
+      ...parsed,
+      key: result.key ?? parsed.key,
+      created_at: result.created_at ?? parsed.created_at ?? null,
+      expires_at: result.expires_at ?? parsed.expires_at ?? null,
+    };
+    localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(next));
+    syncFreeNextEligibleAt(result.expires_at ?? null);
+  } catch {
+    // ignore local sync errors
+  }
 }
 
 export function ResetKeyPage() {
@@ -99,10 +124,9 @@ export function ResetKeyPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileNonce, setTurnstileNonce] = useState(0);
-
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
-  const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
 
+  const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
   const hasValidData = useMemo(() => {
     if (!result?.ok) return false;
     if (!result.key || !result.key_kind || !result.status) return false;
@@ -123,11 +147,6 @@ export function ResetKeyPage() {
     setTurnstileToken(token);
   }, []);
 
-  const resetTurnstile = useCallback(() => {
-    setTurnstileToken(null);
-    setTurnstileNonce((n) => n + 1);
-  }, []);
-
   async function runAction(action: "check" | "reset") {
     if (!normalizedKey) return;
 
@@ -143,20 +162,17 @@ export function ResetKeyPage() {
       const res = await postFunction<ResetKeyPayload>("/reset-key", {
         action,
         key: normalizedKey,
-        cf_turnstile_response: action === "reset" ? turnstileToken : undefined,
+        turnstile_token: action === "reset" ? turnstileToken : undefined,
       });
       setResult(res);
-
-      if (action === "reset" && (res.msg === "TURNSTILE_FAILED" || res.msg === "TURNSTILE_REQUIRED")) {
-        resetTurnstile();
-      }
+      if (res?.ok) syncLastFreeKeySnapshot(res);
     } catch (e: any) {
       setResult(toUiError(e));
-      if (action === "reset" && turnstileSiteKey) resetTurnstile();
     } finally {
       setLoadingAction(null);
       if (action === "reset" && turnstileSiteKey) {
-        resetTurnstile();
+        setTurnstileToken(null);
+        setTurnstileNonce((n) => n + 1);
       }
     }
   }
@@ -166,7 +182,7 @@ export function ResetKeyPage() {
       <div>
         <h1 className="text-2xl font-semibold">Reset Key</h1>
         <p className="text-sm text-muted-foreground">
-          Check trạng thái key luôn được. Nếu Turnstile được bật, nó chỉ áp dụng khi bấm <b>Reset key</b>.
+          Kiểm tra thời hạn key và reset thiết bị trực tiếp cho người dùng.
         </p>
       </div>
 
@@ -209,25 +225,25 @@ export function ResetKeyPage() {
           ) : null}
 
           <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-            Vì lý do chống dò key và chống abuse, hệ thống vẫn có rate limit. Nếu Turnstile bật, mỗi lần <b>Reset</b> cần một token mới.
+            Vì lý do chống dò key và chống abuse, hệ thống sẽ giới hạn tần suất kiểm tra/reset và có thể trả thông báo chung khi key không khả dụng.
           </div>
 
           {!turnstileSiteKey ? (
             <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-              Frontend chưa có VITE_TURNSTILE_SITE_KEY. Bạn vẫn check được key; reset sẽ bị backend từ chối nếu admin bật require_turnstile.
+              Turnstile chưa được cấu hình ở frontend. Trang vẫn hoạt động bình thường; nếu quản trị viên bật bắt buộc Turnstile ở backend thì bạn sẽ được nhắc bổ sung xác minh.
             </div>
           ) : (
-            <div className="rounded-xl border p-3">
+            <>
               <TurnstileWidget
                 key={turnstileNonce}
-                className="rounded-xl"
+                className="rounded-xl border p-3"
                 siteKey={turnstileSiteKey}
                 onTokenChange={handleTurnstileTokenChange}
               />
-              <div className="mt-2 text-xs text-muted-foreground">
-                Chỉ cần xác minh Turnstile trước khi bấm <b>Reset</b>. Check key không cần Turnstile.
+              <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+                Chỉ cần xác minh Turnstile trước khi bấm <span className="font-medium text-foreground">Reset</span>. Check key không cần Turnstile.
               </div>
-            </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -239,14 +255,16 @@ export function ResetKeyPage() {
               <CardTitle>Trạng thái key</CardTitle>
               <Badge variant={statusVariant(result.status)}>{result.status ?? result.msg}</Badge>
             </div>
-            <CardDescription>Đã lấy thông tin mới nhất từ hệ thống.</CardDescription>
+            <CardDescription>
+              {result.ok ? "Đã lấy thông tin mới nhất từ hệ thống." : describeResultMessage(result)}
+            </CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-xl border p-3">
                 <div className="text-xs text-muted-foreground">Key</div>
-                <div className="mt-1 break-all font-mono text-sm">{result.key ?? normalizedKey}</div>
+                <div className="mt-1 font-mono text-sm break-all">{result.key ?? normalizedKey}</div>
               </div>
 
               <div className="rounded-xl border p-3">

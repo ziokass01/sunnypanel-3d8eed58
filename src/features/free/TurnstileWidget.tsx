@@ -9,24 +9,6 @@ type Props = {
 
 let scriptPromise: Promise<void> | null = null;
 
-function waitForTurnstile(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const tick = () => {
-      if (window.turnstile) {
-        resolve();
-        return;
-      }
-      if (Date.now() - start > 10000) {
-        reject(new Error("Turnstile load timeout"));
-        return;
-      }
-      window.setTimeout(tick, 50);
-    };
-    tick();
-  });
-}
-
 function loadTurnstileScript(): Promise<void> {
   if (scriptPromise) return scriptPromise;
 
@@ -35,7 +17,7 @@ function loadTurnstileScript(): Promise<void> {
       'script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]',
     );
     if (existing) {
-      waitForTurnstile().then(resolve).catch(reject);
+      resolve();
       return;
     }
 
@@ -43,9 +25,7 @@ function loadTurnstileScript(): Promise<void> {
     s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
     s.async = true;
     s.defer = true;
-    s.onload = () => {
-      waitForTurnstile().then(resolve).catch(reject);
-    };
+    s.onload = () => resolve();
     s.onerror = () => reject(new Error("Failed to load Turnstile"));
     document.head.appendChild(s);
   });
@@ -61,12 +41,10 @@ export function TurnstileWidget({ siteKey, onToken, onError }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    onToken("");
     loadTurnstileScript()
       .then(() => {
         if (cancelled) return;
         setReady(true);
-        setError(null);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -77,7 +55,7 @@ export function TurnstileWidget({ siteKey, onToken, onError }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [onError, onToken]);
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -86,21 +64,11 @@ export function TurnstileWidget({ siteKey, onToken, onError }: Props) {
 
     const host = hostRef.current;
     host.innerHTML = "";
-    onToken("");
-
     try {
       widgetIdRef.current = window.turnstile.render(host, {
         sitekey: siteKey,
         theme: "auto",
         callback: (token: string) => onToken(token),
-        "expired-callback": () => {
-          onToken("");
-          onError?.("Turnstile đã hết hạn. Vui lòng xác minh lại.");
-        },
-        "error-callback": () => {
-          onToken("");
-          onError?.("Turnstile không hợp lệ. Vui lòng xác minh lại.");
-        },
       });
     } catch (e: any) {
       const msg = e?.message ?? "Turnstile render error";
@@ -115,7 +83,6 @@ export function TurnstileWidget({ siteKey, onToken, onError }: Props) {
       } catch {
         // ignore
       }
-      onToken("");
     };
   }, [ready, siteKey, onToken, onError]);
 

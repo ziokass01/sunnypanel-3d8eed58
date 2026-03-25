@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
+import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
+import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -15,7 +17,6 @@ import {
   getOutToken,
   getSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
-import { toast } from "@/hooks/use-toast";
 
 type RevealOk = {
   ok: true;
@@ -53,8 +54,6 @@ function friendlyRevealError(msg: string) {
   if (m === "GATE_STATUS_INVALID") return "Xác thực chưa hợp lệ hoặc chưa xác thực. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong hôm nay. Vui lòng thử lại sau 00:00 (GMT+7).";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
-  if (m === "TURNSTILE_REQUIRED") return "Bạn cần xác minh Turnstile trước khi nhận key.";
-  if (m === "TURNSTILE_FAILED") return "Turnstile đã hết hạn hoặc token đã được dùng. Vui lòng xác minh lại rồi thử tiếp.";
   if (m === "CLAIM_EXPIRED") return "Phiên xác thực đã hết hạn. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "SESSION_BIND_MISMATCH") return "Phiên không khớp thiết bị/IP. Vui lòng bắt đầu lại từ trang Get Key 🔑.";
   if (m === "BLOCKED") return "Thiết bị hoặc IP của bạn đã bị chặn.";
@@ -272,7 +271,8 @@ export function FreeClaimPage() {
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
-  const [configLoaded, setConfigLoaded] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState("");
   const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
 
@@ -359,7 +359,6 @@ export function FreeClaimPage() {
   }, [hasBareClaimKey, claimFromUrl, tokenSource, clearAllFreeStorage]);
 
   useEffect(() => {
-    if (!configLoaded) return;
     if (!claimToken) return;
     if (!outToken) {
       setError("Lỗi thiếu xác thực. Hãy quay lại Get Key 🔑 rồi vượt lại.");
@@ -379,27 +378,24 @@ export function FreeClaimPage() {
 
   // Fetch backend config to determine Turnstile requirements.
   useEffect(() => {
-    let cancelled = false;
     void (async () => {
       try {
         const fp = getOrCreateFingerprint();
         const cfg = await fetchFreeConfig({ fingerprint: fp });
-        if (cancelled) return;
         setCfg(cfg);
-        setTurnstileEnabled(false);
+        const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
+        setTurnstileEnabled(enabled);
+        setTurnstileSiteKey(cfg.turnstile_site_key ?? null);
+        if (!enabled) setTurnstileToken("");
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
-        if (cancelled) return;
-        // Nếu config không tải được, đừng auto reveal ngay để tránh race TURNSTILE_REQUIRED.
+        // If config cannot be fetched, fail open (do not block claim UI).
         setCfg(null);
         setTurnstileEnabled(false);
-      } finally {
-        if (!cancelled) setConfigLoaded(true);
+        setTurnstileSiteKey(null);
+        setTurnstileToken("");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const returnSeconds = 10;
@@ -410,12 +406,12 @@ export function FreeClaimPage() {
   }, []);
 
   const canVerify = useMemo(() => {
-    if (!configLoaded) return false;
     if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
+    if (turnstileEnabled && !turnstileToken) return false;
     return !loading;
-  }, [configLoaded, claimToken, outToken, revealed, loading]);
+  }, [claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
 
   async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
@@ -443,6 +439,7 @@ export function FreeClaimPage() {
         out_token: outToken,
         session_id: sid || undefined,
         fingerprint: fp,
+        cf_turnstile_response: turnstileEnabled ? turnstileToken : undefined,
         debug: debugMode ? 1 : undefined,
       });
 
@@ -517,13 +514,11 @@ export function FreeClaimPage() {
   }
 
   useEffect(() => {
-    if (!configLoaded) return;
     if (!claimToken || !outToken) return;
     if (revealed) return;
-    if (turnstileEnabled) return;
     void revealOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configLoaded, claimToken, outToken, effectiveSessionId, turnstileEnabled]);
+  }, [claimToken, outToken, effectiveSessionId]);
 
   async function closeAndReturn() {
     try {
@@ -576,7 +571,7 @@ export function FreeClaimPage() {
 
             <div className="rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 text-sm text-muted-foreground shadow-sm">
               <div className="font-semibold text-foreground">Lưu ý</div>
-              <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Flow FREE không còn yêu cầu Turnstile ở bước nhận key.</div>
+              <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Khi nhận thành công, bấm copy để lưu key ngay.</div>
             </div>
 
             <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={remainingTodayServer} />
@@ -630,9 +625,19 @@ export function FreeClaimPage() {
               </div>
             ) : null}
 
+            <FreeDownloadCards cfg={cfg} />
 
             {!revealed ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
+                {turnstileEnabled && turnstileSiteKey ? (
+                  <div className="rounded-2xl border p-3">
+                    <TurnstileWidget
+                      siteKey={turnstileSiteKey}
+                      onToken={setTurnstileToken}
+                      onError={(m) => setError(m)}
+                    />
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl border bg-background p-3">
@@ -650,7 +655,7 @@ export function FreeClaimPage() {
                 </div>
 
                 <Button className="h-12 w-full rounded-2xl text-base font-semibold" disabled={!canVerify || loading} onClick={() => void revealOnce()}>
-                  {!configLoaded ? "Đang tải cấu hình…" : loading ? "Đang xác minh…" : "Xác minh"}
+                  {loading ? "Đang xác minh…" : "Xác minh"}
                 </Button>
               </div>
             ) : (
@@ -689,9 +694,8 @@ export function FreeClaimPage() {
                     try {
                       await navigator.clipboard.writeText(revealed.key);
                       setCopied(true);
-                      toast({ title: "Copy thành công", description: "Key đã được sao chép vào clipboard." });
                     } catch {
-                      toast({ title: "Copy thất bại", description: "Không thể copy key. Hãy copy thủ công.", variant: "destructive" });
+                      // ignore
                     }
                     await closeAndReturn();
                   }}

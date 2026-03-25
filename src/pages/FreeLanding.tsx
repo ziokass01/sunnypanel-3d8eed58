@@ -9,7 +9,7 @@ import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
 import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { PublicInfo } from "@/features/free/PublicInfo";
-import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory } from "@/features/free/flow-ux";
+import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory, syncFreeNextEligibleAt } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -48,6 +48,13 @@ type LastFreeKey = {
 };
 
 const LAST_FREE_KEY_STORAGE = "lastFreeKey";
+
+type ResetKeySnapshot = {
+  ok: boolean;
+  key?: string;
+  created_at?: string | null;
+  expires_at?: string | null;
+};
 
 function formatVnDateTime(value?: string | null) {
   if (!value) return "-";
@@ -101,6 +108,45 @@ export function FreeLandingPage() {
     }
     setDeviceHistory(readFreeDeviceHistory());
   }, []);
+
+  useEffect(() => {
+    if (!lastFreeKey?.key) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await postFunction<ResetKeySnapshot>("/reset-key", {
+          action: "check",
+          key: String(lastFreeKey.key).trim().toUpperCase(),
+        });
+        if (cancelled || !res?.ok || !res.key) return;
+
+        const expiresAt = res.expires_at ?? lastFreeKey.expires_at ?? null;
+        const createdAt = res.created_at ?? lastFreeKey.created_at ?? null;
+        const next = {
+          ...lastFreeKey,
+          key: res.key,
+          created_at: createdAt,
+          expires_at: expiresAt,
+        };
+
+        setLastFreeKey(next);
+        try {
+          localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        syncFreeNextEligibleAt(expiresAt);
+        setDeviceHistory(readFreeDeviceHistory());
+      } catch {
+        // ignore sync failures, keep cached data
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lastFreeKey?.key]);
 
   useEffect(() => {
     if (!err || !isPendingSessionError) return;
@@ -213,7 +259,7 @@ export function FreeLandingPage() {
 
             <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
-            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} />
+            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} lastKeyExpiresAt={lastFreeKey?.expires_at ?? null} />
 
             <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -415,9 +461,8 @@ export function FreeLandingPage() {
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(lastFreeKey.key);
-                      toast({ title: "Copy thành công", description: "Key đã được sao chép vào clipboard." });
                     } catch {
-                      toast({ title: "Copy thất bại", description: "Không thể copy key. Hãy copy thủ công.", variant: "destructive" });
+                      // ignore
                     }
                   }}
                 >
