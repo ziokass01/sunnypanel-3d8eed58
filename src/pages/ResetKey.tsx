@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { postFunction } from "@/lib/functions";
 import { TurnstileWidget } from "@/components/turnstile/TurnstileWidget";
 import { syncFreeNextEligibleAt } from "@/features/free/flow-ux";
+import { CheckCircle2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,6 +85,21 @@ function statusVariant(status?: string) {
   }
 }
 
+function statusLabel(status?: string) {
+  switch ((status ?? "").toLowerCase()) {
+    case "active":
+      return "Đang hoạt động";
+    case "expired":
+      return "Hết hạn";
+    case "blocked":
+      return "Đã chặn";
+    case "not_started":
+      return "Chưa sử dụng";
+    default:
+      return status || "Không rõ";
+  }
+}
+
 function describeResultMessage(result: ResetKeyPayload | null) {
   const msg = String(result?.msg ?? "");
   if (msg === "TURNSTILE_REQUIRED") return "Chỉ cần xác minh Turnstile trước khi bấm Reset. Check key không cần Turnstile.";
@@ -129,9 +145,22 @@ export function ResetKeyPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileNonce, setTurnstileNonce] = useState(0);
+  const [lastCompletedAction, setLastCompletedAction] = useState<"check" | "reset" | null>(null);
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   const normalizedKey = useMemo(() => key.trim().toUpperCase(), [key]);
+
+  useEffect(() => {
+    try {
+      const qsKey = new URLSearchParams(window.location.search).get("key");
+      const normalized = String(qsKey || "").trim().toUpperCase();
+      if (/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(normalized)) {
+        setKey(normalized);
+      }
+    } catch {
+      // ignore invalid query params
+    }
+  }, []);
   const hasValidData = useMemo(() => {
     if (!result?.ok) return false;
     if (!result.key || !result.key_kind || !result.status) return false;
@@ -170,7 +199,10 @@ export function ResetKeyPage() {
         turnstile_token: action === "reset" ? turnstileToken : undefined,
       });
       setResult(res);
-      if (res?.ok) syncLastFreeKeySnapshot(res);
+      if (res?.ok) {
+        setLastCompletedAction(action);
+        syncLastFreeKeySnapshot(res);
+      }
     } catch (e: any) {
       setResult(toUiError(e));
     } finally {
@@ -253,12 +285,32 @@ export function ResetKeyPage() {
         </CardContent>
       </Card>
 
+      {result?.ok && hasValidData && lastCompletedAction === "reset" ? (
+        <Card className="rounded-2xl border-primary/30 bg-gradient-to-br from-primary/10 via-background to-background shadow-sm">
+          <CardContent className="flex items-start gap-3 p-4">
+            <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/30 bg-primary/15 text-primary">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-foreground">Reset Key 🗝 thành công</div>
+                <Badge className="rounded-full">Đã áp dụng</Badge>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Hệ thống đã cập nhật key này theo chính sách hiện tại. Kiểm tra chi tiết bên dưới để xem thời gian còn lại và số thiết bị sau khi reset.
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+
       {result?.ok && hasValidData ? (
         <Card className="rounded-2xl">
           <CardHeader className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Trạng thái key</CardTitle>
-              <Badge variant={statusVariant(result.status)}>{result.status ?? result.msg}</Badge>
+              <Badge variant={statusVariant(result.status)}>{statusLabel(result.status)}</Badge>
             </div>
             <CardDescription>
               {result.ok ? "Đã lấy thông tin mới nhất từ hệ thống." : describeResultMessage(result)}
@@ -289,7 +341,7 @@ export function ResetKeyPage() {
 
               <div className="rounded-xl border p-3">
                 <div className="text-xs text-muted-foreground">Thời gian còn lại</div>
-                <div className="mt-1 text-sm">{formatRemaining(result.remaining_seconds)}</div>
+                <div className="mt-1 text-sm">{result.expires_at ? formatRemaining(result.remaining_seconds) : "Không giới hạn"}</div>
               </div>
 
               <div className="rounded-xl border p-3">
@@ -310,14 +362,14 @@ export function ResetKeyPage() {
               </div>
             </div>
 
-            {typeof result.penalty_pct === "number" ? (
+            {typeof result.penalty_pct === "number" && result.penalty_pct > 0 ? (
               <div className="rounded-xl border p-3 text-sm">
                 Hệ thống vừa áp dụng mức trừ <span className="font-semibold">{result.penalty_pct}%</span>
                 {typeof result.penalty_seconds === "number" ? `, tương đương ${formatRemaining(result.penalty_seconds)}.` : "."}
               </div>
             ) : null}
 
-            {typeof result.devices_removed === "number" ? (
+            {typeof result.devices_removed === "number" && result.devices_removed > 0 ? (
               <div className="rounded-xl border p-3 text-sm text-muted-foreground">
                 Đã xóa {result.devices_removed} thiết bị khỏi key này.
               </div>

@@ -485,20 +485,32 @@ export function FreeLandingPage() {
                   <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Tạo lúc: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.created_at)}</span></div>
                   <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Session: <span className="font-medium text-foreground">{shortHash(lastFreeKey.session_id, 12)}</span></div>
                 </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="rounded-2xl"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(lastFreeKey.key);
-                    } catch {
-                      // ignore
-                    }
-                  }}
-                >
-                  Copy key
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="rounded-2xl"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(lastFreeKey.key);
+                        toast({ title: "Copy thành công", description: "Key đã được copy vào clipboard." });
+                      } catch {
+                        toast({ title: "Copy thất bại", description: "Không thể copy tự động. Hãy copy thủ công.", variant: "destructive" });
+                      }
+                    }}
+                  >
+                    Copy key
+                  </Button>
+                  <Button
+                    type="button"
+                    className="rounded-2xl"
+                    onClick={() => {
+                      window.location.assign(`/reset-key?key=${encodeURIComponent(lastFreeKey.key)}`);
+                    }}
+                  >
+                    Reset Key🗝
+                  </Button>
+                </div>
                 <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
               </div>
             ) : null}

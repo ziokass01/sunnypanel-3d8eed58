@@ -8,6 +8,7 @@ import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
+import { toast } from "@/hooks/use-toast";
 import {
   clearFreeFlowStorage,
   getFreeStartMeta,
@@ -670,8 +671,9 @@ export function FreeClaimPage() {
                     try {
                       await navigator.clipboard.writeText(revealed.key);
                       setCopied(true);
+                      toast({ title: "Copy thành công", description: "Key đã được copy vào clipboard." });
                     } catch {
-                      // ignore
+                      toast({ title: "Copy thất bại", description: "Không thể copy tự động. Hãy copy thủ công.", variant: "destructive" });
                     }
                     await closeAndReturn();
                   }}
