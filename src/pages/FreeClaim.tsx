@@ -6,8 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
-import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
-import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -270,9 +268,6 @@ export function FreeClaimPage() {
   const [copied, setCopied] = useState(false);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
-  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
-  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState("");
   const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
 
@@ -383,17 +378,11 @@ export function FreeClaimPage() {
         const fp = getOrCreateFingerprint();
         const cfg = await fetchFreeConfig({ fingerprint: fp });
         setCfg(cfg);
-        const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
-        setTurnstileEnabled(enabled);
-        setTurnstileSiteKey(cfg.turnstile_site_key ?? null);
-        if (!enabled) setTurnstileToken("");
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
         // If config cannot be fetched, fail open (do not block claim UI).
         setCfg(null);
-        setTurnstileEnabled(false);
-        setTurnstileSiteKey(null);
-        setTurnstileToken("");
+        setRemainingTodayServer(null);
       }
     })();
   }, []);
@@ -409,9 +398,8 @@ export function FreeClaimPage() {
     if (revealed) return false;
     if (!claimToken) return false;
     if (!outToken) return false;
-    if (turnstileEnabled && !turnstileToken) return false;
     return !loading;
-  }, [claimToken, outToken, revealed, loading, turnstileEnabled, turnstileToken]);
+  }, [claimToken, outToken, revealed, loading]);
 
   async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
@@ -439,7 +427,6 @@ export function FreeClaimPage() {
         out_token: outToken,
         session_id: sid || undefined,
         fingerprint: fp,
-        cf_turnstile_response: turnstileEnabled ? turnstileToken : undefined,
         debug: debugMode ? 1 : undefined,
       });
 
@@ -625,20 +612,9 @@ export function FreeClaimPage() {
               </div>
             ) : null}
 
-            <FreeDownloadCards cfg={cfg} />
 
             {!revealed ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
-                {turnstileEnabled && turnstileSiteKey ? (
-                  <div className="rounded-2xl border p-3">
-                    <TurnstileWidget
-                      siteKey={turnstileSiteKey}
-                      onToken={setTurnstileToken}
-                      onError={(m) => setError(m)}
-                    />
-                  </div>
-                ) : null}
-
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl border bg-background p-3">
                     <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>

@@ -107,6 +107,11 @@ function syncLastFreeKeySnapshot(result: ResetKeyPayload) {
     const next = {
       ...parsed,
       key: result.key ?? parsed.key,
+      key_type: result.key_kind === "FREE"
+        ? "Key free"
+        : result.key_kind === "PAID"
+          ? "Key mua / admin"
+          : parsed.key_type ?? null,
       created_at: result.created_at ?? parsed.created_at ?? null,
       expires_at: result.expires_at ?? parsed.expires_at ?? null,
     };

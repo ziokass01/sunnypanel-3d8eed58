@@ -219,19 +219,9 @@ if (!free_download_cards.length) {
     return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: kErr.message }, 503);
   }
 
-  const TURNSTILE_SITE_KEY_RAW = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
-  const TURNSTILE_SECRET_KEY_RAW = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
-
-  const isPlaceholderTurnstileKey = (k: string) => {
-    const v = String(k || "").trim().toLowerCase();
-    return v === "" || v === "dummy" || v === "changeme" || v === "test";
-  };
-
-  const turnstile_enabled = Boolean(
-    TURNSTILE_SITE_KEY_RAW &&
-      TURNSTILE_SECRET_KEY_RAW &&
-      !isPlaceholderTurnstileKey(TURNSTILE_SITE_KEY_RAW),
-  );
+  // FREE flow no longer uses Turnstile. Reset-key keeps its own Turnstile flow.
+  const turnstile_enabled = false;
+  const TURNSTILE_SITE_KEY_RAW = "";
 
   const missing: string[] = [];
   if (!free_outbound_url) missing.push("free_outbound_url");
@@ -343,7 +333,7 @@ if (!free_download_cards.length) {
     })),
 
     turnstile_enabled,
-    turnstile_site_key: turnstile_enabled ? TURNSTILE_SITE_KEY_RAW : null,
+    turnstile_site_key: null,
 
     missing,
   };

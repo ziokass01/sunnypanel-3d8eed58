@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +77,17 @@ function shortHash(v?: string | null, n = 10) {
   return x.length > n ? `${x.slice(0, n)}…` : x;
 }
 
+function readLastFreeKeySnapshot(): LastFreeKey | null {
+  try {
+    const raw = localStorage.getItem(LAST_FREE_KEY_STORAGE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastFreeKey;
+    return parsed?.key ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -96,18 +107,33 @@ export function FreeLandingPage() {
     );
   }, [err]);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAST_FREE_KEY_STORAGE);
-      if (raw) {
-        const parsed = JSON.parse(raw) as LastFreeKey;
-        if (parsed?.key) setLastFreeKey(parsed);
-      }
-    } catch {
-      // ignore
-    }
+  const refreshLocalFreeState = useCallback(() => {
+    setLastFreeKey(readLastFreeKeySnapshot());
     setDeviceHistory(readFreeDeviceHistory());
   }, []);
+
+  useEffect(() => {
+    refreshLocalFreeState();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === LAST_FREE_KEY_STORAGE || event.key === "sunny_free_device_history_v1") {
+        refreshLocalFreeState();
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshLocalFreeState();
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", refreshLocalFreeState);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", refreshLocalFreeState);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshLocalFreeState]);
 
   useEffect(() => {
     if (!lastFreeKey?.key) return;
@@ -126,6 +152,11 @@ export function FreeLandingPage() {
         const next = {
           ...lastFreeKey,
           key: res.key,
+          key_type: res.key_kind === "FREE"
+            ? "Key free"
+            : res.key_kind === "PAID"
+              ? "Key mua / admin"
+              : lastFreeKey.key_type,
           created_at: createdAt,
           expires_at: expiresAt,
         };

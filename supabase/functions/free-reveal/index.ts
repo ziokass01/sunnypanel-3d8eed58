@@ -241,31 +241,7 @@ Deno.serve(async (req) => {
 
   const freeReturnSeconds = Math.max(10, Number(settings?.free_return_seconds ?? 60));
 
-  // Optional Turnstile (enabled only if BOTH env keys exist AND site key is not a placeholder)
-  const TURNSTILE_SITE_KEY_RAW = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
-  const TURNSTILE_SECRET_KEY_RAW = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
-
-  const isPlaceholderTurnstileKey = (k: string) => {
-    const v = String(k || "").trim().toLowerCase();
-    return v === "" || v === "dummy" || v === "changeme" || v === "test";
-  };
-
-  const turnstile_enabled = Boolean(
-    TURNSTILE_SITE_KEY_RAW &&
-      TURNSTILE_SECRET_KEY_RAW &&
-      !isPlaceholderTurnstileKey(TURNSTILE_SITE_KEY_RAW),
-  );
-
-  if (turnstile_enabled) {
-    const token =
-      String((parsed.data as any).cf_turnstile_response ?? "").trim() ||
-      String((parsed.data as any).turnstile_token ?? "").trim();
-
-    if (!token) return json({ ok: false, msg: "UNAUTHORIZED", code: "TURNSTILE_REQUIRED" }, 200);
-
-    const ok = await verifyTurnstile(TURNSTILE_SECRET_KEY_RAW, token, ip);
-    if (!ok) return json({ ok: false, msg: "UNAUTHORIZED", code: "TURNSTILE_FAILED" }, 200);
-  }
+  // FREE flow no longer uses Turnstile. Reset-key keeps its own Turnstile flow.
 
   const debugEnabled =
     (req.headers.get("x-debug") ?? "").trim() === "1" ||
