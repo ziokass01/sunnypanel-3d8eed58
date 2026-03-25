@@ -17,8 +17,13 @@ import { getErrorMessage } from "@/lib/error-message";
 
 const schema = z.object({
   expires_at: z.string().optional(),
-  duration_value: z.coerce.number().int().min(1).max(999999).optional(),
-  duration_unit: z.enum(["minutes", "hours", "days"]).default("days"),
+  // Keep duration optional on edit so admins can block/unblock a started key
+  // even when the legacy duration unit cannot be inferred cleanly in the UI.
+  duration_value: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : Number(value)),
+    z.number().int().min(1).max(999999).optional(),
+  ),
+  duration_unit: z.enum(["minutes", "hours", "days"]).optional().default("days"),
   max_devices: z.coerce.number().int().min(1),
   is_active: z.boolean(),
   note: z.string().trim().max(2000).optional(),
@@ -39,6 +44,14 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
   const unit = v.duration_unit ?? "days";
   const mult = unit === "minutes" ? 60 : unit === "hours" ? 3600 : 86400;
   return value * mult;
+}
+
+function getStartOnFirstUse(data: any) {
+  return Boolean(data?.start_on_first_use || data?.starts_on_first_use);
+}
+
+function getFirstUsedAt(data: any) {
+  return data?.first_used_at ?? data?.activated_at ?? null;
 }
 
 export function LicenseEditPage() {
@@ -65,7 +78,7 @@ export function LicenseEditPage() {
     values: data
       ? {
           expires_at: isoToLocal(data.expires_at),
-          ...(Boolean((data as any)?.start_on_first_use ?? (data as any)?.starts_on_first_use)
+          ...(getStartOnFirstUse(data)
             ? secondsToFields((data as any).duration_seconds ?? ((data as any).duration_days ? (data as any).duration_days * 86400 : null))
             : { duration_value: 2, duration_unit: "hours" as const }),
           max_devices: data.max_devices,
@@ -77,8 +90,8 @@ export function LicenseEditPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
-      const startOnFirstUse = Boolean((data as any)?.start_on_first_use ?? (data as any)?.starts_on_first_use);
-      const firstUsedAt = (data as any)?.first_used_at ?? (data as any)?.activated_at ?? null;
+      const startOnFirstUse = getStartOnFirstUse(data);
+      const firstUsedAt = getFirstUsedAt(data);
 
       const patch: Record<string, unknown> = {
         max_devices: values.max_devices,
@@ -127,7 +140,7 @@ export function LicenseEditPage() {
             <div className="font-mono text-sm">{data.key}</div>
           </div>
 
-          {Boolean((data as any).start_on_first_use ?? (data as any).starts_on_first_use) ? (
+          {getStartOnFirstUse(data) ? (
             <div className="space-y-2">
               <Label>Duration</Label>
               <div className="grid gap-3 md:grid-cols-2">
@@ -136,13 +149,13 @@ export function LicenseEditPage() {
                   type="number"
                   min={1}
                   max={999999}
-                  disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
+                  disabled={Boolean(getFirstUsedAt(data))}
                   {...form.register("duration_value")}
                 />
                 <Select
-                  value={form.watch("duration_unit")}
+                  value={form.watch("duration_unit") ?? "days"}
                   onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
-                  disabled={Boolean((data as any).first_used_at ?? (data as any).activated_at)}
+                  disabled={Boolean(getFirstUsedAt(data))}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Unit" />
@@ -155,7 +168,7 @@ export function LicenseEditPage() {
                 </Select>
               </div>
               <div className="text-xs text-muted-foreground">
-                {Boolean((data as any).first_used_at ?? (data as any).activated_at)
+                {Boolean(getFirstUsedAt(data))
                   ? "Already started. Use Reset activation on the detail page to change duration."
                   : "Countdown will start on first successful verify."}
               </div>
@@ -177,7 +190,10 @@ export function LicenseEditPage() {
               <div className="text-sm font-medium">Active</div>
               <div className="text-xs text-muted-foreground">If off, verify-key returns KEY_BLOCKED.</div>
             </div>
-            <Switch checked={form.watch("is_active")} onCheckedChange={(v) => form.setValue("is_active", v)} />
+            <Switch
+              checked={form.watch("is_active")}
+              onCheckedChange={(v) => form.setValue("is_active", v, { shouldDirty: true, shouldTouch: true, shouldValidate: true })}
+            />
           </div>
 
           <div className="space-y-2">
