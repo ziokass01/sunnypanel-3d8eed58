@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Activity, Download, FileClock, Gauge, History, House, KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, UserRound, Waypoints } from "lucide-react";
+import { Activity, Download, FileClock, Gauge, History, House, KeyRound, LockKeyhole, LogOut, Menu, ShieldCheck, Sparkles, UserRound, Waypoints, X } from "lucide-react";
 
 type ApiOk<T> = { ok: true } & T;
 
@@ -224,7 +224,7 @@ function isSoonExpired(key: RentKey) {
   return diff > 0 && diff <= 3 * 24 * 60 * 60 * 1000;
 }
 
-export function buildTổng quanStats(keys: RentKey[]) {
+export function buildTongQuanStats(keys: RentKey[]) {
   const total = keys.length;
   const enabled = keys.filter((key) => key.is_active).length;
   const disabled = Math.max(0, total - enabled);
@@ -255,10 +255,11 @@ const NAV_ITEMS = [
 
 const panelCardClass = "border-slate-200/80 bg-white/95 text-slate-900 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur";
 const metricCardClass = "rounded-[24px] border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_30px_rgba(15,23,42,0.06)]";
-const fieldClass = "h-12 rounded-2xl border-slate-200 bg-white text-slate-950 caret-slate-950 placeholder:text-slate-400 shadow-[0_8px_20px_rgba(15,23,42,0.06)] ring-offset-white focus-visible:border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
-const heroFieldClass = "h-14 rounded-[22px] border-slate-200 bg-white text-slate-950 caret-slate-950 placeholder:text-slate-400 shadow-[0_12px_24px_rgba(15,23,42,0.07)] ring-offset-white focus-visible:border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
-const textareaClass = "min-h-[120px] rounded-[22px] border-slate-200 bg-white text-slate-950 caret-slate-950 placeholder:text-slate-400 shadow-[0_8px_20px_rgba(15,23,42,0.06)] ring-offset-white focus-visible:border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
-const selectTriggerClass = "h-12 rounded-2xl border-slate-200 bg-white text-slate-950 shadow-[0_8px_20px_rgba(15,23,42,0.06)] focus:border-amber-400 focus:ring-4 focus:ring-amber-100";
+const fieldClass = "h-12 rounded-2xl !border-slate-300 !bg-white !text-slate-950 caret-slate-950 placeholder:!text-slate-400 shadow-[0_8px_20px_rgba(15,23,42,0.06)] ring-offset-white focus-visible:!border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
+const heroFieldClass = "h-14 rounded-[22px] !border-slate-300 !bg-white !text-slate-950 caret-slate-950 placeholder:!text-slate-400 shadow-[0_12px_24px_rgba(15,23,42,0.07)] ring-offset-white focus-visible:!border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
+const textareaClass = "min-h-[120px] rounded-[22px] !border-slate-300 !bg-white !text-slate-950 caret-slate-950 placeholder:!text-slate-400 shadow-[0_8px_20px_rgba(15,23,42,0.06)] ring-offset-white focus-visible:!border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
+const selectTriggerClass = "h-12 rounded-2xl !border-slate-300 !bg-white !text-slate-950 shadow-[0_8px_20px_rgba(15,23,42,0.06)] focus:!border-amber-400 focus:ring-4 focus:ring-amber-100";
+const readableFieldStyle = { color: "#0f172a", backgroundColor: "#ffffff", WebkitTextFillColor: "#0f172a", caretColor: "#0f172a" } as const;
 const dialogCardClass = "border-slate-200/80 bg-white/95 text-slate-900 shadow-[0_28px_70px_rgba(15,23,42,0.18)]";
 const tableWrapClass = "hidden rounded-[24px] border border-slate-200/80 bg-white/80 shadow-[0_12px_28px_rgba(15,23,42,0.05)] md:block";
 const tabListDesktopClass = "grid h-auto w-full gap-2 rounded-[26px] bg-white/10 p-2";
@@ -277,6 +278,7 @@ export function RentPortalPage() {
   });
 
   const [tab, setTab] = useState<TabValue>("status");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [activationKey, setActivationKey] = useState("");
@@ -710,7 +712,7 @@ export function RentPortalPage() {
     });
   }, [keys, keySearch, keyStatusFilter]);
 
-  const dashboardStats = useMemo(() => buildTổng quanStats(keys), [keys]);
+  const dashboardStats = useMemo(() => buildTongQuanStats(keys), [keys]);
 
   const openKeyDialog = (key: RentKey) => {
     setSelectedKeyId(key.id);
@@ -776,7 +778,7 @@ export function RentPortalPage() {
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-slate-700">Tài khoản</Label>
                   <Input
-                    className={heroFieldClass}
+                    style={readableFieldStyle} className={heroFieldClass}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="Nhập tài khoản"
@@ -785,7 +787,7 @@ export function RentPortalPage() {
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-slate-700">Mật khẩu</Label>
                   <Input
-                    className={heroFieldClass}
+                    style={readableFieldStyle} className={heroFieldClass}
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -808,8 +810,8 @@ export function RentPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#0f172a_0%,#111827_18%,#f8fafc_18%,#f5f5f4_100%)] text-slate-900">
-      <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)} className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 xl:px-8">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#081121_0%,#0d1b33_240px,#f3f6fb_240px,#eef2f7_100%)] text-slate-900">
+      <Tabs value={tab} onValueChange={(value) => { setTab(value as TabValue); setMobileNavOpen(false); }} className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 xl:px-8">
         <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
           <aside className="hidden xl:sticky xl:top-6 xl:block xl:self-start">
             <Card className="overflow-hidden rounded-[30px] border-slate-800/80 bg-[linear-gradient(180deg,#0f172a_0%,#111827_100%)] text-white shadow-[0_30px_90px_rgba(2,6,23,0.34)]">
@@ -865,70 +867,132 @@ export function RentPortalPage() {
           </aside>
 
           <div className="space-y-6">
-            <Card className="xl:hidden overflow-hidden rounded-[26px] border-slate-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#fffaf0_40%,#f8fbff_100%)] shadow-[0_18px_48px_rgba(15,23,42,0.08)]">
-              <CardContent className="space-y-4 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-900 to-slate-700 text-sm font-black text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]">S</div>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-950">SUNNY Rent Portal</div>
-                      <div className="truncate text-xs text-slate-500">Bản sáng, gọn, đỡ mỏi mắt hơn</div>
+            <div className="xl:hidden space-y-4">
+              <Card className="overflow-hidden rounded-[28px] border-slate-800 bg-[linear-gradient(135deg,#0b1220_0%,#111827_100%)] text-white shadow-[0_22px_55px_rgba(2,6,23,0.35)]">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-400 text-sm font-black text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.35)]">S</div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-white">SUNNY Rent Portal</div>
+                        <div className="truncate text-xs text-slate-400">Phong cách panel gọn, rõ, bấm thoải mái hơn</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950" onClick={() => setMobileNavOpen(true)}>
+                        <Menu className="h-5 w-5" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}>
+                        <LogOut className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                  <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}><LogOut className="h-4 w-4" /></Button>
-                </div>
 
-                <div className="rounded-[22px] border border-amber-200/80 bg-white/80 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
-                  <div className="text-sm font-semibold text-slate-900 break-all">{account?.username ?? "-"}</div>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                    <span className={account?.is_disabled ? "rounded-full bg-rose-100 px-2.5 py-1 text-rose-700" : isActive ? "rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700" : "rounded-full bg-amber-100 px-2.5 py-1 text-amber-700"}>
-                      {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
-                    </span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1">Hết hạn {fmtDate(account?.expires_at)}</span>
+                  <div className="mt-4 rounded-[24px] border border-white/10 bg-white/6 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-white break-all">{account?.username ?? "-"}</div>
+                        <div className="mt-1 text-xs text-slate-400">Kích hoạt {fmtDate(account?.activated_at)}</div>
+                      </div>
+                      <span className={account?.is_disabled ? "rounded-full bg-rose-500/15 px-2.5 py-1 text-xs text-rose-200" : isActive ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-200" : "rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-200"}>
+                        {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Key</div><div className="mt-1 text-lg font-semibold text-white">{dashboardStats.total}</div></div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Bật</div><div className="mt-1 text-lg font-semibold text-white">{dashboardStats.enabled}</div></div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Tải</div><div className="mt-1 text-lg font-semibold text-white">{downloadsQ.data?.length ?? 0}</div></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {mobileNavOpen ? (
+                <div className="fixed inset-0 z-50 xl:hidden">
+                  <button type="button" aria-label="Đóng menu" className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px]" onClick={() => setMobileNavOpen(false)} />
+                  <div className="absolute left-0 top-0 h-full w-[84vw] max-w-[340px] overflow-y-auto border-r border-white/10 bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] p-4 text-white shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-base font-semibold">Điều hướng</div>
+                        <div className="text-xs text-slate-400">Chọn khu bạn muốn mở</div>
+                      </div>
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950" onClick={() => setMobileNavOpen(false)}>
+                        <X className="h-5 w-5" />
+                      </Button>
+                    </div>
+
+                    <div className="mt-5 rounded-[24px] border border-white/10 bg-white/6 p-4">
+                      <div className="text-sm font-semibold text-white break-all">{account?.username ?? "-"}</div>
+                      <div className="mt-2 text-xs text-slate-400">Hết hạn {fmtDate(account?.expires_at)}</div>
+                    </div>
+
+                    <div className="mt-5 grid gap-2">
+                      {NAV_ITEMS.map(({ value, label, icon: Icon }) => (
+                        <Button
+                          key={value}
+                          type="button"
+                          variant="ghost"
+                          className={cx(
+                            "h-12 justify-start rounded-2xl border px-4 text-left text-sm",
+                            tab === value
+                              ? "border-amber-300/35 bg-white text-slate-950 shadow-[0_10px_20px_rgba(15,23,42,0.18)] hover:bg-white"
+                              : "border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950"
+                          )}
+                          onClick={() => {
+                            setTab(value);
+                            setMobileNavOpen(false);
+                          }}
+                        >
+                          <Icon className="mr-3 h-4 w-4" />
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              ) : null}
+            </div>
 
-            <Card className="overflow-hidden rounded-[34px] border-slate-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#fff8ec_42%,#f8fbff_100%)] text-slate-900 shadow-[0_26px_80px_rgba(15,23,42,0.10)]">
+            <Card className="overflow-hidden rounded-[34px] border-slate-200/80 bg-white text-slate-900 shadow-[0_24px_72px_rgba(15,23,42,0.10)]">
+              <div className="h-1.5 bg-[linear-gradient(90deg,#0f172a_0%,#1e293b_35%,#fbbf24_100%)]" />
               <CardContent className="relative p-0">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.18),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(15,23,42,0.08),transparent_30%)]" />
-                <div className="relative grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.15fr_0.85fr]">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.12),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(15,23,42,0.05),transparent_30%)]" />
+                <div className="relative grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.12fr_0.88fr]">
                   <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-900"><Waypoints className="h-3.5 w-3.5" /> Rent control</div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900"><Waypoints className="h-3.5 w-3.5" /> Thuê website</div>
                     <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
                       {isActive
-                        ? "Giao diện trang thuê được dựng lại theo kiểu sáng hơn, nét hơn và có hơi hướng dashboard admin gọn ghẽ."
-                        : "Tài khoản chưa kích hoạt xong, nên mình dồn điểm nhấn vào khu nhập key để thao tác nhanh và nhìn rõ hơn."}
+                        ? "Trang thuê được dựng lại theo kiểu panel sáng, gọn và rõ nút bấm hơn trên điện thoại."
+                        : "Trang đang ưu tiên khu kích hoạt để bạn nhìn phát là biết phải thao tác ở đâu."}
                     </h1>
                     <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
                       {isActive
-                        ? "Logic cũ vẫn giữ nguyên. Phần chỉnh lần này chỉ chăm ngoại hình: sidebar rõ nhịp, card sáng dịu, font đậm vừa phải và ô nhập không còn chìm màu khi gõ nữa."
-                        : "Khi chưa kích hoạt, trang thu gọn lại để tập trung vào đúng hành động cần làm, tránh cảm giác bảng điều khiển quá ồn khi mới mở ra."}
+                        ? "Mình giữ nguyên logic thật của repo, chỉ đập lại mặt tiền: menu mobile mở từ góc trái, card phân tầng rõ ràng, chữ đậm vừa đủ và ô nhập ép về nền trắng chữ đen để không còn cảnh phải zoom mới đọc được."
+                        : "Khi tài khoản chưa mở, giao diện thu gọn thành một đường băng ngắn gọn để bạn nhập key và kích hoạt nhanh, không bị nhiễu bởi đống khối phụ."}
                     </p>
                     <div className="mt-6 flex flex-wrap gap-3">
                       {isActive ? (
                         <>
                           <Button className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setTab("create")}>Tạo key ngay</Button>
-                          <Button variant="outline" className="rounded-2xl border-slate-200 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-950" onClick={() => setTab("api")}>Mở API và tải xuống</Button>
+                          <Button variant="outline" className="rounded-2xl border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-950" onClick={() => setTab("history")}>Mở lịch sử key</Button>
                         </>
                       ) : (
                         <>
                           <Button className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setTab("status")}>Mở khu kích hoạt</Button>
-                          <Button variant="outline" className="rounded-2xl border-slate-200 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-950" onClick={() => setActivationKey("")}>Xóa key đang nhập</Button>
+                          <Button variant="outline" className="rounded-2xl border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-950" onClick={() => setActivationKey("")}>Xóa key đang nhập</Button>
                         </>
                       )}
                     </div>
                   </div>
                   <div className="grid gap-3 self-end">
-                    <div className="rounded-[24px] border border-white/70 bg-white/80 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
-                      <div className="flex items-center gap-2 text-sm text-slate-500"><Activity className="h-4 w-4 text-amber-500" /> tài khoản hiện tại</div>
-                      <div className="mt-2 text-lg font-semibold text-slate-950">{account?.username ?? "-"}</div>
-                      <div className="mt-2 text-sm text-slate-500">Kích hoạt: {fmtDate(account?.activated_at)}</div>
+                    <div className="rounded-[24px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_18px_40px_rgba(15,23,42,0.18)]">
+                      <div className="flex items-center gap-2 text-sm text-slate-300"><Activity className="h-4 w-4 text-amber-400" /> tài khoản hiện tại</div>
+                      <div className="mt-2 text-lg font-semibold text-white">{account?.username ?? "-"}</div>
+                      <div className="mt-2 text-sm text-slate-400">Kích hoạt: {fmtDate(account?.activated_at)}</div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-[24px] border border-white/70 bg-white/80 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)]"><div className="flex items-center gap-2 text-sm text-slate-500"><KeyRound className="h-4 w-4 text-slate-700" /> tổng key</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.total}</div></div>
-                      <div className="rounded-[24px] border border-white/70 bg-white/80 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)]"><div className="flex items-center gap-2 text-sm text-slate-500"><FileClock className="h-4 w-4 text-amber-600" /> sắp hết hạn</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.soonExpired}</div></div>
+                      <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_12px_24px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-2 text-sm text-slate-500"><KeyRound className="h-4 w-4 text-slate-700" /> tổng key</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.total}</div></div>
+                      <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_12px_24px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-2 text-sm text-slate-500"><FileClock className="h-4 w-4 text-amber-600" /> sắp hết hạn</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.soonExpired}</div></div>
                     </div>
                   </div>
                 </div>
@@ -937,32 +1001,20 @@ export function RentPortalPage() {
 
             {isActive ? (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Đang bật</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.enabled}</div><div className="mt-2 text-sm text-slate-500">Key sẵn sàng xác thực</div></div>
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><LockKeyhole className="h-4 w-4 text-rose-500" /> Đang tắt</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.disabled}</div><div className="mt-2 text-sm text-slate-500">Key đang tạm ngưng</div></div>
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Sparkles className="h-4 w-4 text-amber-500" /> Chạy lần đầu</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.firstUse}</div><div className="mt-2 text-sm text-slate-500">Chưa đốt thời gian ngay</div></div>
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Download className="h-4 w-4 text-slate-700" /> Tệp tải xuống</div><div className="mt-2 text-2xl font-semibold text-slate-950">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Gói hỗ trợ đã sẵn sàng</div></div>
+                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Đang bật</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.enabled}</div><div className="mt-2 text-sm text-slate-500">Key có thể xác thực</div></div>
+                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><LockKeyhole className="h-4 w-4 text-rose-500" /> Đang tắt</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.disabled}</div><div className="mt-2 text-sm text-slate-500">Key tạm ngưng</div></div>
+                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Sparkles className="h-4 w-4 text-amber-500" /> Dùng lần đầu</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.firstUse}</div><div className="mt-2 text-sm text-slate-500">Chưa đốt thời gian ngay</div></div>
+                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Download className="h-4 w-4 text-slate-700" /> Files / Downloads</div><div className="mt-2 text-2xl font-semibold text-slate-950">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Tệp hỗ trợ sẵn có</div></div>
               </div>
             ) : (
               <Card className="rounded-[28px] border-amber-200/80 bg-[linear-gradient(135deg,#fffaf0_0%,#fff7ed_100%)] shadow-[0_16px_36px_rgba(251,191,36,0.12)]">
                 <CardContent className="p-5 sm:p-6">
                   <div className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-900">Chưa kích hoạt xong</div>
-                  <div className="mt-2 text-sm leading-6 text-amber-900/80">Trang tạm cất bớt các khối không cần thiết để bạn nhìn thẳng vào phần kích hoạt. Nhấn tab Trạng thái rồi nhập key để mở toàn bộ khu quản lý.</div>
+                  <div className="mt-2 text-sm leading-6 text-amber-900/80">Giao diện đã thu gọn, ưu tiên đúng việc chính là kích hoạt. Sau khi mở khóa xong, toàn bộ khu quản lý mới bung ra như một cánh cửa trượt.</div>
                 </CardContent>
               </Card>
             )}
 
-            <div className="sticky top-3 z-20 xl:hidden">
-              <div className="overflow-x-auto pb-1">
-                <TabsList className={tabListMobileClass}>
-                  {NAV_ITEMS.map(({ value, label, icon: Icon }) => (
-                    <TabsTrigger key={value} className={tabTriggerMobileClass} value={value}>
-                      <Icon className="h-4 w-4" />
-                      <span>{label}</span>
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </div>
-            </div>
         <TabsContent value="status" className="mt-0 space-y-4">
           {!isActive ? (
             <Card className="border-amber-200 bg-[#fffaf0] text-slate-900">
@@ -973,7 +1025,7 @@ export function RentPortalPage() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Activation key</Label>
-                  <Input className={fieldClass} value={activationKey} onChange={(e) => setActivationKey(normalizeKeyInput(e.target.value))} placeholder="XXXX-XXXX-XXXX-XXXX" />
+                  <Input style={readableFieldStyle} className={fieldClass} value={activationKey} onChange={(e) => setActivationKey(normalizeKeyInput(e.target.value))} placeholder="XXXX-XXXX-XXXX-XXXX" />
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => activateM.mutate()} disabled={activateM.isPending || !activationKey.trim()}>
@@ -1032,22 +1084,22 @@ export function RentPortalPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Key🔑 tự nhập (để trống nếu muốn random)</Label>
-                <Input className={fieldClass} value={customKey} onChange={(e) => setCustomKey(e.target.value)} placeholder="ABCD-EFGH-IJKL-MNOP" />
+                <Input style={readableFieldStyle} className={fieldClass} value={customKey} onChange={(e) => setCustomKey(e.target.value)} placeholder="ABCD-EFGH-IJKL-MNOP" />
                 <p className="text-xs text-muted-foreground">4 nhóm x 4 ký tự, chỉ A-Z và 0-9.</p>
               </div>
               <div className="space-y-2">
                 <Label>Ghi chú</Label>
-                <Textarea className={textareaClass} value={keyNote} onChange={(e) => setKeyNote(e.target.value)} placeholder="Ghi chú cho key" rows={3} />
+                <Textarea style={readableFieldStyle} className={textareaClass} value={keyNote} onChange={(e) => setKeyNote(e.target.value)} placeholder="Ghi chú cho key" rows={3} />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Thời lượng⏰</Label>
-                  <Input className={fieldClass} type="number" min={1} max={999999} value={durationValue} onChange={(e) => setDurationValue(e.target.value)} />
+                  <Input style={readableFieldStyle} className={fieldClass} type="number" min={1} max={999999} value={durationValue} onChange={(e) => setDurationValue(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label>Đơn vị🖍</Label>
                   <Select value={durationUnit} onValueChange={(value) => setDurationUnit(value as DurationUnit)}>
-                    <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Chọn đơn vị" /></SelectTrigger>
+                    <SelectTrigger style={readableFieldStyle} className={selectTriggerClass}><SelectValue placeholder="Chọn đơn vị" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="hour">Giờ</SelectItem>
                       <SelectItem value="day">Ngày</SelectItem>
@@ -1058,7 +1110,7 @@ export function RentPortalPage() {
               <div className="space-y-2">
                 <Label>Số máy tối đa📱</Label>
                 <Input
-                  className={fieldClass}
+                  style={readableFieldStyle} className={fieldClass}
                   type="number"
                   min={1}
                   max={999999}
@@ -1102,7 +1154,7 @@ export function RentPortalPage() {
               <div className="grid gap-3 md:grid-cols-[1fr,auto,auto,auto,auto] md:items-end">
                 <div className="space-y-2">
                   <Label>Tìm key / ghi chú / kiểu chạy</Label>
-                  <Input className={fieldClass} value={keySearch} onChange={(e) => setKeySearch(e.target.value)} placeholder="Tìm kiếm key" />
+                  <Input style={readableFieldStyle} className={fieldClass} value={keySearch} onChange={(e) => setKeySearch(e.target.value)} placeholder="Tìm kiếm key" />
                 </div>
                 <Button variant={keyStatusFilter === "all" ? "default" : "outline"} onClick={() => setKeyStatusFilter("all")}>Tất cả</Button>
                 <Button variant={keyStatusFilter === "on" ? "default" : "outline"} onClick={() => setKeyStatusFilter("on")}>Đang bật</Button>
@@ -1250,11 +1302,11 @@ export function RentPortalPage() {
             <CardContent className="space-y-4 max-w-xl">
               <div className="space-y-2">
                 <Label>Reset code</Label>
-                <Input className={fieldClass} value={resetCode} onChange={(e) => setResetCode(e.target.value)} placeholder="RC-XXXX-XXXX-XXXX" />
+                <Input style={readableFieldStyle} className={fieldClass} value={resetCode} onChange={(e) => setResetCode(e.target.value)} placeholder="RC-XXXX-XXXX-XXXX" />
               </div>
               <div className="space-y-2">
                 <Label>Mật khẩu mới</Label>
-                <Input className={fieldClass} type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Nhập mật khẩu mới" />
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Nhập mật khẩu mới" />
               </div>
               <Button onClick={() => resetPassM.mutate()} disabled={resetPassM.isPending || !resetCode.trim() || !newPass.trim()}>
                 {resetPassM.isPending ? "Đang đổi mật khẩu..." : "Đổi mật khẩu"}
@@ -1383,12 +1435,12 @@ export function RentPortalPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Thời lượng</Label>
-                  <Input className={fieldClass} type="number" min={1} max={999999} value={editDurationValue} onChange={(e) => setEditDurationValue(e.target.value)} />
+                  <Input style={readableFieldStyle} className={fieldClass} type="number" min={1} max={999999} value={editDurationValue} onChange={(e) => setEditDurationValue(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label>Đơn vị</Label>
                   <Select value={editDurationUnit} onValueChange={(value) => setEditDurationUnit(value as DurationUnit)}>
-                    <SelectTrigger className={selectTriggerClass}><SelectValue /></SelectTrigger>
+                    <SelectTrigger style={readableFieldStyle} className={selectTriggerClass}><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="hour">Giờ</SelectItem>
                       <SelectItem value="day">Ngày</SelectItem>
@@ -1400,7 +1452,7 @@ export function RentPortalPage() {
               <div className="space-y-2">
                 <Label>Số máy tối đa</Label>
                 <Input
-                  className={fieldClass}
+                  style={readableFieldStyle} className={fieldClass}
                   type="number"
                   min={1}
                   max={999999}
@@ -1419,7 +1471,7 @@ export function RentPortalPage() {
 
               <div className="space-y-2">
                 <Label>Ghi chú</Label>
-                <Textarea className={textareaClass} value={editKeyNote} onChange={(e) => setEditKeyNote(e.target.value)} rows={3} />
+                <Textarea style={readableFieldStyle} className={textareaClass} value={editKeyNote} onChange={(e) => setEditKeyNote(e.target.value)} rows={3} />
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -1483,7 +1535,7 @@ export function RentPortalPage() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Mật khẩu xem HMAC</Label>
-                <Input className={fieldClass} type="password" value={hmacUnlockPassword} onChange={(e) => setHmacUnlockPassword(e.target.value)} placeholder="Nhập mật khẩu" />
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={hmacUnlockPassword} onChange={(e) => setHmacUnlockPassword(e.target.value)} placeholder="Nhập mật khẩu" />
               </div>
               {lockRemain ? <div className="text-sm text-destructive">Bạn đang bị khóa tạm. Thử lại sau {lockRemain}.</div> : null}
               <Button onClick={() => unlockHmacM.mutate()} disabled={unlockHmacM.isPending || !hmacUnlockPassword.trim() || !!lockRemain}>
@@ -1494,11 +1546,11 @@ export function RentPortalPage() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Mật khẩu mới</Label>
-                <Input className={fieldClass} type="password" value={hmacPassword} onChange={(e) => setHmacPassword(e.target.value)} placeholder="Ví dụ: vip2026" />
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={hmacPassword} onChange={(e) => setHmacPassword(e.target.value)} placeholder="Ví dụ: vip2026" />
               </div>
               <div className="space-y-2">
                 <Label>Nhập lại mật khẩu mới</Label>
-                <Input className={fieldClass} type="password" value={hmacPasswordConfirm} onChange={(e) => setHmacPasswordConfirm(e.target.value)} placeholder="Nhập lại mật khẩu" />
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={hmacPasswordConfirm} onChange={(e) => setHmacPasswordConfirm(e.target.value)} placeholder="Nhập lại mật khẩu" />
               </div>
               <p className="text-xs text-muted-foreground">Tối thiểu 4 ký tự, có cả chữ và số.</p>
               <Button
