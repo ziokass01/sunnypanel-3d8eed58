@@ -94,6 +94,19 @@ Deno.serve(async (req) => {
     });
 
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+  const TURNSTILE_SITE_KEY = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
+  const TURNSTILE_SECRET_KEY = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
+  const turnstileConfigured = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+
+  if (req.method === "GET") {
+    return json({
+      ok: true,
+      turnstile_enabled: turnstileConfigured,
+      configured: turnstileConfigured,
+    });
+  }
+
   if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
 
   try {
@@ -141,9 +154,6 @@ Deno.serve(async (req) => {
   const action = parsed.data.action;
   const keyBucket = await sha256Hex(key);
 
-  const TURNSTILE_SITE_KEY = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
-  const TURNSTILE_SECRET_KEY = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
-  const turnstileConfigured = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
   const token =
     String(parsed.data.cf_turnstile_response ?? "").trim() ||
     String(parsed.data.turnstile_token ?? "").trim();
