@@ -99,7 +99,7 @@ function fmtDate(value: string | null | undefined) {
   }
 }
 
-function normalizeKeyInput(input: string) {
+export function normalizeKeyInput(input: string) {
   return input.trim().toUpperCase();
 }
 
@@ -146,7 +146,7 @@ function getDurationUnit(key: RentKey): DurationUnit {
   return key.duration_unit === "hour" ? "hour" : "day";
 }
 
-function keyDurationLabel(key: Pick<RentKey, "duration_value" | "duration_unit" | "duration_days">) {
+export function keyDurationLabel(key: Pick<RentKey, "duration_value" | "duration_unit" | "duration_days">) {
   const value = Number(key.duration_value ?? key.duration_days ?? 0);
   if (!Number.isFinite(value) || value <= 0) return "-";
   const unit = key.duration_unit === "hour" ? "giờ" : "ngày";
@@ -172,7 +172,7 @@ function mapAuditAction(action: string) {
   return map[action] ?? action;
 }
 
-function mapAuditResult(result: string | null | undefined) {
+export function mapAuditResult(result: string | null | undefined) {
   if (!result) return "-";
   const map: Record<string, string> = {
     VALID: "Hợp lệ",
@@ -204,6 +204,15 @@ function isSoonExpired(key: RentKey) {
   if (!key.expires_at) return false;
   const diff = new Date(key.expires_at).getTime() - Date.now();
   return diff > 0 && diff <= 3 * 24 * 60 * 60 * 1000;
+}
+
+export function buildDashboardStats(keys: RentKey[]) {
+  const total = keys.length;
+  const enabled = keys.filter((key) => key.is_active).length;
+  const disabled = Math.max(0, total - enabled);
+  const firstUse = keys.filter((key) => key.starts_on_first_use).length;
+  const soonExpired = keys.filter((key) => isSoonExpired(key)).length;
+  return { total, enabled, disabled, firstUse, soonExpired };
 }
 
 function calcCountdown(endAtMs: number | null) {
@@ -628,14 +637,7 @@ export function RentPortalPage() {
     });
   }, [keys, keySearch, keyStatusFilter]);
 
-  const dashboardStats = useMemo(() => {
-    const total = keys.length;
-    const enabled = keys.filter((key) => key.is_active).length;
-    const disabled = Math.max(0, total - enabled);
-    const firstUse = keys.filter((key) => key.starts_on_first_use).length;
-    const soonExpired = keys.filter((key) => isSoonExpired(key)).length;
-    return { total, enabled, disabled, firstUse, soonExpired };
-  }, [keys]);
+  const dashboardStats = useMemo(() => buildDashboardStats(keys), [keys]);
 
   const openKeyDialog = (key: RentKey) => {
     setSelectedKeyId(key.id);
@@ -685,30 +687,99 @@ export function RentPortalPage() {
   }
 
   return (
-    <div className="container space-y-6 py-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Thuê Website📡</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Quản lý tài khoản, key sử dụng, API xác thực và tệp tải xuống của bạn.</p>
-        </div>
-        <Button variant="secondary" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}>
-          Đăng xuất
-        </Button>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)} className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 xl:px-8">
+        <div className="grid gap-6 xl:grid-cols-[280px_1fr]">
+          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+            <Card className="rounded-[28px] border-slate-200 bg-white shadow-sm">
+              <CardContent className="space-y-4 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">📡</div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">SUNNY Rent Portal</div>
+                      <div className="text-xs text-slate-500">Giao diện mới nối dữ liệu thật</div>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}>
+                    Đăng xuất
+                  </Button>
+                </div>
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)} className="space-y-4">
-        <div className="overflow-x-auto pb-1">
-          <TabsList className="inline-flex h-auto min-w-max gap-2 rounded-xl p-1">
-            <TabsTrigger value="status">Trạng thái💾</TabsTrigger>
-            <TabsTrigger value="dashboard">Dashboard📂</TabsTrigger>
-            <TabsTrigger value="create">Tạo key🔑</TabsTrigger>
-            <TabsTrigger value="history">Lịch sử key🔏</TabsTrigger>
-            <TabsTrigger value="audit">Audit Log📚</TabsTrigger>
-            <TabsTrigger value="password">Đổi mật khẩu✏️</TabsTrigger>
-            <TabsTrigger value="account">Thông tin tài khoản💳</TabsTrigger>
-            <TabsTrigger value="api">API &amp; Tải xuống📥</TabsTrigger>
-          </TabsList>
-        </div>
+                <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="text-sm font-semibold text-slate-900 break-all">{account?.username ?? "-"}</div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
+                    <span className={account?.is_disabled ? "rounded-full bg-rose-100 px-2 py-1 text-rose-700" : isActive ? "rounded-full bg-emerald-100 px-2 py-1 text-emerald-700" : "rounded-full bg-amber-100 px-2 py-1 text-amber-700"}>
+                      {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
+                    </span>
+                    <span>Hết hạn: {fmtDate(account?.expires_at)}</span>
+                  </div>
+                </div>
+
+                <TabsList className="grid h-auto w-full gap-2 rounded-3xl bg-slate-100 p-2">
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="status">Trạng thái💾</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="dashboard">Dashboard📂</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="create">Tạo key🔑</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="history">Lịch sử key🔏</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="audit">Audit Log📚</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="password">Đổi mật khẩu✏️</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="account">Thông tin tài khoản💳</TabsTrigger>
+                  <TabsTrigger className="justify-start rounded-2xl px-3 py-3 data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="api">API &amp; Tải xuống📥</TabsTrigger>
+                </TabsList>
+              </CardContent>
+            </Card>
+          </aside>
+
+          <div className="space-y-6">
+            <Card className="overflow-hidden rounded-[30px] border-0 bg-slate-900 text-white shadow-2xl shadow-slate-900/10">
+              <CardContent className="relative p-0">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.30),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.22),transparent_30%)]" />
+                <div className="relative grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.2fr_0.8fr]">
+                  <div>
+                    <div className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white/90">Thuê Website</div>
+                    <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">Trang thuê đã được nối lại vào repo theo kiểu sáng sủa, dễ nhìn và vẫn dùng đúng API cũ.</h1>
+                    <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">Bạn vẫn giữ toàn bộ chức năng gốc như đăng nhập, kích hoạt, tạo key, audit log, HMAC và tải file. Phần mới chủ yếu là bố cục gọn hơn, điều hướng rõ hơn, nhìn bớt rối hơn.</p>
+                    <div className="mt-6 flex flex-wrap gap-3">
+                      <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => setTab("create")}>Tạo key ngay</Button>
+                      <Button variant="outline" className="rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white" onClick={() => setTab("api")}>Mở API & tải xuống</Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 self-end">
+                    <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                      <div className="text-sm text-slate-300">Tài khoản</div>
+                      <div className="mt-2 text-lg font-semibold">{account?.username ?? "-"}</div>
+                      <div className="mt-2 text-sm text-slate-300">Activated: {fmtDate(account?.activated_at)}</div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur"><div className="text-sm text-slate-300">Tổng key</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
+                      <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur"><div className="text-sm text-slate-300">Sắp hết hạn</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Đang bật🔓</div><div className="mt-2 text-2xl font-semibold text-slate-900">{dashboardStats.enabled}</div><div className="mt-2 text-sm text-slate-500">Key có thể xác thực</div></div>
+              <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Đang tắt🔒</div><div className="mt-2 text-2xl font-semibold text-slate-900">{dashboardStats.disabled}</div><div className="mt-2 text-sm text-slate-500">Key tạm ngưng</div></div>
+              <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Dùng lần đầu mới chạy⏳</div><div className="mt-2 text-2xl font-semibold text-slate-900">{dashboardStats.firstUse}</div><div className="mt-2 text-sm text-slate-500">Chưa đốt thời gian ngay</div></div>
+              <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Files / Downloads📥</div><div className="mt-2 text-2xl font-semibold text-slate-900">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Tệp hỗ trợ sẵn có</div></div>
+            </div>
+
+            <div className="rounded-[28px] border border-slate-200 bg-white p-3 shadow-sm xl:hidden">
+              <div className="overflow-x-auto">
+                <TabsList className="inline-flex h-auto min-w-max gap-2 rounded-2xl bg-slate-100 p-1">
+                  <TabsTrigger value="status">Trạng thái💾</TabsTrigger>
+                  <TabsTrigger value="dashboard">Dashboard📂</TabsTrigger>
+                  <TabsTrigger value="create">Tạo key🔑</TabsTrigger>
+                  <TabsTrigger value="history">Lịch sử key🔏</TabsTrigger>
+                  <TabsTrigger value="audit">Audit Log📚</TabsTrigger>
+                  <TabsTrigger value="password">Đổi mật khẩu✏️</TabsTrigger>
+                  <TabsTrigger value="account">Thông tin tài khoản💳</TabsTrigger>
+                  <TabsTrigger value="api">API &amp; Tải xuống📥</TabsTrigger>
+                </TabsList>
+              </div>
+            </div>
 
         <TabsContent value="status">
           <Card>
@@ -1101,6 +1172,8 @@ export function RentPortalPage() {
             </CardContent>
           </Card>
         </TabsContent>
+          </div>
+        </div>
       </Tabs>
 
       <Dialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen}>
