@@ -96,14 +96,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
 
-  let body: unknown;
   try {
-    body = await req.json();
-  } catch {
-    return json({ ok: false, msg: "INVALID_JSON" }, 400);
-  }
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ ok: false, msg: "INVALID_JSON" }, 400);
+    }
 
-  const parsed = BodySchema.safeParse(body);
+    const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
     await sleep(500);
     return json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
@@ -168,12 +169,9 @@ Deno.serve(async (req) => {
     }
 
     turnstileVerified = true;
-  } else if (turnstileConfigured && token) {
-    // CHECK có thể verify optional nếu frontend gửi token, nhưng không bắt buộc.
-    turnstileVerified = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
   }
 
-  const shouldRateLimit = !(action === "check" && turnstileVerified);
+  const shouldRateLimit = action === "check" || !turnstileVerified;
 
   if (shouldRateLimit) {
     const limit = action === "check"
@@ -256,4 +254,11 @@ Deno.serve(async (req) => {
     disabled_message: settings.disabled_message ?? null,
     ...(payload ?? { ok: false, msg: "SERVER_ERROR" }),
   });
+  } catch (error) {
+    console.error("[reset-key] unexpected_error", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack ?? null : null,
+    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+  }
 });

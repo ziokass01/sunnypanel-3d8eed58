@@ -7,7 +7,6 @@ import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
 import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
-import { TurnstileWidget } from "@/features/free/TurnstileWidget";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
 import {
@@ -390,10 +389,9 @@ export function FreeClaimPage() {
         const cfg = await fetchFreeConfig({ fingerprint: fp });
         if (cancelled) return;
         setCfg(cfg);
-        const enabled = Boolean(cfg.turnstile_enabled && cfg.turnstile_site_key);
-        setTurnstileEnabled(enabled);
-        setTurnstileSiteKey(cfg.turnstile_site_key ?? null);
-        if (!enabled) setTurnstileToken("");
+        setTurnstileEnabled(false);
+        setTurnstileSiteKey(null);
+        setTurnstileToken("");
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
         if (cancelled) return;
@@ -462,7 +460,6 @@ export function FreeClaimPage() {
         out_token: outToken,
         session_id: sid || undefined,
         fingerprint: fp,
-        cf_turnstile_response: turnstileEnabled ? (turnstileToken || undefined) : undefined,
         debug: debugMode ? 1 : undefined,
       });
 
@@ -604,7 +601,7 @@ export function FreeClaimPage() {
 
             <div className="rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 text-sm text-muted-foreground shadow-sm">
               <div className="font-semibold text-foreground">Lưu ý</div>
-              <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Khi nhận thành công, bấm copy để lưu key ngay.</div>
+              <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Flow FREE không còn yêu cầu Turnstile ở bước nhận key.</div>
             </div>
 
             <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={remainingTodayServer} />
@@ -662,16 +659,7 @@ export function FreeClaimPage() {
 
             {!revealed ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
-                {turnstileEnabled && turnstileSiteKey ? (
-                  <div className="rounded-2xl border p-3">
-                    <TurnstileWidget
-                      key={turnstileNonce}
-                      siteKey={turnstileSiteKey}
-                      onToken={setTurnstileToken}
-                      onError={(m) => setError(m)}
-                    />
-                  </div>
-                ) : null}
+
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl border bg-background p-3">

@@ -219,19 +219,10 @@ if (!free_download_cards.length) {
     return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: kErr.message }, 503);
   }
 
-  const TURNSTILE_SITE_KEY_RAW = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
-  const TURNSTILE_SECRET_KEY_RAW = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
-
-  const isPlaceholderTurnstileKey = (k: string) => {
-    const v = String(k || "").trim().toLowerCase();
-    return v === "" || v === "dummy" || v === "changeme" || v === "test";
-  };
-
-  const turnstile_enabled = Boolean(
-    TURNSTILE_SITE_KEY_RAW &&
-      TURNSTILE_SECRET_KEY_RAW &&
-      !isPlaceholderTurnstileKey(TURNSTILE_SITE_KEY_RAW),
-  );
+  // Public FREE flow no longer requires Turnstile on the client.
+  // This avoids TURNSTILE_REQUIRED / token-expired races in the Get Key flow.
+  const turnstile_enabled = false;
+  const TURNSTILE_SITE_KEY_RAW = "";
 
   const missing: string[] = [];
   if (!free_outbound_url) missing.push("free_outbound_url");
