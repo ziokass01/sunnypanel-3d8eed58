@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { postFunction } from "@/lib/functions";
 import { useToast } from "@/hooks/use-toast";
@@ -100,7 +100,24 @@ function fmtDate(value: string | null | undefined) {
 }
 
 export function normalizeKeyInput(input: string) {
-  return input.trim().toUpperCase();
+  return input
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+function isAuthTokenError(error: unknown) {
+  const msg = getErrorMessage(error as any).toLowerCase();
+  return (
+    msg.includes("invalid token") ||
+    msg.includes("missing token") ||
+    msg.includes("session expired") ||
+    msg.includes("session revoked") ||
+    msg.includes("session not found") ||
+    msg.includes("unauthorized")
+  );
 }
 
 async function copyText(text: string) {
@@ -223,6 +240,7 @@ function calcCountdown(endAtMs: number | null) {
 export function RentPortalPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const authErrorHandledRef = useRef(false);
 
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -302,6 +320,22 @@ export function RentPortalPage() {
 
   const account = meQ.data;
   const isActive = !!account?.expires_at && new Date(account.expires_at).getTime() > Date.now() && !account.is_disabled;
+
+  useEffect(() => {
+    if (!token) {
+      authErrorHandledRef.current = false;
+      return;
+    }
+    if (meQ.error && isAuthTokenError(meQ.error) && !authErrorHandledRef.current) {
+      authErrorHandledRef.current = true;
+      logout();
+      toast({
+        title: "Phiên đăng nhập đã hết hạn",
+        description: "Token phiên không còn hợp lệ. Vui lòng đăng nhập lại rồi kích hoạt tiếp.",
+        variant: "destructive",
+      });
+    }
+  }, [meQ.error, token]);
 
   const keysQ = useQuery({
     queryKey: ["rent", "keys", token],
@@ -402,7 +436,7 @@ export function RentPortalPage() {
     mutationFn: async () => {
       const res = await postFunction<ApiOk<{ expires_at: string; activated_at: string | null }>>(
         "/rent-user",
-        { action: "activate", code: activationKey.trim().toUpperCase() },
+        { action: "activate", code: normalizeKeyInput(activationKey) },
         { authToken: token ?? undefined },
       );
       return res;
@@ -415,6 +449,16 @@ export function RentPortalPage() {
       qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
     },
     onError: (error: any) => {
+      if (isAuthTokenError(error)) {
+        authErrorHandledRef.current = true;
+        logout();
+        toast({
+          title: "Phiên đăng nhập đã hết hạn",
+          description: "Token phiên không còn hợp lệ. Vui lòng đăng nhập lại rồi nhập lại key kích hoạt.",
+          variant: "destructive",
+        });
+        return;
+      }
       toast({ title: "Kích hoạt thất bại", description: getErrorMessage(error), variant: "destructive" });
     },
   });
@@ -663,7 +707,7 @@ export function RentPortalPage() {
   if (!token) {
     return (
       <div className="container max-w-xl py-10">
-        <Card>
+        <Card className="border-amber-200 bg-[#fffdf8] text-slate-900 shadow-sm">
           <CardHeader>
             <CardTitle>Đăng nhập trang thuê</CardTitle>
             <CardDescription>Nhập tài khoản và mật khẩu để vào trang quản lý của bạn.</CardDescription>
@@ -687,7 +731,7 @@ export function RentPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-stone-100 text-slate-900">
       <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)} className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 xl:px-8">
         <div className="grid gap-6 xl:grid-cols-[280px_1fr]">
           <aside className="hidden space-y-4 xl:sticky xl:top-6 xl:block xl:self-start">
@@ -758,37 +802,37 @@ export function RentPortalPage() {
               </CardContent>
             </Card>
 
-            <Card className="overflow-hidden rounded-[30px] border-0 bg-slate-900 text-white shadow-2xl shadow-slate-900/10">
+            <Card className="overflow-hidden rounded-[30px] border border-amber-200 bg-[linear-gradient(135deg,#fffdf7_0%,#fff7e8_52%,#f7fafc_100%)] text-slate-900 shadow-xl shadow-amber-100/40">
               <CardContent className="relative p-0">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.30),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.22),transparent_30%)]" />
+                <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.28),rgba(255,248,235,0.85),rgba(248,250,252,0.92))]" />
                 <div className="relative grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.2fr_0.8fr]">
                   <div>
-                    <div className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white/90">Thuê Website</div>
+                    <div className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-900">Thuê Website</div>
                     <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{isActive ? "Trang thuê đã được dọn lại cho sáng sủa, rõ khối và đỡ rối mắt hơn." : "Tài khoản chưa kích hoạt xong, mình đẩy chỗ kích hoạt lên gần hơn để thao tác gọn tay."}</h1>
-                    <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">{isActive ? "Bạn vẫn giữ toàn bộ chức năng gốc như đăng nhập, kích hoạt, tạo key, audit log, HMAC và tải file. Phần mới chủ yếu là bố cục gọn hơn, điều hướng rõ hơn, nhìn bớt rối hơn." : "Khi chưa kích hoạt, trang sẽ bớt hiển thị các khối số liệu không cần thiết. Bạn chỉ cần vào phần Trạng thái để nhập key kích hoạt rồi dùng tiếp."}</p>
+                    <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">{isActive ? "Bạn vẫn giữ toàn bộ chức năng gốc như đăng nhập, kích hoạt, tạo key, audit log, HMAC và tải file. Phần mới ưu tiên nền sáng dịu hơn, ít tương phản gắt hơn và nhìn đỡ mỏi mắt khi dùng lâu." : "Khi chưa kích hoạt, trang sẽ bớt hiển thị các khối số liệu không cần thiết. Bạn chỉ cần vào phần Trạng thái để nhập key kích hoạt rồi dùng tiếp."}</p>
                     <div className="mt-6 flex flex-wrap gap-3">
                       {isActive ? (
                         <>
                           <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => setTab("create")}>Tạo key ngay</Button>
-                          <Button variant="outline" className="rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white" onClick={() => setTab("api")}>Mở API & tải xuống</Button>
+                          <Button variant="outline" className="rounded-2xl border-slate-300 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-900" onClick={() => setTab("api")}>Mở API & tải xuống</Button>
                         </>
                       ) : (
                         <>
                           <Button className="rounded-2xl bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => setTab("status")}>Mở kích hoạt tài khoản</Button>
-                          <Button variant="outline" className="rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white" onClick={() => setActivationKey("")}>Xóa key nhập thử</Button>
+                          <Button variant="outline" className="rounded-2xl border-slate-300 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-900" onClick={() => setActivationKey("")}>Xóa key nhập thử</Button>
                         </>
                       )}
                     </div>
                   </div>
                   <div className="grid gap-3 self-end">
-                    <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                      <div className="text-sm text-slate-300">Tài khoản</div>
+                    <div className="rounded-3xl border border-white/60 bg-white/80 p-4">
+                      <div className="text-sm text-slate-500">Tài khoản</div>
                       <div className="mt-2 text-lg font-semibold">{account?.username ?? "-"}</div>
-                      <div className="mt-2 text-sm text-slate-300">Activated: {fmtDate(account?.activated_at)}</div>
+                      <div className="mt-2 text-sm text-slate-500">Activated: {fmtDate(account?.activated_at)}</div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur"><div className="text-sm text-slate-300">Tổng key</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
-                      <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur"><div className="text-sm text-slate-300">Sắp hết hạn</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
+                      <div className="rounded-3xl border border-white/60 bg-white/80 p-4"><div className="text-sm text-slate-500">Tổng key</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
+                      <div className="rounded-3xl border border-white/60 bg-white/80 p-4"><div className="text-sm text-slate-500">Sắp hết hạn</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
                     </div>
                   </div>
                 </div>
@@ -803,7 +847,7 @@ export function RentPortalPage() {
                 <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Files / Downloads📥</div><div className="mt-2 text-2xl font-semibold text-slate-900">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Tệp hỗ trợ sẵn có</div></div>
               </div>
             ) : (
-              <Card className="rounded-[26px] border-amber-200 bg-amber-50 shadow-sm">
+              <Card className="rounded-[26px] border-amber-200 bg-[#fffaf0] shadow-sm">
                 <CardContent className="p-5 sm:p-6">
                   <div className="text-sm font-semibold text-amber-900">Chưa kích hoạt xong</div>
                   <div className="mt-2 text-sm leading-6 text-amber-900/80">Trang sẽ ẩn bớt các khối key và số liệu cho đến khi tài khoản được kích hoạt hợp lệ. Nhấn vào tab Trạng thái để nhập key kích hoạt đúng.</div>
@@ -811,7 +855,7 @@ export function RentPortalPage() {
               </Card>
             )}
 
-            <div className="sticky top-3 z-20 rounded-[24px] border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur xl:hidden">
+            <div className="sticky top-3 z-20 rounded-[24px] border border-slate-200 bg-white p-2 shadow-sm xl:hidden">
               <div className="overflow-x-auto">
                 <TabsList className="inline-flex h-auto min-w-max gap-2 rounded-2xl bg-slate-100 p-1">
                   <TabsTrigger className="rounded-2xl data-[state=active]:bg-slate-900 data-[state=active]:text-white" value="status">Trạng thái💾</TabsTrigger>
@@ -828,7 +872,7 @@ export function RentPortalPage() {
 
         <TabsContent value="status" className="mt-0 space-y-4">
           {!isActive ? (
-            <Card className="border-amber-200 bg-amber-50">
+            <Card className="border-amber-200 bg-[#fffaf0] text-slate-900">
               <CardHeader>
                 <CardTitle className="text-amber-900">Kích hoạt tài khoản</CardTitle>
                 <CardDescription className="text-amber-900/80">Nhập key kích hoạt hợp lệ để mở khóa tài khoản thuê. Khi key sai, trang sẽ báo lỗi nhưng sẽ không còn bày các khối số liệu gây rối mắt nữa.</CardDescription>
@@ -836,7 +880,7 @@ export function RentPortalPage() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Activation key</Label>
-                  <Input value={activationKey} onChange={(e) => setActivationKey(e.target.value.toUpperCase())} placeholder="XXXX-XXXX-XXXX-XXXX" />
+                  <Input value={activationKey} onChange={(e) => setActivationKey(normalizeKeyInput(e.target.value))} placeholder="XXXX-XXXX-XXXX-XXXX" />
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Button onClick={() => activateM.mutate()} disabled={activateM.isPending || !activationKey.trim()}>
@@ -848,33 +892,33 @@ export function RentPortalPage() {
             </Card>
           ) : null}
 
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>Trạng thái</CardTitle>
               <CardDescription>Kiểm tra tài khoản thuê đã kích hoạt và còn hạn hay chưa.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border p-4"><div className="text-sm text-muted-foreground">User</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
-              <div className="rounded-2xl border p-4"><div className="text-sm text-muted-foreground">Activated at</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
-              <div className="rounded-2xl border p-4"><div className="text-sm text-muted-foreground">Expires at</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
-              <div className="rounded-2xl border p-4"><div className="text-sm text-muted-foreground">Disabled</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "YES" : "NO"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">User</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Activated at</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Expires at</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Disabled</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "YES" : "NO"}</div></div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="dashboard" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>Dashboard</CardTitle>
               <CardDescription>Xem nhanh tình trạng key🔑 hiện có.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Tổng số key🔑</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Đang bật🔓</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.enabled}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Đang tắt🔒</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.disabled}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Dùng lần đầu mới chạy⏳</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.firstUse}</div></div>
-                <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Sắp hết hạn⌛</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
+                <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Tổng số key🔑</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
+                <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Đang bật🔓</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.enabled}</div></div>
+                <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Đang tắt🔒</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.disabled}</div></div>
+                <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Dùng lần đầu mới chạy⏳</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.firstUse}</div></div>
+                <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Sắp hết hạn⌛</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => setTab("create")}>Tạo key</Button>
@@ -887,7 +931,7 @@ export function RentPortalPage() {
         </TabsContent>
 
         <TabsContent value="create" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>Tạo key</CardTitle>
               <CardDescription>Tạo key🔑 mới để dùng với menu hoặc ứng dụng của bạn.</CardDescription>
@@ -941,7 +985,7 @@ export function RentPortalPage() {
                 <Button variant="secondary" onClick={() => createKeyM.mutate("custom")} disabled={createKeyM.isPending || !customKey.trim()}>Tạo key tự chọn</Button>
               </div>
               {lastCreatedKey ? (
-                <div className="rounded-lg border p-3 text-sm">
+                <div className="rounded-lg border border-slate-200 bg-stone-50 p-3 text-sm">
                   <div className="text-xs text-muted-foreground">Key vừa tạo📖</div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <code className="rounded bg-muted px-2 py-1 break-all">{lastCreatedKey}</code>
@@ -955,7 +999,7 @@ export function RentPortalPage() {
         </TabsContent>
 
         <TabsContent value="history" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>Lịch sử key🗒</CardTitle>
               <CardDescription>Tìm kiếm, xem và chỉnh sửa key của bạn.</CardDescription>
@@ -976,7 +1020,7 @@ export function RentPortalPage() {
                 {keysQ.isLoading ? <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">Đang tải key...</div> : null}
                 {!keysQ.isLoading && filteredKeys.length === 0 ? <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">Chưa có key phù hợp.</div> : null}
                 {filteredKeys.map((key) => (
-                  <div key={key.id} className="rounded-xl border p-4 space-y-3">
+                  <div key={key.id} className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                     <div className="font-mono text-sm break-all">{key.key}</div>
                     <div className="grid gap-2 text-sm">
                       <div><span className="text-muted-foreground">Hết hạn:</span> {keyExpiryLabel(key)}</div>
@@ -1043,7 +1087,7 @@ export function RentPortalPage() {
         </TabsContent>
 
         <TabsContent value="audit" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between gap-2">
               <div>
                 <CardTitle>Audit Log</CardTitle>
@@ -1104,7 +1148,7 @@ export function RentPortalPage() {
         </TabsContent>
 
         <TabsContent value="password" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>Đổi mật khẩu</CardTitle>
               <CardDescription>Nhập code và mật khẩu mới.</CardDescription>
@@ -1126,28 +1170,28 @@ export function RentPortalPage() {
         </TabsContent>
 
         <TabsContent value="account" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>Thông tin tài khoản</CardTitle>
               <CardDescription>Thông tin cơ bản của tài khoản thuê.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Username</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
-              <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Trạng thái tài khoản</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt / hết hạn"}</div></div>
-              <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Ngày tạo</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.created_at)}</div></div>
-              <div className="rounded-lg border p-4"><div className="text-sm text-muted-foreground">Kích hoạt lúc</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
+              <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Username</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
+              <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Trạng thái tài khoản</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt / hết hạn"}</div></div>
+              <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Ngày tạo</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.created_at)}</div></div>
+              <div className="rounded-lg border border-slate-200 bg-stone-50 p-4"><div className="text-sm text-muted-foreground">Kích hoạt lúc</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="api" className="mt-0">
-          <Card>
+          <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
             <CardHeader>
               <CardTitle>API &amp; Tải xuống</CardTitle>
               <CardDescription>Thông tin xác thực, JSON mẫu và các tệp hỗ trợ.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="rounded-xl border p-4 space-y-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="font-medium">HMAC</div>
@@ -1177,7 +1221,7 @@ export function RentPortalPage() {
                 ) : null}
               </div>
 
-              <div className="rounded-xl border p-4 space-y-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                 <div className="font-medium">API verify</div>
                 <code className="block rounded-lg bg-muted p-3 text-xs break-all">POST {import.meta.env.VITE_SUPABASE_URL}/functions/v1/rent-verify-key</code>
                 <div className="text-sm text-muted-foreground">JSON mẫu chỉ dùng <code>sig_user</code>. Master secret đã nằm trong server.</div>
@@ -1232,7 +1276,7 @@ export function RentPortalPage() {
           </DialogHeader>
           {selectedKey ? (
             <div className="space-y-5">
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border border-slate-200 bg-stone-50 p-4">
                 <div className="font-mono text-sm break-all">{selectedKey.key}</div>
                 <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
                   <div>Ngày tạo: {fmtDate(selectedKey.created_at)}</div>
@@ -1293,7 +1337,7 @@ export function RentPortalPage() {
               <Separator />
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <Card>
+                <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base">Thiết bị đã dùng</CardTitle>
                   </CardHeader>
@@ -1309,7 +1353,7 @@ export function RentPortalPage() {
                     ))}
                   </CardContent>
                 </Card>
-                <Card>
+                <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base">Audit log của key</CardTitle>
                   </CardHeader>
