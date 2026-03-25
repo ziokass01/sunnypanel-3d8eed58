@@ -8,7 +8,11 @@ alter table public.license_reset_settings
 alter table public.licenses
   add column if not exists public_reset_disabled boolean not null default false;
 
-create or replace function public.get_public_key_info(p_key text)
+-- PostgreSQL không cho CREATE OR REPLACE nếu RETURNS TABLE thay đổi cấu trúc.
+-- Vì function này đã thêm các cột mới trong bảng trả về, cần drop rồi create lại.
+drop function if exists public.get_public_key_info(text);
+
+create function public.get_public_key_info(p_key text)
 returns table(
   key text,
   key_kind text,
@@ -90,13 +94,15 @@ as $$
           case
             when coalesce(l.public_reset_count, 0) = 0 then coalesce(s.free_first_penalty_pct, 50)
             when coalesce(l.public_reset_count, 0) = 1 then coalesce(s.free_next_penalty_pct, 50)
-            else coalesce(s.free_next_penalty_pct, 50) + greatest(0, coalesce(l.public_reset_count, 0) - 1) * coalesce(s.free_next_step_penalty_pct, 0)
+            else coalesce(s.free_next_penalty_pct, 50)
+              + greatest(0, coalesce(l.public_reset_count, 0) - 1) * coalesce(s.free_next_step_penalty_pct, 0)
           end
         else
           case
             when coalesce(l.public_reset_count, 0) = 0 then coalesce(s.paid_first_penalty_pct, 0)
             when coalesce(l.public_reset_count, 0) = 1 then coalesce(s.paid_next_penalty_pct, 20)
-            else coalesce(s.paid_next_penalty_pct, 20) + greatest(0, coalesce(l.public_reset_count, 0) - 1) * coalesce(s.paid_next_step_penalty_pct, 0)
+            else coalesce(s.paid_next_penalty_pct, 20)
+              + greatest(0, coalesce(l.public_reset_count, 0) - 1) * coalesce(s.paid_next_step_penalty_pct, 0)
           end
       end as raw_next_penalty_pct
     from l cross join s
@@ -117,16 +123,21 @@ as $$
     meta.public_reset_count,
     meta.public_reset_disabled,
     case
-      when meta.public_reset_cancel_after_count > 0 and (meta.public_reset_count + 1) >= meta.public_reset_cancel_after_count then null
+      when meta.public_reset_cancel_after_count > 0
+        and (meta.public_reset_count + 1) >= meta.public_reset_cancel_after_count then null
       else greatest(0, least(100, coalesce(meta.raw_next_penalty_pct, 0)))::integer
     end as next_reset_penalty_pct,
     case
-      when meta.public_reset_cancel_after_count > 0 and (meta.public_reset_count + 1) >= meta.public_reset_cancel_after_count then true
+      when meta.public_reset_cancel_after_count > 0
+        and (meta.public_reset_count + 1) >= meta.public_reset_cancel_after_count then true
       else false
     end as next_reset_will_expire,
     meta.public_reset_cancel_after_count
   from meta;
 $$;
+
+revoke all on function public.get_public_key_info(text) from public;
+grant execute on function public.get_public_key_info(text) to anon, authenticated, service_role;
 
 create or replace function public.public_reset_key(p_key text)
 returns jsonb
@@ -350,8 +361,22 @@ begin
     'public_reset_disabled', coalesce(v_license.public_reset_disabled, false),
     'next_reset_penalty_pct', case
       when coalesce(v_settings.public_reset_cancel_after_count, 0) > 0 and (v_next_public_reset_count + 1) >= coalesce(v_settings.public_reset_cancel_after_count, 0) then null
-      when v_is_free then greatest(0, least(100, case when v_next_public_reset_count = 1 then coalesce(v_settings.free_next_penalty_pct, 50) when v_next_public_reset_count = 0 then coalesce(v_settings.free_first_penalty_pct, 50) else coalesce(v_settings.free_next_penalty_pct, 50) + greatest(0, v_next_public_reset_count - 1) * coalesce(v_settings.free_next_step_penalty_pct, 0) end))
-      else greatest(0, least(100, case when v_next_public_reset_count = 1 then coalesce(v_settings.paid_next_penalty_pct, 20) when v_next_public_reset_count = 0 then coalesce(v_settings.paid_first_penalty_pct, 0) else coalesce(v_settings.paid_next_penalty_pct, 20) + greatest(0, v_next_public_reset_count - 1) * coalesce(v_settings.paid_next_step_penalty_pct, 0) end))
+      when v_is_free then greatest(0, least(100,
+        case
+          when v_next_public_reset_count = 1 then coalesce(v_settings.free_next_penalty_pct, 50)
+          when v_next_public_reset_count = 0 then coalesce(v_settings.free_first_penalty_pct, 50)
+          else coalesce(v_settings.free_next_penalty_pct, 50)
+            + greatest(0, v_next_public_reset_count - 1) * coalesce(v_settings.free_next_step_penalty_pct, 0)
+        end
+      ))
+      else greatest(0, least(100,
+        case
+          when v_next_public_reset_count = 1 then coalesce(v_settings.paid_next_penalty_pct, 20)
+          when v_next_public_reset_count = 0 then coalesce(v_settings.paid_first_penalty_pct, 0)
+          else coalesce(v_settings.paid_next_penalty_pct, 20)
+            + greatest(0, v_next_public_reset_count - 1) * coalesce(v_settings.paid_next_step_penalty_pct, 0)
+        end
+      ))
     end,
     'next_reset_will_expire', case
       when coalesce(v_settings.public_reset_cancel_after_count, 0) > 0 and (v_next_public_reset_count + 1) >= coalesce(v_settings.public_reset_cancel_after_count, 0) then true
