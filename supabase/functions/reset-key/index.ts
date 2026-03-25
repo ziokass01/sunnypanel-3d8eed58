@@ -254,6 +254,16 @@ Deno.serve(async (req) => {
       }, 200);
     }
 
+    if (msg === "KEY_RESET_DISABLED") {
+      await sleep(500);
+      return json({
+        ok: false,
+        msg: "KEY_RESET_DISABLED",
+        reset_enabled: Boolean(settings.enabled),
+        disabled_message: settings.disabled_message ?? null,
+      }, 200);
+    }
+
     await sleep(450);
     return json({
       reset_enabled: Boolean(settings.enabled),

@@ -76,6 +76,9 @@ export function ResetSettingsPage() {
           free_next_penalty_pct: settings.free_next_penalty_pct,
           paid_first_penalty_pct: settings.paid_first_penalty_pct,
           paid_next_penalty_pct: settings.paid_next_penalty_pct,
+          free_next_step_penalty_pct: settings.free_next_step_penalty_pct,
+          paid_next_step_penalty_pct: settings.paid_next_step_penalty_pct,
+          public_reset_cancel_after_count: settings.public_reset_cancel_after_count,
           public_check_limit: settings.public_check_limit,
           public_check_window_seconds: settings.public_check_window_seconds,
           public_reset_limit: settings.public_reset_limit,
@@ -102,6 +105,9 @@ export function ResetSettingsPage() {
         free_next_penalty_pct: Number(currentForm.free_next_penalty_pct),
         paid_first_penalty_pct: Number(currentForm.paid_first_penalty_pct),
         paid_next_penalty_pct: Number(currentForm.paid_next_penalty_pct),
+        free_next_step_penalty_pct: Number(currentForm.free_next_step_penalty_pct),
+        paid_next_step_penalty_pct: Number(currentForm.paid_next_step_penalty_pct),
+        public_reset_cancel_after_count: Number(currentForm.public_reset_cancel_after_count),
         public_check_limit: Number(currentForm.public_check_limit),
         public_check_window_seconds: Number(currentForm.public_check_window_seconds),
         public_reset_limit: Number(currentForm.public_reset_limit),
@@ -256,30 +262,40 @@ export function ResetSettingsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border p-4 space-y-3">
                 <div className="font-medium">Penalty cho key free</div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Free lần 1 (%)</Label>
                     <Input type="number" min={0} max={100} value={currentForm?.free_first_penalty_pct ?? 50} onChange={(e) => updateField("free_first_penalty_pct", e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Free lần sau (%)</Label>
+                    <Label>Free lần 2 (%)</Label>
                     <Input type="number" min={0} max={100} value={currentForm?.free_next_penalty_pct ?? 50} onChange={(e) => updateField("free_next_penalty_pct", e.target.value)} />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Cộng thêm từ lần 3 (%)</Label>
+                    <Input type="number" min={0} max={100} value={currentForm?.free_next_step_penalty_pct ?? 0} onChange={(e) => updateField("free_next_step_penalty_pct", e.target.value)} />
+                  </div>
                 </div>
+                <div className="text-xs text-muted-foreground">Ví dụ: lần 2 = 80%, bước cộng thêm = 5% thì lần 3 = 85%, lần 4 = 90%... tối đa 100%.</div>
               </div>
 
               <div className="rounded-xl border p-4 space-y-3">
                 <div className="font-medium">Penalty cho key mua</div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Paid lần 1 (%)</Label>
                     <Input type="number" min={0} max={100} value={currentForm?.paid_first_penalty_pct ?? 0} onChange={(e) => updateField("paid_first_penalty_pct", e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Paid lần sau (%)</Label>
+                    <Label>Paid lần 2 (%)</Label>
                     <Input type="number" min={0} max={100} value={currentForm?.paid_next_penalty_pct ?? 20} onChange={(e) => updateField("paid_next_penalty_pct", e.target.value)} />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Cộng thêm từ lần 3 (%)</Label>
+                    <Input type="number" min={0} max={100} value={currentForm?.paid_next_step_penalty_pct ?? 0} onChange={(e) => updateField("paid_next_step_penalty_pct", e.target.value)} />
+                  </div>
                 </div>
+                <div className="text-xs text-muted-foreground">Ví dụ: lần 2 = 20%, bước cộng thêm = 10% thì lần 3 = 30%, lần 4 = 40%... tối đa 100%.</div>
               </div>
             </div>
 
@@ -323,9 +339,15 @@ export function ResetSettingsPage() {
               </div>
 
               <div className="rounded-xl border p-4 space-y-2">
-                <Label>Thông báo khi reset bị tắt</Label>
-                <Textarea rows={4} value={currentForm?.disabled_message ?? ""} onChange={(e) => updateField("disabled_message", e.target.value)} />
+                <Label>Hủy key sau quá N lần reset</Label>
+                <Input type="number" min={0} value={currentForm?.public_reset_cancel_after_count ?? 0} onChange={(e) => updateField("public_reset_cancel_after_count", e.target.value)} />
+                <div className="text-xs text-muted-foreground">Đặt 0 để tắt. Ví dụ nhập 3 thì đến lần reset thứ 3, key sẽ bị hủy về trạng thái hết hạn thay vì tiếp tục trừ %.</div>
               </div>
+            </div>
+
+            <div className="rounded-xl border p-4 space-y-2">
+              <Label>Thông báo khi reset bị tắt</Label>
+              <Textarea rows={4} value={currentForm?.disabled_message ?? ""} onChange={(e) => updateField("disabled_message", e.target.value)} />
             </div>
           </CardContent>
         </Card>
@@ -345,9 +367,12 @@ export function ResetSettingsPage() {
               <Badge variant={currentForm?.require_turnstile ? "default" : "secondary"}>{currentForm?.require_turnstile ? "ON" : "OFF"}</Badge>
             </div>
             <div className="rounded-xl border p-3">Free lần 1: <b>{currentForm?.free_first_penalty_pct ?? 50}%</b></div>
-            <div className="rounded-xl border p-3">Free lần sau: <b>{currentForm?.free_next_penalty_pct ?? 50}%</b></div>
+            <div className="rounded-xl border p-3">Free lần 2: <b>{currentForm?.free_next_penalty_pct ?? 50}%</b></div>
+            <div className="rounded-xl border p-3">Free từ lần 3 cộng thêm: <b>{currentForm?.free_next_step_penalty_pct ?? 0}%</b></div>
             <div className="rounded-xl border p-3">Paid lần 1: <b>{currentForm?.paid_first_penalty_pct ?? 0}%</b></div>
-            <div className="rounded-xl border p-3">Paid lần sau: <b>{currentForm?.paid_next_penalty_pct ?? 20}%</b></div>
+            <div className="rounded-xl border p-3">Paid lần 2: <b>{currentForm?.paid_next_penalty_pct ?? 20}%</b></div>
+            <div className="rounded-xl border p-3">Paid từ lần 3 cộng thêm: <b>{currentForm?.paid_next_step_penalty_pct ?? 0}%</b></div>
+            <div className="rounded-xl border p-3">Hủy key sau quá: <b>{Number(currentForm?.public_reset_cancel_after_count ?? 0) > 0 ? `${currentForm?.public_reset_cancel_after_count} lần` : 'Tắt'}</b></div>
             <div className="rounded-xl border p-3">User sale tối đa: <b>{secondsToText(Number(currentForm?.user_max_duration_seconds ?? 2592000))}</b></div>
           </CardContent>
         </Card>

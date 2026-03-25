@@ -22,6 +22,7 @@ export type LicenseRow = {
   activated_at?: string | null;
   max_devices: number;
   is_active: boolean;
+  public_reset_disabled?: boolean;
   note: string | null;
   deleted_at?: string | null;
 };
@@ -63,7 +64,7 @@ export async function fetchLicenses(params: {
       "id,key,created_at,expires_at," +
         "start_on_first_use,duration_days,first_used_at," +
         "starts_on_first_use,duration_seconds,activated_at," +
-        "max_devices,is_active,note,deleted_at",
+        "max_devices,is_active,public_reset_disabled,note,deleted_at",
     )
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
@@ -100,7 +101,7 @@ export async function fetchLicense(id: string) {
       "id,key,created_at,expires_at," +
         "start_on_first_use,duration_days,first_used_at," +
         "starts_on_first_use,duration_seconds,activated_at," +
-        "max_devices,is_active,note,deleted_at",
+        "max_devices,is_active,public_reset_disabled,note,deleted_at",
     )
     .eq("id", id)
     .is("deleted_at", null)
@@ -122,6 +123,7 @@ export async function createLicense(input: {
   activated_at?: string | null;
   max_devices: number;
   is_active: boolean;
+  public_reset_disabled?: boolean;
   note: string | null;
 }) {
   const { data, error } = await (supabase.from(licensesTable) as any)
@@ -138,6 +140,7 @@ export async function createLicense(input: {
       activated_at: input.activated_at ?? input.first_used_at ?? null,
       max_devices: input.max_devices,
       is_active: input.is_active,
+      public_reset_disabled: input.public_reset_disabled ?? false,
       note: input.note,
     })
     .select("id")
@@ -153,6 +156,7 @@ export async function createLicense(input: {
     activated_at: input.activated_at ?? input.first_used_at ?? null,
     max_devices: input.max_devices,
     is_active: input.is_active,
+    public_reset_disabled: input.public_reset_disabled ?? false,
     note: input.note,
   });
   return data as { id: string };

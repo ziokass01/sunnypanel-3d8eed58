@@ -172,6 +172,7 @@ export type Database = {
           id: string
           is_active: boolean
           key: string
+          public_reset_disabled: boolean
           max_devices: number
           note: string | null
           start_on_first_use: boolean
@@ -188,6 +189,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           key: string
+          public_reset_disabled?: boolean
           max_devices?: number
           note?: string | null
           start_on_first_use?: boolean
@@ -204,6 +206,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           key?: string
+          public_reset_disabled?: boolean
           max_devices?: number
           note?: string | null
           start_on_first_use?: boolean

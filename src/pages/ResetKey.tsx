@@ -37,6 +37,10 @@ type ResetKeyPayload = {
   devices_removed?: number;
   reset_enabled?: boolean;
   disabled_message?: string | null;
+  public_reset_disabled?: boolean;
+  next_reset_penalty_pct?: number | null;
+  next_reset_will_expire?: boolean;
+  public_reset_cancel_after_count?: number | null;
   code?: string;
 };
 
@@ -106,6 +110,7 @@ function describeResultMessage(result: ResetKeyPayload | null) {
   if (msg === "TURNSTILE_FAILED") return "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng xác minh lại rồi thử tiếp.";
   if (msg === "RATE_LIMIT") return "Bạn thao tác quá nhanh trên cùng IP hoặc cùng key. Vui lòng chờ một lúc rồi thử lại.";
   if (msg === "KEY_UNAVAILABLE") return "Key không tồn tại, đã bị xóa, bị chặn hoặc đã hết hạn.";
+  if (msg === "KEY_RESET_DISABLED") return "Key này đã bị admin khóa reset, không thể reset từ trang public.";
   return msg;
 }
 
@@ -166,6 +171,20 @@ export function ResetKeyPage() {
     if (!result.key || !result.key_kind || !result.status) return false;
     return /^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(result.key);
   }, [result]);
+
+  const licenseResetLocked = Boolean(
+    result?.ok
+      && result?.key
+      && String(result.key).trim().toUpperCase() === normalizedKey
+      && result.public_reset_disabled,
+  );
+
+  const nextResetHardExpire = Boolean(
+    result?.ok
+      && result?.key
+      && String(result.key).trim().toUpperCase() === normalizedKey
+      && result.next_reset_will_expire,
+  );
 
   const toUiError = useCallback((e: any): ResetKeyPayload => {
     const msg = String(e?.message ?? "Có lỗi xảy ra");
@@ -248,7 +267,7 @@ export function ResetKeyPage() {
             </Button>
 
             <Button
-              disabled={!normalizedKey || loadingAction !== null}
+              disabled={!normalizedKey || loadingAction !== null || licenseResetLocked}
               onClick={() => setConfirmOpen(true)}
             >
               {loadingAction === "reset" ? "Đang reset..." : "Reset key"}
@@ -258,6 +277,18 @@ export function ResetKeyPage() {
           {result?.reset_enabled === false ? (
             <div className="rounded-xl border p-3 text-sm text-muted-foreground">
               {result.disabled_message || "Tính năng reset đang tạm đóng."}
+            </div>
+          ) : null}
+
+          {licenseResetLocked ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              Key này đang bị admin khóa reset. Bạn vẫn có thể Check key, nhưng không thể Reset key từ trang public.
+            </div>
+          ) : null}
+
+          {nextResetHardExpire ? (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+              Cảnh báo: nếu reset lần này, key sẽ bị hủy về trạng thái hết hạn theo luật giới hạn số lần reset hiện tại.
             </div>
           ) : null}
 
@@ -297,7 +328,9 @@ export function ResetKeyPage() {
                 <Badge className="rounded-full">Đã áp dụng</Badge>
               </div>
               <div className="text-sm text-muted-foreground">
-                Hệ thống đã cập nhật key này theo chính sách hiện tại. Kiểm tra chi tiết bên dưới để xem thời gian còn lại và số thiết bị sau khi reset.
+                {result.status === "expired" && result.public_reset_cancel_after_count && result.public_reset_cancel_after_count > 0
+                  ? `Key này đã bị hủy về trạng thái hết hạn vì đã chạm mốc ${result.public_reset_cancel_after_count} lần reset.`
+                  : "Hệ thống đã cập nhật key này theo chính sách hiện tại. Kiểm tra chi tiết bên dưới để xem thời gian còn lại và số thiết bị sau khi reset."}
               </div>
             </div>
           </CardContent>
@@ -360,6 +393,22 @@ export function ResetKeyPage() {
                 <div className="text-xs text-muted-foreground">Admin reset</div>
                 <div className="mt-1 text-sm">{result.admin_reset_count ?? 0}</div>
               </div>
+
+              <div className="rounded-xl border p-3">
+                <div className="text-xs text-muted-foreground">Reset public</div>
+                <div className="mt-1 text-sm">{result.public_reset_disabled ? "Đã khóa bởi admin" : "Được phép"}</div>
+              </div>
+
+              <div className="rounded-xl border p-3">
+                <div className="text-xs text-muted-foreground">Lần reset kế tiếp</div>
+                <div className="mt-1 text-sm">
+                  {result.next_reset_will_expire
+                    ? "Sẽ hủy key"
+                    : typeof result.next_reset_penalty_pct === "number"
+                      ? `Trừ ${result.next_reset_penalty_pct}%`
+                      : "Theo luật hiện tại"}
+                </div>
+              </div>
             </div>
 
             {typeof result.penalty_pct === "number" && result.penalty_pct > 0 ? (
@@ -395,14 +444,18 @@ export function ResetKeyPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Xác nhận reset key?</AlertDialogTitle>
             <AlertDialogDescription>
-              Hệ thống sẽ xóa toàn bộ thiết bị của key này. Nếu là key free hoặc key đã reset nhiều lần, thời gian còn lại có thể bị trừ theo chính sách hiện tại.
+              {licenseResetLocked
+                ? "Key này đang bị admin khóa reset, không thể reset từ trang public."
+                : nextResetHardExpire
+                  ? `Cảnh báo: nếu reset lần này, key sẽ bị hủy về trạng thái hết hạn${Number(result?.public_reset_cancel_after_count ?? 0) > 0 ? ` vì đã chạm mốc ${result?.public_reset_cancel_after_count} lần reset` : ""}.`
+                  : "Hệ thống sẽ xóa toàn bộ thiết bị của key này. Nếu là key free hoặc key đã reset nhiều lần, thời gian còn lại có thể bị trừ theo chính sách hiện tại."}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={loadingAction === "reset"}>Hủy</AlertDialogCancel>
             <AlertDialogAction
-              disabled={loadingAction === "reset" || !normalizedKey}
+              disabled={loadingAction === "reset" || !normalizedKey || licenseResetLocked}
               onClick={() => {
                 setConfirmOpen(false);
                 void runAction("reset");

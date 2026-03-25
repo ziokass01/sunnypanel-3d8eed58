@@ -9,6 +9,9 @@ export type ResetSettingsRow = {
   free_next_penalty_pct: number;
   paid_first_penalty_pct: number;
   paid_next_penalty_pct: number;
+  free_next_step_penalty_pct: number;
+  paid_next_step_penalty_pct: number;
+  public_reset_cancel_after_count: number;
   public_check_limit: number;
   public_check_window_seconds: number;
   public_reset_limit: number;

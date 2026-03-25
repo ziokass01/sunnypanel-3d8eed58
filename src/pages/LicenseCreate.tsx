@@ -31,6 +31,7 @@ const schema = z
     duration_unit: z.enum(["minutes", "hours", "days"]).default("hours"),
     max_devices: z.coerce.number().int().min(1),
     is_active: z.boolean(),
+    public_reset_disabled: z.boolean().default(false),
     note: z.string().trim().max(2000).optional(),
   })
   .superRefine((v, ctx) => {
@@ -96,6 +97,7 @@ export function LicenseCreatePage() {
       duration_unit: "hours",
       max_devices: 1,
       is_active: true,
+      public_reset_disabled: false,
       note: "",
     },
   });
@@ -156,6 +158,7 @@ export function LicenseCreatePage() {
         activated_at: null,
         max_devices: values.max_devices,
         is_active: values.is_active,
+        public_reset_disabled: values.public_reset_disabled,
         note: values.note?.trim() ? values.note.trim() : null,
       });
     },
@@ -277,6 +280,16 @@ export function LicenseCreatePage() {
           </div>
           <Switch checked={form.watch("is_active")} onCheckedChange={(v) => form.setValue("is_active", v)} />
         </div>
+
+        {isAdmin ? (
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-medium">Cấm reset key public</div>
+              <div className="text-xs text-muted-foreground">Bật lên để key này không thể bị reset từ trang Reset Key public.</div>
+            </div>
+            <Switch checked={form.watch("public_reset_disabled")} onCheckedChange={(v) => form.setValue("public_reset_disabled", v)} />
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="note">Note (optional)</Label>
