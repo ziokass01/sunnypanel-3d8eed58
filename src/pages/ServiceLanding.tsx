@@ -36,7 +36,7 @@ export function ServiceLandingPage() {
           <Card>
             <CardHeader>
               <CardTitle>Key Free</CardTitle>
-              <CardDescription> Vào khu lấy Key 🔑 Free, nhận Key 🔑 và tải MENU 🕹 hỗ trợ đi kèm..</CardDescription>
+              <CardDescription>Vào khu lấy Key 🔑 Free, nhận Key 🔑 và tải MENU 🕹 hỗ trợ đi kèm.</CardDescription>
             </CardHeader>
             <CardContent>
               <Button className="w-full" variant="soft" onClick={() => nav("/free")}>Vào Key Free</Button>
