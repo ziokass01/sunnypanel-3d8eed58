@@ -2,98 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    /* SUNNY Key Panel — Tech Futurist (warm sun accent on deep navy) */
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
+    --background: 38 45% 96%;
+    --foreground: 228 57% 11%;
 
-    --card: 222 42% 9%;
-    --card-foreground: 210 40% 98%;
+    --card: 0 0% 100%;
+    --card-foreground: 228 57% 11%;
 
-    --popover: 222 42% 9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 228 57% 11%;
 
-    --primary: 38 92% 58%;
-    --primary-foreground: 222 47% 7%;
+    --primary: 44 96% 56%;
+    --primary-foreground: 228 57% 11%;
+    --primary-glow: 47 98% 72%;
 
-    --primary-glow: 44 95% 72%;
+    --secondary: 220 27% 94%;
+    --secondary-foreground: 226 32% 26%;
 
-    --secondary: 222 30% 14%;
-    --secondary-foreground: 210 40% 98%;
+    --muted: 36 28% 92%;
+    --muted-foreground: 222 16% 46%;
 
-    --muted: 222 24% 14%;
-    --muted-foreground: 215 18% 72%;
+    --accent: 220 30% 95%;
+    --accent-foreground: 228 35% 22%;
 
-    --accent: 222 24% 16%;
-    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
-    --destructive: 0 84% 58%;
-    --destructive-foreground: 210 40% 98%;
+    --border: 220 20% 84%;
+    --input: 220 18% 81%;
+    --ring: 44 96% 56%;
 
-    --border: 222 18% 22%;
-    --input: 222 18% 22%;
-    --ring: 44 95% 72%;
+    --radius: 1.5rem;
 
-    --radius: 0.5rem;
+    --gradient-sun:
+      radial-gradient(52rem 26rem at 50% -4%, hsl(var(--primary) / 0.18), transparent 48%),
+      radial-gradient(40rem 18rem at 50% 0%, hsl(var(--primary-glow) / 0.14), transparent 55%),
+      linear-gradient(180deg, hsl(42 76% 96%) 0%, hsl(var(--background)) 22%, hsl(var(--background)) 100%);
+    --shadow-elev: 0 22px 60px -28px hsl(226 40% 15% / 0.26);
 
-    /* Signature surfaces */
-    --gradient-sun: radial-gradient(800px circle at var(--mx, 50%) var(--my, 40%), hsl(var(--primary) / 0.22), transparent 55%),
-      radial-gradient(620px circle at calc(var(--mx, 50%) + 12%) calc(var(--my, 40%) + 10%), hsl(var(--primary-glow) / 0.12), transparent 58%);
-    --shadow-elev: 0 18px 60px -24px hsl(var(--primary) / 0.45);
-
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 228 42% 16%;
+    --sidebar-primary: 44 96% 56%;
+    --sidebar-primary-foreground: 228 57% 11%;
+    --sidebar-accent: 36 45% 95%;
+    --sidebar-accent-foreground: 228 42% 16%;
+    --sidebar-border: 220 20% 86%;
+    --sidebar-ring: 44 96% 56%;
   }
 
-  /* Keep .dark mapped to same palette for parity (no theme switch UI needed) */
   .dark {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
-
-    --card: 222 42% 9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222 42% 9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 38 92% 58%;
-    --primary-foreground: 222 47% 7%;
-
-    --primary-glow: 44 95% 72%;
-
-    --secondary: 222 30% 14%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 222 24% 14%;
-    --muted-foreground: 215 18% 72%;
-
-    --accent: 222 24% 16%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 84% 58%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 222 18% 22%;
-    --input: 222 18% 22%;
-    --ring: 44 95% 72%;
+    --background: 38 45% 96%;
+    --foreground: 228 57% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 228 57% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 228 57% 11%;
+    --primary: 44 96% 56%;
+    --primary-foreground: 228 57% 11%;
+    --primary-glow: 47 98% 72%;
+    --secondary: 220 27% 94%;
+    --secondary-foreground: 226 32% 26%;
+    --muted: 36 28% 92%;
+    --muted-foreground: 222 16% 46%;
+    --accent: 220 30% 95%;
+    --accent-foreground: 228 35% 22%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 20% 84%;
+    --input: 220 18% 81%;
+    --ring: 44 96% 56%;
   }
 }
 
@@ -102,21 +80,65 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html {
+    color-scheme: light;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    min-height: 100svh;
+    background-image: var(--gradient-sun);
+    background-attachment: fixed;
+    overflow-x: hidden;
+  }
+
+  #root {
+    min-height: 100svh;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+    color: hsl(var(--foreground));
+  }
+
+  input,
+  textarea,
+  select {
+    color: hsl(var(--foreground));
+    -webkit-text-fill-color: hsl(var(--foreground));
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: hsl(var(--muted-foreground));
+    -webkit-text-fill-color: hsl(var(--muted-foreground));
   }
 }
 
-@layer base {
-  /* Subtle background texture + pointer-driven “sun field” (signature moment) */
-  body {
-    background-image: var(--gradient-sun);
-    background-attachment: fixed;
+@layer utilities {
+  .panel-shell {
+    @apply rounded-[2rem] border border-white/70 bg-white/90 shadow-[0_24px_80px_-42px_rgba(15,23,42,0.28)] backdrop-blur-sm;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    body {
-      background-image: none;
-    }
+  .panel-shell-dark {
+    @apply rounded-[2rem] border border-slate-900/10 bg-slate-950 text-white shadow-[0_24px_80px_-42px_rgba(2,6,23,0.55)];
+  }
+
+  .page-wrap {
+    @apply mx-auto w-full max-w-7xl px-4 pb-8 pt-5 sm:px-6 lg:px-8;
+  }
+
+  .section-title {
+    @apply text-3xl font-semibold tracking-tight text-slate-950;
+  }
+
+  .section-subtitle {
+    @apply mt-2 max-w-3xl text-sm leading-7 text-slate-500;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    background-image: linear-gradient(180deg, hsl(42 76% 96%) 0%, hsl(var(--background)) 24%, hsl(var(--background)) 100%);
   }
 }

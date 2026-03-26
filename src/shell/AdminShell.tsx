@@ -1,4 +1,4 @@
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LogOut,
   KeyRound,
@@ -11,6 +11,7 @@ import {
   Building2,
   SlidersHorizontal,
   History,
+  ChevronRight,
 } from "lucide-react";
 
 import {
@@ -31,11 +32,23 @@ import { useAuth } from "@/auth/AuthProvider";
 import { usePanelRole } from "@/hooks/use-panel-role";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+function BrandMark() {
+  return (
+    <img
+      src="/android-chrome-512x512.png"
+      alt="SUNNY"
+      className="h-12 w-12 rounded-[1.1rem] object-cover shadow-[0_14px_26px_-18px_rgba(15,23,42,0.35)]"
+    />
+  );
+}
 
 export function AdminShell() {
   const { signOut } = useAuth();
   const { role, isAdmin, isUserLike } = usePanelRole();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const roleLabel =
     role === "admin"
@@ -46,8 +59,7 @@ export function AdminShell() {
           ? "User"
           : "Panel";
 
-  const roleVariant =
-    role === "admin" ? "default" : role === "moderator" ? "secondary" : "outline";
+  const roleVariant = role === "admin" ? "outline" : role === "moderator" ? "secondary" : "outline";
 
   const showLockedToast = (section: string) => {
     toast({
@@ -56,180 +68,101 @@ export function AdminShell() {
     });
   };
 
+  const items = [
+    { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, show: true },
+    { label: "Licenses", to: "/licenses", icon: KeyRound, show: true },
+    { label: "Licenses 2", to: "/licenses2", icon: KeySquare, show: true },
+    { label: "Trash", to: "/licenses/trash", icon: Trash2, show: isUserLike },
+    { label: "Audit logs", to: "/audit", icon: ScrollText, show: isUserLike },
+    { label: "Free Licenses", to: "/free-licenses", icon: Ticket, show: true, adminOnly: true },
+    { label: "Free keys", to: "/admin/free-keys", icon: Gift, show: true, adminOnly: true },
+    { label: "Thuê Website", to: "/rent", icon: Building2, show: true, adminOnly: true },
+    { label: "Reset Settings", to: "/settings/reset-key", icon: SlidersHorizontal, show: true, adminOnly: true },
+    { label: "Reset Logs", to: "/settings/reset-logs", icon: History, show: true, adminOnly: true },
+  ] as const;
+
+  const activeLabel = items.find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))?.label ?? "Admin Console";
+
   return (
     <SidebarProvider>
       <Sidebar variant="inset" collapsible="icon">
         <SidebarHeader>
-          <div className="flex items-center justify-between gap-2 px-2 py-1">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">SUNNY Key Panel</div>
-              <div className="mt-1"><Badge variant={roleVariant as any}>{roleLabel}</Badge></div>
+          <div className="panel-shell flex items-center gap-3 px-4 py-4">
+            <BrandMark />
+            <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+              <div className="truncate text-base font-semibold text-slate-950">SUNNY Key Panel</div>
+              <div className="mt-1 flex items-center gap-2">
+                <Badge variant={roleVariant as any}>{roleLabel}</Badge>
+                <span className="truncate text-xs text-slate-500">Bản giao diện đồng bộ với trang thuê</span>
+              </div>
             </div>
-            <SidebarTrigger />
+            <SidebarTrigger className="bg-white text-slate-600 shadow-sm hover:bg-slate-100" />
           </div>
         </SidebarHeader>
 
         <SidebarContent>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Dashboard">
-                <NavLink to="/dashboard" activeClassName="data-[active=true]">
-                  <LayoutDashboard />
-                  <span>Dashboard</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {items.filter((item) => item.show).map((item) => {
+              const Icon = item.icon;
+              const isLocked = Boolean(item.adminOnly && !isAdmin);
+              const isActive = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
 
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Licenses">
-                <NavLink to="/licenses" activeClassName="data-[active=true]">
-                  <KeyRound />
-                  <span>Licenses</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Licenses 2">
-                <NavLink to="/licenses2" activeClassName="data-[active=true]">
-                  <KeySquare />
-                  <span>Licenses 2</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-
-            {isUserLike ? (
-              <>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Trash">
-                    <NavLink to="/licenses/trash" activeClassName="data-[active=true]">
-                      <Trash2 />
-                      <span>Trash</span>
-                    </NavLink>
-                  </SidebarMenuButton>
+              return (
+                <SidebarMenuItem key={item.to}>
+                  {isLocked ? (
+                    <SidebarMenuButton
+                      tooltip={item.label}
+                      onClick={() => showLockedToast(item.label)}
+                      className="text-slate-400"
+                    >
+                      <Icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  ) : (
+                    <SidebarMenuButton asChild tooltip={item.label} isActive={isActive}>
+                      <NavLink to={item.to} className="w-full">
+                        <Icon />
+                        <span>{item.label}</span>
+                      </NavLink>
+                    </SidebarMenuButton>
+                  )}
                 </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Audit logs">
-                    <NavLink to="/audit" activeClassName="data-[active=true]">
-                      <ScrollText />
-                      <span>Audit logs</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </>
-            ) : null}
-
-            {isAdmin ? (
-              <>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Free Licenses">
-                    <NavLink to="/free-licenses" activeClassName="data-[active=true]">
-                      <Ticket />
-                      <span>Free Licenses</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Free keys">
-                    <NavLink to="/admin/free-keys" activeClassName="data-[active=true]">
-                      <Gift />
-                      <span>Free keys</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Thuê Website">
-                    <NavLink to="/rent" activeClassName="data-[active=true]">
-                      <Building2 />
-                      <span>Thuê Website</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Reset Settings">
-                    <NavLink to="/settings/reset-key" activeClassName="data-[active=true]">
-                      <SlidersHorizontal />
-                      <span>Reset Settings</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Reset Logs">
-                    <NavLink to="/settings/reset-logs" activeClassName="data-[active=true]">
-                      <History />
-                      <span>Reset Logs</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </>
-            ) : (
-              <>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Free Licenses" className="opacity-60" onClick={() => showLockedToast("Free Licenses")}>
-                    <Ticket />
-                    <span>Free Licenses</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Free keys" className="opacity-60" onClick={() => showLockedToast("Free keys")}>
-                    <Gift />
-                    <span>Free keys</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Thuê Website" className="opacity-60" onClick={() => showLockedToast("Thuê Website")}>
-                    <Building2 />
-                    <span>Thuê Website</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Reset Settings" className="opacity-60" onClick={() => showLockedToast("Reset Settings")}>
-                    <SlidersHorizontal />
-                    <span>Reset Settings</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Reset Logs" className="opacity-60" onClick={() => showLockedToast("Reset Logs")}>
-                    <History />
-                    <span>Reset Logs</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </>
-            )}
+              );
+            })}
           </SidebarMenu>
         </SidebarContent>
 
         <SidebarFooter>
           <Button
             variant="soft"
-            className="mx-2 justify-start"
+            className="justify-start group-data-[collapsible=icon]:justify-center"
             onClick={async () => {
               await signOut();
               navigate("/login", { replace: true });
             }}
           >
-            <LogOut className="mr-2 h-4 w-4" />
-            Sign out
+            <LogOut className="h-4 w-4" />
+            <span className="group-data-[collapsible=icon]:hidden">Sign out</span>
           </Button>
         </SidebarFooter>
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex h-14 items-center gap-3 border-b px-4">
-          <SidebarTrigger />
-          <div className="text-sm text-muted-foreground">Admin Console</div>
+        <header className="sticky top-0 z-20 border-b border-white/70 bg-background/85 backdrop-blur-md">
+          <div className="page-wrap flex items-center gap-3 py-4">
+            <SidebarTrigger className="bg-white text-slate-600 shadow-sm hover:bg-slate-100 md:hidden" />
+            <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-500">
+              <span className="truncate font-medium text-slate-600">Admin Console</span>
+              <ChevronRight className="h-4 w-4 shrink-0" />
+              <span className="truncate font-semibold text-slate-950">{activeLabel}</span>
+            </div>
+          </div>
         </header>
-        <main className="flex-1 p-4">
-          <Outlet />
+
+        <main className="page-wrap flex-1 py-6">
+          <div className={cn("rounded-[2rem] border border-white/60 bg-white/65 p-4 shadow-[0_26px_80px_-50px_rgba(15,23,42,0.22)] backdrop-blur-sm sm:p-5") }>
+            <Outlet />
+          </div>
         </main>
       </SidebarInset>
     </SidebarProvider>
