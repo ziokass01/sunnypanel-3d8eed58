@@ -84,17 +84,23 @@ function translateParsed(data: unknown): string | null {
   return null;
 }
 
-export function getErrorMessage(error: MaybeError, fallback = "Đã có lỗi xảy ra. Vui lòng thử lại."): string {
+export function getErrorMessage(
+  error: MaybeError,
+  fallback = "Đã có lỗi xảy ra. Vui lòng thử lại."
+): string {
   if (!error) return fallback;
 
-  const directCode = typeof error === "object" && error ? toText((error as any).code).toLowerCase() : "";
+  const directCode =
+    typeof error === "object" && error ? toText((error as any).code).toLowerCase() : "";
+
   if (directCode === "admin_auth_required") {
     return "Phiên đăng nhập admin đã hết hạn. Hãy đăng nhập lại.";
   }
 
   if (typeof error === "string") {
     const parsed = tryParseJson(error);
-    return (translateParsed(parsed) ?? translateKnownText(error) ?? error.trim()) || fallback;
+    const friendly = translateParsed(parsed) ?? translateKnownText(error) ?? error.trim();
+    return friendly || fallback;
   }
 
   const candidates = [
