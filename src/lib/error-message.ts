@@ -94,7 +94,7 @@ export function getErrorMessage(error: MaybeError, fallback = "Đã có lỗi x�
 
   if (typeof error === "string") {
     const parsed = tryParseJson(error);
-    return translateParsed(parsed) ?? translateKnownText(error) ?? error.trim() || fallback;
+    return (translateParsed(parsed) ?? translateKnownText(error) ?? error.trim()) || fallback;
   }
 
   const candidates = [
