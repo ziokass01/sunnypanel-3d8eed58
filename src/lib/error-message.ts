@@ -32,7 +32,7 @@ export function getErrorMessage(error: MaybeError, fallback = "Đã có lỗi x�
 
   if (!candidates.length) return fallback;
   return candidates[0];
-}    }
+}    
     return Number.isFinite(min) ? `${field} phải lớn hơn hoặc bằng ${min}.` : `${field} quá nhỏ.`;
   }
 
