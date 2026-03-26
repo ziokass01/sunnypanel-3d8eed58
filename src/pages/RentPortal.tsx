@@ -90,6 +90,7 @@ type DurationUnit = "hour" | "day";
 type TabValue = "status" | "dashboard" | "create" | "history" | "audit" | "password" | "account" | "api";
 
 const LS_TOKEN = "rent_token_v1";
+const BRAND_CAT_SRC = "/android-chrome-512x512.png";
 
 function fmtDate(value: string | null | undefined) {
   if (!value) return "-";
@@ -268,8 +269,8 @@ const tabListMobileClass = "inline-flex h-auto min-w-max gap-2 rounded-[22px] bg
 const tabTriggerMobileClass = "gap-2 rounded-2xl px-3 py-2.5 text-slate-600 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-[0_10px_20px_rgba(15,23,42,0.16)]";
 const amberButtonClass = "rounded-2xl bg-amber-400 text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.28)] hover:bg-amber-300";
 const softButtonClass = "rounded-2xl border border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200 hover:text-slate-950";
-const slateButtonClass = "rounded-2xl bg-slate-700 text-white shadow-[0_10px_24px_rgba(51,65,85,0.18)] hover:bg-slate-600";
-const subtleCodeClass = "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs leading-6 text-slate-800 shadow-inner break-all";
+const slateButtonClass = "rounded-2xl bg-slate-600 text-white shadow-[0_10px_24px_rgba(71,85,105,0.16)] hover:bg-slate-500";
+const subtleCodeClass = "block overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 font-mono text-xs leading-6 text-slate-800 shadow-inner break-all";
 const subtlePreClass = "overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-800 shadow-inner";
 
 export function RentPortalPage() {
@@ -750,7 +751,7 @@ export function RentPortalPage() {
                 SUNNY RENT PORTAL
               </div>
               <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-tight">
-                Đăng nhập để truy cập khu quản lý tài khoản thuê của bạn.
+                Đăng nhập để mở khu quản lý tài khoản thuê của bạn.
               </h1>
               <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
                 Trang quản lý được tối ưu lại theo hướng gọn gàng, dễ đọc và dễ thao tác hơn trên điện thoại lẫn máy tính.
@@ -771,8 +772,8 @@ export function RentPortalPage() {
 
             <Card className="rounded-[34px] border-amber-200/80 bg-white/95 text-slate-900 shadow-[0_28px_80px_rgba(15,23,42,0.10)] backdrop-blur">
               <CardHeader className="space-y-3 px-6 pb-2 pt-7 sm:px-8">
-                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-lg font-semibold text-white">
-                  S
+                <div className="inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-amber-100 bg-white shadow-sm">
+                  <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
                 </div>
                 <CardTitle className="text-3xl font-semibold tracking-tight text-slate-950">Đăng nhập trang thuê</CardTitle>
                 <CardDescription className="text-base leading-7 text-slate-500">
@@ -815,7 +816,7 @@ export function RentPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#081121_0%,#0d1b33_240px,#f3f6fb_240px,#eef2f7_100%)] text-slate-900">
+    <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
       <Tabs value={tab} onValueChange={(value) => { setTab(value as TabValue); setMobileNavOpen(false); }} className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 xl:px-8">
         <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
           <aside className="hidden xl:sticky xl:top-6 xl:block xl:self-start">
@@ -823,35 +824,20 @@ export function RentPortalPage() {
               <CardContent className="space-y-5 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-400 text-base font-black text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.35)]">S</div>
+                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                      <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                    </div>
                     <div>
                       <div className="text-sm font-semibold tracking-wide text-white">SUNNY Rent Portal</div>
-                      <div className="text-xs text-slate-400">Quản lý key, tài khoản và tệp hỗ trợ</div>
+                      <div className="text-xs text-slate-400">Điều hướng nhanh tới từng khu quản lý</div>
                     </div>
                   </div>
                   <div className="rounded-full border border-white/10 bg-white/5 p-2 text-amber-300"><Sparkles className="h-4 w-4" /></div>
                 </div>
 
-                <div className="rounded-[26px] border border-amber-300/20 bg-white/6 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                  <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-amber-200/90"><UserRound className="h-3.5 w-3.5" /> tài khoản</div>
-                  <div className="mt-3 break-all text-base font-semibold text-white">{account?.username ?? "-"}</div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                    <span className={account?.is_disabled ? "rounded-full bg-rose-500/15 px-2.5 py-1 text-rose-200" : isActive ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-emerald-200" : "rounded-full bg-amber-400/15 px-2.5 py-1 text-amber-200"}>
-                      {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
-                    </span>
-                    <span className="rounded-full bg-white/8 px-2.5 py-1 text-slate-300">Hết hạn {fmtDate(account?.expires_at)}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-[22px] border border-white/10 bg-white/6 p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Tổng key</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{dashboardStats.total}</div>
-                  </div>
-                  <div className="rounded-[22px] border border-white/10 bg-white/6 p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Tệp tải</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{downloadsQ.data?.length ?? 0}</div>
-                  </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/6 p-4">
+                  <div className="text-sm font-medium text-slate-200">Xin chào, {account?.username ?? "-"}</div>
+                  <div className="mt-2 text-xs leading-6 text-slate-400">Chọn đúng mục bạn cần ở menu bên dưới. Thông tin trạng thái chi tiết đã được gom về tab tài khoản để đỡ rối mắt hơn.</div>
                 </div>
 
                 <TabsList className={tabListDesktopClass}>
@@ -877,10 +863,12 @@ export function RentPortalPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-400 text-sm font-black text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.35)]">S</div>
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                        <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                      </div>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold text-white">SUNNY Rent Portal</div>
-                        <div className="truncate text-xs text-slate-400">Quản lý key, API và tải xuống ở một nơi</div>
+                        <div className="truncate text-xs text-slate-400">Chọn từng mục từ menu để giao diện gọn hơn</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -893,21 +881,9 @@ export function RentPortalPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 rounded-[24px] border border-white/10 bg-white/6 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-white break-all">{account?.username ?? "-"}</div>
-                        <div className="mt-1 text-xs text-slate-400">Kích hoạt {fmtDate(account?.activated_at)}</div>
-                      </div>
-                      <span className={account?.is_disabled ? "rounded-full bg-rose-500/15 px-2.5 py-1 text-xs text-rose-200" : isActive ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-200" : "rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-200"}>
-                        {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid grid-cols-3 gap-2">
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Key</div><div className="mt-1 text-lg font-semibold text-white">{dashboardStats.total}</div></div>
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Bật</div><div className="mt-1 text-lg font-semibold text-white">{dashboardStats.enabled}</div></div>
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Tải</div><div className="mt-1 text-lg font-semibold text-white">{downloadsQ.data?.length ?? 0}</div></div>
-                    </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-200">Đang mở: {NAV_ITEMS.find((item) => item.value === tab)?.label ?? "Trạng thái"}</span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-400">Thông tin tài khoản đã chuyển sang tab tài khoản</span>
                   </div>
                 </CardContent>
               </Card>
@@ -958,69 +934,31 @@ export function RentPortalPage() {
               ) : null}
             </div>
 
-            <Card className="overflow-hidden rounded-[34px] border-slate-200/80 bg-white text-slate-900 shadow-[0_24px_72px_rgba(15,23,42,0.10)]">
-              <div className="h-1.5 bg-[linear-gradient(90deg,#0f172a_0%,#1e293b_35%,#fbbf24_100%)]" />
-              <CardContent className="relative p-0">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.12),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(15,23,42,0.05),transparent_30%)]" />
-                <div className="relative grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.12fr_0.88fr]">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900"><Waypoints className="h-3.5 w-3.5" /> Thuê website</div>
-                    <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-                      {isActive
-                        ? "Quản lý tài khoản thuê và key trong một giao diện gọn gàng, dễ thao tác."
-                        : "Kích hoạt tài khoản để mở đầy đủ khu quản lý."}
-                    </h1>
-                    <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
-                      {isActive
-                        ? "Theo dõi trạng thái tài khoản, tạo key mới, xem lịch sử sử dụng, audit log và truy cập tệp hỗ trợ ngay trên cùng một trang."
-                        : "Sau khi xác thực thành công, các mục tạo key, lịch sử, audit log và API sẽ hiện đầy đủ trong giao diện."}
-                    </p>
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      {isActive ? (
-                        <>
-                          <Button className={amberButtonClass} onClick={() => setTab("create")}>Tạo key ngay</Button>
-                          <Button variant="outline" className={softButtonClass} onClick={() => setTab("history")}>Mở lịch sử key</Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button className={amberButtonClass} onClick={() => setTab("status")}>Mở khu kích hoạt</Button>
-                          <Button variant="outline" className={softButtonClass} onClick={() => setActivationKey("")}>Xóa key đang nhập</Button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid gap-3 self-end">
-                    <div className="rounded-[24px] border border-slate-200 bg-slate-950 p-5 text-white shadow-[0_18px_40px_rgba(15,23,42,0.18)]">
-                      <div className="flex items-center gap-2 text-sm text-slate-300"><Activity className="h-4 w-4 text-amber-400" /> tài khoản hiện tại</div>
-                      <div className="mt-2 text-lg font-semibold text-white">{account?.username ?? "-"}</div>
-                      <div className="mt-2 text-sm text-slate-400">Kích hoạt: {fmtDate(account?.activated_at)}</div>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_12px_24px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-2 text-sm text-slate-500"><KeyRound className="h-4 w-4 text-slate-700" /> tổng key</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.total}</div></div>
-                      <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_12px_24px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-2 text-sm text-slate-500"><FileClock className="h-4 w-4 text-amber-600" /> sắp hết hạn</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.soonExpired}</div></div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {isActive ? (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Đang bật</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.enabled}</div><div className="mt-2 text-sm text-slate-500">Key có thể xác thực</div></div>
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><LockKeyhole className="h-4 w-4 text-rose-500" /> Đang tắt</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.disabled}</div><div className="mt-2 text-sm text-slate-500">Key tạm ngưng</div></div>
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Sparkles className="h-4 w-4 text-amber-500" /> Dùng lần đầu</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.firstUse}</div><div className="mt-2 text-sm text-slate-500">Chưa đốt thời gian ngay</div></div>
-                <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Download className="h-4 w-4 text-slate-700" /> Files / Downloads</div><div className="mt-2 text-2xl font-semibold text-slate-950">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Tệp hỗ trợ sẵn có</div></div>
-              </div>
-            ) : (
-              <Card className="rounded-[28px] border-amber-200/80 bg-[linear-gradient(135deg,#fffaf0_0%,#fff7ed_100%)] shadow-[0_16px_36px_rgba(251,191,36,0.12)]">
-                <CardContent className="p-5 sm:p-6">
-                  <div className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-900">Chưa kích hoạt xong</div>
-                  <div className="mt-2 text-sm leading-6 text-amber-900/80">Giao diện đã thu gọn, ưu tiên đúng việc chính là kích hoạt. Sau khi mở khóa xong, toàn bộ khu quản lý mới bung ra như một cánh cửa trượt.</div>
-                </CardContent>
-              </Card>
-            )}
-
         <TabsContent value="status" className="mt-0 space-y-4">
+          <Card className="overflow-hidden rounded-[34px] border-slate-200/80 bg-white text-slate-900 shadow-[0_24px_72px_rgba(15,23,42,0.08)]">
+            <div className="h-1.5 bg-[linear-gradient(90deg,#0f172a_0%,#334155_40%,#fbbf24_100%)]" />
+            <CardContent className="p-6 sm:p-8">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900"><Waypoints className="h-3.5 w-3.5" /> Trạng thái</div>
+              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                {isActive ? "Chào mừng quay lại khu quản lý tài khoản thuê." : "Kích hoạt tài khoản để mở đầy đủ khu quản lý."}
+              </h1>
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
+                {isActive
+                  ? "Theo dõi nhanh tình trạng key, số lượng tệp hỗ trợ và các mục cần chú ý. Những phần như tạo key, lịch sử, audit log và API đã nằm gọn đúng tab của chúng để giao diện bớt chiếm spotlight."
+                  : "Sau khi xác thực thành công, các mục tạo key, lịch sử, audit log và API sẽ hiện đầy đủ trong giao diện. Tab này giữ vai trò như màn hình chào và khu kiểm tra trạng thái tổng quan."}
+              </p>
+            </CardContent>
+          </Card>
+
+          {isActive ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Đang bật</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.enabled}</div><div className="mt-2 text-sm text-slate-500">Key có thể xác thực</div></div>
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><LockKeyhole className="h-4 w-4 text-rose-500" /> Đang tắt</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.disabled}</div><div className="mt-2 text-sm text-slate-500">Key tạm ngưng</div></div>
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Sparkles className="h-4 w-4 text-amber-500" /> Dùng lần đầu</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.firstUse}</div><div className="mt-2 text-sm text-slate-500">Chưa đốt thời gian ngay</div></div>
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Download className="h-4 w-4 text-slate-700" /> Files / Downloads</div><div className="mt-2 text-2xl font-semibold text-slate-950">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Tệp hỗ trợ sẵn có</div></div>
+            </div>
+          ) : null}
+
           {!isActive ? (
             <Card className="border-amber-200 bg-[#fffaf0] text-slate-900">
               <CardHeader>
@@ -1048,10 +986,10 @@ export function RentPortalPage() {
               <CardDescription>Kiểm tra tài khoản thuê đã kích hoạt và còn hạn hay chưa.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">User</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Activated at</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Expires at</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Disabled</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "YES" : "NO"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Tài khoản</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Kích hoạt lúc</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Hết hạn</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Khóa tài khoản</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "Có" : "Không"}</div></div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -1320,17 +1258,39 @@ export function RentPortalPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="account" className="mt-0">
+        <TabsContent value="account" className="mt-0 space-y-4">
+          <Card className="overflow-hidden rounded-[30px] border-slate-800/80 bg-[linear-gradient(135deg,#0b1220_0%,#111827_100%)] text-white shadow-[0_22px_55px_rgba(2,6,23,0.24)]">
+            <CardContent className="p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                    <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-sm text-slate-300">Tài khoản hiện tại</div>
+                    <div className="mt-1 text-xl font-semibold break-all text-white">{account?.username ?? "-"}</div>
+                    <div className="mt-2 text-sm text-slate-400">Kích hoạt: {fmtDate(account?.activated_at)}</div>
+                  </div>
+                </div>
+                <span className={account?.is_disabled ? "rounded-full border border-rose-400/25 bg-rose-500/15 px-3 py-1.5 text-sm text-rose-100" : isActive ? "rounded-full border border-emerald-400/25 bg-emerald-500/15 px-3 py-1.5 text-sm text-emerald-100" : "rounded-full border border-amber-300/25 bg-amber-400/15 px-3 py-1.5 text-sm text-amber-100"}>
+                  {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className={panelCardClass}>
             <CardHeader>
               <CardTitle>Thông tin tài khoản</CardTitle>
-              <CardDescription>Thông tin cơ bản của tài khoản thuê.</CardDescription>
+              <CardDescription>Thông tin cơ bản và trạng thái của tài khoản thuê.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Username</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
               <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Trạng thái tài khoản</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt / hết hạn"}</div></div>
               <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Ngày tạo</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.created_at)}</div></div>
               <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Kích hoạt lúc</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Hết hạn</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Số máy tối đa</div><div className="mt-2 text-lg font-semibold">{account?.max_devices ?? 0}</div></div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -1373,17 +1333,19 @@ export function RentPortalPage() {
                 ) : null}
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
-                <div className="font-medium">API verify</div>
-                <code className={subtleCodeClass}>POST {import.meta.env.VITE_SUPABASE_URL}/functions/v1/rent-verify-key</code>
-                <div className="text-sm text-muted-foreground">JSON mẫu chỉ dùng <code>sig_user</code>. Master secret đã nằm trong server.</div>
-                <pre className={subtlePreClass}>{`{
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="space-y-4">
+                  <div className="text-base font-semibold text-slate-950">API verify</div>
+                  <code className={subtleCodeClass}>POST {import.meta.env.VITE_SUPABASE_URL}/functions/v1/rent-verify-key</code>
+                  <div className="text-sm text-muted-foreground">JSON mẫu chỉ dùng <code>sig_user</code>. Master secret đã nằm trong server.</div>
+                  <pre className={subtlePreClass}>{`{
   "username": "${account?.username ?? "name"}",
   "key": "XXXX-XXXX-XXXX-XXXX",
   "device_id": "device-name",
   "ts": 1710000000,
   "sig_user": "HMAC_SHA256_HEX(user_hmac_secret, username|key|device_id|ts)"
 }`}</pre>
+                </div>
               </div>
 
               <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-4 shadow-sm">
