@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { RentApiQuickNotes } from "@/components/rent/RentApiQuickNotes";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Activity, Download, FileClock, Gauge, History, House, KeyRound, LockKeyhole, LogOut, Menu, ShieldCheck, Sparkles, UserRound, Waypoints, X } from "lucide-react";
 
@@ -1347,6 +1348,8 @@ export function RentPortalPage() {
 }`}</pre>
                 </div>
               </div>
+
+              <RentApiQuickNotes />
 
               <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-4 shadow-sm">
                 <div>
