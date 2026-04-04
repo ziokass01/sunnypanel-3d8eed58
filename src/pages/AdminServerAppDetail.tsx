@@ -59,6 +59,35 @@ type ServerAppFeatureRow = {
   sort_order: number;
 };
 
+type ServerAppWalletRuleRow = {
+  app_code: string;
+  soft_wallet_label: string | null;
+  premium_wallet_label: string | null;
+  allow_decimal: boolean | null;
+  soft_daily_reset_enabled: boolean | null;
+  premium_daily_reset_enabled: boolean | null;
+  soft_daily_reset_amount: string | number;
+  premium_daily_reset_amount: string | number;
+  notes: string | null;
+};
+
+type ServerAppRewardPackageRow = {
+  app_code: string;
+  package_code: string;
+  title: string;
+  description: string | null;
+  enabled: boolean;
+  reward_mode: string;
+  plan_code: string | null;
+  soft_credit_amount: string | number;
+  premium_credit_amount: string | number;
+  entitlement_days: number;
+  device_limit_override: number | null;
+  account_limit_override: number | null;
+  sort_order: number;
+  notes: string | null;
+};
+
 const APP_FALLBACKS = [
   {
     code: "free-fire",
@@ -103,6 +132,44 @@ const FEATURE_TEMPLATES: Record<string, ServerAppFeatureRow[]> = {
   ],
 };
 
+const PACKAGE_TEMPLATES: Record<string, ServerAppRewardPackageRow[]> = {
+  "find-dumps": [
+    { app_code: "find-dumps", package_code: "fd_go_7d", title: "Find Dumps Go 7 ngày", description: "Mở plan Go trong 7 ngày, kèm ít credit thường để dùng batch nhẹ.", enabled: true, reward_mode: "mixed", plan_code: "go", soft_credit_amount: 3, premium_credit_amount: 0, entitlement_days: 7, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Gói nhập key cho tab Quà tặng." },
+    { app_code: "find-dumps", package_code: "fd_plus_30d", title: "Find Dumps Plus 30 ngày", description: "Mở plan Plus, kèm một ít credit kim cương để test feature nặng.", enabled: true, reward_mode: "mixed", plan_code: "plus", soft_credit_amount: 5, premium_credit_amount: 1.5, entitlement_days: 30, device_limit_override: 2, account_limit_override: 1, sort_order: 20, notes: "Phù hợp user dùng thường xuyên." },
+    { app_code: "find-dumps", package_code: "fd_pro_30d", title: "Find Dumps Pro 30 ngày", description: "Mở full plan Pro trong 30 ngày, credit hao rẻ hơn nhờ multiplier plan.", enabled: true, reward_mode: "plan", plan_code: "pro", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 30, device_limit_override: 3, account_limit_override: 1, sort_order: 30, notes: "Không tặng quá nhiều credit để tránh lạm dụng." },
+  ],
+  "free-fire": [
+    { app_code: "free-fire", package_code: "ff_go_7d", title: "Free Fire Go 7 ngày", description: "Mở plan Go cho app Free Fire.", enabled: true, reward_mode: "plan", plan_code: "go", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 7, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Có thể map với key mua bên admin." },
+    { app_code: "free-fire", package_code: "ff_plus_30d", title: "Free Fire Plus 30 ngày", description: "Mở plan Plus, cho reset key với cost mềm hơn.", enabled: true, reward_mode: "plan", plan_code: "plus", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 30, device_limit_override: 2, account_limit_override: 1, sort_order: 20, notes: "Dùng cho tab Quà tặng sau này." },
+    { app_code: "free-fire", package_code: "ff_credit_topup", title: "Top-up credit kim cương", description: "Nạp credit kim cương trả phí để dùng feature hao rẻ hơn.", enabled: true, reward_mode: "premium_credit", plan_code: null, soft_credit_amount: 0, premium_credit_amount: 5, entitlement_days: 0, device_limit_override: null, account_limit_override: null, sort_order: 30, notes: "Dùng cho key top-up riêng." },
+  ],
+};
+
+const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
+  "find-dumps": {
+    app_code: "find-dumps",
+    soft_wallet_label: "Credit thường",
+    premium_wallet_label: "Credit kim cương",
+    allow_decimal: true,
+    soft_daily_reset_enabled: true,
+    premium_daily_reset_enabled: false,
+    soft_daily_reset_amount: 5,
+    premium_daily_reset_amount: 0,
+    notes: "Credit thường reset mỗi ngày. Credit kim cương giữ lâu hơn và hao ít hơn.",
+  },
+  "free-fire": {
+    app_code: "free-fire",
+    soft_wallet_label: "Credit thường",
+    premium_wallet_label: "Credit kim cương",
+    allow_decimal: true,
+    soft_daily_reset_enabled: true,
+    premium_daily_reset_enabled: false,
+    soft_daily_reset_amount: 3,
+    premium_daily_reset_amount: 0,
+    notes: "Dùng decimal để tránh cảm giác lạm phát credit.",
+  },
+};
+
 function numericInput(value: string | number | null | undefined) {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? String(num) : "0";
@@ -127,6 +194,20 @@ function ensureFeatures(appCode: string, rows: ServerAppFeatureRow[]) {
   return FEATURE_TEMPLATES[appCode]?.map((row) => ({ ...row })) ?? [];
 }
 
+function ensureWallet(appCode: string, row?: ServerAppWalletRuleRow | null) {
+  return row ? { ...row } : { ...(WALLET_TEMPLATES[appCode] ?? WALLET_TEMPLATES["find-dumps"]) };
+}
+
+function ensurePackages(appCode: string, rows: ServerAppRewardPackageRow[]) {
+  if (rows.length) return [...rows].sort((a, b) => a.sort_order - b.sort_order);
+  return PACKAGE_TEMPLATES[appCode]?.map((row) => ({ ...row })) ?? [];
+}
+
+function isPhaseMissingMessage(message?: string) {
+  const raw = String(message ?? "").toLowerCase();
+  return raw.includes("server_app") || raw.includes("reward_packages") || raw.includes("wallet_rules");
+}
+
 export function AdminServerAppDetailPage() {
   const { appCode = "find-dumps" } = useParams();
   const { toast } = useToast();
@@ -136,19 +217,25 @@ export function AdminServerAppDetailPage() {
     queryKey: ["server-app-detail", appCode],
     queryFn: async () => {
       const sb = supabase as any;
-      const [appRes, settingsRes, plansRes, featuresRes] = await Promise.all([
+      const [appRes, settingsRes, plansRes, featuresRes, walletRes, packagesRes] = await Promise.all([
         sb.from("server_apps").select("*").eq("code", appCode).maybeSingle(),
         sb.from("server_app_settings").select("*").eq("app_code", appCode).maybeSingle(),
         sb.from("server_app_plans").select("*").eq("app_code", appCode).order("sort_order", { ascending: true }),
         sb.from("server_app_features").select("*").eq("app_code", appCode).order("sort_order", { ascending: true }),
+        sb.from("server_app_wallet_rules").select("*").eq("app_code", appCode).maybeSingle(),
+        sb.from("server_app_reward_packages").select("*").eq("app_code", appCode).order("sort_order", { ascending: true }),
       ]);
-      const missing = [appRes, settingsRes, plansRes, featuresRes].find((res: any) => String(res?.error?.message ?? "").toLowerCase().includes("server_app"));
+
+      const missing = [appRes, settingsRes, plansRes, featuresRes, walletRes, packagesRes].find((res: any) => isPhaseMissingMessage(res?.error?.message));
       if (missing?.error) throw missing.error;
+
       return {
         app: (appRes.data as ServerAppRow | null) ?? null,
         settings: (settingsRes.data as ServerAppSettingsRow | null) ?? null,
         plans: (plansRes.data as ServerAppPlanRow[] | null) ?? [],
         features: (featuresRes.data as ServerAppFeatureRow[] | null) ?? [],
+        wallet: (walletRes.data as ServerAppWalletRuleRow | null) ?? null,
+        packages: (packagesRes.data as ServerAppRewardPackageRow[] | null) ?? [],
       };
     },
   });
@@ -171,6 +258,8 @@ export function AdminServerAppDetailPage() {
   });
   const [plansDraft, setPlansDraft] = useState<ServerAppPlanRow[]>(ensurePlans(fallback.code, []));
   const [featuresDraft, setFeaturesDraft] = useState<ServerAppFeatureRow[]>(ensureFeatures(fallback.code, []));
+  const [walletDraft, setWalletDraft] = useState<ServerAppWalletRuleRow>(ensureWallet(fallback.code));
+  const [packagesDraft, setPackagesDraft] = useState<ServerAppRewardPackageRow[]>(ensurePackages(fallback.code, []));
 
   useEffect(() => {
     if (!data) return;
@@ -193,6 +282,8 @@ export function AdminServerAppDetailPage() {
     });
     setPlansDraft(ensurePlans(appCode, data.plans));
     setFeaturesDraft(ensureFeatures(appCode, data.features));
+    setWalletDraft(ensureWallet(appCode, data.wallet));
+    setPackagesDraft(ensurePackages(appCode, data.packages));
   }, [data, appCode]);
 
   const saveAppMutation = useMutation({
@@ -255,19 +346,21 @@ export function AdminServerAppDetailPage() {
   const saveFeaturesMutation = useMutation({
     mutationFn: async () => {
       const sb = supabase as any;
-      const payload = featuresDraft.map((row, index) => ({
-        app_code: appCode,
-        feature_code: row.feature_code.trim(),
-        title: row.title.trim() || row.feature_code.trim() || `feature_${index + 1}` ,
-        description: row.description?.trim() || null,
-        enabled: Boolean(row.enabled),
-        min_plan: row.min_plan || "classic",
-        requires_credit: Boolean(row.requires_credit),
-        soft_cost: normalizeDecimal(row.soft_cost),
-        premium_cost: normalizeDecimal(row.premium_cost),
-        reset_period: row.reset_period || "daily",
-        sort_order: row.sort_order || (index + 1) * 10,
-      })).filter((row) => row.feature_code);
+      const payload = featuresDraft
+        .map((row, index) => ({
+          app_code: appCode,
+          feature_code: row.feature_code.trim(),
+          title: row.title.trim() || row.feature_code.trim() || `feature_${index + 1}`,
+          description: row.description?.trim() || null,
+          enabled: Boolean(row.enabled),
+          min_plan: row.min_plan || "classic",
+          requires_credit: Boolean(row.requires_credit),
+          soft_cost: normalizeDecimal(row.soft_cost),
+          premium_cost: normalizeDecimal(row.premium_cost),
+          reset_period: row.reset_period || "daily",
+          sort_order: row.sort_order || (index + 1) * 10,
+        }))
+        .filter((row) => row.feature_code);
       const res = await sb.from("server_app_features").upsert(payload, { onConflict: "app_code,feature_code" });
       if (res.error) throw res.error;
     },
@@ -276,6 +369,61 @@ export function AdminServerAppDetailPage() {
       await refetch();
     },
     onError: (e: any) => toast({ title: "Lưu feature thất bại", description: e?.message ?? "Không thể lưu feature.", variant: "destructive" }),
+  });
+
+  const saveWalletMutation = useMutation({
+    mutationFn: async () => {
+      const sb = supabase as any;
+      const payload = {
+        app_code: appCode,
+        soft_wallet_label: walletDraft.soft_wallet_label?.trim() || "Credit thường",
+        premium_wallet_label: walletDraft.premium_wallet_label?.trim() || "Credit kim cương",
+        allow_decimal: Boolean(walletDraft.allow_decimal ?? true),
+        soft_daily_reset_enabled: Boolean(walletDraft.soft_daily_reset_enabled ?? true),
+        premium_daily_reset_enabled: Boolean(walletDraft.premium_daily_reset_enabled ?? false),
+        soft_daily_reset_amount: normalizeDecimal(walletDraft.soft_daily_reset_amount),
+        premium_daily_reset_amount: normalizeDecimal(walletDraft.premium_daily_reset_amount),
+        notes: walletDraft.notes?.trim() || null,
+      };
+      const res = await sb.from("server_app_wallet_rules").upsert(payload, { onConflict: "app_code" });
+      if (res.error) throw res.error;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã lưu", description: "Quy tắc ví credit đã được cập nhật." });
+      await refetch();
+    },
+    onError: (e: any) => toast({ title: "Lưu ví thất bại", description: e?.message ?? "Không thể lưu wallet rules.", variant: "destructive" }),
+  });
+
+  const savePackagesMutation = useMutation({
+    mutationFn: async () => {
+      const sb = supabase as any;
+      const payload = packagesDraft
+        .map((row, index) => ({
+          app_code: appCode,
+          package_code: row.package_code.trim(),
+          title: row.title.trim() || row.package_code.trim() || `package_${index + 1}`,
+          description: row.description?.trim() || null,
+          enabled: Boolean(row.enabled),
+          reward_mode: row.reward_mode || "plan",
+          plan_code: row.plan_code && row.plan_code !== "none" ? row.plan_code : null,
+          soft_credit_amount: normalizeDecimal(row.soft_credit_amount),
+          premium_credit_amount: normalizeDecimal(row.premium_credit_amount),
+          entitlement_days: Math.max(0, Math.floor(Number(row.entitlement_days || 0))),
+          device_limit_override: row.device_limit_override == null || Number(row.device_limit_override) <= 0 ? null : Math.floor(Number(row.device_limit_override)),
+          account_limit_override: row.account_limit_override == null || Number(row.account_limit_override) <= 0 ? null : Math.floor(Number(row.account_limit_override)),
+          sort_order: row.sort_order || (index + 1) * 10,
+          notes: row.notes?.trim() || null,
+        }))
+        .filter((row) => row.package_code);
+      const res = await sb.from("server_app_reward_packages").upsert(payload, { onConflict: "app_code,package_code" });
+      if (res.error) throw res.error;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã lưu", description: "Reward packages / redeem mapping đã được cập nhật." });
+      await refetch();
+    },
+    onError: (e: any) => toast({ title: "Lưu package thất bại", description: e?.message ?? "Không thể lưu reward packages.", variant: "destructive" }),
   });
 
   const addFeature = () => {
@@ -297,6 +445,28 @@ export function AdminServerAppDetailPage() {
     ]));
   };
 
+  const addPackage = () => {
+    setPackagesDraft((prev) => ([
+      ...prev,
+      {
+        app_code: appCode,
+        package_code: `package_${prev.length + 1}`,
+        title: "Reward mới",
+        description: "",
+        enabled: true,
+        reward_mode: "plan",
+        plan_code: "go",
+        soft_credit_amount: 0,
+        premium_credit_amount: 0,
+        entitlement_days: 7,
+        device_limit_override: null,
+        account_limit_override: null,
+        sort_order: (prev.length + 1) * 10,
+        notes: "",
+      },
+    ]));
+  };
+
   const openExternal = () => {
     const url = appDraft.admin_url?.trim();
     if (!url) return;
@@ -307,7 +477,11 @@ export function AdminServerAppDetailPage() {
     window.location.assign(url);
   };
 
-  const migrationHint = String((error as Error | undefined)?.message ?? "").toLowerCase().includes("server_app");
+  const migrationHint = useMemo(() => isPhaseMissingMessage((error as Error | undefined)?.message), [error]);
+
+  if (isLoading) {
+    return <div className="text-sm text-muted-foreground">Đang tải cấu hình app...</div>;
+  }
 
   return (
     <section className="space-y-4">
@@ -319,7 +493,7 @@ export function AdminServerAppDetailPage() {
           <div>
             <h1 className="text-2xl font-semibold">{appDraft.label}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Màn quản lý nội bộ cho {appDraft.label}. Đây là tầng 2 để chỉnh plan, credit, entitlement và feature flags mà không đụng lung tung vào phần free key đang chạy.
+              Màn quản lý nội bộ cho {appDraft.label}. Đây là tầng 2 để chỉnh plan, credit, reward package và feature flags mà không đụng lung tung vào phần free key đang chạy.
             </p>
           </div>
         </div>
@@ -334,9 +508,9 @@ export function AdminServerAppDetailPage() {
       {migrationHint ? (
         <Card className="border-destructive/40 bg-destructive/5">
           <CardHeader>
-            <CardTitle>Thiếu migration phase 2</CardTitle>
+            <CardTitle>Thiếu migration phase 2 / phase 3</CardTitle>
             <CardDescription>
-              Cần apply migration <span className="font-mono">20260404193000_server_apps_phase2.sql</span> rồi reload trang này.
+              Cần apply migration <span className="font-mono">20260404193000_server_apps_phase2.sql</span> và <span className="font-mono">20260404213000_server_app_wallets_rewards_phase3.sql</span> rồi reload trang này.
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
@@ -345,18 +519,21 @@ export function AdminServerAppDetailPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Guest plan</div><div className="mt-1 text-2xl font-semibold">{settingsDraft.guest_plan || "classic"}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Gift tab</div><div className="mt-1 text-2xl font-semibold">{settingsDraft.gift_tab_label || "Quà tặng"}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Plans</div><div className="mt-1 text-2xl font-semibold">{plansDraft.length}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Features</div><div className="mt-1 text-2xl font-semibold">{featuresDraft.length}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Reward packages</div><div className="mt-1 text-2xl font-semibold">{packagesDraft.length}</div></CardContent></Card>
       </div>
 
       <Tabs defaultValue="settings" className="space-y-3">
-        <TabsList className="flex w-full flex-wrap justify-start">
+        <TabsList className="flex w-full flex-wrap justify-start gap-2">
           <TabsTrigger value="settings">App settings</TabsTrigger>
           <TabsTrigger value="plans">Plans & credit</TabsTrigger>
           <TabsTrigger value="features">Feature flags</TabsTrigger>
+          <TabsTrigger value="wallet">Wallet rules</TabsTrigger>
+          <TabsTrigger value="rewards">Reward / redeem</TabsTrigger>
         </TabsList>
 
         <TabsContent value="settings">
@@ -507,6 +684,127 @@ export function AdminServerAppDetailPage() {
               <div className="flex flex-wrap justify-between gap-2">
                 <Button variant="outline" onClick={addFeature}>Thêm feature</Button>
                 <Button onClick={() => saveFeaturesMutation.mutate()} disabled={saveFeaturesMutation.isPending}>Lưu feature flags</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="wallet">
+          <Card>
+            <CardHeader>
+              <CardTitle>Wallet rules</CardTitle>
+              <CardDescription>
+                Quy tắc ví credit để chuẩn bị cho app nhớ key sau khi nhập đúng và tính hao decimal kiểu 1.34, 0.45 như bạn chốt.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Tên ví credit thường</div>
+                  <Input value={walletDraft.soft_wallet_label || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_wallet_label: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Tên ví credit kim cương</div>
+                  <Input value={walletDraft.premium_wallet_label || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_wallet_label: e.target.value }))} />
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border p-3">
+                  <div>
+                    <div className="font-medium">Cho phép số thập phân</div>
+                    <div className="text-xs text-muted-foreground">Bật để cost có thể là 1.34, 0.45 thay vì số nguyên cứng.</div>
+                  </div>
+                  <Switch checked={Boolean(walletDraft.allow_decimal ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, allow_decimal: value }))} />
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border p-3">
+                  <div>
+                    <div className="font-medium">Reset credit thường mỗi ngày</div>
+                    <div className="text-xs text-muted-foreground">Thường nên bật để user có quota free hàng ngày.</div>
+                  </div>
+                  <Switch checked={Boolean(walletDraft.soft_daily_reset_enabled ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_enabled: value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Số credit thường reset / ngày</div>
+                  <Input value={numericInput(walletDraft.soft_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_amount: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Số credit kim cương reset / ngày</div>
+                  <Input value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: e.target.value }))} />
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border p-3 md:col-span-2">
+                  <div>
+                    <div className="font-medium">Reset credit kim cương định kỳ</div>
+                    <div className="text-xs text-muted-foreground">Thường nên tắt để credit trả phí không tự trôi mất, trừ khi bạn muốn theo chu kỳ.</div>
+                  </div>
+                  <Switch checked={Boolean(walletDraft.premium_daily_reset_enabled ?? false)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_enabled: value }))} />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <div className="text-sm font-medium">Ghi chú ví</div>
+                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: credit thường dùng nhiều hơn, credit kim cương hao ít hơn, ưu tiên cho feature nặng..." />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => saveWalletMutation.mutate()} disabled={saveWalletMutation.isPending}>Lưu wallet rules</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="rewards">
+          <Card>
+            <CardHeader>
+              <CardTitle>Reward / redeem packages</CardTitle>
+              <CardDescription>
+                Đây là lớp để admin phân loại key nhập trong tab Quà tặng sau này: key này mở Go / Plus / Pro hay chỉ nạp credit thường, credit kim cương, hoặc cả hai.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {packagesDraft.map((pkg, index) => (
+                <div key={`${pkg.package_code}-${index}`} className="rounded-2xl border p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="grid gap-3 md:grid-cols-3 flex-1">
+                      <Input value={pkg.package_code} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, package_code: e.target.value } : item))} placeholder="package_code" />
+                      <Input value={pkg.title} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: e.target.value } : item))} placeholder="Tên gói" />
+                      <Select value={pkg.reward_mode} onValueChange={(value) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, reward_mode: value } : item))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="plan">Plan</SelectItem>
+                          <SelectItem value="soft_credit">Credit thường</SelectItem>
+                          <SelectItem value="premium_credit">Credit kim cương</SelectItem>
+                          <SelectItem value="mixed">Mixed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Bật</span>
+                      <Switch checked={pkg.enabled} onCheckedChange={(value) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: value } : item))} />
+                    </div>
+                  </div>
+                  <Textarea rows={2} value={pkg.description || ""} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} placeholder="Mô tả ngắn cho loại key / redeem package" />
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Plan mở ra</div>
+                      <Select value={pkg.plan_code || "none"} onValueChange={(value) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, plan_code: value === "none" ? null : value } : item))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Không gắn plan</SelectItem>
+                          <SelectItem value="classic">Classic</SelectItem>
+                          <SelectItem value="go">Go</SelectItem>
+                          <SelectItem value="plus">Plus</SelectItem>
+                          <SelectItem value="pro">Pro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường cộng thêm</div><Input value={numericInput(pkg.soft_credit_amount)} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_credit_amount: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương cộng thêm</div><Input value={numericInput(pkg.premium_credit_amount)} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_credit_amount: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Thời hạn entitlement (ngày)</div><Input type="number" min={0} value={pkg.entitlement_days} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, entitlement_days: Number(e.target.value) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Override số thiết bị</div><Input type="number" min={0} value={pkg.device_limit_override ?? 0} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, device_limit_override: Number(e.target.value) || null } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Override số tài khoản</div><Input type="number" min={0} value={pkg.account_limit_override ?? 0} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, account_limit_override: Number(e.target.value) || null } : item))} /></div>
+                    <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium">Ghi chú package</div><Input value={pkg.notes || ""} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, notes: e.target.value } : item))} placeholder="Ví dụ: key nhập đúng sẽ mở Plus 30 ngày, không cần nhập lại cho tới khi admin revoke." /></div>
+                  </div>
+                </div>
+              ))}
+              <div className="flex flex-wrap justify-between gap-2">
+                <Button variant="outline" onClick={addPackage}>Thêm reward package</Button>
+                <Button onClick={() => savePackagesMutation.mutate()} disabled={savePackagesMutation.isPending}>Lưu reward / redeem</Button>
               </div>
             </CardContent>
           </Card>
