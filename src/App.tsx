@@ -24,6 +24,7 @@ import { FreeGatePage } from "@/pages/FreeGate";
 import { FreeClaimPage } from "@/pages/FreeClaim";
 import { AdminFreeKeysPage } from "@/pages/AdminFreeKeys";
 import { AdminServerAppsPage } from "@/pages/AdminServerApps";
+import { AdminServerAppDetailPage } from "@/pages/AdminServerAppDetail";
 import { RentPortalPage } from "@/pages/RentPortal";
 import { RentAdminCustomerSetupPage } from "@/pages/RentAdminCustomerSetup";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
@@ -93,6 +94,7 @@ const App = () => {
                   <Route path="/audit" element={<AuditLogsPage />} />
                   <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
                   <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
+                  <Route path="/admin/apps/:appCode" element={<AdminRoute><AdminServerAppDetailPage /></AdminRoute>} />
                   <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
                   <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
                   <Route path="/settings/reset-logs" element={<AdminRoute><ResetLogsPage /></AdminRoute>} />
