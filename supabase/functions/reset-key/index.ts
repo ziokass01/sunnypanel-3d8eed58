@@ -53,6 +53,14 @@ function logRpcError(fn: string, error: any, context?: Record<string, unknown>) 
   });
 }
 
+function parseAllowResetFromNote(note?: string | null) {
+  const raw = String(note ?? "").toUpperCase();
+  if (!raw) return true;
+  if (raw.includes("ALLOW_RESET=0")) return false;
+  if (raw.includes("ALLOW_RESET=FALSE")) return false;
+  return true;
+}
+
 function mapRpcError(error: any) {
   const raw = String(error?.message ?? "").toUpperCase();
   const code = String(error?.code ?? "").toUpperCase();
@@ -153,6 +161,13 @@ Deno.serve(async (req) => {
     const action = parsed.data.action;
     const keyBucket = await sha256Hex(key);
 
+    const licRow = await db
+      .from("licenses")
+      .select("id,note")
+      .eq("key", key)
+      .maybeSingle();
+    const allowResetByKey = parseAllowResetFromNote(licRow.data?.note ?? null);
+
     const needsTurnstile = Boolean(settings.require_turnstile) && action === "reset";
     let turnstileVerified = false;
 
@@ -226,8 +241,19 @@ Deno.serve(async (req) => {
         msg: "OK",
         reset_enabled: Boolean(settings.enabled),
         disabled_message: settings.disabled_message ?? null,
+        allow_reset: allowResetByKey,
         ...info,
       });
+    }
+
+    if (!allowResetByKey) {
+      await sleep(500);
+      return json({
+        ok: false,
+        msg: "KEY_RESET_DISABLED",
+        reset_enabled: Boolean(settings.enabled),
+        disabled_message: settings.disabled_message ?? null,
+      }, 200);
     }
 
     const resetRes = await db.rpc("public_reset_key", { p_key: key });

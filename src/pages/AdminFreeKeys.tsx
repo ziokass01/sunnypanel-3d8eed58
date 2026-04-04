@@ -78,8 +78,21 @@ type KeyTypeRow = {
   sort_order: number;
   enabled: boolean;
   requires_double_gate?: boolean;
+  app_code?: string | null;
+  app_label?: string | null;
+  key_signature?: string | null;
+  allow_reset?: boolean;
   updated_at: string;
 };
+
+const APP_OPTIONS = [
+  { code: "free-fire", label: "Free Fire", signature: "FF" },
+  { code: "find-dumps", label: "Find Dumps", signature: "FD" },
+] as const;
+
+function getAppMeta(code?: string | null) {
+  return APP_OPTIONS.find((item) => item.code === code) ?? APP_OPTIONS[0];
+}
 
 type SessionRow = {
   session_id: string;
@@ -363,6 +376,12 @@ function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
 
+  const initialAppCode = useMemo(() => {
+    if (typeof window === "undefined") return "free-fire";
+    const raw = new URLSearchParams(window.location.search).get("app");
+    return APP_OPTIONS.some((item) => item.code === raw) ? String(raw) : "free-fire";
+  }, []);
+
   const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
   const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
   const gateUrl = baseUrl ? `${baseUrl}/free/gate` : "/free/gate";
@@ -631,7 +650,7 @@ export function AdminFreeKeysPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("licenses_free_key_types")
-        .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate,updated_at")
+        .select("*")
         .order("sort_order", { ascending: true });
       if (error) throw error;
       return (data ?? []) as any as KeyTypeRow[];
@@ -660,6 +679,23 @@ export function AdminFreeKeysPage() {
       const { error } = await supabase
         .from("licenses_free_key_types")
         .update({ requires_double_gate: args.requires_double_gate })
+        .eq("code", args.code);
+      if (error) throw error;
+      return true;
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+    onSuccess: async () => {
+      await keyTypesQuery.refetch();
+    },
+  });
+
+  const toggleAllowReset = useMutation({
+    mutationFn: async (args: { code: string; allow_reset: boolean }) => {
+      const { error } = await supabase
+        .from("licenses_free_key_types")
+        .update({ allow_reset: args.allow_reset })
         .eq("code", args.code);
       if (error) throw error;
       return true;
@@ -708,16 +744,26 @@ export function AdminFreeKeysPage() {
   const [newKind, setNewKind] = useState<"hour" | "day">("hour");
   const [newValue, setNewValue] = useState<number>(1);
   const [newLabel, setNewLabel] = useState<string>("");
+  const [newAppCode, setNewAppCode] = useState<string>(initialAppCode);
+  const [newKeySignature, setNewKeySignature] = useState<string>(getAppMeta(initialAppCode).signature);
+  const [newAllowReset, setNewAllowReset] = useState<boolean>(true);
+
+  useEffect(() => {
+    setNewKeySignature(getAppMeta(newAppCode).signature);
+  }, [newAppCode]);
 
   const createKeyType = useMutation({
     mutationFn: async () => {
+      const appMeta = getAppMeta(newAppCode);
+      const signature = (newKeySignature.trim().toUpperCase() || appMeta.signature).replace(/[^A-Z0-9]/g, "") || appMeta.signature;
       const v = Math.max(1, Math.floor(Number(newValue) || 1));
       const max = newKind === "hour" ? 24 : 30;
       const value = Math.min(max, v);
-      const code = `${newKind === "hour" ? "h" : "d"}${pad2(value)}`;
-      const label = (newLabel?.trim() || `${value} ${newKind === "hour" ? "giờ" : "ngày"}`);
+      const baseCode = `${newKind === "hour" ? "h" : "d"}${pad2(value)}`;
+      const code = `${signature.toLowerCase()}_${baseCode}`;
+      const label = (newLabel?.trim() || `${signature} | ${appMeta.label} | ${value} ${newKind === "hour" ? "giờ" : "ngày"}`);
       const duration_seconds = newKind === "hour" ? value * 3600 : value * 86400;
-      const sort_order = newKind === "hour" ? value : 100 + value;
+      const sort_order = (newAppCode === "find-dumps" ? 1000 : 0) + (newKind === "hour" ? value : 100 + value);
 
       const { error } = await supabase
         .from("licenses_free_key_types")
@@ -730,6 +776,10 @@ export function AdminFreeKeysPage() {
             duration_seconds,
             sort_order,
             enabled: true,
+            app_code: newAppCode,
+            app_label: appMeta.label,
+            key_signature: signature,
+            allow_reset: newAllowReset,
           },
           { onConflict: "code" },
         );
@@ -1551,7 +1601,19 @@ export function AdminFreeKeysPage() {
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <div className="mt-3 grid gap-3 md:grid-cols-5">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">App</div>
+                <Select value={newAppCode} onValueChange={setNewAppCode}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {APP_OPTIONS.map((item) => (
+                      <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="space-y-2">
                 <div className="text-sm font-medium">Loại</div>
                 <Select value={newKind} onValueChange={(v) => setNewKind(v as any)}>
@@ -1577,6 +1639,15 @@ export function AdminFreeKeysPage() {
               </div>
 
               <div className="space-y-2">
+                <div className="text-sm font-medium">Chữ ký key</div>
+                <Input
+                  value={newKeySignature}
+                  onChange={(e) => setNewKeySignature(e.target.value.toUpperCase())}
+                  placeholder="FF / FD"
+                />
+              </div>
+
+              <div className="space-y-2">
                 <div className="text-sm font-medium">Tên hiển thị (optional)</div>
                 <Input
                   value={newLabel}
@@ -1584,6 +1655,14 @@ export function AdminFreeKeysPage() {
                   placeholder={newKind === "hour" ? "Ví dụ: 6 giờ" : "Ví dụ: 3 ngày"}
                 />
               </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between rounded-md border p-3">
+              <div>
+                <div className="font-medium">Cho reset key</div>
+                <div className="text-xs text-muted-foreground">Admin chọn trước loại key này có hỗ trợ reset hay không.</div>
+              </div>
+              <Switch checked={newAllowReset} onCheckedChange={setNewAllowReset} />
             </div>
 
             <div className="mt-3">
@@ -1598,11 +1677,14 @@ export function AdminFreeKeysPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>On</TableHead>
+                  <TableHead>App</TableHead>
                   <TableHead>Code</TableHead>
                   <TableHead>Label</TableHead>
+                  <TableHead>Signature</TableHead>
                   <TableHead>Kind</TableHead>
                   <TableHead>Value</TableHead>
                   <TableHead>Seconds</TableHead>
+                  <TableHead>Reset</TableHead>
                   <TableHead>VIP 2-pass</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -1616,11 +1698,19 @@ export function AdminFreeKeysPage() {
                         onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
                       />
                     </TableCell>
+                    <TableCell>{k.app_label || getAppMeta(k.app_code).label}</TableCell>
                     <TableCell className="font-mono">{k.code}</TableCell>
                     <TableCell>{k.label}</TableCell>
+                    <TableCell className="font-mono">{k.key_signature || getAppMeta(k.app_code).signature}</TableCell>
                     <TableCell>{k.kind}</TableCell>
                     <TableCell>{k.value}</TableCell>
                     <TableCell className="font-mono">{k.duration_seconds}</TableCell>
+                    <TableCell className="w-24">
+                      <Switch
+                        checked={Boolean(k.allow_reset ?? true)}
+                        onCheckedChange={(v) => toggleAllowReset.mutate({ code: k.code, allow_reset: Boolean(v) })}
+                      />
+                    </TableCell>
                     <TableCell className="w-24">
                       <Switch
                         checked={Boolean((k as any).requires_double_gate ?? false)}
@@ -1644,7 +1734,7 @@ export function AdminFreeKeysPage() {
                 ))}
                 {!keyTypesQuery.data?.length ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center text-sm text-muted-foreground">
                       No rows
                     </TableCell>
                   </TableRow>
@@ -1918,7 +2008,7 @@ export function AdminFreeKeysPage() {
                 ))}
                 {!sessionsQuery.data?.length ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center text-sm text-muted-foreground">
                       No rows
                     </TableCell>
                   </TableRow>
@@ -1994,7 +2084,7 @@ export function AdminFreeKeysPage() {
                 ))}
                 {!gateLogsQuery.data?.length ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center text-sm text-muted-foreground">
                       No rows
                     </TableCell>
                   </TableRow>

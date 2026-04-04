@@ -33,6 +33,12 @@ function maskKey(key: string) {
   return `${key.slice(0, 9)}…${key.slice(-4)}`;
 }
 
+async function getKeyTypeMeta(sb: any, code: string | null) {
+  if (!code) return null;
+  const res = await sb.from("licenses_free_key_types").select("*").eq("code", code).maybeSingle();
+  return res.data ?? null;
+}
+
 function getVietnamDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -411,8 +417,9 @@ Deno.serve(async (req) => {
   if (Number(sess.reveal_count ?? 0) > 0 || sess.status === "revealed" || sess.status === "revealing") {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
+    const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
     if (existing) {
-      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, warnings: warnings.length ? warnings : undefined }, 200);
+      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: Boolean(keyTypeMeta?.allow_reset ?? true), app_code: keyTypeMeta?.app_code ?? "free-fire", key_signature: keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
     }
 
     // Inconsistent: session says revealed/revealing but no issued key row exists.
@@ -530,7 +537,8 @@ Deno.serve(async (req) => {
   if (!lock.data) {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
-    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, warnings: warnings.length ? warnings : undefined }, 200);
+    const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
+    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: Boolean(keyTypeMeta?.allow_reset ?? true), app_code: keyTypeMeta?.app_code ?? "free-fire", key_signature: keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
 
     // If someone else locked it, signal in-progress; otherwise report lock failure clearly.
     if (sess.status === "revealing") {
@@ -542,6 +550,16 @@ Deno.serve(async (req) => {
   const dur = Math.max(60, Number(sess.duration_seconds ?? 0));
   const expires_at = new Date(Date.now() + dur * 1000).toISOString();
   const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
+  const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
+  const allowReset = Boolean(keyTypeMeta?.allow_reset ?? true);
+  const appCode = String(keyTypeMeta?.app_code ?? "free-fire").trim();
+  const keySignature = String(keyTypeMeta?.key_signature ?? "FF").trim().toUpperCase();
+  const freeNote = [
+    `FREE_${String(sess.key_type_code ?? "GENERIC").toUpperCase()}`,
+    `APP=${appCode}`,
+    `SIG=${keySignature}`,
+    `ALLOW_RESET=${allowReset ? 1 : 0}`,
+  ].join(";");
 
   // Mint license
   let inserted: { id: string; key: string } | null = null;
@@ -554,7 +572,7 @@ Deno.serve(async (req) => {
         is_active: true,
         max_devices: 1,
         expires_at,
-        note: sess.key_type_code ? `FREE_${String(sess.key_type_code).toUpperCase()}` : "FREE",
+        note: freeNote,
       })
       .select("id,key")
       .single();
@@ -618,6 +636,9 @@ Deno.serve(async (req) => {
       created_at: new Date().toISOString(),
       session_id: sessionId,
       ip_hash: ipHash,
+      allow_reset: allowReset,
+      app_code: appCode,
+      key_signature: keySignature,
       warnings: warnings.length ? warnings : undefined,
       debug: debugOut,
     },

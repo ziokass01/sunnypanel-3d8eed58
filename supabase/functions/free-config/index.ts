@@ -211,7 +211,7 @@ if (!free_download_cards.length) {
   // Load enabled key types
   const { data: keyTypes, error: kErr } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,kind,value,duration_seconds,sort_order,enabled,requires_double_gate")
+    .select("*")
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
@@ -323,13 +323,17 @@ if (!free_download_cards.length) {
       icon_url: free_external_download_icon_url,
     },
 
-    key_types: (keyTypes ?? []).map((k) => ({
+    key_types: (keyTypes ?? []).map((k: any) => ({
       code: k.code,
       label: k.label,
       kind: k.kind,
       value: k.value,
       duration_seconds: k.duration_seconds,
-      requires_double_gate: Boolean((k as any).requires_double_gate ?? false),
+      requires_double_gate: Boolean(k?.requires_double_gate ?? false),
+      app_code: k?.app_code ?? "free-fire",
+      app_label: k?.app_label ?? "Free Fire",
+      key_signature: k?.key_signature ?? "FF",
+      allow_reset: Boolean(k?.allow_reset ?? true),
     })),
 
     turnstile_enabled,

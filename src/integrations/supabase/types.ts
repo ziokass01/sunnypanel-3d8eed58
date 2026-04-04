@@ -367,33 +367,48 @@ export type Database = {
       }
       licenses_free_key_types: {
         Row: {
+          allow_reset: boolean
+          app_code: string
+          app_label: string | null
           code: string
           duration_seconds: number
           enabled: boolean
+          key_signature: string | null
           kind: string
           label: string
+          requires_double_gate: boolean | null
           sort_order: number
           updated_at: string
           updated_by: string | null
           value: number
         }
         Insert: {
+          allow_reset?: boolean
+          app_code?: string
+          app_label?: string | null
           code: string
           duration_seconds: number
           enabled?: boolean
+          key_signature?: string | null
           kind: string
           label: string
+          requires_double_gate?: boolean | null
           sort_order?: number
           updated_at?: string
           updated_by?: string | null
           value: number
         }
         Update: {
+          allow_reset?: boolean
+          app_code?: string
+          app_label?: string | null
           code?: string
           duration_seconds?: number
           enabled?: boolean
+          key_signature?: string | null
           kind?: string
           label?: string
+          requires_double_gate?: boolean | null
           sort_order?: number
           updated_at?: string
           updated_by?: string | null

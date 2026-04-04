@@ -9,15 +9,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchAuditLogs } from "@/features/audit/audit-api";
-import { supabase } from "@/integrations/supabase/client";
 
 type QuickFilter = "all" | "verify_fail" | "verify_ok" | "mutations" | "destructive" | "blocked" | "today" | "last_10m";
 
 function auditVariant(action?: string, detail?: any) {
   const v = String(action ?? "").toUpperCase();
-  if (v === "VERIFY") {
-    return detail?.ok === false ? ("destructive" as const) : ("default" as const);
-  }
+  if (v === "VERIFY") return detail?.ok === false ? ("destructive" as const) : ("default" as const);
   if (["CREATE", "RESTORE"].includes(v)) return "default" as const;
   if (["SOFT_DELETE", "DELETE", "HARD_DELETE"].includes(v)) return "destructive" as const;
   if (["UPDATE"].includes(v)) return "secondary" as const;
@@ -46,79 +43,24 @@ function maskDetail(value: any): any {
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw === "string" && /(ip|device|fingerprint|token|session|secret|hash)/i.test(key)) {
-      out[key] = maskValue(raw);
-    } else if (raw && typeof raw === "object") {
-      out[key] = maskDetail(raw);
-    } else {
-      out[key] = raw;
-    }
+    if (typeof raw === "string" && /(ip|device|fingerprint|token|session|secret|hash)/i.test(key)) out[key] = maskValue(raw);
+    else if (raw && typeof raw === "object") out[key] = maskDetail(raw);
+    else out[key] = raw;
   }
   return out;
-}
-
-function escapeILike(s: string): string {
-  return s.replace(/[\\%_]/g, "\\\\$&");
 }
 
 export function AuditLogsPage() {
   const [q, setQ] = useState("");
   const [action, setAction] = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [quick, setQuick] = useState<QuickFilter>("all");
+  const [quick, setQuick] = useState<QuickFilter>("today");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const queryKey = useMemo(() => ["audit_logs", { q, action }] as const, [q, action]);
+  const queryKey = useMemo(() => ["audit_logs", { q, action, quick }] as const, [q, action, quick]);
   const { data = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => fetchAuditLogs({ q, action }),
-  });
-
-  const statsQuery = useQuery({
-    queryKey: ["audit_logs_stats", q, action, quick],
-    queryFn: async () => {
-      const qText = q.trim();
-      const todayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
-      const last10m = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-
-      const applyFilters = (query: any) => {
-        let next = query;
-        if (action !== "all") next = next.eq("action", action);
-        if (qText) next = next.ilike("license_key", `%${escapeILike(qText)}%`);
-        if (quick === "verify_fail") next = next.eq("action", "VERIFY").contains("detail", { ok: false });
-        if (quick === "verify_ok") next = next.eq("action", "VERIFY").not("detail", "cs", { ok: false } as any);
-        if (quick === "mutations") next = next.in("action", ["CREATE", "UPDATE", "RESTORE"]);
-        if (quick === "destructive") next = next.or("action.in.(SOFT_DELETE,DELETE,HARD_DELETE),and(action.eq.VERIFY,detail.cs.{\"ok\":false})");
-        if (quick === "blocked") next = next.or("action.ilike.%BLOCK%,detail::text.ilike.%BLOCK%");
-        if (quick === "today") next = next.gte("created_at", todayStart);
-        if (quick === "last_10m") next = next.gte("created_at", last10m);
-        return next;
-      };
-
-      const countQuery = () => applyFilters(supabase.from("audit_logs").select("id", { count: "exact", head: true }));
-      const verifyFailQuery = () => countQuery().eq("action", "VERIFY").contains("detail", { ok: false });
-      const verifyTotalQuery = () => countQuery().eq("action", "VERIFY");
-      const destructiveQuery = () => countQuery().in("action", ["SOFT_DELETE", "DELETE", "HARD_DELETE"]);
-
-      const [totalRes, verifyFailRes, verifyTotalRes, destructiveRes] = await Promise.all([
-        countQuery(),
-        verifyFailQuery(),
-        verifyTotalQuery(),
-        destructiveQuery(),
-      ]);
-
-      if (totalRes.error) throw totalRes.error;
-      if (verifyFailRes.error) throw verifyFailRes.error;
-      if (verifyTotalRes.error) throw verifyTotalRes.error;
-      if (destructiveRes.error) throw destructiveRes.error;
-
-      return {
-        total: totalRes.count ?? 0,
-        verifyFail: verifyFailRes.count ?? 0,
-        verifyOk: Math.max(0, (verifyTotalRes.count ?? 0) - (verifyFailRes.count ?? 0)),
-        destructive: destructiveRes.count ?? 0,
-      };
-    },
+    queryFn: () => fetchAuditLogs({ q, action, quick, limit: 200 }),
   });
 
   const filteredData = useMemo(() => {
@@ -129,24 +71,30 @@ export function AuditLogsPage() {
       if (quick === "verify_ok") return actionUpper === "VERIFY" && row.detail?.ok !== false;
       if (quick === "mutations") return ["CREATE", "UPDATE", "RESTORE"].includes(actionUpper);
       if (quick === "destructive") return ["SOFT_DELETE", "DELETE", "HARD_DELETE"].includes(actionUpper) || row.detail?.ok === false;
-      if (quick === "blocked") return JSON.stringify(row.detail ?? {}).includes("BLOCK") || actionUpper.includes("BLOCK");
+      if (quick === "blocked") return JSON.stringify(row.detail ?? {}).toUpperCase().includes("BLOCK") || actionUpper.includes("BLOCK");
       if (quick === "today") return new Date(row.created_at).toDateString() === new Date().toDateString();
       if (quick === "last_10m") return created >= Date.now() - 10 * 60 * 1000;
       return true;
     });
   }, [data, quick]);
 
-  const stats = statsQuery.data ?? { total: 0, verifyOk: 0, verifyFail: 0, destructive: 0 };
+  const stats = useMemo(() => {
+    const total = data.length;
+    const verifyFail = data.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok === false).length;
+    const verifyOk = data.filter((row) => String(row.action).toUpperCase() === "VERIFY" && row.detail?.ok !== false).length;
+    const destructive = data.filter((row) => ["SOFT_DELETE", "DELETE", "HARD_DELETE"].includes(String(row.action).toUpperCase())).length;
+    return { total, verifyOk, verifyFail, destructive };
+  }, [data]);
 
   const quickButtons: Array<{ key: QuickFilter; label: string }> = [
-    { key: "all", label: "Tất cả" },
+    { key: "today", label: "Hôm nay" },
+    { key: "last_10m", label: "10 phút gần" },
+    { key: "all", label: "7 ngày gần" },
     { key: "verify_fail", label: "Verify fail" },
     { key: "verify_ok", label: "Verify ok" },
     { key: "mutations", label: "Create / Update" },
     { key: "destructive", label: "Delete / lỗi" },
     { key: "blocked", label: "Blocked" },
-    { key: "last_10m", label: "10 phút gần" },
-    { key: "today", label: "Hôm nay" },
   ];
 
   return (
@@ -155,7 +103,9 @@ export function AuditLogsPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Audit logs</h1>
-            <p className="mt-2 text-sm text-muted-foreground">Theo dõi thao tác tạo, sửa, xoá và xác minh key theo cách gọn hơn, dễ đọc hơn.</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Mặc định chỉ tải log gần đây để tránh timeout. Khi cần soi sâu hơn, hãy lọc theo từ khoá hoặc action.
+            </p>
           </div>
           <Collapsible open={showFilters} onOpenChange={setShowFilters}>
             <CollapsibleTrigger asChild>
@@ -169,42 +119,10 @@ export function AuditLogsPage() {
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <div className="text-xs uppercase text-muted-foreground">Tổng log</div>
-                <div className="mt-1 text-2xl font-semibold">{stats.total}</div>
-              </div>
-              <Badge variant="outline">Rows</Badge>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <div className="text-xs uppercase text-muted-foreground">Verify OK</div>
-                <div className="mt-1 text-2xl font-semibold">{stats.verifyOk}</div>
-              </div>
-              <CheckCircle2 className="h-5 w-5 text-primary" />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <div className="text-xs uppercase text-muted-foreground">Verify fail</div>
-                <div className="mt-1 text-2xl font-semibold">{stats.verifyFail}</div>
-              </div>
-              <ShieldAlert className="h-5 w-5 text-destructive" />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <div className="text-xs uppercase text-muted-foreground">Delete / hard delete</div>
-                <div className="mt-1 text-2xl font-semibold">{stats.destructive}</div>
-              </div>
-              <Trash2 className="h-5 w-5 text-muted-foreground" />
-            </CardContent>
-          </Card>
+          <Card><CardContent className="flex items-center justify-between p-4"><div><div className="text-xs uppercase text-muted-foreground">Tổng log</div><div className="mt-1 text-2xl font-semibold">{stats.total}</div></div><Badge variant="outline">Rows</Badge></CardContent></Card>
+          <Card><CardContent className="flex items-center justify-between p-4"><div><div className="text-xs uppercase text-muted-foreground">Verify OK</div><div className="mt-1 text-2xl font-semibold">{stats.verifyOk}</div></div><CheckCircle2 className="h-5 w-5 text-primary" /></CardContent></Card>
+          <Card><CardContent className="flex items-center justify-between p-4"><div><div className="text-xs uppercase text-muted-foreground">Verify fail</div><div className="mt-1 text-2xl font-semibold">{stats.verifyFail}</div></div><ShieldAlert className="h-5 w-5 text-destructive" /></CardContent></Card>
+          <Card><CardContent className="flex items-center justify-between p-4"><div><div className="text-xs uppercase text-muted-foreground">Delete / hard delete</div><div className="mt-1 text-2xl font-semibold">{stats.destructive}</div></div><Trash2 className="h-5 w-5 text-muted-foreground" /></CardContent></Card>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -224,13 +142,9 @@ export function AuditLogsPage() {
         <Collapsible open={showFilters} onOpenChange={setShowFilters}>
           <CollapsibleContent className="rounded-xl border bg-muted/20 p-3">
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="md:col-span-2">
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by license key…" />
-              </div>
+              <div className="md:col-span-2"><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by license key…" /></div>
               <Select value={action} onValueChange={(v) => setAction(v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Action" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Action" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="VERIFY">VERIFY</SelectItem>

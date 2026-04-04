@@ -45,6 +45,7 @@ type LastFreeKey = {
   expires_at: string;
   ip_hash?: string | null;
   session_id?: string | null;
+  allow_reset?: boolean;
 };
 
 const LAST_FREE_KEY_STORAGE = "lastFreeKey";
@@ -501,15 +502,21 @@ export function FreeLandingPage() {
                   >
                     Copy key
                   </Button>
-                  <Button
-                    type="button"
-                    className="rounded-2xl"
-                    onClick={() => {
-                      window.location.assign(`/reset-key?key=${encodeURIComponent(lastFreeKey.key)}`);
-                    }}
-                  >
-                    Reset Key🗝
-                  </Button>
+                  {lastFreeKey.allow_reset !== false ? (
+                    <Button
+                      type="button"
+                      className="rounded-2xl"
+                      onClick={() => {
+                        window.location.assign(`/reset-key?key=${encodeURIComponent(lastFreeKey.key)}`);
+                      }}
+                    >
+                      Reset Key🗝
+                    </Button>
+                  ) : (
+                    <Badge variant="outline" className="rounded-2xl px-3 py-2">
+                      Key này không hỗ trợ reset
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
               </div>

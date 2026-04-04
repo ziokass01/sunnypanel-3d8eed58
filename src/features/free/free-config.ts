@@ -7,6 +7,10 @@ export type FreeKeyType = {
   value: number;
   duration_seconds: number;
   requires_double_gate?: boolean;
+  app_code?: string | null;
+  app_label?: string | null;
+  key_signature?: string | null;
+  allow_reset?: boolean;
 };
 
 export type PublicLink = {

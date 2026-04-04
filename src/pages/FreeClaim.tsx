@@ -26,6 +26,7 @@ type RevealOk = {
   created_at?: string | null;
   session_id?: string | null;
   ip_hash?: string | null;
+  allow_reset?: boolean | null;
 };
 type RevealErr = { ok: false; msg: string; code?: string };
 
@@ -483,6 +484,7 @@ export function FreeClaimPage() {
           expires_at: okRes.expires_at,
           ip_hash: okRes.ip_hash || null,
           session_id: okRes.session_id || null,
+          allow_reset: okRes.allow_reset !== false,
         };
         localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
         markFreeSuccess({ keyLabel: payload.key_type, nextEligibleAt: okRes.expires_at || null });

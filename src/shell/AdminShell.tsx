@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   History,
   ChevronRight,
+  AppWindow,
 } from "lucide-react";
 
 import {
@@ -79,6 +80,7 @@ export function AdminShell() {
     { label: "Thuê Website", to: "/rent", icon: Building2, show: true, adminOnly: true },
     { label: "Reset Settings", to: "/settings/reset-key", icon: SlidersHorizontal, show: true, adminOnly: true },
     { label: "Reset Logs", to: "/settings/reset-logs", icon: History, show: true, adminOnly: true },
+    { label: "Server app", to: "/admin/apps", icon: AppWindow, show: true, adminOnly: true },
   ] as const;
 
   const activeLabel = items.find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))?.label ?? "Admin Console";
