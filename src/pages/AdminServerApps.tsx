@@ -1,20 +1,20 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getAppWorkspaceOrigin, getAppWorkspaceUrl } from "@/lib/appWorkspace";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildAppWorkspaceUrl } from "@/lib/appWorkspace";
 
 const APPS = [
   {
     code: "free-fire",
     label: "Free Fire",
-    description: "Server web hiện tại cho app Free Fire. Từ đây bạn nhảy sang web app riêng để chỉnh cấu hình hoặc runtime mà không lẫn với admin tổng.",
+    description: "Server web hiện tại cho app Free Fire. Dùng để quản lý free key, luồng vượt và các gói mở rộng sau này.",
     url: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || "/admin/free-keys?app=free-fire",
     mode: "current",
   },
   {
     code: "find-dumps",
     label: "Find Dumps",
-    description: "Server web dành cho app Find Dumps. Cấu hình app và runtime sẽ nằm trên app.mityangho.id.vn để tách hẳn khỏi admin tổng.",
+    description: "Server web dành cho app Find Dumps. Tại đây bạn có thể chuẩn bị cấu hình gói, credit và feature flags riêng cho app này.",
     url: (import.meta.env.VITE_SERVER_APP_FIND_DUMPS_URL as string | undefined)?.trim() || "/admin/free-keys?app=find-dumps",
     mode: "new",
   },
@@ -30,8 +30,8 @@ export function AdminServerAppsPage() {
     window.location.assign(url);
   };
 
-  const openAppWorkspace = (appCode: string, tab: "config" | "runtime") => {
-    window.location.assign(getAppWorkspaceUrl(appCode, tab));
+  const openWorkspace = (appCode: string, section: "config" | "runtime") => {
+    window.location.assign(buildAppWorkspaceUrl(appCode, section));
   };
 
   return (
@@ -41,11 +41,12 @@ export function AdminServerAppsPage() {
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Từ đây chỉ còn vai trò cổng tổng. Khi bấm <span className="font-medium text-foreground">Cấu hình app</span> hoặc <span className="font-medium text-foreground">Runtime app</span>,
-              hệ thống sẽ chuyển sang web riêng trên <span className="font-medium text-foreground">{getAppWorkspaceOrigin()}</span>. Vẫn dùng chung quyền admin hiện tại, chỉ tách giao diện để khỏi rối khi số app tăng lên.
+              Admin tổng chỉ là cổng vào. Khi bấm cấu hình app hoặc runtime app, bạn sẽ được đưa sang hẳn domain
+              <span className="mx-1 font-medium text-foreground">app.mityangho.id.vn</span>
+              để tránh nhầm với giao diện admin chính.
             </p>
           </div>
-          <Badge variant="outline">App domain</Badge>
+          <Badge variant="outline">App domain workspace</Badge>
         </div>
       </header>
 
@@ -63,18 +64,13 @@ export function AdminServerAppsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-2xl border bg-muted/20 p-3 text-xs text-muted-foreground break-all">
-                Server web: {app.url}
-                <br />
-                App workspace: {getAppWorkspaceUrl(app.code, "config")}
+                {app.url}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => openTarget(app.url)}>Mở server web</Button>
-                <Button variant="outline" onClick={() => openAppWorkspace(app.code, "config")}>
-                  Cấu hình app
-                </Button>
-                <Button variant="outline" onClick={() => openAppWorkspace(app.code, "runtime")}>
-                  Runtime app
-                </Button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button onClick={() => openWorkspace(app.code, "config")}>Cấu hình app</Button>
+                <Button variant="outline" onClick={() => openWorkspace(app.code, "runtime")}>Runtime app</Button>
+                <Button variant="outline" onClick={() => openTarget(app.url)}>Mở server web</Button>
+                <Button variant="outline" onClick={() => openWorkspace(app.code, "config")}>Mở app workspace</Button>
               </div>
             </CardContent>
           </Card>
