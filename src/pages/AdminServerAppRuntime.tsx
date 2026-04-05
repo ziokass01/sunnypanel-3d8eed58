@@ -294,6 +294,14 @@ function formatMutationError(error: any) {
     ?? "Unknown error";
 }
 
+function formatJsonBlock(value: unknown) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
 export function AdminServerAppRuntimePage() {
   const { appCode = "" } = useParams();
   const { toast } = useToast();
@@ -778,7 +786,7 @@ export function AdminServerAppRuntimePage() {
             <CardHeader>
               <CardTitle>Runtime simulator không cần app</CardTitle>
               <CardDescription>
-                Phase 7 thêm buồng thử runtime ngay trong admin. Bạn có thể giả lập `catalog`, `redeem`, `consume`, `heartbeat`, `logout` mà chưa cần APK thật.
+                Phase 7 thêm buồng thử runtime ngay trong admin. Bạn có thể giả lập `health`, `catalog`, `redeem`, `consume`, `heartbeat`, `logout` mà chưa cần APK thật.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -788,6 +796,7 @@ export function AdminServerAppRuntimePage() {
                   <Select value={simulatorDraft.action} onValueChange={(value) => setSimulatorDraft((prev) => ({ ...prev, action: value as SimulatorForm["action"] }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="health">health</SelectItem>
                       <SelectItem value="catalog">catalog</SelectItem>
                       <SelectItem value="me">me</SelectItem>
                       <SelectItem value="redeem">redeem</SelectItem>
@@ -839,7 +848,23 @@ export function AdminServerAppRuntimePage() {
 
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => runSimulatorMutation.mutate()} disabled={runSimulatorMutation.isPending}>Chạy simulator</Button>
-                <Button variant="outline" onClick={() => { setSimulatorDraft(defaultSimulatorForm()); setSimulatorResult(""); }}>Xóa form</Button>
+                <Button variant="outline" onClick={() => {
+                  setSimulatorDraft(defaultSimulatorForm());
+                  setSimulatorResult("");
+                  setSimulatorLastPayload("");
+                  setSimulatorStatus("Chưa chạy simulator.");
+                }}>Xóa form</Button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Trạng thái simulator</div>
+                  <div className="rounded-2xl border bg-muted/40 p-3 text-sm text-muted-foreground">{simulatorStatus}</div>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Payload vừa gửi</div>
+                  <pre className="min-h-[88px] overflow-auto rounded-2xl border bg-muted p-4 text-[11px] leading-5 text-muted-foreground">{simulatorLastPayload || "Chưa có payload nào được gửi."}</pre>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -884,7 +909,12 @@ export function AdminServerAppRuntimePage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button onClick={() => adjustWalletMutation.mutate()} disabled={adjustWalletMutation.isPending}>Cập nhật ví</Button>
-                  <Button variant="outline" onClick={() => setWalletAdjustDraft(defaultWalletAdjustForm())}>Reset form</Button>
+                  <Button variant="outline" onClick={() => {
+                    setWalletAdjustDraft(defaultWalletAdjustForm());
+                    setOpsStatus("Chưa chạy ops.");
+                    setOpsLastPayload("");
+                    setOpsResult("");
+                  }}>Reset form</Button>
                 </div>
               </CardContent>
             </Card>
@@ -912,7 +942,17 @@ export function AdminServerAppRuntimePage() {
               <CardTitle>Kết quả ops</CardTitle>
               <CardDescription>Log JSON của các thao tác cleanup hoặc chỉnh ví thủ công.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Trạng thái ops</div>
+                  <div className="rounded-2xl border bg-muted/40 p-3 text-sm text-muted-foreground">{opsStatus}</div>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Payload ops vừa gửi</div>
+                  <pre className="min-h-[88px] overflow-auto rounded-2xl border bg-muted p-4 text-[11px] leading-5 text-muted-foreground">{opsLastPayload || "Chưa có payload ops nào được gửi."}</pre>
+                </div>
+              </div>
               <pre className="min-h-[220px] overflow-auto rounded-2xl border bg-muted p-4 text-[11px] leading-5 text-muted-foreground">{opsResult || "Chưa có thao tác ops nào được chạy."}</pre>
             </CardContent>
           </Card>
