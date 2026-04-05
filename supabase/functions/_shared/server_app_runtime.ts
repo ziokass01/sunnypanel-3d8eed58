@@ -89,6 +89,9 @@ type RuntimeControls = {
   blocked_ip_hashes: string[];
   max_daily_redeems_per_account: number;
   max_daily_redeems_per_device: number;
+  session_idle_timeout_minutes: number;
+  session_max_age_minutes: number;
+  event_retention_days: number;
 };
 
 type RuntimeEntitlement = {
@@ -209,6 +212,63 @@ function round2(value: number) {
 
 function getNowIso() {
   return new Date().toISOString();
+}
+
+function minutesAgoIso(minutes: number) {
+  return new Date(Date.now() - Math.max(0, minutes) * 60_000).toISOString();
+}
+
+function daysAgoIso(days: number) {
+  return new Date(Date.now() - Math.max(0, days) * 86_400_000).toISOString();
+}
+
+function getSessionExpiryCode(session: any, controls: RuntimeControls) {
+  if (session?.expires_at && !isFutureIso(session.expires_at)) return "SESSION_EXPIRED";
+  if (controls.session_idle_timeout_minutes > 0 && session?.last_seen_at) {
+    const idleMs = Date.now() - new Date(String(session.last_seen_at)).getTime();
+    if (Number.isFinite(idleMs) && idleMs > controls.session_idle_timeout_minutes * 60_000) {
+      return "SESSION_IDLE_TIMEOUT";
+    }
+  }
+  if (controls.session_max_age_minutes > 0 && session?.started_at) {
+    const ageMs = Date.now() - new Date(String(session.started_at)).getTime();
+    if (Number.isFinite(ageMs) && ageMs > controls.session_max_age_minutes * 60_000) {
+      return "SESSION_MAX_AGE_EXPIRED";
+    }
+  }
+  return null;
+}
+
+async function expireSessionWithCode(sessionId: string, code: string) {
+  const admin = createAdminClient();
+  const nowIso = getNowIso();
+  const patch: Record<string, unknown> = {
+    status: "expired",
+    updated_at: nowIso,
+  };
+  if (code === "SESSION_EXPIRED") {
+    patch.expires_at = nowIso;
+  }
+  if (code === "SESSION_IDLE_TIMEOUT") {
+    patch.revoke_reason = "Expired by idle timeout";
+    patch.expires_at = nowIso;
+  }
+  if (code === "SESSION_MAX_AGE_EXPIRED") {
+    patch.revoke_reason = "Expired by max session age";
+    patch.expires_at = nowIso;
+  }
+  const { error } = await admin.from("server_app_sessions").update(patch).eq("id", sessionId);
+  if (error) throw error;
+}
+
+async function enforceSessionActiveOrThrow(appCode: string, session: any) {
+  const controls = await getRuntimeControls(appCode);
+  const expiryCode = getSessionExpiryCode(session, controls);
+  if (expiryCode) {
+    await expireSessionWithCode(asString(session.id), expiryCode);
+    throw Object.assign(new Error(expiryCode), { status: 409, code: expiryCode });
+  }
+  return controls;
 }
 
 function addDaysIso(baseIso: string, days: number) {
@@ -358,7 +418,7 @@ export async function getRuntimeControls(appCode: string): Promise<RuntimeContro
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_runtime_controls")
-    .select("runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device")
+    .select("runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days")
     .eq("app_code", appCode)
     .maybeSingle();
 
@@ -377,6 +437,9 @@ export async function getRuntimeControls(appCode: string): Promise<RuntimeContro
     blocked_ip_hashes: asStringArray(data?.blocked_ip_hashes),
     max_daily_redeems_per_account: Math.max(0, Math.trunc(asNumber(data?.max_daily_redeems_per_account, 0))),
     max_daily_redeems_per_device: Math.max(0, Math.trunc(asNumber(data?.max_daily_redeems_per_device, 0))),
+    session_idle_timeout_minutes: Math.max(0, Math.trunc(asNumber(data?.session_idle_timeout_minutes, 1440))),
+    session_max_age_minutes: Math.max(0, Math.trunc(asNumber(data?.session_max_age_minutes, 43200))),
+    event_retention_days: Math.max(1, Math.trunc(asNumber(data?.event_retention_days, 30))),
   };
 }
 
@@ -1038,9 +1101,18 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
   const sessionToken = asNullableString(opts?.sessionToken);
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
   if (session) {
-    if (asString(session.status) !== "active") session = null;
-    if (session?.revoked_at) session = null;
-    if (session?.expires_at && !isFutureIso(session.expires_at)) session = null;
+    if (asString(session.status) !== "active") {
+      session = null;
+    } else if (session?.revoked_at) {
+      session = null;
+    } else {
+      const controls = await getRuntimeControls(appCode);
+      const expiryCode = getSessionExpiryCode(session, controls);
+      if (expiryCode) {
+        await expireSessionWithCode(asString(session.id), expiryCode);
+        session = null;
+      }
+    }
   }
 
   let entitlement = session?.entitlement_id
@@ -1116,9 +1188,7 @@ export async function touchRuntimeSession(appCode: string, sessionToken: string,
     throw Object.assign(new Error("SESSION_INACTIVE"), { status: 409, code: "SESSION_INACTIVE" });
   }
 
-  if (session.expires_at && new Date(session.expires_at).getTime() <= Date.now()) {
-    throw Object.assign(new Error("SESSION_EXPIRED"), { status: 409, code: "SESSION_EXPIRED" });
-  }
+  await enforceSessionActiveOrThrow(appCode, session);
 
   const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : null;
   if (entitlement?.revoked_at) {
@@ -1304,7 +1374,7 @@ export async function consumeRuntimeFeature(params: {
   const session = await findSession(appCode, sessionToken);
   if (!session) throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
   if (asString(session.status) !== "active") throw Object.assign(new Error("SESSION_INACTIVE"), { status: 409, code: "SESSION_INACTIVE" });
-  if (session.expires_at && !isFutureIso(session.expires_at)) throw Object.assign(new Error("SESSION_EXPIRED"), { status: 409, code: "SESSION_EXPIRED" });
+  await enforceSessionActiveOrThrow(appCode, session);
 
   const { settings, planMap, features } = await getRuntimeContext(appCode);
   const entitlement = session.entitlement_id
@@ -1432,6 +1502,128 @@ export async function consumeRuntimeFeature(params: {
     charged_soft: Math.abs(softDelta),
     charged_premium: Math.abs(premiumDelta),
     state,
+  };
+}
+
+export async function cleanupRuntimeOps(appCode: string) {
+  const controls = await getRuntimeControls(appCode);
+  const admin = createAdminClient();
+  const { data: sessions, error: sessionsError } = await admin
+    .from("server_app_sessions")
+    .select("id,status,started_at,last_seen_at,expires_at")
+    .eq("app_code", appCode)
+    .eq("status", "active");
+
+  if (sessionsError) throw sessionsError;
+
+  let expiredSessions = 0;
+  const reasons: Record<string, number> = {};
+  for (const session of sessions ?? []) {
+    const expiryCode = getSessionExpiryCode(session, controls);
+    if (!expiryCode) continue;
+    await expireSessionWithCode(asString((session as any).id), expiryCode);
+    expiredSessions += 1;
+    reasons[expiryCode] = (reasons[expiryCode] ?? 0) + 1;
+  }
+
+  const pruneBeforeIso = daysAgoIso(controls.event_retention_days);
+  const { data: oldEvents, error: oldEventsError } = await admin
+    .from("server_app_runtime_events")
+    .select("id")
+    .eq("app_code", appCode)
+    .lt("created_at", pruneBeforeIso);
+  if (oldEventsError) throw oldEventsError;
+
+  const oldEventIds = (oldEvents ?? []).map((row: any) => asString(row.id)).filter(Boolean);
+  let prunedEvents = 0;
+  if (oldEventIds.length) {
+    const { error: deleteError } = await admin.from("server_app_runtime_events").delete().in("id", oldEventIds);
+    if (deleteError) throw deleteError;
+    prunedEvents = oldEventIds.length;
+  }
+
+  return {
+    app_code: appCode,
+    expired_sessions: expiredSessions,
+    expired_reasons: reasons,
+    pruned_events: prunedEvents,
+    controls: {
+      session_idle_timeout_minutes: controls.session_idle_timeout_minutes,
+      session_max_age_minutes: controls.session_max_age_minutes,
+      event_retention_days: controls.event_retention_days,
+    },
+  };
+}
+
+export async function adjustRuntimeWalletBalance(params: {
+  appCode: string;
+  accountRef: string;
+  deviceId?: string | null;
+  softDelta?: number | null;
+  premiumDelta?: number | null;
+  note?: string | null;
+  metadata?: Record<string, unknown> | null;
+}) {
+  const appCode = asString(params.appCode);
+  const accountRef = asString(params.accountRef);
+  const deviceId = asNullableString(params.deviceId);
+  const softDelta = round2(asNumber(params.softDelta, 0));
+  const premiumDelta = round2(asNumber(params.premiumDelta, 0));
+  if (!accountRef) throw Object.assign(new Error("MISSING_ACCOUNT_REF"), { status: 400, code: "MISSING_ACCOUNT_REF" });
+  if (!softDelta && !premiumDelta) throw Object.assign(new Error("EMPTY_ADJUSTMENT"), { status: 400, code: "EMPTY_ADJUSTMENT" });
+
+  const wallet = await ensureWalletRecord(appCode, accountRef, deviceId);
+  const nextSoft = round2(wallet.soft_balance + softDelta);
+  const nextPremium = round2(wallet.premium_balance + premiumDelta);
+  if (nextSoft < 0) throw Object.assign(new Error("NEGATIVE_SOFT_BALANCE"), { status: 409, code: "NEGATIVE_SOFT_BALANCE" });
+  if (nextPremium < 0) throw Object.assign(new Error("NEGATIVE_PREMIUM_BALANCE"), { status: 409, code: "NEGATIVE_PREMIUM_BALANCE" });
+
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_wallet_balances")
+    .update({
+      soft_balance: nextSoft,
+      premium_balance: nextPremium,
+      device_id: deviceId,
+      updated_by_source: "admin_adjust",
+      updated_at: getNowIso(),
+    })
+    .eq("id", wallet.id)
+    .eq("soft_balance", wallet.soft_balance)
+    .eq("premium_balance", wallet.premium_balance)
+    .select("id")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw Object.assign(new Error("WALLET_BALANCE_CONFLICT"), { status: 409, code: "WALLET_BALANCE_CONFLICT" });
+
+  const walletKind = softDelta && premiumDelta ? "mixed" : softDelta ? "soft" : "premium";
+  await insertWalletTransaction({
+    app_code: appCode,
+    wallet_balance_id: wallet.id,
+    entitlement_id: null,
+    redeem_key_id: null,
+    reward_package_id: null,
+    account_ref: accountRef,
+    device_id: deviceId,
+    feature_code: null,
+    transaction_type: "admin_adjust",
+    wallet_kind: walletKind,
+    soft_delta: softDelta,
+    premium_delta: premiumDelta,
+    soft_balance_after: nextSoft,
+    premium_balance_after: nextPremium,
+    note: asNullableString(params.note) ?? "Admin wallet adjust",
+    metadata: params.metadata ?? { source: "server_app_runtime_ops" },
+  });
+
+  return {
+    wallet_id: wallet.id,
+    account_ref: accountRef,
+    soft_balance: nextSoft,
+    premium_balance: nextPremium,
+    soft_delta: softDelta,
+    premium_delta: premiumDelta,
   };
 }
 

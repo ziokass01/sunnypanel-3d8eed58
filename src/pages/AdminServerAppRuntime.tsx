@@ -156,6 +156,9 @@ type ControlRow = {
   blocked_ip_hashes: string[] | null;
   max_daily_redeems_per_account: number;
   max_daily_redeems_per_device: number;
+  session_idle_timeout_minutes: number;
+  session_max_age_minutes: number;
+  event_retention_days: number;
 };
 
 type ControlDraft = {
@@ -173,6 +176,9 @@ type ControlDraft = {
   blocked_ip_hashes_text: string;
   max_daily_redeems_per_account: number;
   max_daily_redeems_per_device: number;
+  session_idle_timeout_minutes: number;
+  session_max_age_minutes: number;
+  event_retention_days: number;
 };
 
 type EventRow = {
@@ -189,6 +195,25 @@ type EventRow = {
   client_version: string | null;
   meta: Record<string, unknown> | null;
   created_at: string;
+};
+
+type SimulatorForm = {
+  action: "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
+  account_ref: string;
+  device_id: string;
+  client_version: string;
+  redeem_key: string;
+  feature_code: string;
+  wallet_kind: string;
+  session_token: string;
+};
+
+type WalletAdjustForm = {
+  account_ref: string;
+  device_id: string;
+  soft_delta: string;
+  premium_delta: string;
+  note: string;
 };
 
 function emptyRedeemKey(appCode: string, index: number): RedeemKeyRow {
@@ -232,6 +257,32 @@ function defaultControlDraft(appCode: string): ControlDraft {
     blocked_ip_hashes_text: "",
     max_daily_redeems_per_account: 0,
     max_daily_redeems_per_device: 0,
+    session_idle_timeout_minutes: 1440,
+    session_max_age_minutes: 43200,
+    event_retention_days: 30,
+  };
+}
+
+function defaultSimulatorForm(): SimulatorForm {
+  return {
+    action: "catalog",
+    account_ref: "",
+    device_id: "",
+    client_version: "1.0.0",
+    redeem_key: "",
+    feature_code: "",
+    wallet_kind: "auto",
+    session_token: "",
+  };
+}
+
+function defaultWalletAdjustForm(): WalletAdjustForm {
+  return {
+    account_ref: "",
+    device_id: "",
+    soft_delta: "0",
+    premium_delta: "0",
+    note: "Điều chỉnh ví từ runtime admin",
   };
 }
 
@@ -252,7 +303,7 @@ export function AdminServerAppRuntimePage() {
         sb.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(50),
         sb.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(50),
         sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
-        sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device").eq("app_code", appCode).maybeSingle(),
+        sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days").eq("app_code", appCode).maybeSingle(),
         sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
       ]);
 
@@ -276,6 +327,10 @@ export function AdminServerAppRuntimePage() {
   const { data, isLoading, error, refetch } = runtimeQuery;
   const [redeemDraft, setRedeemDraft] = useState<RedeemKeyRow[]>([]);
   const [controlDraft, setControlDraft] = useState<ControlDraft>(defaultControlDraft(appCode));
+  const [simulatorDraft, setSimulatorDraft] = useState<SimulatorForm>(defaultSimulatorForm());
+  const [simulatorResult, setSimulatorResult] = useState<string>("");
+  const [opsResult, setOpsResult] = useState<string>("");
+  const [walletAdjustDraft, setWalletAdjustDraft] = useState<WalletAdjustForm>(defaultWalletAdjustForm());
 
   useEffect(() => {
     setRedeemDraft((data?.redeemKeys ?? []).map((row) => ({
@@ -304,8 +359,12 @@ export function AdminServerAppRuntimePage() {
       blocked_ip_hashes_text: listToTextarea(row.blocked_ip_hashes ?? []),
       max_daily_redeems_per_account: Number(row.max_daily_redeems_per_account ?? 0),
       max_daily_redeems_per_device: Number(row.max_daily_redeems_per_device ?? 0),
+      session_idle_timeout_minutes: Number(row.session_idle_timeout_minutes ?? 1440),
+      session_max_age_minutes: Number(row.session_max_age_minutes ?? 43200),
+      event_retention_days: Number(row.event_retention_days ?? 30),
     } : defaultControlDraft(appCode));
   }, [appCode, data?.controls]);
+
 
   const packageMap = useMemo(() => {
     return new Map((data?.rewardPackages ?? []).map((item) => [item.id, item]));
@@ -383,6 +442,9 @@ export function AdminServerAppRuntimePage() {
         blocked_ip_hashes: textareaToList(controlDraft.blocked_ip_hashes_text),
         max_daily_redeems_per_account: Math.max(0, Math.floor(Number(controlDraft.max_daily_redeems_per_account || 0))),
         max_daily_redeems_per_device: Math.max(0, Math.floor(Number(controlDraft.max_daily_redeems_per_device || 0))),
+        session_idle_timeout_minutes: Math.max(0, Math.floor(Number(controlDraft.session_idle_timeout_minutes || 0))),
+        session_max_age_minutes: Math.max(0, Math.floor(Number(controlDraft.session_max_age_minutes || 0))),
+        event_retention_days: Math.max(1, Math.floor(Number(controlDraft.event_retention_days || 30))),
         updated_at: new Date().toISOString(),
       };
       const { error } = await sb.from("server_app_runtime_controls").upsert(payload, { onConflict: "app_code" });
@@ -433,6 +495,90 @@ export function AdminServerAppRuntimePage() {
       await refetch();
     },
     onError: (e: any) => toast({ title: "Revoke session thất bại", description: e?.message ?? "Không thể revoke session.", variant: "destructive" }),
+  });
+
+  const runSimulatorMutation = useMutation({
+    mutationFn: async () => {
+      const payload: Record<string, unknown> = {
+        action: simulatorDraft.action,
+        app_code: appCode,
+        client_version: simulatorDraft.client_version.trim() || null,
+      };
+
+      if (simulatorDraft.account_ref.trim()) payload.account_ref = simulatorDraft.account_ref.trim();
+      if (simulatorDraft.device_id.trim()) payload.device_id = simulatorDraft.device_id.trim();
+      if (simulatorDraft.redeem_key.trim()) payload.redeem_key = simulatorDraft.redeem_key.trim();
+      if (simulatorDraft.feature_code.trim()) payload.feature_code = simulatorDraft.feature_code.trim();
+      if (simulatorDraft.wallet_kind.trim()) payload.wallet_kind = simulatorDraft.wallet_kind.trim();
+      if (simulatorDraft.session_token.trim()) payload.session_token = simulatorDraft.session_token.trim();
+
+      const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: async (result) => {
+      setSimulatorResult(formatJsonBlock(result));
+      const sessionToken = (result as any)?.session_token;
+      if (typeof sessionToken === "string" && sessionToken.trim()) {
+        setSimulatorDraft((prev) => ({ ...prev, session_token: sessionToken }));
+      }
+      toast({ title: "Đã chạy simulator", description: "Runtime đã trả kết quả. Kiểm tra JSON bên dưới." });
+      await refetch();
+    },
+    onError: (e: any) => {
+      const payload = { ok: false, message: e?.message ?? "Simulator call failed" };
+      setSimulatorResult(formatJsonBlock(payload));
+      toast({ title: "Simulator lỗi", description: e?.message ?? "Không thể gọi runtime function.", variant: "destructive" });
+    },
+  });
+
+  const cleanupOpsMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", {
+        body: {
+          action: "cleanup",
+          app_code: appCode,
+        },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: async (result) => {
+      setOpsResult(formatJsonBlock(result));
+      toast({ title: "Đã dọn runtime", description: "Session cũ và event quá hạn đã được xử lý." });
+      await refetch();
+    },
+    onError: (e: any) => {
+      setOpsResult(formatJsonBlock({ ok: false, message: e?.message ?? "Cleanup failed" }));
+      toast({ title: "Cleanup thất bại", description: e?.message ?? "Không thể dọn runtime.", variant: "destructive" });
+    },
+  });
+
+  const adjustWalletMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", {
+        body: {
+          action: "adjust_wallet",
+          app_code: appCode,
+          account_ref: walletAdjustDraft.account_ref.trim(),
+          device_id: walletAdjustDraft.device_id.trim() || null,
+          soft_delta: Number(walletAdjustDraft.soft_delta || 0),
+          premium_delta: Number(walletAdjustDraft.premium_delta || 0),
+          note: walletAdjustDraft.note.trim() || null,
+        },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: async (result) => {
+      setOpsResult(formatJsonBlock(result));
+      toast({ title: "Đã chỉnh ví", description: "Số dư runtime đã được cập nhật và ghi log." });
+      await refetch();
+    },
+    onError: (e: any) => {
+      setOpsResult(formatJsonBlock({ ok: false, message: e?.message ?? "Wallet adjust failed" }));
+      toast({ title: "Chỉnh ví thất bại", description: e?.message ?? "Không thể cập nhật số dư ví.", variant: "destructive" });
+    },
   });
 
   const addRedeemKey = () => {
@@ -501,6 +647,8 @@ export function AdminServerAppRuntimePage() {
       <Tabs defaultValue="controls" className="space-y-3">
         <TabsList className="flex w-full flex-wrap justify-start gap-2">
           <TabsTrigger value="controls">Controls</TabsTrigger>
+          <TabsTrigger value="simulator">Simulator</TabsTrigger>
+          <TabsTrigger value="ops">Ops</TabsTrigger>
           <TabsTrigger value="redeem">Redeem keys</TabsTrigger>
           <TabsTrigger value="entitlements">Entitlements</TabsTrigger>
           <TabsTrigger value="wallets">Wallets</TabsTrigger>
@@ -545,6 +693,21 @@ export function AdminServerAppRuntimePage() {
                 </div>
               </div>
 
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Session idle timeout (phút)</div>
+                  <Input type="number" min={0} value={controlDraft.session_idle_timeout_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_idle_timeout_minutes: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Session max age (phút)</div>
+                  <Input type="number" min={0} value={controlDraft.session_max_age_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_max_age_minutes: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Giữ event tối đa (ngày)</div>
+                  <Input type="number" min={1} value={controlDraft.event_retention_days} onChange={(e) => setControlDraft((prev) => ({ ...prev, event_retention_days: Number(e.target.value) || 30 }))} />
+                </div>
+              </div>
+
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Blocked client versions</div>
@@ -567,6 +730,151 @@ export function AdminServerAppRuntimePage() {
               <div className="flex justify-end">
                 <Button onClick={() => saveControlsMutation.mutate()} disabled={saveControlsMutation.isPending}>Lưu runtime controls</Button>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="simulator">
+          <Card>
+            <CardHeader>
+              <CardTitle>Runtime simulator không cần app</CardTitle>
+              <CardDescription>
+                Phase 7 thêm buồng thử runtime ngay trong admin. Bạn có thể giả lập `catalog`, `redeem`, `consume`, `heartbeat`, `logout` mà chưa cần APK thật.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Action</div>
+                  <Select value={simulatorDraft.action} onValueChange={(value) => setSimulatorDraft((prev) => ({ ...prev, action: value as SimulatorForm["action"] }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="catalog">catalog</SelectItem>
+                      <SelectItem value="me">me</SelectItem>
+                      <SelectItem value="redeem">redeem</SelectItem>
+                      <SelectItem value="consume">consume</SelectItem>
+                      <SelectItem value="heartbeat">heartbeat</SelectItem>
+                      <SelectItem value="logout">logout</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Account ref</div>
+                  <Input value={simulatorDraft.account_ref} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, account_ref: e.target.value }))} placeholder="user_001" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Device id</div>
+                  <Input value={simulatorDraft.device_id} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, device_id: e.target.value }))} placeholder="device_001" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Client version</div>
+                  <Input value={simulatorDraft.client_version} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, client_version: e.target.value }))} placeholder="1.0.0" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem key</div>
+                  <Input value={simulatorDraft.redeem_key} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, redeem_key: e.target.value }))} placeholder="Chỉ dùng khi action = redeem" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Feature code</div>
+                  <Input value={simulatorDraft.feature_code} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, feature_code: e.target.value }))} placeholder="Chỉ dùng khi action = consume" />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Wallet kind</div>
+                  <Select value={simulatorDraft.wallet_kind} onValueChange={(value) => setSimulatorDraft((prev) => ({ ...prev, wallet_kind: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">auto</SelectItem>
+                      <SelectItem value="soft">soft</SelectItem>
+                      <SelectItem value="premium">premium</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Session token</div>
+                  <Textarea rows={3} value={simulatorDraft.session_token} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, session_token: e.target.value }))} placeholder="Sau khi redeem thành công token sẽ tự đổ vào đây" />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => runSimulatorMutation.mutate()} disabled={runSimulatorMutation.isPending}>Chạy simulator</Button>
+                <Button variant="outline" onClick={() => { setSimulatorDraft(defaultSimulatorForm()); setSimulatorResult(""); }}>Xóa form</Button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Kết quả JSON</div>
+                <pre className="min-h-[220px] overflow-auto rounded-2xl border bg-muted p-4 text-[11px] leading-5 text-muted-foreground">{simulatorResult || "Chưa có kết quả. Chạy một action để xem phản hồi runtime."}</pre>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ops">
+          <div className="grid gap-3 lg:grid-cols-[1.2fr,0.8fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Wallet adjust thủ công</CardTitle>
+                <CardDescription>
+                  Khi chưa có app thật, chỗ này giúp bạn nạp hoặc trừ credit để test server. Mỗi lần chỉnh đều ghi transaction `admin_adjust`.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Account ref</div>
+                    <Input value={walletAdjustDraft.account_ref} onChange={(e) => setWalletAdjustDraft((prev) => ({ ...prev, account_ref: e.target.value }))} placeholder="user_001" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Device id</div>
+                    <Input value={walletAdjustDraft.device_id} onChange={(e) => setWalletAdjustDraft((prev) => ({ ...prev, device_id: e.target.value }))} placeholder="device_001" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Soft delta</div>
+                    <Input value={walletAdjustDraft.soft_delta} onChange={(e) => setWalletAdjustDraft((prev) => ({ ...prev, soft_delta: e.target.value }))} placeholder="100 hoặc -25" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Premium delta</div>
+                    <Input value={walletAdjustDraft.premium_delta} onChange={(e) => setWalletAdjustDraft((prev) => ({ ...prev, premium_delta: e.target.value }))} placeholder="10 hoặc -3" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Ghi chú</div>
+                  <Textarea rows={3} value={walletAdjustDraft.note} onChange={(e) => setWalletAdjustDraft((prev) => ({ ...prev, note: e.target.value }))} placeholder="Ví dụ: nạp credit để test consume" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => adjustWalletMutation.mutate()} disabled={adjustWalletMutation.isPending}>Cập nhật ví</Button>
+                  <Button variant="outline" onClick={() => setWalletAdjustDraft(defaultWalletAdjustForm())}>Reset form</Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Cleanup runtime</CardTitle>
+                <CardDescription>
+                  Dọn session bị quá hạn theo timeout phase 7 và xóa event cũ hơn số ngày giữ lại trong controls.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
+                  Idle timeout: <span className="font-medium text-foreground">{controlDraft.session_idle_timeout_minutes} phút</span><br />
+                  Max age: <span className="font-medium text-foreground">{controlDraft.session_max_age_minutes} phút</span><br />
+                  Event retention: <span className="font-medium text-foreground">{controlDraft.event_retention_days} ngày</span>
+                </div>
+                <Button onClick={() => cleanupOpsMutation.mutate()} disabled={cleanupOpsMutation.isPending}>Chạy cleanup ngay</Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="mt-3">
+            <CardHeader>
+              <CardTitle>Kết quả ops</CardTitle>
+              <CardDescription>Log JSON của các thao tác cleanup hoặc chỉnh ví thủ công.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <pre className="min-h-[220px] overflow-auto rounded-2xl border bg-muted p-4 text-[11px] leading-5 text-muted-foreground">{opsResult || "Chưa có thao tác ops nào được chạy."}</pre>
             </CardContent>
           </Card>
         </TabsContent>
