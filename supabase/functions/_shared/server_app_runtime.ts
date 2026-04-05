@@ -75,6 +75,22 @@ type RuntimeWalletRules = {
   premium_daily_reset_amount: number;
 };
 
+type RuntimeControls = {
+  runtime_enabled: boolean;
+  catalog_enabled: boolean;
+  redeem_enabled: boolean;
+  consume_enabled: boolean;
+  heartbeat_enabled: boolean;
+  maintenance_notice: string | null;
+  min_client_version: string | null;
+  blocked_client_versions: string[];
+  blocked_accounts: string[];
+  blocked_devices: string[];
+  blocked_ip_hashes: string[];
+  max_daily_redeems_per_account: number;
+  max_daily_redeems_per_device: number;
+};
+
 type RuntimeEntitlement = {
   id: string;
   plan_code: string;
@@ -149,6 +165,38 @@ function asString(value: unknown, fallback = "") {
 function asNullableString(value: unknown): string | null {
   const v = String(value ?? "").trim();
   return v || null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map((item) => asString(item)).filter(Boolean)));
+  }
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  return Array.from(new Set(raw.split(/[,
+]/).map((item) => item.trim()).filter(Boolean)));
+}
+
+function compareVersionText(left: string | null | undefined, right: string | null | undefined) {
+  const a = String(left ?? "").trim();
+  const b = String(right ?? "").trim();
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  const aParts = a.split(/[^0-9]+/).filter(Boolean).map((part) => Number(part));
+  const bParts = b.split(/[^0-9]+/).filter(Boolean).map((part) => Number(part));
+  const maxLen = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < maxLen; i += 1) {
+    const av = Number.isFinite(aParts[i]) ? aParts[i] : 0;
+    const bv = Number.isFinite(bParts[i]) ? bParts[i] : 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return a.localeCompare(b, undefined, { sensitivity: "base" });
+}
+
+function startOfUtcDayIso(base = new Date()) {
+  return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 0, 0, 0, 0)).toISOString();
 }
 
 function asNumber(value: unknown, fallback = 0) {
@@ -305,6 +353,83 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
     soft_daily_reset_amount: asNumber(data?.soft_daily_reset_amount),
     premium_daily_reset_amount: asNumber(data?.premium_daily_reset_amount),
   };
+}
+
+export async function getRuntimeControls(appCode: string): Promise<RuntimeControls> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_runtime_controls")
+    .select("runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device")
+    .eq("app_code", appCode)
+    .maybeSingle();
+
+  if (error) throw error;
+  return {
+    runtime_enabled: Boolean(data?.runtime_enabled ?? true),
+    catalog_enabled: Boolean(data?.catalog_enabled ?? true),
+    redeem_enabled: Boolean(data?.redeem_enabled ?? true),
+    consume_enabled: Boolean(data?.consume_enabled ?? true),
+    heartbeat_enabled: Boolean(data?.heartbeat_enabled ?? true),
+    maintenance_notice: asNullableString(data?.maintenance_notice),
+    min_client_version: asNullableString(data?.min_client_version),
+    blocked_client_versions: asStringArray(data?.blocked_client_versions),
+    blocked_accounts: asStringArray(data?.blocked_accounts),
+    blocked_devices: asStringArray(data?.blocked_devices),
+    blocked_ip_hashes: asStringArray(data?.blocked_ip_hashes),
+    max_daily_redeems_per_account: Math.max(0, Math.trunc(asNumber(data?.max_daily_redeems_per_account, 0))),
+    max_daily_redeems_per_device: Math.max(0, Math.trunc(asNumber(data?.max_daily_redeems_per_device, 0))),
+  };
+}
+
+export async function countRuntimeSuccessEvents(params: {
+  appCode: string;
+  eventType: string;
+  accountRef?: string | null;
+  deviceId?: string | null;
+  sinceIso?: string | null;
+}) {
+  const admin = createAdminClient();
+  let query = admin
+    .from("server_app_runtime_events")
+    .select("id", { count: "exact", head: true })
+    .eq("app_code", params.appCode)
+    .eq("event_type", params.eventType)
+    .eq("ok", true);
+
+  const accountRef = asNullableString(params.accountRef);
+  const deviceId = asNullableString(params.deviceId);
+  const sinceIso = asNullableString(params.sinceIso) ?? startOfUtcDayIso();
+
+  if (accountRef) query = query.eq("account_ref", accountRef);
+  if (deviceId) query = query.eq("device_id", deviceId);
+  if (sinceIso) query = query.gte("created_at", sinceIso);
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return Number(count ?? 0);
+}
+
+export async function logRuntimeEvent(payload: Record<string, unknown>) {
+  const admin = createAdminClient();
+  const normalized = {
+    app_code: asString(payload.app_code),
+    event_type: asString(payload.event_type),
+    ok: Boolean(payload.ok ?? true),
+    code: asNullableString(payload.code),
+    message: asNullableString(payload.message),
+    account_ref: asNullableString(payload.account_ref),
+    device_id: asNullableString(payload.device_id),
+    session_id: asNullableString(payload.session_id),
+    redeem_key_id: asNullableString(payload.redeem_key_id),
+    feature_code: asNullableString(payload.feature_code),
+    wallet_kind: asNullableString(payload.wallet_kind),
+    ip_hash: asNullableString(payload.ip_hash),
+    client_version: asNullableString(payload.client_version),
+    meta: typeof payload.meta === "object" && payload.meta != null ? payload.meta : {},
+  };
+
+  const { error } = await admin.from("server_app_runtime_events").insert(normalized);
+  if (error) throw error;
 }
 
 function getPlanRank(planCode: string) {

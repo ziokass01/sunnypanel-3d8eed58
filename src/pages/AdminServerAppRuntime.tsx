@@ -50,6 +50,14 @@ function formatTime(value: string | null | undefined) {
   return date.toLocaleString("vi-VN");
 }
 
+function listToTextarea(value: string[] | null | undefined) {
+  return (value ?? []).join("\n");
+}
+
+function textareaToList(value: string) {
+  return Array.from(new Set(String(value ?? "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)));
+}
+
 type RewardPackageOption = {
   id: string;
   package_code: string;
@@ -133,6 +141,56 @@ type TransactionRow = {
   created_at: string;
 };
 
+type ControlRow = {
+  app_code: string;
+  runtime_enabled: boolean;
+  catalog_enabled: boolean;
+  redeem_enabled: boolean;
+  consume_enabled: boolean;
+  heartbeat_enabled: boolean;
+  maintenance_notice: string | null;
+  min_client_version: string | null;
+  blocked_client_versions: string[] | null;
+  blocked_accounts: string[] | null;
+  blocked_devices: string[] | null;
+  blocked_ip_hashes: string[] | null;
+  max_daily_redeems_per_account: number;
+  max_daily_redeems_per_device: number;
+};
+
+type ControlDraft = {
+  app_code: string;
+  runtime_enabled: boolean;
+  catalog_enabled: boolean;
+  redeem_enabled: boolean;
+  consume_enabled: boolean;
+  heartbeat_enabled: boolean;
+  maintenance_notice: string;
+  min_client_version: string;
+  blocked_client_versions_text: string;
+  blocked_accounts_text: string;
+  blocked_devices_text: string;
+  blocked_ip_hashes_text: string;
+  max_daily_redeems_per_account: number;
+  max_daily_redeems_per_device: number;
+};
+
+type EventRow = {
+  id: string;
+  event_type: string;
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+  account_ref: string | null;
+  device_id: string | null;
+  feature_code: string | null;
+  wallet_kind: string | null;
+  ip_hash: string | null;
+  client_version: string | null;
+  meta: Record<string, unknown> | null;
+  created_at: string;
+};
+
 function emptyRedeemKey(appCode: string, index: number): RedeemKeyRow {
   return {
     app_code: appCode,
@@ -158,6 +216,25 @@ function emptyRedeemKey(appCode: string, index: number): RedeemKeyRow {
   };
 }
 
+function defaultControlDraft(appCode: string): ControlDraft {
+  return {
+    app_code: appCode,
+    runtime_enabled: true,
+    catalog_enabled: true,
+    redeem_enabled: true,
+    consume_enabled: true,
+    heartbeat_enabled: true,
+    maintenance_notice: "",
+    min_client_version: "",
+    blocked_client_versions_text: "",
+    blocked_accounts_text: "",
+    blocked_devices_text: "",
+    blocked_ip_hashes_text: "",
+    max_daily_redeems_per_account: 0,
+    max_daily_redeems_per_device: 0,
+  };
+}
+
 export function AdminServerAppRuntimePage() {
   const { appCode = "" } = useParams();
   const { toast } = useToast();
@@ -167,7 +244,7 @@ export function AdminServerAppRuntimePage() {
     enabled: Boolean(appCode),
     queryFn: async () => {
       const sb = supabase as any;
-      const [appRes, packageRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes] = await Promise.all([
+      const [appRes, packageRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes] = await Promise.all([
         sb.from("server_apps").select("code,label,description,public_enabled").eq("code", appCode).maybeSingle(),
         sb.from("server_app_reward_packages").select("id,package_code,title,enabled").eq("app_code", appCode).order("sort_order", { ascending: true }),
         sb.from("server_app_redeem_keys").select("id,app_code,reward_package_id,redeem_key,title,description,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override,blocked_at,blocked_reason,notes").eq("app_code", appCode).order("created_at", { ascending: false }),
@@ -175,9 +252,11 @@ export function AdminServerAppRuntimePage() {
         sb.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(50),
         sb.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(50),
         sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
+        sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device").eq("app_code", appCode).maybeSingle(),
+        sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
       ]);
 
-      const firstError = [appRes, packageRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes].find((item) => item.error)?.error;
+      const firstError = [appRes, packageRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes].find((item) => item.error)?.error;
       if (firstError) throw firstError;
 
       return {
@@ -188,12 +267,15 @@ export function AdminServerAppRuntimePage() {
         wallets: (walletRes.data ?? []) as WalletRow[],
         sessions: (sessionRes.data ?? []) as SessionRow[],
         transactions: (txRes.data ?? []) as TransactionRow[],
+        controls: (controlsRes.data ?? null) as ControlRow | null,
+        events: (eventsRes.data ?? []) as EventRow[],
       };
     },
   });
 
   const { data, isLoading, error, refetch } = runtimeQuery;
   const [redeemDraft, setRedeemDraft] = useState<RedeemKeyRow[]>([]);
+  const [controlDraft, setControlDraft] = useState<ControlDraft>(defaultControlDraft(appCode));
 
   useEffect(() => {
     setRedeemDraft((data?.redeemKeys ?? []).map((row) => ({
@@ -204,6 +286,26 @@ export function AdminServerAppRuntimePage() {
       notes: row.notes ?? "",
     })));
   }, [data]);
+
+  useEffect(() => {
+    const row = data?.controls;
+    setControlDraft(row ? {
+      app_code: row.app_code,
+      runtime_enabled: Boolean(row.runtime_enabled),
+      catalog_enabled: Boolean(row.catalog_enabled),
+      redeem_enabled: Boolean(row.redeem_enabled),
+      consume_enabled: Boolean(row.consume_enabled),
+      heartbeat_enabled: Boolean(row.heartbeat_enabled),
+      maintenance_notice: row.maintenance_notice ?? "",
+      min_client_version: row.min_client_version ?? "",
+      blocked_client_versions_text: listToTextarea(row.blocked_client_versions ?? []),
+      blocked_accounts_text: listToTextarea(row.blocked_accounts ?? []),
+      blocked_devices_text: listToTextarea(row.blocked_devices ?? []),
+      blocked_ip_hashes_text: listToTextarea(row.blocked_ip_hashes ?? []),
+      max_daily_redeems_per_account: Number(row.max_daily_redeems_per_account ?? 0),
+      max_daily_redeems_per_device: Number(row.max_daily_redeems_per_device ?? 0),
+    } : defaultControlDraft(appCode));
+  }, [appCode, data?.controls]);
 
   const packageMap = useMemo(() => {
     return new Map((data?.rewardPackages ?? []).map((item) => [item.id, item]));
@@ -261,6 +363,36 @@ export function AdminServerAppRuntimePage() {
       await refetch();
     },
     onError: (e: any) => toast({ title: "Lưu redeem thất bại", description: e?.message ?? "Không thể lưu redeem keys.", variant: "destructive" }),
+  });
+
+  const saveControlsMutation = useMutation({
+    mutationFn: async () => {
+      const sb = supabase as any;
+      const payload = {
+        app_code: appCode,
+        runtime_enabled: Boolean(controlDraft.runtime_enabled),
+        catalog_enabled: Boolean(controlDraft.catalog_enabled),
+        redeem_enabled: Boolean(controlDraft.redeem_enabled),
+        consume_enabled: Boolean(controlDraft.consume_enabled),
+        heartbeat_enabled: Boolean(controlDraft.heartbeat_enabled),
+        maintenance_notice: controlDraft.maintenance_notice.trim() || null,
+        min_client_version: controlDraft.min_client_version.trim() || null,
+        blocked_client_versions: textareaToList(controlDraft.blocked_client_versions_text),
+        blocked_accounts: textareaToList(controlDraft.blocked_accounts_text),
+        blocked_devices: textareaToList(controlDraft.blocked_devices_text),
+        blocked_ip_hashes: textareaToList(controlDraft.blocked_ip_hashes_text),
+        max_daily_redeems_per_account: Math.max(0, Math.floor(Number(controlDraft.max_daily_redeems_per_account || 0))),
+        max_daily_redeems_per_device: Math.max(0, Math.floor(Number(controlDraft.max_daily_redeems_per_device || 0))),
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await sb.from("server_app_runtime_controls").upsert(payload, { onConflict: "app_code" });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã lưu", description: "Runtime controls đã được cập nhật." });
+      await refetch();
+    },
+    onError: (e: any) => toast({ title: "Lưu runtime controls thất bại", description: e?.message ?? "Không thể lưu controls.", variant: "destructive" }),
   });
 
   const revokeEntitlementMutation = useMutation({
@@ -357,22 +489,87 @@ export function AdminServerAppRuntimePage() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-6">
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Redeem keys</div><div className="mt-1 text-2xl font-semibold">{data?.redeemKeys.length ?? 0}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Entitlements</div><div className="mt-1 text-2xl font-semibold">{data?.entitlements.length ?? 0}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Wallets</div><div className="mt-1 text-2xl font-semibold">{data?.wallets.length ?? 0}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Sessions</div><div className="mt-1 text-2xl font-semibold">{data?.sessions.length ?? 0}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Transactions</div><div className="mt-1 text-2xl font-semibold">{data?.transactions.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Events</div><div className="mt-1 text-2xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
       </div>
 
-      <Tabs defaultValue="redeem" className="space-y-3">
+      <Tabs defaultValue="controls" className="space-y-3">
         <TabsList className="flex w-full flex-wrap justify-start gap-2">
+          <TabsTrigger value="controls">Controls</TabsTrigger>
           <TabsTrigger value="redeem">Redeem keys</TabsTrigger>
           <TabsTrigger value="entitlements">Entitlements</TabsTrigger>
           <TabsTrigger value="wallets">Wallets</TabsTrigger>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="events">Events</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="controls">
+          <Card>
+            <CardHeader>
+              <CardTitle>Runtime controls / hardening</CardTitle>
+              <CardDescription>
+                Kill switch, chặn version cũ, chặn account hoặc device, và giới hạn số lần redeem trong ngày. Chỗ này là buồng lái tím điện của phase 6.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-5">
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Runtime enabled</div><Switch checked={controlDraft.runtime_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, runtime_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Catalog / me</div><Switch checked={controlDraft.catalog_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, catalog_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Redeem</div><Switch checked={controlDraft.redeem_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, redeem_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Consume</div><Switch checked={controlDraft.consume_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, consume_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Heartbeat</div><Switch checked={controlDraft.heartbeat_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, heartbeat_enabled: value }))} /></div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Min client version</div>
+                  <Input value={controlDraft.min_client_version} onChange={(e) => setControlDraft((prev) => ({ ...prev, min_client_version: e.target.value }))} placeholder="Ví dụ: 1.0.5" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Thông báo bảo trì / khóa app</div>
+                  <Input value={controlDraft.maintenance_notice} onChange={(e) => setControlDraft((prev) => ({ ...prev, maintenance_notice: e.target.value }))} placeholder="Ví dụ: Đang bảo trì runtime 15 phút" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem tối đa mỗi account / ngày</div>
+                  <Input type="number" min={0} value={controlDraft.max_daily_redeems_per_account} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_daily_redeems_per_account: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem tối đa mỗi device / ngày</div>
+                  <Input type="number" min={0} value={controlDraft.max_daily_redeems_per_device} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_daily_redeems_per_device: Number(e.target.value) || 0 }))} />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Blocked client versions</div>
+                  <Textarea rows={5} value={controlDraft.blocked_client_versions_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_client_versions_text: e.target.value }))} placeholder={"Mỗi dòng 1 version\n1.0.1\n1.0.2"} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Blocked accounts</div>
+                  <Textarea rows={5} value={controlDraft.blocked_accounts_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_accounts_text: e.target.value }))} placeholder={"Mỗi dòng 1 account_ref"} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Blocked devices</div>
+                  <Textarea rows={5} value={controlDraft.blocked_devices_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_devices_text: e.target.value }))} placeholder={"Mỗi dòng 1 device_id"} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Blocked IP hashes</div>
+                  <Textarea rows={5} value={controlDraft.blocked_ip_hashes_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_ip_hashes_text: e.target.value }))} placeholder={"Mỗi dòng 1 ip hash SHA-256"} />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button onClick={() => saveControlsMutation.mutate()} disabled={saveControlsMutation.isPending}>Lưu runtime controls</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="redeem">
           <Card>
@@ -589,6 +786,39 @@ export function AdminServerAppRuntimePage() {
                     Sau giao dịch: thường {item.soft_balance_after ?? "-"} · kim cương {item.premium_balance_after ?? "-"} · {formatTime(item.created_at)}
                   </div>
                   {item.note ? <div className="mt-2 text-xs text-muted-foreground">Ghi chú: {item.note}</div> : null}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="events">
+          <Card>
+            <CardHeader>
+              <CardTitle>Runtime events</CardTitle>
+              <CardDescription>
+                Dòng thời gian runtime cho từng action. Chỗ này giúp bạn soi app đang ngã ở đâu thay vì nhìn log như hố đen tím.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(data?.events ?? []).length === 0 ? <div className="text-sm text-muted-foreground">Chưa có event nào.</div> : null}
+              {(data?.events ?? []).map((item) => (
+                <div key={item.id} className="rounded-2xl border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={item.ok ? "secondary" : "destructive"}>{item.ok ? "OK" : "FAIL"}</Badge>
+                        <Badge variant="outline">{item.event_type}</Badge>
+                        {item.code ? <Badge variant="outline">{item.code}</Badge> : null}
+                      </div>
+                      <div className="text-sm font-medium">{item.account_ref || "guest"}</div>
+                      <div className="text-xs text-muted-foreground">Device: {item.device_id || "-"} · Feature: {item.feature_code || "-"} · Wallet: {item.wallet_kind || "-"}</div>
+                      <div className="text-xs text-muted-foreground">Client: {item.client_version || "-"} · IP hash: {item.ip_hash || "-"}</div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">{formatTime(item.created_at)}</div>
+                  </div>
+                  {item.message ? <div className="mt-3 text-sm text-muted-foreground">{item.message}</div> : null}
+                  {item.meta ? <pre className="mt-3 overflow-auto rounded-xl bg-muted p-3 text-[11px] leading-5 text-muted-foreground">{JSON.stringify(item.meta, null, 2)}</pre> : null}
                 </div>
               ))}
             </CardContent>
