@@ -38,10 +38,10 @@ export function AdminServerAppsPage() {
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Mỗi app có một khu quản lý riêng. Bạn có thể mở thẳng server web của app hoặc đi vào màn cấu hình nội bộ để chuẩn bị plan, credit và feature flags.
+              Mỗi app giờ có một workspace riêng. Bấm vào app là đi sang khu điều khiển riêng của app đó, vẫn trực thuộc quyền admin hiện tại nhưng đỡ nhầm với admin tổng.
             </p>
           </div>
-          <Badge variant="outline">2 tầng quản lý</Badge>
+          <Badge variant="outline">App workspace</Badge>
         </div>
       </header>
 
@@ -64,10 +64,13 @@ export function AdminServerAppsPage() {
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => openTarget(app.url)}>Mở server web</Button>
                 <Button asChild variant="outline">
-                  <Link to={`/admin/apps/${app.code}`}>Cấu hình nội bộ</Link>
+                  <Link to={`/apps/${app.code}/dashboard`}>Mở workspace</Link>
                 </Button>
                 <Button asChild variant="outline">
-                  <Link to={`/admin/apps/${app.code}/runtime`}>Runtime admin</Link>
+                  <Link to={`/apps/${app.code}/internal`}>Cấu hình nội bộ</Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link to={`/apps/${app.code}/runtime`}>Runtime admin</Link>
                 </Button>
               </div>
             </CardContent>

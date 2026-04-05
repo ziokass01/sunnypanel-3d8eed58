@@ -473,7 +473,9 @@ export function AdminServerAppRuntimePage() {
   const [opsLastPayload, setOpsLastPayload] = useState("");
   const [opsStatus, setOpsStatus] = useState("Chưa chạy ops.");
   const [walletAdjustDraft, setWalletAdjustDraft] = useState<WalletAdjustForm>(defaultWalletAdjustForm());
-  const [searchText, setSearchText] = useState("");
+  const [accountSearch, setAccountSearch] = useState("");
+  const [redeemSearch, setRedeemSearch] = useState("");
+  const [logSearch, setLogSearch] = useState("");
 
   useEffect(() => {
     setRedeemDraft((data?.redeemKeys ?? []).map((row) => ({
@@ -512,28 +514,28 @@ export function AdminServerAppRuntimePage() {
   const featureOptions = data?.features ?? [];
 
   const filteredEntitlements = useMemo(
-    () => (data?.entitlements ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.plan_code, item.status, item.revoke_reason)),
-    [data?.entitlements, searchText],
+    () => (data?.entitlements ?? []).filter((item) => matchesSearch(accountSearch, item.account_ref, item.device_id, item.plan_code, item.status, item.revoke_reason)),
+    [data?.entitlements, accountSearch],
   );
   const filteredWallets = useMemo(
-    () => (data?.wallets ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.soft_balance, item.premium_balance)),
-    [data?.wallets, searchText],
+    () => (data?.wallets ?? []).filter((item) => matchesSearch(accountSearch, item.account_ref, item.device_id, item.soft_balance, item.premium_balance)),
+    [data?.wallets, accountSearch],
   );
   const filteredSessions = useMemo(
-    () => (data?.sessions ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.status, item.client_version, item.revoke_reason)),
-    [data?.sessions, searchText],
+    () => (data?.sessions ?? []).filter((item) => matchesSearch(accountSearch, item.account_ref, item.device_id, item.status, item.client_version, item.revoke_reason)),
+    [data?.sessions, accountSearch],
   );
   const filteredTransactions = useMemo(
-    () => (data?.transactions ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.transaction_type, item.wallet_kind, item.feature_code, item.note)),
-    [data?.transactions, searchText],
+    () => (data?.transactions ?? []).filter((item) => matchesSearch(logSearch, item.account_ref, item.device_id, item.transaction_type, item.wallet_kind, item.feature_code, item.note)),
+    [data?.transactions, logSearch],
   );
   const filteredEvents = useMemo(
-    () => (data?.events ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.event_type, item.code, item.message, item.feature_code)),
-    [data?.events, searchText],
+    () => (data?.events ?? []).filter((item) => matchesSearch(logSearch, item.account_ref, item.device_id, item.event_type, item.code, item.message, item.feature_code)),
+    [data?.events, logSearch],
   );
   const filteredRedeemDraft = useMemo(
-    () => redeemDraft.filter((item) => matchesSearch(searchText, item.redeem_key, item.title, item.description, item.reward_mode, item.plan_code, item.blocked_reason)),
-    [redeemDraft, searchText],
+    () => redeemDraft.filter((item) => matchesSearch(redeemSearch, item.redeem_key, item.title, item.description, item.reward_mode, item.plan_code, item.blocked_reason)),
+    [redeemDraft, redeemSearch],
   );
 
   const saveRedeemMutation = useMutation({
@@ -840,7 +842,7 @@ export function AdminServerAppRuntimePage() {
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm">
-                  <Link to={`/admin/apps/${appCode}`}>← Quay lại cấu hình app</Link>
+                  <Link to={`/apps/${appCode}/dashboard`}>← Quay lại cấu hình app</Link>
                 </Button>
                 <Badge variant={data?.app?.public_enabled ? "secondary" : "outline"}>
                   {data?.app?.public_enabled ? "App đang bật" : "App đang ẩn"}
@@ -861,15 +863,31 @@ export function AdminServerAppRuntimePage() {
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[1.3fr,0.7fr]">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Tìm nhanh account, device, key, feature, event</div>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input className="pl-9" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Ví dụ: user_001, device_001, REDEEM_1, FEATURE_A, SESSION..." />
+          <div className="grid gap-3 lg:grid-cols-[1.4fr,0.6fr]">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho entitlements, wallets và sessions.</div>
               </div>
-              <div className="text-xs text-muted-foreground">
-                Bộ lọc này chạy xuyên qua redeem keys, entitlements, wallets, sessions, transactions và events.
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm redeem key</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={redeemSearch} onChange={(e) => setRedeemSearch(e.target.value)} placeholder="Ví dụ: REDEEM_1 hoặc plus_30d" />
+                </div>
+                <div className="text-xs text-muted-foreground">Chỉ lọc danh sách redeem keys.</div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm log / lỗi / transaction</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho transactions và events.</div>
               </div>
             </div>
             <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
@@ -1132,7 +1150,7 @@ export function AdminServerAppRuntimePage() {
               <CardDescription>Mode `package` sẽ lấy reward từ package. Các mode còn lại sẽ lấy trực tiếp plan hoặc credit bạn gõ trên key.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {filteredRedeemDraft.length === 0 ? <div className="text-sm text-muted-foreground">Không có redeem key nào khớp bộ lọc.</div> : null}
+              {filteredRedeemDraft.length === 0 ? <div className="text-sm text-muted-foreground">Không có redeem key nào khớp ô tìm redeem key.</div> : null}
               {filteredRedeemDraft.map((item) => {
                 const index = redeemDraft.findIndex((row) => row === item || row.id === item.id);
                 const rewardSource = summarizeRewardSource(item, packageMap);
@@ -1264,7 +1282,7 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Wallet balances</CardTitle>
-              <CardDescription>Danh sách ví đã được lọc theo từ khóa tìm kiếm bên trên.</CardDescription>
+              <CardDescription>Danh sách ví lọc theo ô tìm tài khoản / thiết bị.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {filteredWallets.length === 0 ? <div className="text-sm text-muted-foreground">Không có ví nào khớp bộ lọc.</div> : null}
@@ -1326,7 +1344,7 @@ export function AdminServerAppRuntimePage() {
               <CardDescription>Nếu redeem có cộng credit, transaction type sẽ là `redeem` và hiện rõ delta.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có transaction nào khớp bộ lọc.</div> : null}
+              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có transaction nào khớp ô tìm log / lỗi.</div> : null}
               {filteredTransactions.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1358,7 +1376,7 @@ export function AdminServerAppRuntimePage() {
               <CardDescription>Đây là chỗ đọc lỗi thật. Từ phase 8, khi FAIL nó sẽ hiện code rõ hơn và lọc được theo search.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có event nào khớp bộ lọc.</div> : null}
+              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có event nào khớp ô tìm log / lỗi.</div> : null}
               {filteredEvents.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
