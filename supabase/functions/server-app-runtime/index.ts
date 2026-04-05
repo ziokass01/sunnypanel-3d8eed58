@@ -12,7 +12,7 @@ import {
   touchRuntimeSession,
 } from "../_shared/server_app_runtime.ts";
 
-type RuntimeAction = "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
+type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
 
 function getIp(req: Request) {
   return req.headers.get("cf-connecting-ip")
@@ -186,9 +186,20 @@ Deno.serve(async (req) => {
       }
     };
 
-    if (!["catalog", "me", "redeem", "consume", "heartbeat", "logout"].includes(action)) {
+    if (!["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"].includes(action)) {
       await logSafe({ ok: false, code: "UNKNOWN_ACTION", message: action || null });
       return runtimeJson(400, { ok: false, code: "UNKNOWN_ACTION", action }, origin);
+    }
+
+    if (action === "health") {
+      await logSafe({ ok: true, code: "OK", meta: { mode: "health" } });
+      return runtimeJson(200, {
+        ok: true,
+        action,
+        app_code: appCode,
+        function: "server-app-runtime",
+        ts: new Date().toISOString(),
+      }, origin);
     }
 
     await enforceControls({

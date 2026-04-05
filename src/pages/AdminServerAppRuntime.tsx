@@ -198,7 +198,7 @@ type EventRow = {
 };
 
 type SimulatorForm = {
-  action: "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
+  action: "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
   account_ref: string;
   device_id: string;
   client_version: string;
@@ -265,7 +265,7 @@ function defaultControlDraft(appCode: string): ControlDraft {
 
 function defaultSimulatorForm(): SimulatorForm {
   return {
-    action: "catalog",
+    action: "health",
     account_ref: "",
     device_id: "",
     client_version: "1.0.0",
@@ -284,6 +284,14 @@ function defaultWalletAdjustForm(): WalletAdjustForm {
     premium_delta: "0",
     note: "Điều chỉnh ví từ runtime admin",
   };
+}
+
+function formatMutationError(error: any) {
+  return error?.context?.json?.message
+    ?? error?.context?.json?.msg
+    ?? error?.context?.json?.code
+    ?? error?.message
+    ?? "Unknown error";
 }
 
 export function AdminServerAppRuntimePage() {
@@ -329,7 +337,11 @@ export function AdminServerAppRuntimePage() {
   const [controlDraft, setControlDraft] = useState<ControlDraft>(defaultControlDraft(appCode));
   const [simulatorDraft, setSimulatorDraft] = useState<SimulatorForm>(defaultSimulatorForm());
   const [simulatorResult, setSimulatorResult] = useState<string>("");
+  const [simulatorLastPayload, setSimulatorLastPayload] = useState<string>("");
+  const [simulatorStatus, setSimulatorStatus] = useState<string>("Chưa chạy simulator.");
   const [opsResult, setOpsResult] = useState<string>("");
+  const [opsLastPayload, setOpsLastPayload] = useState<string>("");
+  const [opsStatus, setOpsStatus] = useState<string>("Chưa chạy ops.");
   const [walletAdjustDraft, setWalletAdjustDraft] = useState<WalletAdjustForm>(defaultWalletAdjustForm());
 
   useEffect(() => {
@@ -512,11 +524,19 @@ export function AdminServerAppRuntimePage() {
       if (simulatorDraft.wallet_kind.trim()) payload.wallet_kind = simulatorDraft.wallet_kind.trim();
       if (simulatorDraft.session_token.trim()) payload.session_token = simulatorDraft.session_token.trim();
 
+      setSimulatorLastPayload(formatJsonBlock(payload));
+      setSimulatorStatus(`Đang gọi simulator: ${String(payload.action)}...`);
+      setSimulatorResult(formatJsonBlock({ ok: false, pending: true, payload }));
+
       const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
-      if (error) throw error;
-      return data;
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
+      return { payload, data };
     },
-    onSuccess: async (result) => {
+    onSuccess: async ({ payload, data: result }) => {
+      setSimulatorStatus(`Simulator chạy xong: ${String(payload.action)}`);
       setSimulatorResult(formatJsonBlock(result));
       const sessionToken = (result as any)?.session_token;
       if (typeof sessionToken === "string" && sessionToken.trim()) {
@@ -526,58 +546,77 @@ export function AdminServerAppRuntimePage() {
       await refetch();
     },
     onError: (e: any) => {
-      const payload = { ok: false, message: e?.message ?? "Simulator call failed" };
-      setSimulatorResult(formatJsonBlock(payload));
-      toast({ title: "Simulator lỗi", description: e?.message ?? "Không thể gọi runtime function.", variant: "destructive" });
+      const payload = e?.context?.payload ?? null;
+      const json = e?.context?.json ?? null;
+      const msg = formatMutationError(e);
+      setSimulatorStatus("Simulator lỗi.");
+      setSimulatorResult(formatJsonBlock({ ok: false, message: msg, error_json: json, payload }));
+      toast({ title: "Simulator lỗi", description: msg, variant: "destructive" });
     },
   });
 
   const cleanupOpsMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", {
-        body: {
-          action: "cleanup",
-          app_code: appCode,
-        },
-      });
-      if (error) throw error;
-      return data;
+      const payload = {
+        action: "cleanup",
+        app_code: appCode,
+      };
+      setOpsLastPayload(formatJsonBlock(payload));
+      setOpsStatus("Đang chạy cleanup...");
+      setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
+      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", { body: payload });
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
+      return { payload, data };
     },
-    onSuccess: async (result) => {
+    onSuccess: async ({ payload, data: result }) => {
+      setOpsStatus(`Cleanup chạy xong: ${String(payload.action)}`);
       setOpsResult(formatJsonBlock(result));
       toast({ title: "Đã dọn runtime", description: "Session cũ và event quá hạn đã được xử lý." });
       await refetch();
     },
     onError: (e: any) => {
-      setOpsResult(formatJsonBlock({ ok: false, message: e?.message ?? "Cleanup failed" }));
-      toast({ title: "Cleanup thất bại", description: e?.message ?? "Không thể dọn runtime.", variant: "destructive" });
+      const msg = formatMutationError(e);
+      setOpsStatus("Cleanup lỗi.");
+      setOpsResult(formatJsonBlock({ ok: false, message: msg, error_json: e?.context?.json ?? null, payload: e?.context?.payload ?? null }));
+      toast({ title: "Cleanup thất bại", description: msg, variant: "destructive" });
     },
   });
 
   const adjustWalletMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", {
-        body: {
-          action: "adjust_wallet",
-          app_code: appCode,
-          account_ref: walletAdjustDraft.account_ref.trim(),
-          device_id: walletAdjustDraft.device_id.trim() || null,
-          soft_delta: Number(walletAdjustDraft.soft_delta || 0),
-          premium_delta: Number(walletAdjustDraft.premium_delta || 0),
-          note: walletAdjustDraft.note.trim() || null,
-        },
-      });
-      if (error) throw error;
-      return data;
+      const payload = {
+        action: "adjust_wallet",
+        app_code: appCode,
+        account_ref: walletAdjustDraft.account_ref.trim(),
+        device_id: walletAdjustDraft.device_id.trim() || null,
+        soft_delta: Number(walletAdjustDraft.soft_delta || 0),
+        premium_delta: Number(walletAdjustDraft.premium_delta || 0),
+        note: walletAdjustDraft.note.trim() || null,
+      };
+      setOpsLastPayload(formatJsonBlock(payload));
+      setOpsStatus("Đang chạy adjust_wallet...");
+      setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
+      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", { body: payload });
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
+      return { payload, data };
     },
-    onSuccess: async (result) => {
+    onSuccess: async ({ payload, data: result }) => {
+      setOpsStatus(`Ops chạy xong: ${String(payload.action)}`);
       setOpsResult(formatJsonBlock(result));
       toast({ title: "Đã chỉnh ví", description: "Số dư runtime đã được cập nhật và ghi log." });
       await refetch();
     },
     onError: (e: any) => {
-      setOpsResult(formatJsonBlock({ ok: false, message: e?.message ?? "Wallet adjust failed" }));
-      toast({ title: "Chỉnh ví thất bại", description: e?.message ?? "Không thể cập nhật số dư ví.", variant: "destructive" });
+      const msg = formatMutationError(e);
+      setOpsStatus("Chỉnh ví lỗi.");
+      setOpsResult(formatJsonBlock({ ok: false, message: msg, error_json: e?.context?.json ?? null, payload: e?.context?.payload ?? null }));
+      toast({ title: "Chỉnh ví thất bại", description: msg, variant: "destructive" });
     },
   });
 
