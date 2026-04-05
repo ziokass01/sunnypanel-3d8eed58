@@ -66,6 +66,9 @@ export function AdminServerAppsPage() {
                 <Button asChild variant="outline">
                   <Link to={`/admin/apps/${app.code}`}>Cấu hình nội bộ</Link>
                 </Button>
+                <Button asChild variant="outline">
+                  <Link to={`/admin/apps/${app.code}/runtime`}>Runtime admin</Link>
+                </Button>
               </div>
             </CardContent>
           </Card>

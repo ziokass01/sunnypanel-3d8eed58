@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -361,8 +362,18 @@ export function AdminServerAppDetailPage() {
           sort_order: row.sort_order || (index + 1) * 10,
         }))
         .filter((row) => row.feature_code);
-      const res = await sb.from("server_app_features").upsert(payload, { onConflict: "app_code,feature_code" });
-      if (res.error) throw res.error;
+      const keepCodes = new Set(payload.map((row) => row.feature_code));
+      const deleteCodes = ((data?.features as ServerAppFeatureRow[] | undefined) ?? [])
+        .map((row) => row.feature_code)
+        .filter((code) => !keepCodes.has(code));
+      if (deleteCodes.length) {
+        const deleteRes = await sb.from("server_app_features").delete().eq("app_code", appCode).in("feature_code", deleteCodes);
+        if (deleteRes.error) throw deleteRes.error;
+      }
+      if (payload.length) {
+        const res = await sb.from("server_app_features").upsert(payload, { onConflict: "app_code,feature_code" });
+        if (res.error) throw res.error;
+      }
     },
     onSuccess: async () => {
       toast({ title: "Đã lưu", description: "Feature flags và cost đã được cập nhật." });
@@ -416,8 +427,18 @@ export function AdminServerAppDetailPage() {
           notes: row.notes?.trim() || null,
         }))
         .filter((row) => row.package_code);
-      const res = await sb.from("server_app_reward_packages").upsert(payload, { onConflict: "app_code,package_code" });
-      if (res.error) throw res.error;
+      const keepCodes = new Set(payload.map((row) => row.package_code));
+      const deleteCodes = ((data?.packages as ServerAppRewardPackageRow[] | undefined) ?? [])
+        .map((row) => row.package_code)
+        .filter((code) => !keepCodes.has(code));
+      if (deleteCodes.length) {
+        const deleteRes = await sb.from("server_app_reward_packages").delete().eq("app_code", appCode).in("package_code", deleteCodes);
+        if (deleteRes.error) throw deleteRes.error;
+      }
+      if (payload.length) {
+        const res = await sb.from("server_app_reward_packages").upsert(payload, { onConflict: "app_code,package_code" });
+        if (res.error) throw res.error;
+      }
     },
     onSuccess: async () => {
       toast({ title: "Đã lưu", description: "Reward packages / redeem mapping đã được cập nhật." });
@@ -467,6 +488,14 @@ export function AdminServerAppDetailPage() {
     ]));
   };
 
+  const removeFeature = (index: number) => {
+    setFeaturesDraft((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const removePackage = (index: number) => {
+    setPackagesDraft((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
   const openExternal = () => {
     const url = appDraft.admin_url?.trim();
     if (!url) return;
@@ -501,6 +530,9 @@ export function AdminServerAppDetailPage() {
           <Badge variant={appDraft.public_enabled ? "secondary" : "outline"}>
             {appDraft.public_enabled ? "Đang bật" : "Đang ẩn"}
           </Badge>
+          <Button asChild variant="outline">
+            <Link to={`/admin/apps/${appCode}/runtime`}>Runtime admin</Link>
+          </Button>
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>
         </div>
       </div>
@@ -670,6 +702,10 @@ export function AdminServerAppDetailPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">Bật</span>
                       <Switch checked={feature.enabled} onCheckedChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: value } : item))} />
+                      <Button variant="outline" size="sm" className="text-destructive" onClick={() => removeFeature(index)}>
+                        <Trash2 className="h-4 w-4" />
+                        Xóa
+                      </Button>
                     </div>
                   </div>
                   <Textarea rows={2} value={feature.description || ""} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} placeholder="Mô tả ngắn cho admin và app manifest" />
@@ -776,6 +812,10 @@ export function AdminServerAppDetailPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">Bật</span>
                       <Switch checked={pkg.enabled} onCheckedChange={(value) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: value } : item))} />
+                      <Button variant="outline" size="sm" className="text-destructive" onClick={() => removePackage(index)}>
+                        <Trash2 className="h-4 w-4" />
+                        Xóa
+                      </Button>
                     </div>
                   </div>
                   <Textarea rows={2} value={pkg.description || ""} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} placeholder="Mô tả ngắn cho loại key / redeem package" />
