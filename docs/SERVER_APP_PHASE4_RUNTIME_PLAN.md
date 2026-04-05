@@ -75,3 +75,27 @@ Ghi nhận session/token hash để làm heartbeat, logout, revoke sync.
   2. function
   3. frontend
 - Không `repair` migration history nếu chưa xác nhận mismatch thật
+
+
+## Đã thêm ở nhịp này
+### Edge Function mới
+- `supabase/functions/server-app-runtime/index.ts`
+- `supabase/functions/_shared/server_app_runtime.ts`
+
+### Action đã làm được
+- `catalog`: trả về app settings, guest plan, plans/features đang bật, cost hiệu lực theo plan hiện tại
+- `me`: alias cùng dữ liệu runtime state, có thể kèm `session_token` để đọc trạng thái hiện tại
+- `heartbeat`: chạm session đang active và trả về runtime state mới nhất
+- `logout`: khóa session thành `logged_out`
+
+### Chưa làm ở function này
+- `redeem`
+- `consume`
+- refill/reset job thật
+
+## Sửa deploy để tránh nổ lại lỗi migration mismatch
+- Tách workflow push thường ra thành `Deploy Supabase Edge Functions`
+- Workflow DB còn lại là `Manual Supabase DB Push (Safe)`
+- Muốn chạy DB push phải gõ đúng **tên migration mới nhất**
+- Có bước `supabase db push --include-all --dry-run` trước khi push thật
+- Mục tiêu là giảm tối đa việc bấm deploy rồi lặp lại lỗi mismatch history

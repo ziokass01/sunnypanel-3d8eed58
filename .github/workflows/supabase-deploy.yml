@@ -1,18 +1,19 @@
-name: Deploy Supabase (DB + Edge Functions)
+name: Manual Supabase DB Push (Safe)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
-      run_db_push:
-        description: "Run supabase db push"
+      confirm_newest_local_migration:
+        description: "Type the exact newest local migration filename to unlock db push"
+        required: true
+        default: ""
+      run_functions_after_db:
+        description: "Also deploy Edge Functions after DB push"
         required: false
-        default: "false"
+        default: "true"
 
 jobs:
-  deploy:
+  deploy-db:
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -32,14 +33,30 @@ jobs:
       - name: Show migration list
         run: supabase migration list
 
+      - name: Confirm newest local migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          newest_local=$(ls supabase/migrations/*.sql | xargs -n1 basename | sort | tail -n 1)
+          echo "Newest local migration: $newest_local"
+          echo "User confirmation input: ${{ github.event.inputs.confirm_newest_local_migration }}"
+          if [ "$newest_local" != "${{ github.event.inputs.confirm_newest_local_migration }}" ]; then
+            echo "Refusing db push because the confirmation text does not match the newest local migration."
+            exit 1
+          fi
+
+      - name: Dry run migrations first
+        run: supabase db push --include-all --dry-run
+
       - name: Push migrations
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
-        run: yes | supabase db push --include-all
+        run: printf 'y\n' | supabase db push --include-all
 
       - name: Deploy all Edge Functions
+        if: ${{ github.event.inputs.run_functions_after_db == 'true' }}
         run: supabase functions deploy --project-ref "$PROJECT_REF"
 
       - name: Set function secrets
+        if: ${{ github.event.inputs.run_functions_after_db == 'true' }}
         run: |
           supabase secrets set \
             ADMIN_EMAILS="${{ secrets.ADMIN_EMAILS }}" \
