@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Trash2, RefreshCw } from "lucide-react";
+import { RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,51 +16,71 @@ import { supabase } from "@/integrations/supabase/client";
 
 const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
+const WALLET_KIND_OPTIONS = ["auto", "soft", "premium"] as const;
+const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"] as const;
 
-function numericInput(value: unknown) {
-  if (value == null) return "";
-  return String(value);
-}
-
-function normalizeDecimal(value: unknown) {
-  const n = Number(value ?? 0);
-  if (!Number.isFinite(n)) return 0;
-  return Number(n.toFixed(2));
-}
-
-function toLocalDateTimeInput(value: string | null | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 16);
-}
-
-function fromLocalDateTimeInput(value: string | null | undefined) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return null;
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function formatTime(value: string | null | undefined) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("vi-VN");
-}
-
-function listToTextarea(value: string[] | null | undefined) {
-  return (value ?? []).join("\n");
-}
-
-function textareaToList(value: string) {
-  return Array.from(new Set(String(value ?? "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)));
-}
+const FRIENDLY_ERROR_MAP: Record<string, string> = {
+  BAD_JSON: "Payload gửi lên bị lỗi JSON.",
+  METHOD_NOT_ALLOWED: "Cách gọi function chưa đúng phương thức.",
+  MISSING_ACTION: "Thiếu action cần chạy.",
+  MISSING_APP_CODE: "Thiếu mã app.",
+  MISSING_ACCOUNT_REF: "Thiếu account ref.",
+  MISSING_DEVICE_ID: "Thiếu device id.",
+  MISSING_REDEEM_KEY: "Thiếu redeem key.",
+  MISSING_FEATURE_CODE: "Thiếu feature code. Muốn consume thì phải nhập mã tính năng.",
+  MISSING_SESSION_TOKEN: "Thiếu session token. Hãy redeem trước rồi mới heartbeat, consume hoặc logout.",
+  REDEEM_KEY_NOT_FOUND: "Redeem key không tồn tại hoặc gõ sai.",
+  REDEEM_KEY_DISABLED: "Redeem key đang bị tắt.",
+  REDEEM_KEY_BLOCKED: "Redeem key đang bị khóa.",
+  REDEEM_KEY_NOT_STARTED: "Redeem key chưa đến giờ bắt đầu.",
+  REDEEM_KEY_EXPIRED: "Redeem key đã hết hạn.",
+  REDEEM_KEY_LIMIT_REACHED: "Redeem key đã hết lượt dùng tối đa.",
+  REDEEM_DAILY_ACCOUNT_LIMIT: "Account này đã chạm giới hạn redeem trong ngày.",
+  REDEEM_DAILY_DEVICE_LIMIT: "Thiết bị này đã chạm giới hạn redeem trong ngày.",
+  REWARD_PACKAGE_DISABLED: "Reward package đang bị tắt hoặc không còn hợp lệ.",
+  DEVICE_LIMIT_REACHED: "Đã chạm giới hạn thiết bị đang hoạt động của entitlement này.",
+  SESSION_NOT_FOUND: "Không tìm thấy session token này.",
+  SESSION_INACTIVE: "Session này không còn active.",
+  SESSION_EXPIRED: "Session đã hết hạn.",
+  SESSION_IDLE_TIMEOUT: "Session đã hết hạn do không hoạt động quá lâu.",
+  SESSION_MAX_AGE_EXPIRED: "Session đã quá tuổi tối đa.",
+  FEATURE_NOT_FOUND: "Không tìm thấy feature code này.",
+  FEATURE_PLAN_LOCKED: "Tính năng này bị khóa theo plan hiện tại.",
+  INSUFFICIENT_SOFT_BALANCE: "Không đủ credit thường để consume tính năng này.",
+  INSUFFICIENT_PREMIUM_BALANCE: "Không đủ credit kim cương để consume tính năng này.",
+  PREMIUM_COST_NOT_CONFIGURED: "Tính năng này chưa có giá premium hợp lệ.",
+  SOFT_COST_NOT_CONFIGURED: "Tính năng này chưa có giá soft hợp lệ.",
+  ACCOUNT_BLOCKED: "Account này đang bị chặn bởi runtime controls.",
+  DEVICE_BLOCKED: "Thiết bị này đang bị chặn bởi runtime controls.",
+  IP_BLOCKED: "IP hiện tại đang bị chặn bởi runtime controls.",
+  CLIENT_VERSION_TOO_OLD: "Phiên bản client quá cũ.",
+  CLIENT_VERSION_BLOCKED: "Phiên bản client này đang bị chặn.",
+  CATALOG_DISABLED: "Catalog hoặc me đang bị tắt.",
+  REDEEM_DISABLED: "Redeem hiện đang bị tắt.",
+  CONSUME_DISABLED: "Consume hiện đang bị tắt.",
+  HEARTBEAT_DISABLED: "Heartbeat hiện đang bị tắt.",
+  RUNTIME_DISABLED: "Runtime hiện đang bị tắt toàn bộ.",
+  EMPTY_ADJUSTMENT: "Bạn chưa nhập số cộng hoặc trừ cho ví.",
+  NEGATIVE_SOFT_BALANCE: "Không thể làm credit thường âm.",
+  NEGATIVE_PREMIUM_BALANCE: "Không thể làm credit kim cương âm.",
+  WALLET_BALANCE_CONFLICT: "Ví vừa bị thay đổi ở nơi khác. Hãy tải lại rồi thử lại.",
+};
 
 type RewardPackageOption = {
   id: string;
   package_code: string;
+  title: string;
+  enabled: boolean;
+  reward_mode?: string | null;
+  plan_code?: string | null;
+  soft_credit_amount?: number | string | null;
+  premium_credit_amount?: number | string | null;
+  entitlement_days?: number | null;
+};
+
+type FeatureOption = {
+  id?: string;
+  feature_code: string;
   title: string;
   enabled: boolean;
 };
@@ -197,8 +217,10 @@ type EventRow = {
   created_at: string;
 };
 
+type SimulatorAction = typeof SIMULATOR_ACTIONS[number];
+
 type SimulatorForm = {
-  action: "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
+  action: SimulatorAction;
   account_ref: string;
   device_id: string;
   client_version: string;
@@ -216,6 +238,55 @@ type WalletAdjustForm = {
   note: string;
 };
 
+function numericInput(value: unknown) {
+  if (value == null) return "";
+  return String(value);
+}
+
+function normalizeDecimal(value: unknown) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Number(n.toFixed(2));
+}
+
+function toLocalDateTimeInput(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 16);
+}
+
+function fromLocalDateTimeInput(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function formatTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("vi-VN");
+}
+
+function listToTextarea(value: string[] | null | undefined) {
+  return (value ?? []).join("\n");
+}
+
+function textareaToList(value: string) {
+  return Array.from(new Set(String(value ?? "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)));
+}
+
+function formatJsonBlock(value: unknown) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
 function emptyRedeemKey(appCode: string, index: number): RedeemKeyRow {
   return {
     app_code: appCode,
@@ -228,7 +299,7 @@ function emptyRedeemKey(appCode: string, index: number): RedeemKeyRow {
     expires_at: null,
     max_redemptions: 1,
     redeemed_count: 0,
-    reward_mode: "package",
+    reward_mode: "mixed",
     plan_code: null,
     soft_credit_amount: 0,
     premium_credit_amount: 0,
@@ -286,20 +357,69 @@ function defaultWalletAdjustForm(): WalletAdjustForm {
   };
 }
 
-function formatMutationError(error: any) {
+function getErrorCode(error: any) {
+  return error?.context?.json?.code ?? error?.code ?? error?.message ?? "UNKNOWN_ERROR";
+}
+
+function getErrorMessage(error: any) {
   return error?.context?.json?.message
     ?? error?.context?.json?.msg
-    ?? error?.context?.json?.code
     ?? error?.message
     ?? "Unknown error";
 }
 
-function formatJsonBlock(value: unknown) {
-  try {
-    return JSON.stringify(value ?? {}, null, 2);
-  } catch {
-    return String(value ?? "");
+function formatMutationError(error: any) {
+  const code = String(getErrorCode(error));
+  const raw = String(getErrorMessage(error));
+  const friendly = FRIENDLY_ERROR_MAP[code] ?? raw;
+  if (friendly === raw || raw.includes(code)) return `${friendly} (${code})`;
+  return `${friendly} (${code})\n${raw}`;
+}
+
+function normalizeSearch(value: unknown) {
+  return String(value ?? "").toLowerCase();
+}
+
+function matchesSearch(search: string, ...parts: Array<unknown>) {
+  const q = normalizeSearch(search).trim();
+  if (!q) return true;
+  return parts.some((part) => normalizeSearch(part).includes(q));
+}
+
+function getSimulatorHelp(action: SimulatorAction) {
+  switch (action) {
+    case "redeem":
+      return "Redeem cần account_ref, device_id và redeem_key. Session token sẽ tự đổ vào form sau khi chạy thành công.";
+    case "consume":
+      return "Consume cần session_token và feature_code. Không dùng redeem_key ở bước này.";
+    case "heartbeat":
+    case "logout":
+      return "Action này cần session_token đã sinh ra từ redeem.";
+    case "me":
+      return "Me có thể gọi trống hoặc gắn session_token để xem trạng thái user hiện tại.";
+    case "catalog":
+      return "Catalog trả app, settings và danh sách feature. Không bắt buộc account/device.";
+    default:
+      return "Health chỉ kiểm tra function còn sống hay không.";
   }
+}
+
+function summarizeRewardSource(row: RedeemKeyRow, packageMap: Map<string, RewardPackageOption>) {
+  if (row.reward_package_id) {
+    const pkg = packageMap.get(row.reward_package_id);
+    return {
+      title: pkg ? `Đang lấy reward từ package ${pkg.package_code}` : "Đang trỏ tới package reward",
+      description: pkg
+        ? `Package hiện cho plan ${pkg.plan_code || "-"} · soft ${pkg.soft_credit_amount ?? 0} · premium ${pkg.premium_credit_amount ?? 0} · ${pkg.entitlement_days ?? 0} ngày.`
+        : "Nếu muốn dùng credit gõ trực tiếp ở key này, hãy bỏ package hoặc đổi reward mode ra ngoài package rồi lưu lại.",
+      variant: "package" as const,
+    };
+  }
+  return {
+    title: "Đang lấy reward trực tiếp từ key này",
+    description: `Plan ${row.plan_code || "-"} · soft ${row.soft_credit_amount || 0} · premium ${row.premium_credit_amount || 0} · ${row.entitlement_days || 0} ngày.`,
+    variant: "inline" as const,
+  };
 }
 
 export function AdminServerAppRuntimePage() {
@@ -311,24 +431,26 @@ export function AdminServerAppRuntimePage() {
     enabled: Boolean(appCode),
     queryFn: async () => {
       const sb = supabase as any;
-      const [appRes, packageRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes] = await Promise.all([
+      const [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes] = await Promise.all([
         sb.from("server_apps").select("code,label,description,public_enabled").eq("code", appCode).maybeSingle(),
-        sb.from("server_app_reward_packages").select("id,package_code,title,enabled").eq("app_code", appCode).order("sort_order", { ascending: true }),
+        sb.from("server_app_reward_packages").select("id,package_code,title,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days").eq("app_code", appCode).order("sort_order", { ascending: true }),
+        sb.from("server_app_features").select("id,feature_code,title,enabled").eq("app_code", appCode).order("sort_order", { ascending: true }),
         sb.from("server_app_redeem_keys").select("id,app_code,reward_package_id,redeem_key,title,description,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override,blocked_at,blocked_reason,notes").eq("app_code", appCode).order("created_at", { ascending: false }),
-        sb.from("server_app_entitlements").select("id,account_ref,device_id,plan_code,status,starts_at,expires_at,revoked_at,revoke_reason,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(50),
-        sb.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(50),
-        sb.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(50),
-        sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
+        sb.from("server_app_entitlements").select("id,account_ref,device_id,plan_code,status,starts_at,expires_at,revoked_at,revoke_reason,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
+        sb.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(100),
+        sb.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(100),
+        sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
         sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days").eq("app_code", appCode).maybeSingle(),
-        sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(100),
+        sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
       ]);
 
-      const firstError = [appRes, packageRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes].find((item) => item.error)?.error;
+      const firstError = [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes].find((item) => item.error)?.error;
       if (firstError) throw firstError;
 
       return {
         app: appRes.data,
         rewardPackages: (packageRes.data ?? []) as RewardPackageOption[],
+        features: (featureRes.data ?? []) as FeatureOption[],
         redeemKeys: (redeemRes.data ?? []) as RedeemKeyRow[],
         entitlements: (entitlementRes.data ?? []) as EntitlementRow[],
         wallets: (walletRes.data ?? []) as WalletRow[],
@@ -344,13 +466,14 @@ export function AdminServerAppRuntimePage() {
   const [redeemDraft, setRedeemDraft] = useState<RedeemKeyRow[]>([]);
   const [controlDraft, setControlDraft] = useState<ControlDraft>(defaultControlDraft(appCode));
   const [simulatorDraft, setSimulatorDraft] = useState<SimulatorForm>(defaultSimulatorForm());
-  const [simulatorResult, setSimulatorResult] = useState<string>("");
-  const [simulatorLastPayload, setSimulatorLastPayload] = useState<string>("");
-  const [simulatorStatus, setSimulatorStatus] = useState<string>("Chưa chạy simulator.");
-  const [opsResult, setOpsResult] = useState<string>("");
-  const [opsLastPayload, setOpsLastPayload] = useState<string>("");
-  const [opsStatus, setOpsStatus] = useState<string>("Chưa chạy ops.");
+  const [simulatorResult, setSimulatorResult] = useState("");
+  const [simulatorLastPayload, setSimulatorLastPayload] = useState("");
+  const [simulatorStatus, setSimulatorStatus] = useState("Chưa chạy simulator.");
+  const [opsResult, setOpsResult] = useState("");
+  const [opsLastPayload, setOpsLastPayload] = useState("");
+  const [opsStatus, setOpsStatus] = useState("Chưa chạy ops.");
   const [walletAdjustDraft, setWalletAdjustDraft] = useState<WalletAdjustForm>(defaultWalletAdjustForm());
+  const [searchText, setSearchText] = useState("");
 
   useEffect(() => {
     setRedeemDraft((data?.redeemKeys ?? []).map((row) => ({
@@ -360,7 +483,7 @@ export function AdminServerAppRuntimePage() {
       blocked_reason: row.blocked_reason ?? "",
       notes: row.notes ?? "",
     })));
-  }, [data]);
+  }, [data?.redeemKeys]);
 
   useEffect(() => {
     const row = data?.controls;
@@ -385,37 +508,64 @@ export function AdminServerAppRuntimePage() {
     } : defaultControlDraft(appCode));
   }, [appCode, data?.controls]);
 
+  const packageMap = useMemo(() => new Map((data?.rewardPackages ?? []).map((item) => [item.id, item])), [data?.rewardPackages]);
+  const featureOptions = data?.features ?? [];
 
-  const packageMap = useMemo(() => {
-    return new Map((data?.rewardPackages ?? []).map((item) => [item.id, item]));
-  }, [data]);
+  const filteredEntitlements = useMemo(
+    () => (data?.entitlements ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.plan_code, item.status, item.revoke_reason)),
+    [data?.entitlements, searchText],
+  );
+  const filteredWallets = useMemo(
+    () => (data?.wallets ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.soft_balance, item.premium_balance)),
+    [data?.wallets, searchText],
+  );
+  const filteredSessions = useMemo(
+    () => (data?.sessions ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.status, item.client_version, item.revoke_reason)),
+    [data?.sessions, searchText],
+  );
+  const filteredTransactions = useMemo(
+    () => (data?.transactions ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.transaction_type, item.wallet_kind, item.feature_code, item.note)),
+    [data?.transactions, searchText],
+  );
+  const filteredEvents = useMemo(
+    () => (data?.events ?? []).filter((item) => matchesSearch(searchText, item.account_ref, item.device_id, item.event_type, item.code, item.message, item.feature_code)),
+    [data?.events, searchText],
+  );
+  const filteredRedeemDraft = useMemo(
+    () => redeemDraft.filter((item) => matchesSearch(searchText, item.redeem_key, item.title, item.description, item.reward_mode, item.plan_code, item.blocked_reason)),
+    [redeemDraft, searchText],
+  );
 
   const saveRedeemMutation = useMutation({
     mutationFn: async () => {
       const sb = supabase as any;
       const normalized = redeemDraft
-        .map((row, index) => ({
-          id: row.id,
-          app_code: appCode,
-          reward_package_id: row.reward_package_id || null,
-          redeem_key: row.redeem_key.trim(),
-          title: row.title.trim() || row.redeem_key.trim() || `redeem_${index + 1}`,
-          description: row.description.trim() || null,
-          enabled: Boolean(row.enabled),
-          starts_at: fromLocalDateTimeInput(row.starts_at),
-          expires_at: fromLocalDateTimeInput(row.expires_at),
-          max_redemptions: Math.max(1, Math.floor(Number(row.max_redemptions || 1))),
-          reward_mode: row.reward_mode || "package",
-          plan_code: row.plan_code && row.plan_code !== "none" ? row.plan_code : null,
-          soft_credit_amount: normalizeDecimal(row.soft_credit_amount),
-          premium_credit_amount: normalizeDecimal(row.premium_credit_amount),
-          entitlement_days: Math.max(0, Math.floor(Number(row.entitlement_days || 0))),
-          device_limit_override: row.device_limit_override == null || Number(row.device_limit_override) <= 0 ? null : Math.floor(Number(row.device_limit_override)),
-          account_limit_override: row.account_limit_override == null || Number(row.account_limit_override) <= 0 ? null : Math.floor(Number(row.account_limit_override)),
-          blocked_at: row.blocked_reason.trim() ? new Date().toISOString() : null,
-          blocked_reason: row.blocked_reason.trim() || null,
-          notes: row.notes.trim() || null,
-        }))
+        .map((row, index) => {
+          const rewardMode = row.reward_mode || "mixed";
+          const rewardPackageId = rewardMode === "package" ? (row.reward_package_id || null) : null;
+          return {
+            id: row.id,
+            app_code: appCode,
+            reward_package_id: rewardPackageId,
+            redeem_key: row.redeem_key.trim(),
+            title: row.title.trim() || row.redeem_key.trim() || `redeem_${index + 1}`,
+            description: row.description.trim() || null,
+            enabled: Boolean(row.enabled),
+            starts_at: fromLocalDateTimeInput(row.starts_at),
+            expires_at: fromLocalDateTimeInput(row.expires_at),
+            max_redemptions: Math.max(1, Math.floor(Number(row.max_redemptions || 1))),
+            reward_mode: rewardMode,
+            plan_code: row.plan_code && row.plan_code !== "none" ? row.plan_code : null,
+            soft_credit_amount: normalizeDecimal(row.soft_credit_amount),
+            premium_credit_amount: normalizeDecimal(row.premium_credit_amount),
+            entitlement_days: Math.max(0, Math.floor(Number(row.entitlement_days || 0))),
+            device_limit_override: row.device_limit_override == null || Number(row.device_limit_override) <= 0 ? null : Math.floor(Number(row.device_limit_override)),
+            account_limit_override: row.account_limit_override == null || Number(row.account_limit_override) <= 0 ? null : Math.floor(Number(row.account_limit_override)),
+            blocked_at: row.blocked_reason.trim() ? new Date().toISOString() : null,
+            blocked_reason: row.blocked_reason.trim() || null,
+            notes: row.notes.trim() || null,
+          };
+        })
         .filter((row) => row.redeem_key);
 
       const keepIds = new Set(normalized.filter((row) => row.id).map((row) => row.id as string));
@@ -438,10 +588,10 @@ export function AdminServerAppRuntimePage() {
       }
     },
     onSuccess: async () => {
-      toast({ title: "Đã lưu", description: "Redeem keys đã được cập nhật." });
+      toast({ title: "Đã lưu redeem keys", description: "Nếu key đang ở mode package thì reward lấy theo package. Các mode khác sẽ lấy credit trực tiếp từ key." });
       await refetch();
     },
-    onError: (e: any) => toast({ title: "Lưu redeem thất bại", description: e?.message ?? "Không thể lưu redeem keys.", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Lưu redeem thất bại", description: formatMutationError(e), variant: "destructive" }),
   });
 
   const saveControlsMutation = useMutation({
@@ -471,50 +621,82 @@ export function AdminServerAppRuntimePage() {
       if (error) throw error;
     },
     onSuccess: async () => {
-      toast({ title: "Đã lưu", description: "Runtime controls đã được cập nhật." });
+      toast({ title: "Đã lưu runtime controls", description: "Các khóa chặn và giới hạn mới đã được cập nhật." });
       await refetch();
     },
-    onError: (e: any) => toast({ title: "Lưu runtime controls thất bại", description: e?.message ?? "Không thể lưu controls.", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Lưu runtime controls thất bại", description: formatMutationError(e), variant: "destructive" }),
   });
 
   const revokeEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
       const sb = supabase as any;
-      const { error } = await sb
-        .from("server_app_entitlements")
-        .update({
-          status: "revoked",
-          revoked_at: new Date().toISOString(),
-          revoke_reason: "Revoked from admin runtime page",
-        })
-        .eq("id", entitlementId);
+      const { error } = await sb.from("server_app_entitlements").update({
+        status: "revoked",
+        revoked_at: new Date().toISOString(),
+        revoke_reason: "Revoked from admin runtime page",
+      }).eq("id", entitlementId);
       if (error) throw error;
     },
     onSuccess: async () => {
-      toast({ title: "Đã revoke", description: "Entitlement đã bị thu hồi." });
+      toast({ title: "Đã revoke entitlement", description: "Người dùng sẽ mất quyền cho đến khi mở lại hoặc redeem lại." });
       await refetch();
     },
-    onError: (e: any) => toast({ title: "Revoke entitlement thất bại", description: e?.message ?? "Không thể revoke entitlement.", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Revoke entitlement thất bại", description: formatMutationError(e), variant: "destructive" }),
+  });
+
+  const restoreEntitlementMutation = useMutation({
+    mutationFn: async (entitlementId: string) => {
+      const sb = supabase as any;
+      const { error } = await sb.from("server_app_entitlements").update({
+        status: "active",
+        revoked_at: null,
+        revoke_reason: null,
+        updated_at: new Date().toISOString(),
+      }).eq("id", entitlementId);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã mở lại entitlement", description: "Entitlement đã quay lại trạng thái active." });
+      await refetch();
+    },
+    onError: (e: any) => toast({ title: "Mở lại entitlement thất bại", description: formatMutationError(e), variant: "destructive" }),
   });
 
   const revokeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
       const sb = supabase as any;
-      const { error } = await sb
-        .from("server_app_sessions")
-        .update({
-          status: "revoked",
-          revoked_at: new Date().toISOString(),
-          revoke_reason: "Revoked from admin runtime page",
-        })
-        .eq("id", sessionId);
+      const { error } = await sb.from("server_app_sessions").update({
+        status: "revoked",
+        revoked_at: new Date().toISOString(),
+        revoke_reason: "Revoked from admin runtime page",
+        updated_at: new Date().toISOString(),
+      }).eq("id", sessionId);
       if (error) throw error;
     },
     onSuccess: async () => {
-      toast({ title: "Đã revoke", description: "Session đã bị khóa." });
+      toast({ title: "Đã revoke session", description: "Session đã bị khóa." });
       await refetch();
     },
-    onError: (e: any) => toast({ title: "Revoke session thất bại", description: e?.message ?? "Không thể revoke session.", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Revoke session thất bại", description: formatMutationError(e), variant: "destructive" }),
+  });
+
+  const restoreSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const sb = supabase as any;
+      const { error } = await sb.from("server_app_sessions").update({
+        status: "active",
+        revoked_at: null,
+        revoke_reason: null,
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", sessionId);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã mở lại session", description: "Session đã quay lại active." });
+      await refetch();
+    },
+    onError: (e: any) => toast({ title: "Mở lại session thất bại", description: formatMutationError(e), variant: "destructive" }),
   });
 
   const runSimulatorMutation = useMutation({
@@ -524,7 +706,6 @@ export function AdminServerAppRuntimePage() {
         app_code: appCode,
         client_version: simulatorDraft.client_version.trim() || null,
       };
-
       if (simulatorDraft.account_ref.trim()) payload.account_ref = simulatorDraft.account_ref.trim();
       if (simulatorDraft.device_id.trim()) payload.device_id = simulatorDraft.device_id.trim();
       if (simulatorDraft.redeem_key.trim()) payload.redeem_key = simulatorDraft.redeem_key.trim();
@@ -533,7 +714,7 @@ export function AdminServerAppRuntimePage() {
       if (simulatorDraft.session_token.trim()) payload.session_token = simulatorDraft.session_token.trim();
 
       setSimulatorLastPayload(formatJsonBlock(payload));
-      setSimulatorStatus(`Đang gọi simulator: ${String(payload.action)}...`);
+      setSimulatorStatus(`Đang gọi runtime: ${String(payload.action)}...`);
       setSimulatorResult(formatJsonBlock({ ok: false, pending: true, payload }));
 
       const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
@@ -550,25 +731,22 @@ export function AdminServerAppRuntimePage() {
       if (typeof sessionToken === "string" && sessionToken.trim()) {
         setSimulatorDraft((prev) => ({ ...prev, session_token: sessionToken }));
       }
-      toast({ title: "Đã chạy simulator", description: "Runtime đã trả kết quả. Kiểm tra JSON bên dưới." });
+      toast({ title: "Simulator đã chạy", description: `${String(payload.action)} đã trả JSON. Kiểm tra kỹ reward, wallet hoặc session token bên dưới.` });
       await refetch();
     },
     onError: (e: any) => {
       const payload = e?.context?.payload ?? null;
       const json = e?.context?.json ?? null;
       const msg = formatMutationError(e);
-      setSimulatorStatus("Simulator lỗi.");
-      setSimulatorResult(formatJsonBlock({ ok: false, message: msg, error_json: json, payload }));
+      setSimulatorStatus(`Simulator lỗi: ${msg}`);
+      setSimulatorResult(formatJsonBlock({ ok: false, friendly_message: msg, error_json: json, payload }));
       toast({ title: "Simulator lỗi", description: msg, variant: "destructive" });
     },
   });
 
   const cleanupOpsMutation = useMutation({
     mutationFn: async () => {
-      const payload = {
-        action: "cleanup",
-        app_code: appCode,
-      };
+      const payload = { action: "cleanup", app_code: appCode };
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy cleanup...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
@@ -587,8 +765,8 @@ export function AdminServerAppRuntimePage() {
     },
     onError: (e: any) => {
       const msg = formatMutationError(e);
-      setOpsStatus("Cleanup lỗi.");
-      setOpsResult(formatJsonBlock({ ok: false, message: msg, error_json: e?.context?.json ?? null, payload: e?.context?.payload ?? null }));
+      setOpsStatus(`Cleanup lỗi: ${msg}`);
+      setOpsResult(formatJsonBlock({ ok: false, friendly_message: msg, error_json: e?.context?.json ?? null, payload: e?.context?.payload ?? null }));
       toast({ title: "Cleanup thất bại", description: msg, variant: "destructive" });
     },
   });
@@ -617,27 +795,26 @@ export function AdminServerAppRuntimePage() {
     onSuccess: async ({ payload, data: result }) => {
       setOpsStatus(`Ops chạy xong: ${String(payload.action)}`);
       setOpsResult(formatJsonBlock(result));
-      toast({ title: "Đã chỉnh ví", description: "Số dư runtime đã được cập nhật và ghi log." });
+      toast({ title: "Đã chỉnh ví", description: "Số dư runtime đã được cập nhật và transaction cũng đã được ghi." });
       await refetch();
     },
     onError: (e: any) => {
       const msg = formatMutationError(e);
-      setOpsStatus("Chỉnh ví lỗi.");
-      setOpsResult(formatJsonBlock({ ok: false, message: msg, error_json: e?.context?.json ?? null, payload: e?.context?.payload ?? null }));
+      setOpsStatus(`Chỉnh ví lỗi: ${msg}`);
+      setOpsResult(formatJsonBlock({ ok: false, friendly_message: msg, error_json: e?.context?.json ?? null, payload: e?.context?.payload ?? null }));
       toast({ title: "Chỉnh ví thất bại", description: msg, variant: "destructive" });
     },
   });
 
-  const addRedeemKey = () => {
-    setRedeemDraft((prev) => [...prev, emptyRedeemKey(appCode, prev.length)]);
-  };
+  const addRedeemKey = () => setRedeemDraft((prev) => [...prev, emptyRedeemKey(appCode, prev.length)]);
+  const removeRedeemKey = (index: number) => setRedeemDraft((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
 
-  const removeRedeemKey = (index: number) => {
-    setRedeemDraft((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  const setRedeemField = <K extends keyof RedeemKeyRow>(index: number, key: K, value: RedeemKeyRow[K]) => {
+    setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row));
   };
 
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground">Đang tải runtime admin...</div>;
+    return <div className="text-sm text-muted-foreground">Đang tải app workspace runtime...</div>;
   }
 
   if (error) {
@@ -645,9 +822,7 @@ export function AdminServerAppRuntimePage() {
       <Card className="border-destructive/40 bg-destructive/5">
         <CardHeader>
           <CardTitle>Runtime admin chưa sẵn sàng</CardTitle>
-          <CardDescription>
-            Có vẻ phase 4 core chưa được apply đủ hoặc DB đang trả về lỗi. Kiểm tra migration phase 4 rồi reload lại trang này.
-          </CardDescription>
+          <CardDescription>Kiểm tra migration phase 4-7 rồi tải lại trang này.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <div>{(error as Error)?.message || "Unknown error"}</div>
@@ -659,28 +834,56 @@ export function AdminServerAppRuntimePage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-2">
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/admin/apps/${appCode}`}>← Quay lại cấu hình app</Link>
-          </Button>
-          <div>
-            <h1 className="text-2xl font-semibold">Runtime admin · {data?.app?.label || appCode}</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Đây là tầng vận hành phase 5 để quản lý redeem keys thật, entitlement, wallet, session và log runtime cho từng app.
-            </p>
+      <Card className="border-primary/20">
+        <CardHeader className="space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link to={`/admin/apps/${appCode}`}>← Quay lại cấu hình app</Link>
+                </Button>
+                <Badge variant={data?.app?.public_enabled ? "secondary" : "outline"}>
+                  {data?.app?.public_enabled ? "App đang bật" : "App đang ẩn"}
+                </Badge>
+              </div>
+              <div>
+                <CardTitle className="text-3xl">App workspace · {data?.app?.label || appCode}</CardTitle>
+                <CardDescription className="mt-2 max-w-3xl text-sm leading-6">
+                  Đây là trang điều khiển riêng cho app này. Từ phase 8 trở đi, bạn có thể ở hẳn trong một khu điều hành riêng để quản lý runtime, test flow, tìm user, xem ví, session, event và xử lý lỗi rõ ràng hơn.
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => refetch()}>
+                <RefreshCw className="h-4 w-4" />
+                Làm mới
+              </Button>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant={data?.app?.public_enabled ? "secondary" : "outline"}>
-            {data?.app?.public_enabled ? "Đang bật" : "Đang ẩn"}
-          </Badge>
-          <Button variant="outline" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4" />
-            Làm mới
-          </Button>
-        </div>
-      </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1.3fr,0.7fr]">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Tìm nhanh account, device, key, feature, event</div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Ví dụ: user_001, device_001, REDEEM_1, FEATURE_A, SESSION..." />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Bộ lọc này chạy xuyên qua redeem keys, entitlements, wallets, sessions, transactions và events.
+              </div>
+            </div>
+            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
+              <div className="font-medium text-foreground">Ghi chú flow test chuẩn</div>
+              <div className="mt-2 space-y-1">
+                <div>1. `health` để kiểm tra function sống</div>
+                <div>2. `redeem` để lấy `session_token`</div>
+                <div>3. `consume` hoặc `heartbeat` bằng token đó</div>
+                <div>4. `logout` để kết thúc session</div>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
 
       <div className="grid gap-3 md:grid-cols-6">
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Redeem keys</div><div className="mt-1 text-2xl font-semibold">{data?.redeemKeys.length ?? 0}</div></CardContent></Card>
@@ -691,11 +894,11 @@ export function AdminServerAppRuntimePage() {
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Events</div><div className="mt-1 text-2xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
       </div>
 
-      <Tabs defaultValue="controls" className="space-y-3">
-        <TabsList className="flex w-full flex-wrap justify-start gap-2">
-          <TabsTrigger value="controls">Controls</TabsTrigger>
+      <Tabs defaultValue="simulator" className="space-y-3">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-2xl border bg-background p-2">
           <TabsTrigger value="simulator">Simulator</TabsTrigger>
           <TabsTrigger value="ops">Ops</TabsTrigger>
+          <TabsTrigger value="controls">Controls</TabsTrigger>
           <TabsTrigger value="redeem">Redeem keys</TabsTrigger>
           <TabsTrigger value="entitlements">Entitlements</TabsTrigger>
           <TabsTrigger value="wallets">Wallets</TabsTrigger>
@@ -704,105 +907,20 @@ export function AdminServerAppRuntimePage() {
           <TabsTrigger value="events">Events</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="controls">
-          <Card>
-            <CardHeader>
-              <CardTitle>Runtime controls / hardening</CardTitle>
-              <CardDescription>
-                Kill switch, chặn version cũ, chặn account hoặc device, và giới hạn số lần redeem trong ngày. Chỗ này là buồng lái tím điện của phase 6.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-5">
-                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Runtime enabled</div><Switch checked={controlDraft.runtime_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, runtime_enabled: value }))} /></div>
-                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Catalog / me</div><Switch checked={controlDraft.catalog_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, catalog_enabled: value }))} /></div>
-                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Redeem</div><Switch checked={controlDraft.redeem_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, redeem_enabled: value }))} /></div>
-                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Consume</div><Switch checked={controlDraft.consume_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, consume_enabled: value }))} /></div>
-                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Heartbeat</div><Switch checked={controlDraft.heartbeat_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, heartbeat_enabled: value }))} /></div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Min client version</div>
-                  <Input value={controlDraft.min_client_version} onChange={(e) => setControlDraft((prev) => ({ ...prev, min_client_version: e.target.value }))} placeholder="Ví dụ: 1.0.5" />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Thông báo bảo trì / khóa app</div>
-                  <Input value={controlDraft.maintenance_notice} onChange={(e) => setControlDraft((prev) => ({ ...prev, maintenance_notice: e.target.value }))} placeholder="Ví dụ: Đang bảo trì runtime 15 phút" />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Redeem tối đa mỗi account / ngày</div>
-                  <Input type="number" min={0} value={controlDraft.max_daily_redeems_per_account} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_daily_redeems_per_account: Number(e.target.value) || 0 }))} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Redeem tối đa mỗi device / ngày</div>
-                  <Input type="number" min={0} value={controlDraft.max_daily_redeems_per_device} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_daily_redeems_per_device: Number(e.target.value) || 0 }))} />
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Session idle timeout (phút)</div>
-                  <Input type="number" min={0} value={controlDraft.session_idle_timeout_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_idle_timeout_minutes: Number(e.target.value) || 0 }))} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Session max age (phút)</div>
-                  <Input type="number" min={0} value={controlDraft.session_max_age_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_max_age_minutes: Number(e.target.value) || 0 }))} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Giữ event tối đa (ngày)</div>
-                  <Input type="number" min={1} value={controlDraft.event_retention_days} onChange={(e) => setControlDraft((prev) => ({ ...prev, event_retention_days: Number(e.target.value) || 30 }))} />
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Blocked client versions</div>
-                  <Textarea rows={5} value={controlDraft.blocked_client_versions_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_client_versions_text: e.target.value }))} placeholder={"Mỗi dòng 1 version\n1.0.1\n1.0.2"} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Blocked accounts</div>
-                  <Textarea rows={5} value={controlDraft.blocked_accounts_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_accounts_text: e.target.value }))} placeholder={"Mỗi dòng 1 account_ref"} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Blocked devices</div>
-                  <Textarea rows={5} value={controlDraft.blocked_devices_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_devices_text: e.target.value }))} placeholder={"Mỗi dòng 1 device_id"} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Blocked IP hashes</div>
-                  <Textarea rows={5} value={controlDraft.blocked_ip_hashes_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_ip_hashes_text: e.target.value }))} placeholder={"Mỗi dòng 1 ip hash SHA-256"} />
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <Button onClick={() => saveControlsMutation.mutate()} disabled={saveControlsMutation.isPending}>Lưu runtime controls</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="simulator">
           <Card>
             <CardHeader>
               <CardTitle>Runtime simulator không cần app</CardTitle>
-              <CardDescription>
-                Phase 7 thêm buồng thử runtime ngay trong admin. Bạn có thể giả lập `health`, `catalog`, `redeem`, `consume`, `heartbeat`, `logout` mà chưa cần APK thật.
-              </CardDescription>
+              <CardDescription>{getSimulatorHelp(simulatorDraft.action)}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Action</div>
-                  <Select value={simulatorDraft.action} onValueChange={(value) => setSimulatorDraft((prev) => ({ ...prev, action: value as SimulatorForm["action"] }))}>
+                  <Select value={simulatorDraft.action} onValueChange={(value) => setSimulatorDraft((prev) => ({ ...prev, action: value as SimulatorAction }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="health">health</SelectItem>
-                      <SelectItem value="catalog">catalog</SelectItem>
-                      <SelectItem value="me">me</SelectItem>
-                      <SelectItem value="redeem">redeem</SelectItem>
-                      <SelectItem value="consume">consume</SelectItem>
-                      <SelectItem value="heartbeat">heartbeat</SelectItem>
-                      <SelectItem value="logout">logout</SelectItem>
+                      {SIMULATOR_ACTIONS.map((action) => <SelectItem key={action} value={action}>{action}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -824,7 +942,10 @@ export function AdminServerAppRuntimePage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Feature code</div>
-                  <Input value={simulatorDraft.feature_code} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, feature_code: e.target.value }))} placeholder="Chỉ dùng khi action = consume" />
+                  <Input value={simulatorDraft.feature_code} onChange={(e) => setSimulatorDraft((prev) => ({ ...prev, feature_code: e.target.value }))} placeholder="Ví dụ: aim_assist hoặc batch_search" list="runtime-feature-codes" />
+                  <datalist id="runtime-feature-codes">
+                    {featureOptions.map((feature) => <option key={feature.feature_code} value={feature.feature_code}>{feature.title}</option>)}
+                  </datalist>
                 </div>
               </div>
 
@@ -834,9 +955,7 @@ export function AdminServerAppRuntimePage() {
                   <Select value={simulatorDraft.wallet_kind} onValueChange={(value) => setSimulatorDraft((prev) => ({ ...prev, wallet_kind: value }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="auto">auto</SelectItem>
-                      <SelectItem value="soft">soft</SelectItem>
-                      <SelectItem value="premium">premium</SelectItem>
+                      {WALLET_KIND_OPTIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -880,9 +999,7 @@ export function AdminServerAppRuntimePage() {
             <Card>
               <CardHeader>
                 <CardTitle>Wallet adjust thủ công</CardTitle>
-                <CardDescription>
-                  Khi chưa có app thật, chỗ này giúp bạn nạp hoặc trừ credit để test server. Mỗi lần chỉnh đều ghi transaction `admin_adjust`.
-                </CardDescription>
+                <CardDescription>Khi chưa có app thật, chỗ này giúp bạn nạp hoặc trừ credit để test server. Mỗi lần chỉnh đều ghi transaction `admin_adjust`.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-2">
@@ -922,9 +1039,7 @@ export function AdminServerAppRuntimePage() {
             <Card>
               <CardHeader>
                 <CardTitle>Cleanup runtime</CardTitle>
-                <CardDescription>
-                  Dọn session bị quá hạn theo timeout phase 7 và xóa event cũ hơn số ngày giữ lại trong controls.
-                </CardDescription>
+                <CardDescription>Dọn session bị quá hạn theo timeout và xóa event cũ hơn số ngày giữ lại trong controls.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
@@ -940,7 +1055,7 @@ export function AdminServerAppRuntimePage() {
           <Card className="mt-3">
             <CardHeader>
               <CardTitle>Kết quả ops</CardTitle>
-              <CardDescription>Log JSON của các thao tác cleanup hoặc chỉnh ví thủ công.</CardDescription>
+              <CardDescription>Log JSON của cleanup hoặc chỉnh ví thủ công.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
@@ -958,93 +1073,152 @@ export function AdminServerAppRuntimePage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="controls">
+          <Card>
+            <CardHeader>
+              <CardTitle>Runtime controls / hardening</CardTitle>
+              <CardDescription>Kill switch, chặn version cũ, chặn account hoặc device và giới hạn số lần redeem trong ngày.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-5">
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Runtime enabled</div><Switch checked={controlDraft.runtime_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, runtime_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Catalog / me</div><Switch checked={controlDraft.catalog_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, catalog_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Redeem</div><Switch checked={controlDraft.redeem_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, redeem_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Consume</div><Switch checked={controlDraft.consume_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, consume_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Heartbeat</div><Switch checked={controlDraft.heartbeat_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, heartbeat_enabled: value }))} /></div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Min client version</div>
+                  <Input value={controlDraft.min_client_version} onChange={(e) => setControlDraft((prev) => ({ ...prev, min_client_version: e.target.value }))} placeholder="Ví dụ: 1.0.5" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Thông báo bảo trì / khóa app</div>
+                  <Input value={controlDraft.maintenance_notice} onChange={(e) => setControlDraft((prev) => ({ ...prev, maintenance_notice: e.target.value }))} placeholder="Ví dụ: Đang bảo trì runtime 15 phút" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem tối đa mỗi account / ngày</div>
+                  <Input type="number" min={0} value={controlDraft.max_daily_redeems_per_account} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_daily_redeems_per_account: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem tối đa mỗi device / ngày</div>
+                  <Input type="number" min={0} value={controlDraft.max_daily_redeems_per_device} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_daily_redeems_per_device: Number(e.target.value) || 0 }))} />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2"><div className="text-sm font-medium">Session idle timeout (phút)</div><Input type="number" min={0} value={controlDraft.session_idle_timeout_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_idle_timeout_minutes: Number(e.target.value) || 0 }))} /></div>
+                <div className="space-y-2"><div className="text-sm font-medium">Session max age (phút)</div><Input type="number" min={0} value={controlDraft.session_max_age_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_max_age_minutes: Number(e.target.value) || 0 }))} /></div>
+                <div className="space-y-2"><div className="text-sm font-medium">Giữ event tối đa (ngày)</div><Input type="number" min={1} value={controlDraft.event_retention_days} onChange={(e) => setControlDraft((prev) => ({ ...prev, event_retention_days: Number(e.target.value) || 30 }))} /></div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2"><div className="text-sm font-medium">Blocked client versions</div><Textarea rows={5} value={controlDraft.blocked_client_versions_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_client_versions_text: e.target.value }))} /></div>
+                <div className="space-y-2"><div className="text-sm font-medium">Blocked accounts</div><Textarea rows={5} value={controlDraft.blocked_accounts_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_accounts_text: e.target.value }))} /></div>
+                <div className="space-y-2"><div className="text-sm font-medium">Blocked devices</div><Textarea rows={5} value={controlDraft.blocked_devices_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_devices_text: e.target.value }))} /></div>
+                <div className="space-y-2"><div className="text-sm font-medium">Blocked IP hashes</div><Textarea rows={5} value={controlDraft.blocked_ip_hashes_text} onChange={(e) => setControlDraft((prev) => ({ ...prev, blocked_ip_hashes_text: e.target.value }))} /></div>
+              </div>
+
+              <div className="flex justify-end"><Button onClick={() => saveControlsMutation.mutate()} disabled={saveControlsMutation.isPending}>Lưu runtime controls</Button></div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="redeem">
           <Card>
             <CardHeader>
               <CardTitle>Redeem keys thật</CardTitle>
-              <CardDescription>
-                Tạo, sửa, chặn và xóa các key nhập ở tab Quà tặng. Có thêm thì có xóa, không để danh sách thành nghĩa địa khô khốc nữa.
-              </CardDescription>
+              <CardDescription>Mode `package` sẽ lấy reward từ package. Các mode còn lại sẽ lấy trực tiếp plan hoặc credit bạn gõ trên key.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {redeemDraft.map((item, index) => (
-                <div key={`${item.id || "new"}-${index}`} className="space-y-3 rounded-2xl border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="grid flex-1 gap-3 md:grid-cols-3">
-                      <Input value={item.redeem_key} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, redeem_key: e.target.value } : row))} placeholder="redeem_key" />
-                      <Input value={item.title} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, title: e.target.value } : row))} placeholder="Tên hiển thị" />
-                      <Select value={item.reward_package_id || "none"} onValueChange={(value) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, reward_package_id: value === "none" ? null : value } : row))}>
-                        <SelectTrigger><SelectValue placeholder="Reward package" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Không gắn package</SelectItem>
-                          {(data?.rewardPackages ?? []).map((pkg) => (
-                            <SelectItem key={pkg.id} value={pkg.id}>{pkg.package_code} · {pkg.title}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+              {filteredRedeemDraft.length === 0 ? <div className="text-sm text-muted-foreground">Không có redeem key nào khớp bộ lọc.</div> : null}
+              {filteredRedeemDraft.map((item) => {
+                const index = redeemDraft.findIndex((row) => row === item || row.id === item.id);
+                const rewardSource = summarizeRewardSource(item, packageMap);
+                return (
+                  <div key={`${item.id || "new"}-${index}`} className="space-y-3 rounded-2xl border p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="grid flex-1 gap-3 md:grid-cols-3">
+                        <Input value={item.redeem_key} onChange={(e) => setRedeemField(index, "redeem_key", e.target.value)} placeholder="redeem_key" />
+                        <Input value={item.title} onChange={(e) => setRedeemField(index, "title", e.target.value)} placeholder="Tên hiển thị" />
+                        <Select
+                          value={item.reward_package_id || "none"}
+                          onValueChange={(value) => {
+                            setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? {
+                              ...row,
+                              reward_package_id: value === "none" ? null : value,
+                              reward_mode: value === "none" ? row.reward_mode : "package",
+                            } : row));
+                          }}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Reward package" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Không gắn package</SelectItem>
+                            {(data?.rewardPackages ?? []).map((pkg) => (
+                              <SelectItem key={pkg.id} value={pkg.id}>{pkg.package_code} · {pkg.title}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">Đã dùng {item.redeemed_count}</Badge>
+                        <span className="text-xs text-muted-foreground">Bật</span>
+                        <Switch checked={item.enabled} onCheckedChange={(value) => setRedeemField(index, "enabled", value)} />
+                        <Button variant="outline" size="sm" className="text-destructive" onClick={() => removeRedeemKey(index)}>
+                          <Trash2 className="h-4 w-4" />
+                          Xóa
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">Đã dùng {item.redeemed_count}</Badge>
-                      <span className="text-xs text-muted-foreground">Bật</span>
-                      <Switch checked={item.enabled} onCheckedChange={(value) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, enabled: value } : row))} />
-                      <Button variant="outline" size="sm" className="text-destructive" onClick={() => removeRedeemKey(index)}>
-                        <Trash2 className="h-4 w-4" />
-                        Xóa
-                      </Button>
+
+                    <div className={`rounded-2xl border p-3 text-sm ${rewardSource.variant === "package" ? "bg-amber-50" : "bg-muted/40"}`}>
+                      <div className="font-medium">{rewardSource.title}</div>
+                      <div className="mt-1 text-muted-foreground">{rewardSource.description}</div>
+                    </div>
+
+                    <Textarea rows={2} value={item.description} onChange={(e) => setRedeemField(index, "description", e.target.value)} placeholder="Mô tả ngắn cho redeem key" />
+
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Reward mode</div>
+                        <Select value={item.reward_mode} onValueChange={(value) => {
+                          setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? {
+                            ...row,
+                            reward_mode: value,
+                            reward_package_id: value === "package" ? row.reward_package_id : null,
+                          } : row));
+                        }}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {REWARD_MODE_OPTIONS.map((mode) => <SelectItem key={mode} value={mode}>{mode}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Plan mở ra</div>
+                        <Select value={item.plan_code || "none"} onValueChange={(value) => setRedeemField(index, "plan_code", value === "none" ? null : value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Không gắn plan</SelectItem>
+                            {PLAN_OPTIONS.map((plan) => <SelectItem key={plan} value={plan}>{plan}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Bắt đầu</div><Input type="datetime-local" value={toLocalDateTimeInput(item.starts_at)} onChange={(e) => setRedeemField(index, "starts_at", e.target.value)} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Hết hạn</div><Input type="datetime-local" value={toLocalDateTimeInput(item.expires_at)} onChange={(e) => setRedeemField(index, "expires_at", e.target.value)} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Số lượt dùng tối đa</div><Input type="number" min={1} value={item.max_redemptions} onChange={(e) => setRedeemField(index, "max_redemptions", Number(e.target.value))} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Credit thường</div><Input value={numericInput(item.soft_credit_amount)} onChange={(e) => setRedeemField(index, "soft_credit_amount", e.target.value)} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương</div><Input value={numericInput(item.premium_credit_amount)} onChange={(e) => setRedeemField(index, "premium_credit_amount", e.target.value)} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Ngày entitlement</div><Input type="number" min={0} value={item.entitlement_days} onChange={(e) => setRedeemField(index, "entitlement_days", Number(e.target.value))} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Override thiết bị</div><Input type="number" min={0} value={item.device_limit_override ?? 0} onChange={(e) => setRedeemField(index, "device_limit_override", Number(e.target.value) || null)} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Override tài khoản</div><Input type="number" min={0} value={item.account_limit_override ?? 0} onChange={(e) => setRedeemField(index, "account_limit_override", Number(e.target.value) || null)} /></div>
+                      <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium">Lý do chặn</div><Input value={item.blocked_reason} onChange={(e) => setRedeemField(index, "blocked_reason", e.target.value)} placeholder="Để trống nếu không chặn key này" /></div>
+                      <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium">Ghi chú</div><Input value={item.notes} onChange={(e) => setRedeemField(index, "notes", e.target.value)} placeholder="Ví dụ: key quà tặng Plus 30 ngày, credit test tháng này" /></div>
                     </div>
                   </div>
-
-                  <Textarea rows={2} value={item.description} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, description: e.target.value } : row))} placeholder="Mô tả ngắn cho redeem key" />
-
-                  <div className="grid gap-3 md:grid-cols-4">
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Reward mode</div>
-                      <Select value={item.reward_mode} onValueChange={(value) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, reward_mode: value } : row))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {REWARD_MODE_OPTIONS.map((mode) => (
-                            <SelectItem key={mode} value={mode}>{mode}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Plan mở ra</div>
-                      <Select value={item.plan_code || "none"} onValueChange={(value) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, plan_code: value === "none" ? null : value } : row))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Không gắn plan</SelectItem>
-                          {PLAN_OPTIONS.map((plan) => (
-                            <SelectItem key={plan} value={plan}>{plan}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Bắt đầu</div>
-                      <Input type="datetime-local" value={toLocalDateTimeInput(item.starts_at)} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, starts_at: e.target.value } : row))} />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Hết hạn</div>
-                      <Input type="datetime-local" value={toLocalDateTimeInput(item.expires_at)} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, expires_at: e.target.value } : row))} />
-                    </div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Số lượt dùng tối đa</div><Input type="number" min={1} value={item.max_redemptions} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, max_redemptions: Number(e.target.value) } : row))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường</div><Input value={numericInput(item.soft_credit_amount)} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, soft_credit_amount: e.target.value } : row))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương</div><Input value={numericInput(item.premium_credit_amount)} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, premium_credit_amount: e.target.value } : row))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Ngày entitlement</div><Input type="number" min={0} value={item.entitlement_days} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, entitlement_days: Number(e.target.value) } : row))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Override thiết bị</div><Input type="number" min={0} value={item.device_limit_override ?? 0} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, device_limit_override: Number(e.target.value) || null } : row))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Override tài khoản</div><Input type="number" min={0} value={item.account_limit_override ?? 0} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, account_limit_override: Number(e.target.value) || null } : row))} /></div>
-                    <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium">Lý do chặn</div><Input value={item.blocked_reason} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, blocked_reason: e.target.value } : row))} placeholder="Để trống nếu không chặn key này" /></div>
-                    <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium">Ghi chú</div><Input value={item.notes} onChange={(e) => setRedeemDraft((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, notes: e.target.value } : row))} placeholder="Ví dụ: key quà tặng Plus 30 ngày, dùng cho đợt test tháng này." /></div>
-                  </div>
-
-                  {item.reward_package_id ? (
-                    <div className="text-xs text-muted-foreground">
-                      Package đang map: {packageMap.get(item.reward_package_id)?.package_code || "Unknown"}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
 
               <div className="flex flex-wrap justify-between gap-2">
                 <Button variant="outline" onClick={addRedeemKey}>Thêm redeem key</Button>
@@ -1058,11 +1232,11 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Entitlements gần đây</CardTitle>
-              <CardDescription>Kiểm tra ai đang có gói nào, còn hạn hay đã bị revoke.</CardDescription>
+              <CardDescription>Từ phase 8 đã có cả revoke lẫn mở lại.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {(data?.entitlements ?? []).length === 0 ? <div className="text-sm text-muted-foreground">Chưa có entitlement nào.</div> : null}
-              {(data?.entitlements ?? []).map((item) => (
+              {filteredEntitlements.length === 0 ? <div className="text-sm text-muted-foreground">Không có entitlement nào khớp bộ lọc.</div> : null}
+              {filteredEntitlements.map((item) => (
                 <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border p-4">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1074,9 +1248,10 @@ export function AdminServerAppRuntimePage() {
                     <div className="text-xs text-muted-foreground">Bắt đầu: {formatTime(item.starts_at)} · Hết hạn: {formatTime(item.expires_at)}</div>
                     {item.revoked_at ? <div className="text-xs text-destructive">Đã revoke lúc {formatTime(item.revoked_at)} · {item.revoke_reason || "Không có ghi chú"}</div> : null}
                   </div>
-                  <div>
-                    <Button variant="outline" size="sm" className="text-destructive" disabled={item.status !== "active" || revokeEntitlementMutation.isPending} onClick={() => revokeEntitlementMutation.mutate(item.id)}>
-                      Revoke
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="text-destructive" disabled={item.status !== "active" || revokeEntitlementMutation.isPending} onClick={() => revokeEntitlementMutation.mutate(item.id)}>Revoke</Button>
+                    <Button variant="outline" size="sm" disabled={item.status === "active" || restoreEntitlementMutation.isPending} onClick={() => restoreEntitlementMutation.mutate(item.id)}>
+                      <RotateCcw className="mr-2 h-4 w-4" />Mở lại
                     </Button>
                   </div>
                 </div>
@@ -1089,11 +1264,11 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Wallet balances</CardTitle>
-              <CardDescription>Đây là số dư runtime hiện tại của từng account. Tạm thời phase 5 để đọc và kiểm tra, chỉnh tay sâu hơn có thể làm tiếp sau.</CardDescription>
+              <CardDescription>Danh sách ví đã được lọc theo từ khóa tìm kiếm bên trên.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {(data?.wallets ?? []).length === 0 ? <div className="text-sm text-muted-foreground">Chưa có ví nào.</div> : null}
-              {(data?.wallets ?? []).map((item) => (
+              {filteredWallets.length === 0 ? <div className="text-sm text-muted-foreground">Không có ví nào khớp bộ lọc.</div> : null}
+              {filteredWallets.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1105,9 +1280,7 @@ export function AdminServerAppRuntimePage() {
                       <div>Credit kim cương: <span className="font-semibold">{item.premium_balance}</span></div>
                     </div>
                   </div>
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    Reset thường: {formatTime(item.last_soft_reset_at)} · Reset kim cương: {formatTime(item.last_premium_reset_at)} · Cập nhật: {formatTime(item.updated_at)}
-                  </div>
+                  <div className="mt-3 text-xs text-muted-foreground">Reset thường: {formatTime(item.last_soft_reset_at)} · Reset kim cương: {formatTime(item.last_premium_reset_at)} · Cập nhật: {formatTime(item.updated_at)}</div>
                 </div>
               ))}
             </CardContent>
@@ -1118,11 +1291,11 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Sessions gần đây</CardTitle>
-              <CardDescription>Nhìn trạng thái online gần nhất của từng thiết bị và khóa nhanh nếu cần.</CardDescription>
+              <CardDescription>Có thể khóa hoặc mở lại session đã revoke.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {(data?.sessions ?? []).length === 0 ? <div className="text-sm text-muted-foreground">Chưa có session nào.</div> : null}
-              {(data?.sessions ?? []).map((item) => (
+              {filteredSessions.length === 0 ? <div className="text-sm text-muted-foreground">Không có session nào khớp bộ lọc.</div> : null}
+              {filteredSessions.map((item) => (
                 <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border p-4">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1134,9 +1307,10 @@ export function AdminServerAppRuntimePage() {
                     <div className="text-xs text-muted-foreground">Bắt đầu: {formatTime(item.started_at)} · Last seen: {formatTime(item.last_seen_at)} · Hết hạn: {formatTime(item.expires_at)}</div>
                     {item.revoked_at ? <div className="text-xs text-destructive">Đã revoke lúc {formatTime(item.revoked_at)} · {item.revoke_reason || "Không có ghi chú"}</div> : null}
                   </div>
-                  <div>
-                    <Button variant="outline" size="sm" className="text-destructive" disabled={item.status !== "active" || revokeSessionMutation.isPending} onClick={() => revokeSessionMutation.mutate(item.id)}>
-                      Revoke session
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="text-destructive" disabled={item.status !== "active" || revokeSessionMutation.isPending} onClick={() => revokeSessionMutation.mutate(item.id)}>Revoke session</Button>
+                    <Button variant="outline" size="sm" disabled={item.status === "active" || restoreSessionMutation.isPending} onClick={() => restoreSessionMutation.mutate(item.id)}>
+                      <RotateCcw className="mr-2 h-4 w-4" />Mở lại
                     </Button>
                   </div>
                 </div>
@@ -1149,11 +1323,11 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Wallet transactions</CardTitle>
-              <CardDescription>Log runtime mới nhất để soi redeem, consume, reset và refill.</CardDescription>
+              <CardDescription>Nếu redeem có cộng credit, transaction type sẽ là `redeem` và hiện rõ delta.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {(data?.transactions ?? []).length === 0 ? <div className="text-sm text-muted-foreground">Chưa có giao dịch nào.</div> : null}
-              {(data?.transactions ?? []).map((item) => (
+              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có transaction nào khớp bộ lọc.</div> : null}
+              {filteredTransactions.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="space-y-1">
@@ -1169,9 +1343,7 @@ export function AdminServerAppRuntimePage() {
                       <div>Δ kim cương: <span className="font-semibold">{item.premium_delta}</span></div>
                     </div>
                   </div>
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    Sau giao dịch: thường {item.soft_balance_after ?? "-"} · kim cương {item.premium_balance_after ?? "-"} · {formatTime(item.created_at)}
-                  </div>
+                  <div className="mt-3 text-xs text-muted-foreground">Sau giao dịch: thường {item.soft_balance_after ?? "-"} · kim cương {item.premium_balance_after ?? "-"} · {formatTime(item.created_at)}</div>
                   {item.note ? <div className="mt-2 text-xs text-muted-foreground">Ghi chú: {item.note}</div> : null}
                 </div>
               ))}
@@ -1183,13 +1355,11 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Runtime events</CardTitle>
-              <CardDescription>
-                Dòng thời gian runtime cho từng action. Chỗ này giúp bạn soi app đang ngã ở đâu thay vì nhìn log như hố đen tím.
-              </CardDescription>
+              <CardDescription>Đây là chỗ đọc lỗi thật. Từ phase 8, khi FAIL nó sẽ hiện code rõ hơn và lọc được theo search.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {(data?.events ?? []).length === 0 ? <div className="text-sm text-muted-foreground">Chưa có event nào.</div> : null}
-              {(data?.events ?? []).map((item) => (
+              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có event nào khớp bộ lọc.</div> : null}
+              {filteredEvents.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="space-y-1">
@@ -1204,7 +1374,7 @@ export function AdminServerAppRuntimePage() {
                     </div>
                     <div className="text-xs text-muted-foreground">{formatTime(item.created_at)}</div>
                   </div>
-                  {item.message ? <div className="mt-3 text-sm text-muted-foreground">{item.message}</div> : null}
+                  {(item.message || item.code) ? <div className="mt-3 text-sm text-muted-foreground">{FRIENDLY_ERROR_MAP[item.code || ""] ?? item.message ?? item.code}</div> : null}
                   {item.meta ? <pre className="mt-3 overflow-auto rounded-xl bg-muted p-3 text-[11px] leading-5 text-muted-foreground">{JSON.stringify(item.meta, null, 2)}</pre> : null}
                 </div>
               ))}
