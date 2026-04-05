@@ -173,8 +173,7 @@ function asStringArray(value: unknown): string[] {
   }
   const raw = String(value ?? "").trim();
   if (!raw) return [];
-  return Array.from(new Set(raw.split(/[,
-]/).map((item) => item.trim()).filter(Boolean)));
+  return Array.from(new Set(raw.split(/[,\n\r]+/).map((item) => item.trim()).filter(Boolean)));
 }
 
 function compareVersionText(left: string | null | undefined, right: string | null | undefined) {
