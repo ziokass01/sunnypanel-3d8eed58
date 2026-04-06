@@ -28,7 +28,6 @@ import { AdminFreeKeysPage } from "@/pages/AdminFreeKeys";
 import { AdminServerAppsPage } from "@/pages/AdminServerApps";
 import { AdminServerAppDetailPage } from "@/pages/AdminServerAppDetail";
 import { AdminServerAppRuntimePage } from "@/pages/AdminServerAppRuntime";
-import { AdminServerAppTrashPage } from "@/pages/AdminServerAppTrash";
 import { RentPortalPage } from "@/pages/RentPortal";
 import { RentAdminCustomerSetupPage } from "@/pages/RentAdminCustomerSetup";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
@@ -174,7 +173,6 @@ const App = () => {
                   <Route path="internal" element={<Navigate to="../config" replace />} />
                   <Route path="config" element={<AdminServerAppDetailPage />} />
                   <Route path="runtime" element={<AdminServerAppRuntimePage />} />
-                  <Route path="trash" element={<AdminServerAppTrashPage />} />
                 </Route>
               )}
 

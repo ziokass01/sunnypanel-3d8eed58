@@ -1352,7 +1352,7 @@ export function AdminServerAppRuntimePage() {
           <Card>
             <CardHeader>
               <CardTitle>Session gần đây</CardTitle>
-              <CardDescription>Có thể khóa hoặc mở lại session. Các session đã revoke / logged_out / expired có thể dọn hẳn ở tab Trash.</CardDescription>
+              <CardDescription>Có thể khóa hoặc mở lại session đã revoke.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-2">
@@ -1381,7 +1381,6 @@ export function AdminServerAppRuntimePage() {
                     <Button variant="outline" size="sm" disabled={item.status === "active" || restoreSessionMutation.isPending} onClick={() => restoreSessionMutation.mutate(item.id)}>
                       <RotateCcw className="mr-2 h-4 w-4" />Mở lại
                     </Button>
-                    {item.status !== "active" ? <Badge variant="outline">Dọn hẳn ở Trash</Badge> : null}
                   </div>
                 </div>
               ))}

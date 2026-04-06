@@ -90,10 +90,8 @@ type OpsAction =
   | "redeem_preview"
   | "revoke_session"
   | "restore_session"
-  | "hard_delete_session"
   | "revoke_entitlement"
-  | "restore_entitlement"
-  | "hard_delete_entitlement";
+  | "restore_entitlement";
 
 function asString(value: unknown, fallback = "") {
   const v = String(value ?? fallback).trim();
@@ -132,8 +130,6 @@ function buildFriendlyError(code: string, message: string) {
     REDEEM_KEY_LIMIT_REACHED: "Redeem key đã hết lượt dùng tối đa.",
     SESSION_NOT_FOUND: "Không tìm thấy session cần xử lý.",
     ENTITLEMENT_NOT_FOUND: "Không tìm thấy entitlement cần xử lý.",
-    ACTIVE_SESSION_DELETE_BLOCKED: "Chỉ được xóa vĩnh viễn session đã revoke / logged_out / expired.",
-    ACTIVE_ENTITLEMENT_DELETE_BLOCKED: "Chỉ được xóa vĩnh viễn entitlement không còn active.",
     EMPTY_ADJUSTMENT: "Bạn chưa nhập số cộng hoặc trừ cho ví.",
     NEGATIVE_SOFT_BALANCE: "Không thể làm credit thường âm.",
     NEGATIVE_PREMIUM_BALANCE: "Không thể làm credit kim cương âm.",
@@ -418,59 +414,6 @@ async function updateEntitlementStatus(params: { entitlementId: string; status: 
   return data;
 }
 
-
-async function hardDeleteSession(params: { sessionId: string }) {
-  const admin = createAdminClient();
-  const sessionId = asString(params.sessionId);
-  if (!sessionId) {
-    throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
-  }
-
-  const { data: current, error: currentError } = await admin
-    .from("server_app_sessions")
-    .select("id,app_code,account_ref,device_id,status,revoked_at")
-    .eq("id", sessionId)
-    .maybeSingle();
-  if (currentError) throw currentError;
-  if (!current) throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
-  if (String((current as any).status ?? "") === "active") {
-    throw Object.assign(new Error("ACTIVE_SESSION_DELETE_BLOCKED"), { status: 409, code: "ACTIVE_SESSION_DELETE_BLOCKED" });
-  }
-
-  const { error } = await admin
-    .from("server_app_sessions")
-    .delete()
-    .eq("id", sessionId);
-  if (error) throw error;
-  return { id: sessionId, deleted: true, account_ref: (current as any).account_ref, device_id: (current as any).device_id, status: (current as any).status };
-}
-
-async function hardDeleteEntitlement(params: { entitlementId: string }) {
-  const admin = createAdminClient();
-  const entitlementId = asString(params.entitlementId);
-  if (!entitlementId) {
-    throw Object.assign(new Error("ENTITLEMENT_NOT_FOUND"), { status: 404, code: "ENTITLEMENT_NOT_FOUND" });
-  }
-
-  const { data: current, error: currentError } = await admin
-    .from("server_app_entitlements")
-    .select("id,account_ref,device_id,plan_code,status,revoked_at")
-    .eq("id", entitlementId)
-    .maybeSingle();
-  if (currentError) throw currentError;
-  if (!current) throw Object.assign(new Error("ENTITLEMENT_NOT_FOUND"), { status: 404, code: "ENTITLEMENT_NOT_FOUND" });
-  if (String((current as any).status ?? "") === "active") {
-    throw Object.assign(new Error("ACTIVE_ENTITLEMENT_DELETE_BLOCKED"), { status: 409, code: "ACTIVE_ENTITLEMENT_DELETE_BLOCKED" });
-  }
-
-  const { error } = await admin
-    .from("server_app_entitlements")
-    .delete()
-    .eq("id", entitlementId);
-  if (error) throw error;
-  return { id: entitlementId, deleted: true, account_ref: (current as any).account_ref, device_id: (current as any).device_id, plan_code: (current as any).plan_code, status: (current as any).status };
-}
-
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin") ?? "";
 
@@ -547,13 +490,6 @@ Deno.serve(async (req) => {
       return opsJson(200, { ok: true, action, result }, origin);
     }
 
-    if (action === "hard_delete_session") {
-      const result = await hardDeleteSession({
-        sessionId: asString(body?.session_id),
-      });
-      return opsJson(200, { ok: true, action, result }, origin);
-    }
-
     if (action === "revoke_entitlement") {
       const result = await updateEntitlementStatus({
         entitlementId: asString(body?.entitlement_id),
@@ -567,13 +503,6 @@ Deno.serve(async (req) => {
       const result = await updateEntitlementStatus({
         entitlementId: asString(body?.entitlement_id),
         status: "active",
-      });
-      return opsJson(200, { ok: true, action, result }, origin);
-    }
-
-    if (action === "hard_delete_entitlement") {
-      const result = await hardDeleteEntitlement({
-        entitlementId: asString(body?.entitlement_id),
       });
       return opsJson(200, { ok: true, action, result }, origin);
     }

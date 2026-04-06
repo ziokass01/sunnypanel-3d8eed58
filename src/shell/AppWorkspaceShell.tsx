@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
-import { AppWindow, ChevronRight, Cog, Menu, Trash2, X } from "lucide-react";
+import { AppWindow, ChevronRight, Cog, Menu, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,18 +9,17 @@ import { getAdminAppsUrl } from "@/lib/appWorkspace";
 const APP_META: Record<string, { label: string; note: string }> = {
   "find-dumps": {
     label: "Find Dumps",
-    note: "Khu app này giữ 3 mục chính: runtime, cấu hình và trash. Không còn trang trung gian thừa.",
+    note: "Khu app này chỉ giữ 2 mục chính: runtime và cấu hình. Không còn trang trung gian thừa.",
   },
   "free-fire": {
     label: "Free Fire",
-    note: "Khu app riêng của Free Fire. Giữ runtime, cấu hình và trash để dọn dữ liệu cuối cùng.",
+    note: "Khu app riêng của Free Fire. Chỉ giữ runtime và cấu hình để giao diện gọn hơn.",
   },
 };
 
 const NAV_ITEMS = [
   { key: "runtime", label: "Runtime app", icon: AppWindow },
   { key: "config", label: "Cấu hình app", icon: Cog },
-  { key: "trash", label: "Trash", icon: Trash2 },
 ] as const;
 
 function resolveAppMeta(appCode: string) {
@@ -45,7 +44,7 @@ export function AppWorkspaceShell() {
   const meta = resolveAppMeta(appCode);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const backToAdminUrl = useMemo(() => getAdminAppsUrl(), []);
-  const activeKey = location.pathname.includes("/trash") ? "trash" : location.pathname.includes("/config") ? "config" : "runtime";
+  const activeKey = location.pathname.includes("/config") ? "config" : "runtime";
   const activeLabel = NAV_ITEMS.find((item) => item.key === activeKey)?.label ?? "Runtime app";
 
   useEffect(() => {
@@ -70,7 +69,7 @@ export function AppWorkspaceShell() {
                 </div>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-white">{meta.label}</div>
-                  <div className="truncate text-xs text-slate-400">Runtime, cấu hình và trash</div>
+                  <div className="truncate text-xs text-slate-400">Chỉ giữ runtime và cấu hình</div>
                 </div>
               </div>
               <Button
