@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { postFunction } from "@/lib/functions";
 
 const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
@@ -303,42 +304,6 @@ function compactEdgeMessage(message?: string | null) {
   return raw;
 }
 
-async function extractInvokeErrorContext(error: any, payload: Record<string, unknown>) {
-  let json: any = null;
-  let text: string | null = null;
-  let status: number | null = null;
-
-  const response = error?.context;
-  if (response) {
-    status = typeof response?.status === "number" ? response.status : null;
-
-    if (typeof response?.clone === "function") {
-      const cloned = response.clone();
-      try {
-        json = await cloned.json();
-      } catch {
-        try {
-          text = await cloned.text();
-        } catch {
-          text = null;
-        }
-      }
-    } else {
-      json = response?.json ?? null;
-      text = typeof response?.text === "string" ? response.text : null;
-    }
-  }
-
-  return { payload, json, text, status };
-}
-
-async function invokeRuntimeEdge(functionName: "server-app-runtime" | "server-app-runtime-ops", payload: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke(functionName, { body: payload });
-  if (!error) return { data };
-  (error as any).context = await extractInvokeErrorContext(error, payload);
-  throw error;
-}
-
 function formatJsonBlock(value: unknown) {
   try {
     return JSON.stringify(value ?? {}, null, 2);
@@ -424,7 +389,6 @@ function getErrorCode(error: any) {
 function getErrorMessage(error: any) {
   return error?.context?.json?.message
     ?? error?.context?.json?.msg
-    ?? error?.context?.text
     ?? error?.message
     ?? "Unknown error";
 }
@@ -433,11 +397,8 @@ function formatMutationError(error: any) {
   const code = String(getErrorCode(error));
   const raw = String(getErrorMessage(error));
   const friendly = FRIENDLY_ERROR_MAP[code] ?? raw;
-  const status = error?.context?.status;
-  const statusText = typeof status === "number" ? `HTTP ${status} · ` : "";
-
-  if (friendly === raw || raw.includes(code)) return `${statusText}${friendly} (${code})`;
-  return `${statusText}${friendly} (${code})\n${raw}`;
+  if (friendly === raw || raw.includes(code)) return `${friendly} (${code})`;
+  return `${friendly} (${code})\n${raw}`;
 }
 
 function normalizeSearch(value: unknown) {
@@ -787,7 +748,11 @@ export function AdminServerAppRuntimePage() {
       setSimulatorStatus(`Đang gọi runtime: ${String(payload.action)}...`);
       setSimulatorResult(formatJsonBlock({ ok: false, pending: true, payload }));
 
-      const { data } = await invokeRuntimeEdge("server-app-runtime", payload);
+      const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
       return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
@@ -816,8 +781,7 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy cleanup...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      const { data } = await invokeRuntimeEdge("server-app-runtime-ops", payload);
-      return { payload, data };
+      return await postAdminRuntimeOps(payload);
     },
     onSuccess: async ({ payload, data: result }) => {
       setOpsStatus(`Cleanup chạy xong: ${String(payload.action)}`);
@@ -847,8 +811,7 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy adjust_wallet...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      const { data } = await invokeRuntimeEdge("server-app-runtime-ops", payload);
-      return { payload, data };
+      return await postAdminRuntimeOps(payload);
     },
     onSuccess: async ({ payload, data: result }) => {
       setOpsStatus(`Ops chạy xong: ${String(payload.action)}`);
