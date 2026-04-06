@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 
@@ -13,6 +13,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+
+const CONFIG_TABS = ["settings", "plans", "features", "wallet", "rewards"] as const;
+
+function normalizeConfigTab(value: string | null) {
+  return (CONFIG_TABS as readonly string[]).includes(String(value || "")) ? (value as typeof CONFIG_TABS[number]) : "settings";
+}
 
 type ServerAppRow = {
   code: string;
@@ -511,6 +517,7 @@ export function AdminServerAppDetailPage() {
   };
 
   const migrationHint = useMemo(() => isPhaseMissingMessage((error as Error | undefined)?.message), [error]);
+  const activeTab = normalizeConfigTab(searchParams.get("tab"));
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">Đang tải cấu hình app...</div>;
@@ -520,13 +527,10 @@ export function AdminServerAppDetailPage() {
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-2">
-          <Button asChild variant="outline" size="sm">
-            <Link to="/admin/apps">← Quay lại Server app</Link>
-          </Button>
           <div>
-            <h1 className="text-2xl font-semibold">{appDraft.label}</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Màn quản lý nội bộ cho {appDraft.label}. Đây là tầng 2 để chỉnh plan, credit, reward package và feature flags mà không đụng lung tung vào phần free key đang chạy.
+            <h1 className="text-2xl font-semibold">Cấu hình · {appDraft.label}</h1>
+            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+              Chia nhỏ cấu hình theo từng tab để mobile gọn hơn: phần cơ bản, gói, tính năng, ví và gói quà.
             </p>
           </div>
         </div>
@@ -535,7 +539,7 @@ export function AdminServerAppDetailPage() {
             {appDraft.public_enabled ? "Đang bật" : "Đang ẩn"}
           </Badge>
           <Button asChild variant="outline">
-            <Link to={`/admin/apps/${appCode}/runtime`}>Runtime admin</Link>
+            <Link to={`/apps/${appCode}/runtime`}>Mở runtime</Link>
           </Button>
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>
         </div>
@@ -555,21 +559,21 @@ export function AdminServerAppDetailPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-5">
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Guest plan</div><div className="mt-1 text-2xl font-semibold">{settingsDraft.guest_plan || "classic"}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Gift tab</div><div className="mt-1 text-2xl font-semibold">{settingsDraft.gift_tab_label || "Quà tặng"}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Plans</div><div className="mt-1 text-2xl font-semibold">{plansDraft.length}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Features</div><div className="mt-1 text-2xl font-semibold">{featuresDraft.length}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Reward packages</div><div className="mt-1 text-2xl font-semibold">{packagesDraft.length}</div></CardContent></Card>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói mặc định</div><div className="mt-1 break-words text-lg font-semibold">{settingsDraft.guest_plan || "classic"}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Nhãn tab key</div><div className="mt-1 break-words text-lg font-semibold">{settingsDraft.gift_tab_label || "Mã quà"}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói</div><div className="mt-1 text-lg font-semibold">{plansDraft.length}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Tính năng</div><div className="mt-1 text-lg font-semibold">{featuresDraft.length}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói quà</div><div className="mt-1 text-lg font-semibold">{packagesDraft.length}</div></CardContent></Card>
       </div>
 
-      <Tabs defaultValue="settings" className="space-y-3">
-        <TabsList className="flex w-full flex-wrap justify-start gap-2">
-          <TabsTrigger value="settings">App settings</TabsTrigger>
-          <TabsTrigger value="plans">Plans & credit</TabsTrigger>
-          <TabsTrigger value="features">Feature flags</TabsTrigger>
-          <TabsTrigger value="wallet">Wallet rules</TabsTrigger>
-          <TabsTrigger value="rewards">Reward / redeem</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={(value) => { const next = new URLSearchParams(searchParams); next.set("tab", value); setSearchParams(next, { replace: true }); }} className="space-y-3">
+        <TabsList className="flex h-auto w-full flex-nowrap justify-start gap-2 overflow-x-auto rounded-2xl border bg-background p-2">
+          <TabsTrigger value="settings" className="whitespace-nowrap">Cơ bản</TabsTrigger>
+          <TabsTrigger value="plans" className="whitespace-nowrap">Gói & credit</TabsTrigger>
+          <TabsTrigger value="features" className="whitespace-nowrap">Tính năng</TabsTrigger>
+          <TabsTrigger value="wallet" className="whitespace-nowrap">Ví</TabsTrigger>
+          <TabsTrigger value="rewards" className="whitespace-nowrap">Gói quà</TabsTrigger>
         </TabsList>
 
         <TabsContent value="settings">
@@ -608,7 +612,7 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Tên tab nhập key</div>
-                  <Input value={settingsDraft.gift_tab_label || ""} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, gift_tab_label: e.target.value }))} placeholder="Quà tặng / Mã quà" />
+                  <Input value={settingsDraft.gift_tab_label || ""} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, gift_tab_label: e.target.value }))} placeholder="Mã quà / Nhập key" />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Giờ reset credit thường</div>

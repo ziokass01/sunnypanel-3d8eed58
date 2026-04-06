@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 
@@ -18,6 +18,7 @@ const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
 const WALLET_KIND_OPTIONS = ["auto", "soft", "premium"] as const;
 const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"] as const;
+const RUNTIME_TABS = ["simulator", "ops", "controls", "redeem", "entitlements", "wallets", "sessions", "transactions", "events"] as const;
 
 const FRIENDLY_ERROR_MAP: Record<string, string> = {
   BAD_JSON: "Payload gửi lên bị lỗi JSON.",
@@ -286,6 +287,22 @@ function textareaToList(value: string) {
   return Array.from(new Set(String(value ?? "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)));
 }
 
+function normalizeRuntimeTab(value: string | null) {
+  return (RUNTIME_TABS as readonly string[]).includes(String(value || "")) ? (value as typeof RUNTIME_TABS[number]) : "simulator";
+}
+
+function compactEdgeMessage(message?: string | null) {
+  const raw = String(message ?? "").trim();
+  if (!raw) return "Có lỗi xảy ra khi gọi runtime.";
+  if (raw.includes("Failed to send a request to the Edge Function")) {
+    return "Không gửi được yêu cầu tới Edge Function. Kiểm tra deploy, CORS hoặc mạng.";
+  }
+  if (raw.includes("Edge Function returned a non-2xx status code")) {
+    return "Edge Function trả về lỗi. Mở khối kết quả JSON để xem chi tiết.";
+  }
+  return raw;
+}
+
 function formatJsonBlock(value: unknown) {
   try {
     return JSON.stringify(value ?? {}, null, 2);
@@ -431,6 +448,7 @@ function summarizeRewardSource(row: RedeemKeyRow, packageMap: Map<string, Reward
 
 export function AdminServerAppRuntimePage() {
   const { appCode = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
 
   const runtimeQuery = useQuery({
@@ -485,6 +503,7 @@ export function AdminServerAppRuntimePage() {
   const [accountSearch, setAccountSearch] = useState("");
   const [redeemSearch, setRedeemSearch] = useState("");
   const [logSearch, setLogSearch] = useState("");
+  const activeTab = normalizeRuntimeTab(searchParams.get("tab"));
 
   useEffect(() => {
     setRedeemDraft((data?.redeemKeys ?? []).map((row) => ({
@@ -845,103 +864,74 @@ export function AdminServerAppRuntimePage() {
 
   return (
     <section className="space-y-4">
-      <Card className="border-primary/20">
-        <CardHeader className="space-y-4">
+      <Card className="border-primary/20 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+        <CardHeader className="space-y-4 p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
-                <Button asChild variant="outline" size="sm">
-                  <Link to={`/apps/${appCode}/config`}>← Quay lại cấu hình app</Link>
-                </Button>
                 <Badge variant={data?.app?.public_enabled ? "secondary" : "outline"}>
                   {data?.app?.public_enabled ? "App đang bật" : "App đang ẩn"}
                 </Badge>
+                <Badge variant="outline">Runtime riêng</Badge>
               </div>
               <div>
-                <CardTitle className="text-3xl">Runtime app · {data?.app?.label || appCode}</CardTitle>
+                <CardTitle className="text-2xl sm:text-[2rem]">Runtime · {data?.app?.label || appCode}</CardTitle>
                 <CardDescription className="mt-2 max-w-3xl text-sm leading-6">
-                  Đây là trang điều khiển riêng cho app này. Từ phase 8 trở đi, bạn có thể ở hẳn trong một khu điều hành riêng để quản lý runtime, test flow, tìm user, xem ví, session, event và xử lý lỗi rõ ràng hơn.
+                  Chia nhỏ từng khu xử lý để mobile gọn hơn: test nhanh, ops, chặn giới hạn, redeem, quyền, ví, session, giao dịch và sự kiện.
                 </CardDescription>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => refetch()}>
-                <RefreshCw className="h-4 w-4" />
-                Làm mới
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-[1.4fr,0.6fr]">
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
-                </div>
-                <div className="text-xs text-muted-foreground">Áp dụng cho entitlements, wallets và sessions.</div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm redeem key</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={redeemSearch} onChange={(e) => setRedeemSearch(e.target.value)} placeholder="Ví dụ: REDEEM_1 hoặc plus_30d" />
-                </div>
-                <div className="text-xs text-muted-foreground">Chỉ lọc danh sách redeem keys.</div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm log / lỗi / transaction</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
-                </div>
-                <div className="text-xs text-muted-foreground">Áp dụng cho transactions và events.</div>
-              </div>
-            </div>
-            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
-              <div className="font-medium text-foreground">Ghi chú flow test chuẩn</div>
-              <div className="mt-2 space-y-1">
-                <div>1. `health` để kiểm tra function sống</div>
-                <div>2. `redeem` để lấy `session_token`</div>
-                <div>3. `consume` hoặc `heartbeat` bằng token đó</div>
-                <div>4. `logout` để kết thúc session</div>
-                <div className="pt-2 text-[11px]">Auto wallet hiện theo policy app: <span className="font-medium text-foreground">{data?.walletRules?.consume_priority === 'premium_first' ? 'premium trước, thường sau' : 'thường trước, premium sau'}</span>.</div>
-              </div>
-            </div>
+            <Button variant="outline" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4" />
+              Làm mới
+            </Button>
           </div>
         </CardHeader>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-6">
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Redeem keys</div><div className="mt-1 text-2xl font-semibold">{data?.redeemKeys.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Entitlements</div><div className="mt-1 text-2xl font-semibold">{data?.entitlements.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Wallets</div><div className="mt-1 text-2xl font-semibold">{data?.wallets.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Sessions</div><div className="mt-1 text-2xl font-semibold">{data?.sessions.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Transactions</div><div className="mt-1 text-2xl font-semibold">{data?.transactions.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Events</div><div className="mt-1 text-2xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Redeem</div><div className="mt-1 text-xl font-semibold">{data?.redeemKeys.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Quyền</div><div className="mt-1 text-xl font-semibold">{data?.entitlements.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Ví</div><div className="mt-1 text-xl font-semibold">{data?.wallets.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Session</div><div className="mt-1 text-xl font-semibold">{data?.sessions.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Giao dịch</div><div className="mt-1 text-xl font-semibold">{data?.transactions.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Sự kiện</div><div className="mt-1 text-xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
       </div>
 
-      <Tabs defaultValue="simulator" className="space-y-3">
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-2xl border bg-background p-2">
-          <TabsTrigger value="simulator">Simulator</TabsTrigger>
-          <TabsTrigger value="ops">Ops</TabsTrigger>
-          <TabsTrigger value="controls">Controls</TabsTrigger>
-          <TabsTrigger value="redeem">Redeem keys</TabsTrigger>
-          <TabsTrigger value="entitlements">Entitlements</TabsTrigger>
-          <TabsTrigger value="wallets">Wallets</TabsTrigger>
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          <TabsTrigger value="transactions">Transactions</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={(value) => {
+        const next = new URLSearchParams(searchParams);
+        next.set("tab", value);
+        setSearchParams(next, { replace: true });
+      }} className="space-y-3">
+        <TabsList className="flex h-auto w-full flex-nowrap items-center justify-start gap-2 overflow-x-auto rounded-2xl border bg-background p-2">
+          <TabsTrigger value="simulator" className="whitespace-nowrap">Test nhanh</TabsTrigger>
+          <TabsTrigger value="ops" className="whitespace-nowrap">Ops</TabsTrigger>
+          <TabsTrigger value="controls" className="whitespace-nowrap">Chặn / giới hạn</TabsTrigger>
+          <TabsTrigger value="redeem" className="whitespace-nowrap">Redeem</TabsTrigger>
+          <TabsTrigger value="entitlements" className="whitespace-nowrap">Quyền</TabsTrigger>
+          <TabsTrigger value="wallets" className="whitespace-nowrap">Ví</TabsTrigger>
+          <TabsTrigger value="sessions" className="whitespace-nowrap">Session</TabsTrigger>
+          <TabsTrigger value="transactions" className="whitespace-nowrap">Giao dịch</TabsTrigger>
+          <TabsTrigger value="events" className="whitespace-nowrap">Sự kiện</TabsTrigger>
         </TabsList>
 
         <TabsContent value="simulator">
           <Card>
             <CardHeader>
-              <CardTitle>Runtime simulator không cần app</CardTitle>
+              <CardTitle>Test nhanh không cần app</CardTitle>
               <CardDescription>{getSimulatorHelp(simulatorDraft.action)}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
+                <div className="font-medium text-foreground">Flow test chuẩn</div>
+                <div className="mt-2 space-y-1">
+                  <div>1. `health` để kiểm tra function sống</div>
+                  <div>2. `redeem` để lấy `session_token`</div>
+                  <div>3. `consume` hoặc `heartbeat` bằng token đó</div>
+                  <div>4. `logout` để kết thúc session</div>
+                  <div className="pt-2 text-[11px]">Auto wallet hiện theo policy app: <span className="font-medium text-foreground">{data?.walletRules?.consume_priority === 'premium_first' ? 'premium trước, thường sau' : 'thường trước, premium sau'}</span>.</div>
+                </div>
+              </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Action</div>
@@ -1105,7 +1095,7 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="controls">
           <Card>
             <CardHeader>
-              <CardTitle>Runtime controls / hardening</CardTitle>
+              <CardTitle>Chặn, giới hạn và hardening</CardTitle>
               <CardDescription>Kill switch, chặn version cũ, chặn account hoặc device và giới hạn số lần redeem trong ngày.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1161,6 +1151,14 @@ export function AdminServerAppRuntimePage() {
               <CardDescription>Mode `package` sẽ lấy reward từ package. Các mode còn lại sẽ lấy trực tiếp plan hoặc credit bạn gõ trên key.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm redeem key</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={redeemSearch} onChange={(e) => setRedeemSearch(e.target.value)} placeholder="Ví dụ: REDEEM_1 hoặc plus_30d" />
+                </div>
+                <div className="text-xs text-muted-foreground">Chỉ lọc danh sách redeem key của tab này.</div>
+              </div>
               {filteredRedeemDraft.length === 0 ? <div className="text-sm text-muted-foreground">Không có redeem key nào khớp ô tìm redeem key.</div> : null}
               {filteredRedeemDraft.map((item) => {
                 const index = redeemDraft.findIndex((row) => row === item || row.id === item.id);
@@ -1260,11 +1258,19 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="entitlements">
           <Card>
             <CardHeader>
-              <CardTitle>Entitlements gần đây</CardTitle>
+              <CardTitle>Quyền gần đây</CardTitle>
               <CardDescription>Từ phase 8 đã có cả revoke lẫn mở lại.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {filteredEntitlements.length === 0 ? <div className="text-sm text-muted-foreground">Không có entitlement nào khớp bộ lọc.</div> : null}
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho quyền theo account, plan hoặc thiết bị.</div>
+              </div>
+              {filteredEntitlements.length === 0 ? <div className="text-sm text-muted-foreground">Không có quyền nào khớp bộ lọc.</div> : null}
               {filteredEntitlements.map((item) => (
                 <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border p-4">
                   <div className="space-y-2">
@@ -1292,10 +1298,18 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="wallets">
           <Card>
             <CardHeader>
-              <CardTitle>Wallet balances</CardTitle>
+              <CardTitle>Ví gần đây</CardTitle>
               <CardDescription>Danh sách ví lọc theo ô tìm tài khoản / thiết bị.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho ví thường và premium của tab này.</div>
+              </div>
               {filteredWallets.length === 0 ? <div className="text-sm text-muted-foreground">Không có ví nào khớp bộ lọc.</div> : null}
               {filteredWallets.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
@@ -1319,10 +1333,18 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="sessions">
           <Card>
             <CardHeader>
-              <CardTitle>Sessions gần đây</CardTitle>
+              <CardTitle>Session gần đây</CardTitle>
               <CardDescription>Có thể khóa hoặc mở lại session đã revoke.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho session, phiên bản client và trạng thái.</div>
+              </div>
               {filteredSessions.length === 0 ? <div className="text-sm text-muted-foreground">Không có session nào khớp bộ lọc.</div> : null}
               {filteredSessions.map((item) => (
                 <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border p-4">
@@ -1351,11 +1373,19 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="transactions">
           <Card>
             <CardHeader>
-              <CardTitle>Wallet transactions</CardTitle>
+              <CardTitle>Giao dịch gần đây</CardTitle>
               <CardDescription>Nếu redeem có cộng credit, transaction type sẽ là `redeem` và hiện rõ delta.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có transaction nào khớp ô tìm log / lỗi.</div> : null}
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm log / lỗi / giao dịch</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
+                </div>
+                <div className="text-xs text-muted-foreground">Chỉ lọc giao dịch của tab này.</div>
+              </div>
+              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có giao dịch nào khớp ô tìm kiếm.</div> : null}
               {filteredTransactions.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1383,11 +1413,19 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="events">
           <Card>
             <CardHeader>
-              <CardTitle>Runtime events</CardTitle>
+              <CardTitle>Sự kiện runtime gần đây</CardTitle>
               <CardDescription>Đây là chỗ đọc lỗi thật. Từ phase 8, khi FAIL nó sẽ hiện code rõ hơn và lọc được theo search.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có event nào khớp ô tìm log / lỗi.</div> : null}
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm log / lỗi / sự kiện</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
+                </div>
+                <div className="text-xs text-muted-foreground">Chỉ lọc sự kiện của tab này.</div>
+              </div>
+              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có sự kiện nào khớp ô tìm kiếm.</div> : null}
               {filteredEvents.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">

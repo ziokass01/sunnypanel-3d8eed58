@@ -53,3 +53,10 @@ export function buildAppWorkspaceUrl(
   const safeSearch = search || "";
   return `${origin}/apps/${safeApp}/${safeSection}${suffix}${safeSearch}`;
 }
+
+
+export function getAdminLoginUrl(next?: string) {
+  const origin = getAdminOrigin();
+  const safeNext = String(next ?? "").trim();
+  return safeNext ? `${origin}/login?next=${encodeURIComponent(safeNext)}` : `${origin}/login`;
+}
