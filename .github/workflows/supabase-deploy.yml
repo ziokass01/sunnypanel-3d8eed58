@@ -32,6 +32,10 @@ jobs:
       - name: Show migration list
         run: supabase migration list
 
+      - name: Repair legacy migration marker 20260327
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
+        run: supabase migration repair --status reverted 20260327 || true
+
       - name: Push migrations
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
         run: yes | supabase db push --include-all
