@@ -53,14 +53,40 @@ type PendingDelete =
   | null;
 
 async function getAdminAuthToken() {
-  const sess = await supabase.auth.getSession();
-  const token = sess.data.session?.access_token ?? null;
-  if (!token) {
+  const firstSession = await supabase.auth.getSession();
+  let session = firstSession.data.session ?? null;
+
+  if (!session?.access_token) {
     const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
     err.code = "ADMIN_AUTH_REQUIRED";
     throw err;
   }
-  return token;
+
+  const currentToken = String(session.access_token || "").trim();
+  const probe = await supabase.auth.getUser(currentToken);
+
+  if (!probe.error && probe.data.user) {
+    return currentToken;
+  }
+
+  const refreshed = await supabase.auth.refreshSession();
+  session = refreshed.data.session ?? null;
+
+  if (refreshed.error || !session?.access_token) {
+    const err = new Error("ADMIN_AUTH_EXPIRED") as Error & { code?: string };
+    err.code = "ADMIN_AUTH_EXPIRED";
+    throw err;
+  }
+
+  const refreshedToken = String(session.access_token || "").trim();
+  const refreshedProbe = await supabase.auth.getUser(refreshedToken);
+  if (refreshedProbe.error || !refreshedProbe.data.user) {
+    const err = new Error("ADMIN_AUTH_EXPIRED") as Error & { code?: string };
+    err.code = "ADMIN_AUTH_EXPIRED";
+    throw err;
+  }
+
+  return refreshedToken;
 }
 
 function formatTime(value?: string | null) {
@@ -77,11 +103,19 @@ function matchesSearch(query: string, ...values: Array<string | number | null | 
 }
 
 function formatMutationError(error: any) {
-  const contextJson = error?.context?.json;
-  if (contextJson?.friendly_message) return String(contextJson.friendly_message);
-  if (contextJson?.message) return String(contextJson.message);
-  if (contextJson?.msg) return String(contextJson.msg);
-  if (error?.message && typeof error.message === "string") return error.message;
+  const code = String(error?.context?.json?.code ?? error?.code ?? "");
+  const raw =
+    error?.context?.json?.friendly_message
+    ?? error?.context?.json?.message
+    ?? error?.context?.json?.msg
+    ?? error?.message
+    ?? "";
+
+  if (code === "ADMIN_AUTH_REQUIRED" || code === "ADMIN_AUTH_EXPIRED" || String(raw).toLowerCase().includes("invalid jwt")) {
+    return "Phiên đăng nhập admin đã hết hạn hoặc không còn hợp lệ. Hãy đăng xuất rồi đăng nhập lại ở admin, sau đó mở lại tab Trash.";
+  }
+
+  if (typeof raw === "string" && raw.trim()) return raw;
   try {
     return JSON.stringify(error);
   } catch {
