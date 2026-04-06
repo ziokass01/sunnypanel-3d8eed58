@@ -161,6 +161,13 @@ type TransactionRow = {
   created_at: string;
 };
 
+type WalletRuleRuntimeRow = {
+  app_code: string;
+  soft_wallet_label: string | null;
+  premium_wallet_label: string | null;
+  consume_priority: 'soft_first' | 'premium_first';
+};
+
 type ControlRow = {
   app_code: string;
   runtime_enabled: boolean;
@@ -431,7 +438,7 @@ export function AdminServerAppRuntimePage() {
     enabled: Boolean(appCode),
     queryFn: async () => {
       const sb = supabase as any;
-      const [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes] = await Promise.all([
+      const [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, walletRulesRes, eventsRes] = await Promise.all([
         sb.from("server_apps").select("code,label,description,public_enabled").eq("code", appCode).maybeSingle(),
         sb.from("server_app_reward_packages").select("id,package_code,title,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days").eq("app_code", appCode).order("sort_order", { ascending: true }),
         sb.from("server_app_features").select("id,feature_code,title,enabled").eq("app_code", appCode).order("sort_order", { ascending: true }),
@@ -441,10 +448,11 @@ export function AdminServerAppRuntimePage() {
         sb.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(100),
         sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
         sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days").eq("app_code", appCode).maybeSingle(),
+        sb.from("server_app_wallet_rules").select("app_code,soft_wallet_label,premium_wallet_label,consume_priority").eq("app_code", appCode).maybeSingle(),
         sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
       ]);
 
-      const firstError = [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes].find((item) => item.error)?.error;
+      const firstError = [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, walletRulesRes, eventsRes].find((item) => item.error)?.error;
       if (firstError) throw firstError;
 
       return {
@@ -457,6 +465,7 @@ export function AdminServerAppRuntimePage() {
         sessions: (sessionRes.data ?? []) as SessionRow[],
         transactions: (txRes.data ?? []) as TransactionRow[],
         controls: (controlsRes.data ?? null) as ControlRow | null,
+        walletRules: (walletRulesRes.data ?? null) as WalletRuleRuntimeRow | null,
         events: (eventsRes.data ?? []) as EventRow[],
       };
     },
@@ -816,7 +825,7 @@ export function AdminServerAppRuntimePage() {
   };
 
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground">Đang tải app workspace runtime...</div>;
+    return <div className="text-sm text-muted-foreground">Đang tải khu runtime app...</div>;
   }
 
   if (error) {
@@ -842,14 +851,14 @@ export function AdminServerAppRuntimePage() {
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm">
-                  <Link to={`/apps/${appCode}/dashboard`}>← Quay lại cấu hình app</Link>
+                  <Link to={`/apps/${appCode}/config`}>← Quay lại cấu hình app</Link>
                 </Button>
                 <Badge variant={data?.app?.public_enabled ? "secondary" : "outline"}>
                   {data?.app?.public_enabled ? "App đang bật" : "App đang ẩn"}
                 </Badge>
               </div>
               <div>
-                <CardTitle className="text-3xl">App workspace · {data?.app?.label || appCode}</CardTitle>
+                <CardTitle className="text-3xl">Runtime app · {data?.app?.label || appCode}</CardTitle>
                 <CardDescription className="mt-2 max-w-3xl text-sm leading-6">
                   Đây là trang điều khiển riêng cho app này. Từ phase 8 trở đi, bạn có thể ở hẳn trong một khu điều hành riêng để quản lý runtime, test flow, tìm user, xem ví, session, event và xử lý lỗi rõ ràng hơn.
                 </CardDescription>
@@ -897,6 +906,7 @@ export function AdminServerAppRuntimePage() {
                 <div>2. `redeem` để lấy `session_token`</div>
                 <div>3. `consume` hoặc `heartbeat` bằng token đó</div>
                 <div>4. `logout` để kết thúc session</div>
+                <div className="pt-2 text-[11px]">Auto wallet hiện theo policy app: <span className="font-medium text-foreground">{data?.walletRules?.consume_priority === 'premium_first' ? 'premium trước, thường sau' : 'thường trước, premium sau'}</span>.</div>
               </div>
             </div>
           </div>
@@ -976,6 +986,7 @@ export function AdminServerAppRuntimePage() {
                       {WALLET_KIND_OPTIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  <div className="text-xs text-muted-foreground">`auto` sẽ theo policy app hiện tại: {data?.walletRules?.consume_priority === 'premium_first' ? 'premium trước, thường sau' : 'thường trước, premium sau'}.</div>
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Session token</div>

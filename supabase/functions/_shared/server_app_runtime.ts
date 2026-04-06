@@ -73,6 +73,7 @@ type RuntimeWalletRules = {
   premium_daily_reset_enabled: boolean;
   soft_daily_reset_amount: number;
   premium_daily_reset_amount: number;
+  consume_priority: 'soft_first' | 'premium_first';
 };
 
 type RuntimeControls = {
@@ -401,7 +402,7 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_wallet_rules")
-    .select("soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount")
+    .select("soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,consume_priority")
     .eq("app_code", appCode)
     .maybeSingle();
 
@@ -411,6 +412,7 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
     premium_daily_reset_enabled: Boolean(data?.premium_daily_reset_enabled ?? false),
     soft_daily_reset_amount: asNumber(data?.soft_daily_reset_amount),
     premium_daily_reset_amount: asNumber(data?.premium_daily_reset_amount),
+    consume_priority: String(data?.consume_priority ?? 'soft_first').trim() === 'premium_first' ? 'premium_first' : 'soft_first',
   };
 }
 
@@ -1091,8 +1093,9 @@ async function getRuntimeContext(appCode: string) {
   const settings = normalizeSettings(config);
   const plans = await getPlans(appCode);
   const features = await getFeatures(appCode);
+  const walletRules = await getWalletRules(appCode);
   const planMap = new Map(plans.map((plan) => [plan.plan_code, plan]));
-  return { config, settings, plans, planMap, features };
+  return { config, settings: { ...settings, wallet_rules: walletRules }, plans, planMap, features };
 }
 
 export async function buildRuntimeState(appCode: string, opts?: { sessionToken?: string | null }) : Promise<RuntimeAppState> {
@@ -1404,18 +1407,34 @@ export async function consumeRuntimeFeature(params: {
   let premiumDelta = 0;
 
   if (feature.requires_credit) {
+    const priority = settings.wallet_rules.consume_priority;
+    const softAvailable = effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost;
+    const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
+
     if (requestedWalletKind === "soft") {
       chargeKind = "soft";
     } else if (requestedWalletKind === "premium") {
       chargeKind = "premium";
-    } else if (effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost) {
-      chargeKind = "premium";
-    } else if (effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost) {
-      chargeKind = "soft";
-    } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
-      chargeKind = "premium";
+    } else if (priority === "premium_first") {
+      if (premiumAvailable) {
+        chargeKind = "premium";
+      } else if (softAvailable) {
+        chargeKind = "soft";
+      } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
+        chargeKind = "premium";
+      } else {
+        chargeKind = "soft";
+      }
     } else {
-      chargeKind = "soft";
+      if (softAvailable) {
+        chargeKind = "soft";
+      } else if (premiumAvailable) {
+        chargeKind = "premium";
+      } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
+        chargeKind = "soft";
+      } else {
+        chargeKind = "premium";
+      }
     }
 
     if (chargeKind === "premium") {

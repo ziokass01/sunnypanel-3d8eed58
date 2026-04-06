@@ -41,7 +41,7 @@ const queryClient = new QueryClient();
 function AdminHostAppRedirect() {
   const { appCode = "", "*": rest = "" } = useParams();
   const location = useLocation();
-  const section = rest.startsWith("runtime") ? "runtime" : "config";
+  const section = rest.startsWith("config") ? "config" : "runtime";
   const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
 
   useEffect(() => {
@@ -50,7 +50,7 @@ function AdminHostAppRedirect() {
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển sang app workspace...
+      Đang chuyển sang app domain...
     </div>
   );
 }
@@ -123,6 +123,7 @@ const App = () => {
                   <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
                   <Route path="/admin/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
                   <Route path="/admin/apps/:appCode/runtime" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
+                  <Route path="/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
                   <Route path="/apps/:appCode/*" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
                   <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
                   <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
@@ -143,8 +144,8 @@ const App = () => {
                     </AuthGate>
                   }
                 >
-                  <Route index element={<Navigate to="config" replace />} />
-                  <Route path="dashboard" element={<Navigate to="../config" replace />} />
+                  <Route index element={<Navigate to="runtime" replace />} />
+                  <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
                   <Route path="internal" element={<Navigate to="../config" replace />} />
                   <Route path="config" element={<AdminServerAppDetailPage />} />
                   <Route path="runtime" element={<AdminServerAppRuntimePage />} />

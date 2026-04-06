@@ -69,6 +69,7 @@ type ServerAppWalletRuleRow = {
   premium_daily_reset_enabled: boolean | null;
   soft_daily_reset_amount: string | number;
   premium_daily_reset_amount: string | number;
+  consume_priority: 'soft_first' | 'premium_first';
   notes: string | null;
 };
 
@@ -156,6 +157,7 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     premium_daily_reset_enabled: false,
     soft_daily_reset_amount: 5,
     premium_daily_reset_amount: 0,
+    consume_priority: 'soft_first',
     notes: "Credit thường reset mỗi ngày. Credit kim cương giữ lâu hơn và hao ít hơn.",
   },
   "free-fire": {
@@ -167,6 +169,7 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     premium_daily_reset_enabled: false,
     soft_daily_reset_amount: 3,
     premium_daily_reset_amount: 0,
+    consume_priority: 'soft_first',
     notes: "Dùng decimal để tránh cảm giác lạm phát credit.",
   },
 };
@@ -394,6 +397,7 @@ export function AdminServerAppDetailPage() {
         premium_daily_reset_enabled: Boolean(walletDraft.premium_daily_reset_enabled ?? false),
         soft_daily_reset_amount: normalizeDecimal(walletDraft.soft_daily_reset_amount),
         premium_daily_reset_amount: normalizeDecimal(walletDraft.premium_daily_reset_amount),
+        consume_priority: walletDraft.consume_priority === 'premium_first' ? 'premium_first' : 'soft_first',
         notes: walletDraft.notes?.trim() || null,
       };
       const res = await sb.from("server_app_wallet_rules").upsert(payload, { onConflict: "app_code" });
@@ -765,6 +769,17 @@ export function AdminServerAppDetailPage() {
                   <div className="text-sm font-medium">Số credit kim cương reset / ngày</div>
                   <Input value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: e.target.value }))} />
                 </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Ưu tiên trừ credit khi app gửi `auto`</div>
+                  <Select value={walletDraft.consume_priority || 'soft_first'} onValueChange={(value) => setWalletDraft((prev) => ({ ...prev, consume_priority: value === 'premium_first' ? 'premium_first' : 'soft_first' }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="soft_first">Credit thường trước, premium sau</SelectItem>
+                      <SelectItem value="premium_first">Premium trước, credit thường sau</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-muted-foreground">Find Dumps nên để `soft_first` để tiêu quota thường trước. App chỉ gửi `auto`, server sẽ quyết định thứ tự trừ thật.</div>
+                </div>
                 <div className="flex items-center justify-between rounded-2xl border p-3 md:col-span-2">
                   <div>
                     <div className="font-medium">Reset credit kim cương định kỳ</div>
@@ -774,7 +789,7 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <div className="text-sm font-medium">Ghi chú ví</div>
-                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: credit thường dùng nhiều hơn, credit kim cương hao ít hơn, ưu tiên cho feature nặng..." />
+                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: Find Dumps ưu tiên trừ credit thường trước, premium chỉ dùng khi soft không đủ hoặc admin ép premium..." />
                 </div>
               </div>
               <div className="flex justify-end">
