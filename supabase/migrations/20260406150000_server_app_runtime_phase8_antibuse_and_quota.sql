@@ -12,15 +12,96 @@ alter table public.server_app_runtime_controls
   add column if not exists success_health_logs_enabled boolean not null default false,
   add column if not exists success_heartbeat_logs_enabled boolean not null default false;
 
-alter table public.server_app_runtime_controls
-  add constraint server_app_runtime_controls_max_requests_ip_check check (max_requests_per_10m_per_ip >= 0),
-  add constraint server_app_runtime_controls_max_requests_account_check check (max_requests_per_10m_per_account >= 0),
-  add constraint server_app_runtime_controls_max_requests_device_check check (max_requests_per_10m_per_device >= 0),
-  add constraint server_app_runtime_controls_max_failed_redeems_ip_check check (max_failed_redeems_per_hour_per_ip >= 0),
-  add constraint server_app_runtime_controls_max_failed_redeems_account_check check (max_failed_redeems_per_hour_per_account >= 0),
-  add constraint server_app_runtime_controls_max_failed_redeems_device_check check (max_failed_redeems_per_hour_per_device >= 0),
-  add constraint server_app_runtime_controls_max_accounts_per_device_check check (max_accounts_per_device >= 0),
-  add constraint server_app_runtime_controls_max_devices_per_account_check check (max_devices_per_account >= 0);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_requests_ip_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_requests_ip_check
+      check (max_requests_per_10m_per_ip >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_requests_account_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_requests_account_check
+      check (max_requests_per_10m_per_account >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_requests_device_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_requests_device_check
+      check (max_requests_per_10m_per_device >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_failed_redeems_ip_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_failed_redeems_ip_check
+      check (max_failed_redeems_per_hour_per_ip >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_failed_redeems_account_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_failed_redeems_account_check
+      check (max_failed_redeems_per_hour_per_account >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_failed_redeems_device_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_failed_redeems_device_check
+      check (max_failed_redeems_per_hour_per_device >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_accounts_per_device_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_accounts_per_device_check
+      check (max_accounts_per_device >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'server_app_runtime_controls_max_devices_per_account_check'
+      and conrelid = 'public.server_app_runtime_controls'::regclass
+  ) then
+    alter table public.server_app_runtime_controls
+      add constraint server_app_runtime_controls_max_devices_per_account_check
+      check (max_devices_per_account >= 0);
+  end if;
+end $$;
 
 create table if not exists public.server_app_runtime_counter_buckets (
   app_code text not null references public.server_apps(code) on delete cascade,
