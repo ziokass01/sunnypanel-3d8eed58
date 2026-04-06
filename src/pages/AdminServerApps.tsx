@@ -1,9 +1,7 @@
-import { ArrowUpRight, Cog, PlayCircle } from "lucide-react";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildAppWorkspaceUrl, getAppWorkspaceOrigin } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl } from "@/lib/appWorkspace";
 
 const APPS = [
   {
@@ -23,8 +21,6 @@ const APPS = [
 ] as const;
 
 export function AdminServerAppsPage() {
-  const appOrigin = getAppWorkspaceOrigin();
-
   const openTarget = (url: string) => {
     if (!url) return;
     if (/^https?:\/\//i.test(url)) {
@@ -34,7 +30,7 @@ export function AdminServerAppsPage() {
     window.location.assign(url);
   };
 
-  const openWorkspaceSection = (appCode: string, section: "config" | "runtime") => {
+  const openWorkspace = (appCode: string, section: "config" | "runtime") => {
     window.location.assign(buildAppWorkspaceUrl(appCode, section));
   };
 
@@ -44,18 +40,19 @@ export function AdminServerAppsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
-            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Admin tổng chỉ là cổng vào. Khi bấm <span className="font-medium text-foreground">Cấu hình app</span> hoặc <span className="font-medium text-foreground">Runtime app</span>, hệ thống sẽ chuyển thẳng sang domain riêng của app để tránh nhồi quá nhiều chức năng vào một trang trung gian.
+            <p className="mt-2 text-sm text-muted-foreground">
+              Admin tổng chỉ là cổng vào. Khi bấm cấu hình app hoặc runtime app, bạn sẽ được đưa sang hẳn domain
+              <span className="mx-1 font-medium text-foreground">app.mityangho.id.vn</span>
+              để tránh nhầm với giao diện admin chính.
             </p>
           </div>
-          <Badge variant="outline">{appOrigin}</Badge>
+          <Badge variant="outline">App domain workspace</Badge>
         </div>
       </header>
 
       <div className="grid gap-4 md:grid-cols-2">
         {APPS.map((app) => (
-          <Card key={app.code} className="overflow-hidden rounded-[28px] border-slate-200/80 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-            <div className="h-1.5 bg-[linear-gradient(90deg,#0f172a_0%,#334155_40%,#fbbf24_100%)]" />
+          <Card key={app.code} className="overflow-hidden">
             <CardHeader className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle>{app.label}</CardTitle>
@@ -67,21 +64,13 @@ export function AdminServerAppsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-2xl border bg-muted/20 p-3 text-xs text-muted-foreground break-all">
-                Server web cũ: {app.url}
+                {app.url}
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <Button onClick={() => openWorkspaceSection(app.code, "config")}>
-                  <Cog className="mr-2 h-4 w-4" />
-                  Cấu hình app
-                </Button>
-                <Button variant="outline" onClick={() => openWorkspaceSection(app.code, "runtime")}>
-                  <PlayCircle className="mr-2 h-4 w-4" />
-                  Runtime app
-                </Button>
-                <Button variant="outline" className="sm:col-span-2" onClick={() => openTarget(app.url)}>
-                  <ArrowUpRight className="mr-2 h-4 w-4" />
-                  Mở server web cũ
-                </Button>
+                <Button onClick={() => openWorkspace(app.code, "config")}>Cấu hình app</Button>
+                <Button variant="outline" onClick={() => openWorkspace(app.code, "runtime")}>Runtime app</Button>
+                <Button variant="outline" onClick={() => openTarget(app.url)}>Mở server web</Button>
+                <Button variant="outline" onClick={() => openWorkspace(app.code, "config")}>Mở app workspace</Button>
               </div>
             </CardContent>
           </Card>

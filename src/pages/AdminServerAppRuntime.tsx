@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 
@@ -13,13 +13,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { postFunction } from "@/lib/functions";
 
 const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
 const WALLET_KIND_OPTIONS = ["auto", "soft", "premium"] as const;
 const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"] as const;
-const RUNTIME_TABS = ["simulator", "ops", "controls", "redeem", "entitlements", "wallets", "sessions", "transactions", "events"] as const;
 
 const FRIENDLY_ERROR_MAP: Record<string, string> = {
   BAD_JSON: "Payload gửi lên bị lỗi JSON.",
@@ -163,13 +161,6 @@ type TransactionRow = {
   created_at: string;
 };
 
-type WalletRuleRuntimeRow = {
-  app_code: string;
-  soft_wallet_label: string | null;
-  premium_wallet_label: string | null;
-  consume_priority: 'soft_first' | 'premium_first';
-};
-
 type ControlRow = {
   app_code: string;
   runtime_enabled: boolean;
@@ -185,6 +176,18 @@ type ControlRow = {
   blocked_ip_hashes: string[] | null;
   max_daily_redeems_per_account: number;
   max_daily_redeems_per_device: number;
+  max_requests_per_10m_per_ip: number;
+  max_requests_per_10m_per_account: number;
+  max_requests_per_10m_per_device: number;
+  max_failed_redeems_per_hour_per_ip: number;
+  max_failed_redeems_per_hour_per_account: number;
+  max_failed_redeems_per_hour_per_device: number;
+  max_accounts_per_device: number;
+  max_devices_per_account: number;
+  lock_account_to_first_device: boolean;
+  lock_account_to_first_ip: boolean;
+  success_health_logs_enabled: boolean;
+  success_heartbeat_logs_enabled: boolean;
   session_idle_timeout_minutes: number;
   session_max_age_minutes: number;
   event_retention_days: number;
@@ -205,6 +208,18 @@ type ControlDraft = {
   blocked_ip_hashes_text: string;
   max_daily_redeems_per_account: number;
   max_daily_redeems_per_device: number;
+  max_requests_per_10m_per_ip: number;
+  max_requests_per_10m_per_account: number;
+  max_requests_per_10m_per_device: number;
+  max_failed_redeems_per_hour_per_ip: number;
+  max_failed_redeems_per_hour_per_account: number;
+  max_failed_redeems_per_hour_per_device: number;
+  max_accounts_per_device: number;
+  max_devices_per_account: number;
+  lock_account_to_first_device: boolean;
+  lock_account_to_first_ip: boolean;
+  success_health_logs_enabled: boolean;
+  success_heartbeat_logs_enabled: boolean;
   session_idle_timeout_minutes: number;
   session_max_age_minutes: number;
   event_retention_days: number;
@@ -288,88 +303,11 @@ function textareaToList(value: string) {
   return Array.from(new Set(String(value ?? "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)));
 }
 
-function normalizeRuntimeTab(value: string | null) {
-  return (RUNTIME_TABS as readonly string[]).includes(String(value || "")) ? (value as typeof RUNTIME_TABS[number]) : "simulator";
-}
-
-function compactEdgeMessage(message?: string | null) {
-  const raw = String(message ?? "").trim();
-  if (!raw) return "Có lỗi xảy ra khi gọi runtime.";
-  if (raw.includes("Failed to send a request to the Edge Function")) {
-    return "Không gửi được yêu cầu tới Edge Function. Kiểm tra deploy, CORS hoặc mạng.";
-  }
-  if (raw.includes("Edge Function returned a non-2xx status code")) {
-    return "Edge Function trả về lỗi. Mở khối kết quả JSON để xem chi tiết.";
-  }
-  return raw;
-}
-
 function formatJsonBlock(value: unknown) {
   try {
     return JSON.stringify(value ?? {}, null, 2);
   } catch {
     return String(value ?? "");
-  }
-}
-
-
-async function invokeRuntimeWithJson(payload: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
-  if (error) {
-    let json: any = data ?? null;
-    let status: number | null = null;
-    const response = (error as any)?.context;
-    if (response) {
-      status = typeof response.status === "number" ? response.status : null;
-      if (typeof response.json === "function") {
-        try {
-          json = await response.json();
-        } catch {
-          // ignore json parse errors
-        }
-      }
-    }
-    (error as any).context = { payload, json, status };
-    throw error;
-  }
-  return { payload, data };
-}
-
-async function postAdminRuntimeOps(payload: Record<string, unknown>) {
-  const sessionResult = await supabase.auth.getSession();
-  const token = sessionResult.data.session?.access_token?.trim();
-  if (!token) {
-    const err = new Error("Bạn chưa đăng nhập admin hoặc phiên đăng nhập đã hết hạn.") as Error & {
-      code?: string;
-      status?: number;
-      context?: Record<string, unknown>;
-    };
-    err.code = "ADMIN_AUTH_REQUIRED";
-    err.status = 401;
-    err.context = {
-      payload,
-      status: 401,
-      json: { ok: false, code: "ADMIN_AUTH_REQUIRED", msg: "Missing admin session token" },
-    };
-    throw err;
-  }
-
-  try {
-    const data = await postFunction<any>("/server-app-runtime-ops", payload, { authToken: token });
-    return { payload, data };
-  } catch (error: any) {
-    const json = error?.context?.json ?? {
-      ok: false,
-      code: error?.code ?? (error?.status ? `HTTP_${error.status}` : "UNKNOWN_ERROR"),
-      msg: error?.message ?? "Request failed",
-    };
-    error.context = {
-      ...(error?.context ?? {}),
-      payload,
-      status: error?.status ?? error?.context?.status ?? null,
-      json,
-    };
-    throw error;
   }
 }
 
@@ -414,6 +352,18 @@ function defaultControlDraft(appCode: string): ControlDraft {
     blocked_ip_hashes_text: "",
     max_daily_redeems_per_account: 0,
     max_daily_redeems_per_device: 0,
+    max_requests_per_10m_per_ip: 0,
+    max_requests_per_10m_per_account: 0,
+    max_requests_per_10m_per_device: 0,
+    max_failed_redeems_per_hour_per_ip: 0,
+    max_failed_redeems_per_hour_per_account: 0,
+    max_failed_redeems_per_hour_per_device: 0,
+    max_accounts_per_device: 0,
+    max_devices_per_account: 0,
+    lock_account_to_first_device: false,
+    lock_account_to_first_ip: false,
+    success_health_logs_enabled: false,
+    success_heartbeat_logs_enabled: false,
     session_idle_timeout_minutes: 1440,
     session_max_age_minutes: 43200,
     event_retention_days: 30,
@@ -510,7 +460,6 @@ function summarizeRewardSource(row: RedeemKeyRow, packageMap: Map<string, Reward
 
 export function AdminServerAppRuntimePage() {
   const { appCode = "" } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
 
   const runtimeQuery = useQuery({
@@ -518,7 +467,7 @@ export function AdminServerAppRuntimePage() {
     enabled: Boolean(appCode),
     queryFn: async () => {
       const sb = supabase as any;
-      const [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, walletRulesRes, eventsRes] = await Promise.all([
+      const [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes] = await Promise.all([
         sb.from("server_apps").select("code,label,description,public_enabled").eq("code", appCode).maybeSingle(),
         sb.from("server_app_reward_packages").select("id,package_code,title,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days").eq("app_code", appCode).order("sort_order", { ascending: true }),
         sb.from("server_app_features").select("id,feature_code,title,enabled").eq("app_code", appCode).order("sort_order", { ascending: true }),
@@ -527,12 +476,11 @@ export function AdminServerAppRuntimePage() {
         sb.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(100),
         sb.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(100),
         sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
-        sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days").eq("app_code", appCode).maybeSingle(),
-        sb.from("server_app_wallet_rules").select("app_code,soft_wallet_label,premium_wallet_label,consume_priority").eq("app_code", appCode).maybeSingle(),
+        sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,max_requests_per_10m_per_ip,max_requests_per_10m_per_account,max_requests_per_10m_per_device,max_failed_redeems_per_hour_per_ip,max_failed_redeems_per_hour_per_account,max_failed_redeems_per_hour_per_device,max_accounts_per_device,max_devices_per_account,lock_account_to_first_device,lock_account_to_first_ip,success_health_logs_enabled,success_heartbeat_logs_enabled,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days").eq("app_code", appCode).maybeSingle(),
         sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
       ]);
 
-      const firstError = [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, walletRulesRes, eventsRes].find((item) => item.error)?.error;
+      const firstError = [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, eventsRes].find((item) => item.error)?.error;
       if (firstError) throw firstError;
 
       return {
@@ -545,7 +493,6 @@ export function AdminServerAppRuntimePage() {
         sessions: (sessionRes.data ?? []) as SessionRow[],
         transactions: (txRes.data ?? []) as TransactionRow[],
         controls: (controlsRes.data ?? null) as ControlRow | null,
-        walletRules: (walletRulesRes.data ?? null) as WalletRuleRuntimeRow | null,
         events: (eventsRes.data ?? []) as EventRow[],
       };
     },
@@ -565,7 +512,6 @@ export function AdminServerAppRuntimePage() {
   const [accountSearch, setAccountSearch] = useState("");
   const [redeemSearch, setRedeemSearch] = useState("");
   const [logSearch, setLogSearch] = useState("");
-  const activeTab = normalizeRuntimeTab(searchParams.get("tab"));
 
   useEffect(() => {
     setRedeemDraft((data?.redeemKeys ?? []).map((row) => ({
@@ -594,6 +540,18 @@ export function AdminServerAppRuntimePage() {
       blocked_ip_hashes_text: listToTextarea(row.blocked_ip_hashes ?? []),
       max_daily_redeems_per_account: Number(row.max_daily_redeems_per_account ?? 0),
       max_daily_redeems_per_device: Number(row.max_daily_redeems_per_device ?? 0),
+      max_requests_per_10m_per_ip: Number(row.max_requests_per_10m_per_ip ?? 0),
+      max_requests_per_10m_per_account: Number(row.max_requests_per_10m_per_account ?? 0),
+      max_requests_per_10m_per_device: Number(row.max_requests_per_10m_per_device ?? 0),
+      max_failed_redeems_per_hour_per_ip: Number(row.max_failed_redeems_per_hour_per_ip ?? 0),
+      max_failed_redeems_per_hour_per_account: Number(row.max_failed_redeems_per_hour_per_account ?? 0),
+      max_failed_redeems_per_hour_per_device: Number(row.max_failed_redeems_per_hour_per_device ?? 0),
+      max_accounts_per_device: Number(row.max_accounts_per_device ?? 0),
+      max_devices_per_account: Number(row.max_devices_per_account ?? 0),
+      lock_account_to_first_device: Boolean(row.lock_account_to_first_device ?? false),
+      lock_account_to_first_ip: Boolean(row.lock_account_to_first_ip ?? false),
+      success_health_logs_enabled: Boolean(row.success_health_logs_enabled ?? false),
+      success_heartbeat_logs_enabled: Boolean(row.success_heartbeat_logs_enabled ?? false),
       session_idle_timeout_minutes: Number(row.session_idle_timeout_minutes ?? 1440),
       session_max_age_minutes: Number(row.session_max_age_minutes ?? 43200),
       event_retention_days: Number(row.event_retention_days ?? 30),
@@ -704,6 +662,18 @@ export function AdminServerAppRuntimePage() {
         blocked_ip_hashes: textareaToList(controlDraft.blocked_ip_hashes_text),
         max_daily_redeems_per_account: Math.max(0, Math.floor(Number(controlDraft.max_daily_redeems_per_account || 0))),
         max_daily_redeems_per_device: Math.max(0, Math.floor(Number(controlDraft.max_daily_redeems_per_device || 0))),
+        max_requests_per_10m_per_ip: Math.max(0, Math.floor(Number(controlDraft.max_requests_per_10m_per_ip || 0))),
+        max_requests_per_10m_per_account: Math.max(0, Math.floor(Number(controlDraft.max_requests_per_10m_per_account || 0))),
+        max_requests_per_10m_per_device: Math.max(0, Math.floor(Number(controlDraft.max_requests_per_10m_per_device || 0))),
+        max_failed_redeems_per_hour_per_ip: Math.max(0, Math.floor(Number(controlDraft.max_failed_redeems_per_hour_per_ip || 0))),
+        max_failed_redeems_per_hour_per_account: Math.max(0, Math.floor(Number(controlDraft.max_failed_redeems_per_hour_per_account || 0))),
+        max_failed_redeems_per_hour_per_device: Math.max(0, Math.floor(Number(controlDraft.max_failed_redeems_per_hour_per_device || 0))),
+        max_accounts_per_device: Math.max(0, Math.floor(Number(controlDraft.max_accounts_per_device || 0))),
+        max_devices_per_account: Math.max(0, Math.floor(Number(controlDraft.max_devices_per_account || 0))),
+        lock_account_to_first_device: Boolean(controlDraft.lock_account_to_first_device),
+        lock_account_to_first_ip: Boolean(controlDraft.lock_account_to_first_ip),
+        success_health_logs_enabled: Boolean(controlDraft.success_health_logs_enabled),
+        success_heartbeat_logs_enabled: Boolean(controlDraft.success_heartbeat_logs_enabled),
         session_idle_timeout_minutes: Math.max(0, Math.floor(Number(controlDraft.session_idle_timeout_minutes || 0))),
         session_max_age_minutes: Math.max(0, Math.floor(Number(controlDraft.session_max_age_minutes || 0))),
         event_retention_days: Math.max(1, Math.floor(Number(controlDraft.event_retention_days || 30))),
@@ -809,7 +779,12 @@ export function AdminServerAppRuntimePage() {
       setSimulatorStatus(`Đang gọi runtime: ${String(payload.action)}...`);
       setSimulatorResult(formatJsonBlock({ ok: false, pending: true, payload }));
 
-      return await invokeRuntimeWithJson(payload);
+      const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
+      return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
       setSimulatorStatus(`Simulator chạy xong: ${String(payload.action)}`);
@@ -837,7 +812,12 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy cleanup...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      return await postAdminRuntimeOps(payload);
+      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", { body: payload });
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
+      return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
       setOpsStatus(`Cleanup chạy xong: ${String(payload.action)}`);
@@ -867,7 +847,12 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy adjust_wallet...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      return await postAdminRuntimeOps(payload);
+      const { data, error } = await supabase.functions.invoke("server-app-runtime-ops", { body: payload });
+      if (error) {
+        (error as any).context = { payload, json: data ?? null };
+        throw error;
+      }
+      return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
       setOpsStatus(`Ops chạy xong: ${String(payload.action)}`);
@@ -891,7 +876,7 @@ export function AdminServerAppRuntimePage() {
   };
 
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground">Đang tải khu runtime app...</div>;
+    return <div className="text-sm text-muted-foreground">Đang tải app workspace runtime...</div>;
   }
 
   if (error) {
@@ -911,74 +896,102 @@ export function AdminServerAppRuntimePage() {
 
   return (
     <section className="space-y-4">
-      <Card className="border-primary/20 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
-        <CardHeader className="space-y-4 p-5 sm:p-6">
+      <Card className="border-primary/20">
+        <CardHeader className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link to={`/apps/${appCode}/dashboard`}>← Quay lại cấu hình app</Link>
+                </Button>
                 <Badge variant={data?.app?.public_enabled ? "secondary" : "outline"}>
                   {data?.app?.public_enabled ? "App đang bật" : "App đang ẩn"}
                 </Badge>
-                <Badge variant="outline">Runtime riêng</Badge>
               </div>
               <div>
-                <CardTitle className="text-2xl sm:text-[2rem]">Runtime · {data?.app?.label || appCode}</CardTitle>
+                <CardTitle className="text-3xl">App workspace · {data?.app?.label || appCode}</CardTitle>
                 <CardDescription className="mt-2 max-w-3xl text-sm leading-6">
-                  Chia nhỏ từng khu xử lý để mobile gọn hơn: test nhanh, ops, chặn giới hạn, redeem, quyền, ví, session, giao dịch và sự kiện.
+                  Đây là trang điều khiển riêng cho app này. Từ phase 8 trở đi, bạn có thể ở hẳn trong một khu điều hành riêng để quản lý runtime, test flow, tìm user, xem ví, session, event và xử lý lỗi rõ ràng hơn.
                 </CardDescription>
               </div>
             </div>
-            <Button variant="outline" onClick={() => refetch()}>
-              <RefreshCw className="h-4 w-4" />
-              Làm mới
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => refetch()}>
+                <RefreshCw className="h-4 w-4" />
+                Làm mới
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1.4fr,0.6fr]">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho entitlements, wallets và sessions.</div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm redeem key</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={redeemSearch} onChange={(e) => setRedeemSearch(e.target.value)} placeholder="Ví dụ: REDEEM_1 hoặc plus_30d" />
+                </div>
+                <div className="text-xs text-muted-foreground">Chỉ lọc danh sách redeem keys.</div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Tìm log / lỗi / transaction</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
+                </div>
+                <div className="text-xs text-muted-foreground">Áp dụng cho transactions và events.</div>
+              </div>
+            </div>
+            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
+              <div className="font-medium text-foreground">Ghi chú flow test chuẩn</div>
+              <div className="mt-2 space-y-1">
+                <div>1. `health` để kiểm tra function sống</div>
+                <div>2. `redeem` để lấy `session_token`</div>
+                <div>3. `consume` hoặc `heartbeat` bằng token đó</div>
+                <div>4. `logout` để kết thúc session</div>
+              </div>
+            </div>
           </div>
         </CardHeader>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Redeem</div><div className="mt-1 text-xl font-semibold">{data?.redeemKeys.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Quyền</div><div className="mt-1 text-xl font-semibold">{data?.entitlements.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Ví</div><div className="mt-1 text-xl font-semibold">{data?.wallets.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Session</div><div className="mt-1 text-xl font-semibold">{data?.sessions.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Giao dịch</div><div className="mt-1 text-xl font-semibold">{data?.transactions.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Sự kiện</div><div className="mt-1 text-xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
+      <div className="grid gap-3 md:grid-cols-6">
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Redeem keys</div><div className="mt-1 text-2xl font-semibold">{data?.redeemKeys.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Entitlements</div><div className="mt-1 text-2xl font-semibold">{data?.entitlements.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Wallets</div><div className="mt-1 text-2xl font-semibold">{data?.wallets.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Sessions</div><div className="mt-1 text-2xl font-semibold">{data?.sessions.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Transactions</div><div className="mt-1 text-2xl font-semibold">{data?.transactions.length ?? 0}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Events</div><div className="mt-1 text-2xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => {
-        const next = new URLSearchParams(searchParams);
-        next.set("tab", value);
-        setSearchParams(next, { replace: true });
-      }} className="space-y-3">
-        <TabsList className="flex h-auto w-full flex-nowrap items-center justify-start gap-2 overflow-x-auto rounded-2xl border bg-background p-2">
-          <TabsTrigger value="simulator" className="whitespace-nowrap">Test nhanh</TabsTrigger>
-          <TabsTrigger value="ops" className="whitespace-nowrap">Ops</TabsTrigger>
-          <TabsTrigger value="controls" className="whitespace-nowrap">Chặn / giới hạn</TabsTrigger>
-          <TabsTrigger value="redeem" className="whitespace-nowrap">Redeem</TabsTrigger>
-          <TabsTrigger value="entitlements" className="whitespace-nowrap">Quyền</TabsTrigger>
-          <TabsTrigger value="wallets" className="whitespace-nowrap">Ví</TabsTrigger>
-          <TabsTrigger value="sessions" className="whitespace-nowrap">Session</TabsTrigger>
-          <TabsTrigger value="transactions" className="whitespace-nowrap">Giao dịch</TabsTrigger>
-          <TabsTrigger value="events" className="whitespace-nowrap">Sự kiện</TabsTrigger>
+      <Tabs defaultValue="simulator" className="space-y-3">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-2xl border bg-background p-2">
+          <TabsTrigger value="simulator">Simulator</TabsTrigger>
+          <TabsTrigger value="ops">Ops</TabsTrigger>
+          <TabsTrigger value="controls">Controls</TabsTrigger>
+          <TabsTrigger value="redeem">Redeem keys</TabsTrigger>
+          <TabsTrigger value="entitlements">Entitlements</TabsTrigger>
+          <TabsTrigger value="wallets">Wallets</TabsTrigger>
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="events">Events</TabsTrigger>
         </TabsList>
 
         <TabsContent value="simulator">
           <Card>
             <CardHeader>
-              <CardTitle>Test nhanh không cần app</CardTitle>
+              <CardTitle>Runtime simulator không cần app</CardTitle>
               <CardDescription>{getSimulatorHelp(simulatorDraft.action)}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
-                <div className="font-medium text-foreground">Flow test chuẩn</div>
-                <div className="mt-2 space-y-1">
-                  <div>1. `health` để kiểm tra function sống</div>
-                  <div>2. `redeem` để lấy `session_token`</div>
-                  <div>3. `consume` hoặc `heartbeat` bằng token đó</div>
-                  <div>4. `logout` để kết thúc session</div>
-                  <div className="pt-2 text-[11px]">Auto wallet hiện theo policy app: <span className="font-medium text-foreground">{data?.walletRules?.consume_priority === 'premium_first' ? 'premium trước, thường sau' : 'thường trước, premium sau'}</span>.</div>
-                </div>
-              </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Action</div>
@@ -1023,7 +1036,6 @@ export function AdminServerAppRuntimePage() {
                       {WALLET_KIND_OPTIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <div className="text-xs text-muted-foreground">`auto` sẽ theo policy app hiện tại: {data?.walletRules?.consume_priority === 'premium_first' ? 'premium trước, thường sau' : 'thường trước, premium sau'}.</div>
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Session token</div>
@@ -1142,7 +1154,7 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="controls">
           <Card>
             <CardHeader>
-              <CardTitle>Chặn, giới hạn và hardening</CardTitle>
+              <CardTitle>Runtime controls / hardening</CardTitle>
               <CardDescription>Kill switch, chặn version cũ, chặn account hoặc device và giới hạn số lần redeem trong ngày.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1174,6 +1186,48 @@ export function AdminServerAppRuntimePage() {
               </div>
 
               <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Request / 10 phút theo IP</div>
+                  <Input type="number" min={0} value={controlDraft.max_requests_per_10m_per_ip} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_requests_per_10m_per_ip: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Request / 10 phút theo account</div>
+                  <Input type="number" min={0} value={controlDraft.max_requests_per_10m_per_account} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_requests_per_10m_per_account: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Request / 10 phút theo device</div>
+                  <Input type="number" min={0} value={controlDraft.max_requests_per_10m_per_device} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_requests_per_10m_per_device: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem fail / giờ theo IP</div>
+                  <Input type="number" min={0} value={controlDraft.max_failed_redeems_per_hour_per_ip} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_failed_redeems_per_hour_per_ip: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem fail / giờ theo account</div>
+                  <Input type="number" min={0} value={controlDraft.max_failed_redeems_per_hour_per_account} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_failed_redeems_per_hour_per_account: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Redeem fail / giờ theo device</div>
+                  <Input type="number" min={0} value={controlDraft.max_failed_redeems_per_hour_per_device} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_failed_redeems_per_hour_per_device: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Số account tối đa / device</div>
+                  <Input type="number" min={0} value={controlDraft.max_accounts_per_device} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_accounts_per_device: Number(e.target.value) || 0 }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Số device tối đa / account</div>
+                  <Input type="number" min={0} value={controlDraft.max_devices_per_account} onChange={(e) => setControlDraft((prev) => ({ ...prev, max_devices_per_account: Number(e.target.value) || 0 }))} />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Khóa account vào device đầu</div><Switch checked={controlDraft.lock_account_to_first_device} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, lock_account_to_first_device: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Khóa account vào IP đầu</div><Switch checked={controlDraft.lock_account_to_first_ip} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, lock_account_to_first_ip: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Log health thành công</div><Switch checked={controlDraft.success_health_logs_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, success_health_logs_enabled: value }))} /></div>
+                <div className="rounded-2xl border p-4"><div className="mb-2 text-sm font-medium">Log heartbeat thành công</div><Switch checked={controlDraft.success_heartbeat_logs_enabled} onCheckedChange={(value) => setControlDraft((prev) => ({ ...prev, success_heartbeat_logs_enabled: value }))} /></div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2"><div className="text-sm font-medium">Session idle timeout (phút)</div><Input type="number" min={0} value={controlDraft.session_idle_timeout_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_idle_timeout_minutes: Number(e.target.value) || 0 }))} /></div>
                 <div className="space-y-2"><div className="text-sm font-medium">Session max age (phút)</div><Input type="number" min={0} value={controlDraft.session_max_age_minutes} onChange={(e) => setControlDraft((prev) => ({ ...prev, session_max_age_minutes: Number(e.target.value) || 0 }))} /></div>
                 <div className="space-y-2"><div className="text-sm font-medium">Giữ event tối đa (ngày)</div><Input type="number" min={1} value={controlDraft.event_retention_days} onChange={(e) => setControlDraft((prev) => ({ ...prev, event_retention_days: Number(e.target.value) || 30 }))} /></div>
@@ -1198,14 +1252,6 @@ export function AdminServerAppRuntimePage() {
               <CardDescription>Mode `package` sẽ lấy reward từ package. Các mode còn lại sẽ lấy trực tiếp plan hoặc credit bạn gõ trên key.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm redeem key</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={redeemSearch} onChange={(e) => setRedeemSearch(e.target.value)} placeholder="Ví dụ: REDEEM_1 hoặc plus_30d" />
-                </div>
-                <div className="text-xs text-muted-foreground">Chỉ lọc danh sách redeem key của tab này.</div>
-              </div>
               {filteredRedeemDraft.length === 0 ? <div className="text-sm text-muted-foreground">Không có redeem key nào khớp ô tìm redeem key.</div> : null}
               {filteredRedeemDraft.map((item) => {
                 const index = redeemDraft.findIndex((row) => row === item || row.id === item.id);
@@ -1305,19 +1351,11 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="entitlements">
           <Card>
             <CardHeader>
-              <CardTitle>Quyền gần đây</CardTitle>
+              <CardTitle>Entitlements gần đây</CardTitle>
               <CardDescription>Từ phase 8 đã có cả revoke lẫn mở lại.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
-                </div>
-                <div className="text-xs text-muted-foreground">Áp dụng cho quyền theo account, plan hoặc thiết bị.</div>
-              </div>
-              {filteredEntitlements.length === 0 ? <div className="text-sm text-muted-foreground">Không có quyền nào khớp bộ lọc.</div> : null}
+              {filteredEntitlements.length === 0 ? <div className="text-sm text-muted-foreground">Không có entitlement nào khớp bộ lọc.</div> : null}
               {filteredEntitlements.map((item) => (
                 <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border p-4">
                   <div className="space-y-2">
@@ -1345,18 +1383,10 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="wallets">
           <Card>
             <CardHeader>
-              <CardTitle>Ví gần đây</CardTitle>
+              <CardTitle>Wallet balances</CardTitle>
               <CardDescription>Danh sách ví lọc theo ô tìm tài khoản / thiết bị.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
-                </div>
-                <div className="text-xs text-muted-foreground">Áp dụng cho ví thường và premium của tab này.</div>
-              </div>
               {filteredWallets.length === 0 ? <div className="text-sm text-muted-foreground">Không có ví nào khớp bộ lọc.</div> : null}
               {filteredWallets.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
@@ -1380,18 +1410,10 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="sessions">
           <Card>
             <CardHeader>
-              <CardTitle>Session gần đây</CardTitle>
+              <CardTitle>Sessions gần đây</CardTitle>
               <CardDescription>Có thể khóa hoặc mở lại session đã revoke.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm tài khoản / thiết bị</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} placeholder="Ví dụ: user_001 hoặc device_001" />
-                </div>
-                <div className="text-xs text-muted-foreground">Áp dụng cho session, phiên bản client và trạng thái.</div>
-              </div>
               {filteredSessions.length === 0 ? <div className="text-sm text-muted-foreground">Không có session nào khớp bộ lọc.</div> : null}
               {filteredSessions.map((item) => (
                 <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border p-4">
@@ -1420,19 +1442,11 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="transactions">
           <Card>
             <CardHeader>
-              <CardTitle>Giao dịch gần đây</CardTitle>
+              <CardTitle>Wallet transactions</CardTitle>
               <CardDescription>Nếu redeem có cộng credit, transaction type sẽ là `redeem` và hiện rõ delta.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm log / lỗi / giao dịch</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
-                </div>
-                <div className="text-xs text-muted-foreground">Chỉ lọc giao dịch của tab này.</div>
-              </div>
-              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có giao dịch nào khớp ô tìm kiếm.</div> : null}
+              {filteredTransactions.length === 0 ? <div className="text-sm text-muted-foreground">Không có transaction nào khớp ô tìm log / lỗi.</div> : null}
               {filteredTransactions.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1460,19 +1474,11 @@ export function AdminServerAppRuntimePage() {
         <TabsContent value="events">
           <Card>
             <CardHeader>
-              <CardTitle>Sự kiện runtime gần đây</CardTitle>
+              <CardTitle>Runtime events</CardTitle>
               <CardDescription>Đây là chỗ đọc lỗi thật. Từ phase 8, khi FAIL nó sẽ hiện code rõ hơn và lọc được theo search.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tìm log / lỗi / sự kiện</div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Ví dụ: redeem, FAIL, SESSION, feature_code" />
-                </div>
-                <div className="text-xs text-muted-foreground">Chỉ lọc sự kiện của tab này.</div>
-              </div>
-              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có sự kiện nào khớp ô tìm kiếm.</div> : null}
+              {filteredEvents.length === 0 ? <div className="text-sm text-muted-foreground">Không có event nào khớp ô tìm log / lỗi.</div> : null}
               {filteredEvents.map((item) => (
                 <div key={item.id} className="rounded-2xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">

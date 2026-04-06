@@ -68,22 +68,9 @@ export async function assertAdmin(
 
   const directAdminKeys = [runtimeOpsAdminKey, serviceRoleKey].filter(Boolean);
 
-console.log(JSON.stringify({
-  tag: "assertAdmin_debug",
-  hasRuntimeOpsAdminKey: Boolean(runtimeOpsAdminKey),
-  runtimeOpsAdminKeyLength: runtimeOpsAdminKey.length,
-  bearerToken,
-  apiKeyHeader,
-  adminKeyHeader,
-  bearerMatchesRuntimeKey: bearerToken === runtimeOpsAdminKey,
-  apiKeyMatchesRuntimeKey: apiKeyHeader === runtimeOpsAdminKey,
-  adminKeyMatchesRuntimeKey: adminKeyHeader === runtimeOpsAdminKey,
-  tokenCandidates,
-}));
-
-if (tokenCandidates.some((token) => directAdminKeys.includes(token))) {
-  return { ok: true };
-}
+  if (tokenCandidates.some((token) => directAdminKeys.includes(token))) {
+    return { ok: true };
+  }
 
   const token = tokenCandidates[0] ?? "";
   if (!token) {

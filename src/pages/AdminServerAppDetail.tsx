@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 
@@ -13,12 +13,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-
-const CONFIG_TABS = ["settings", "plans", "features", "wallet", "rewards"] as const;
-
-function normalizeConfigTab(value: string | null) {
-  return (CONFIG_TABS as readonly string[]).includes(String(value || "")) ? (value as typeof CONFIG_TABS[number]) : "settings";
-}
 
 type ServerAppRow = {
   code: string;
@@ -75,7 +69,6 @@ type ServerAppWalletRuleRow = {
   premium_daily_reset_enabled: boolean | null;
   soft_daily_reset_amount: string | number;
   premium_daily_reset_amount: string | number;
-  consume_priority: 'soft_first' | 'premium_first';
   notes: string | null;
 };
 
@@ -163,7 +156,6 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     premium_daily_reset_enabled: false,
     soft_daily_reset_amount: 5,
     premium_daily_reset_amount: 0,
-    consume_priority: 'soft_first',
     notes: "Credit thường reset mỗi ngày. Credit kim cương giữ lâu hơn và hao ít hơn.",
   },
   "free-fire": {
@@ -175,7 +167,6 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     premium_daily_reset_enabled: false,
     soft_daily_reset_amount: 3,
     premium_daily_reset_amount: 0,
-    consume_priority: 'soft_first',
     notes: "Dùng decimal để tránh cảm giác lạm phát credit.",
   },
 };
@@ -220,7 +211,6 @@ function isPhaseMissingMessage(message?: string) {
 
 export function AdminServerAppDetailPage() {
   const { appCode = "find-dumps" } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const fallback = appFallback(appCode);
 
@@ -404,7 +394,6 @@ export function AdminServerAppDetailPage() {
         premium_daily_reset_enabled: Boolean(walletDraft.premium_daily_reset_enabled ?? false),
         soft_daily_reset_amount: normalizeDecimal(walletDraft.soft_daily_reset_amount),
         premium_daily_reset_amount: normalizeDecimal(walletDraft.premium_daily_reset_amount),
-        consume_priority: walletDraft.consume_priority === 'premium_first' ? 'premium_first' : 'soft_first',
         notes: walletDraft.notes?.trim() || null,
       };
       const res = await sb.from("server_app_wallet_rules").upsert(payload, { onConflict: "app_code" });
@@ -518,7 +507,6 @@ export function AdminServerAppDetailPage() {
   };
 
   const migrationHint = useMemo(() => isPhaseMissingMessage((error as Error | undefined)?.message), [error]);
-  const activeTab = normalizeConfigTab(searchParams.get("tab"));
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">Đang tải cấu hình app...</div>;
@@ -528,10 +516,13 @@ export function AdminServerAppDetailPage() {
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/admin/apps">← Quay lại Server app</Link>
+          </Button>
           <div>
-            <h1 className="text-2xl font-semibold">Cấu hình · {appDraft.label}</h1>
-            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Chia nhỏ cấu hình theo từng tab để mobile gọn hơn: phần cơ bản, gói, tính năng, ví và gói quà.
+            <h1 className="text-2xl font-semibold">{appDraft.label}</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Màn quản lý nội bộ cho {appDraft.label}. Đây là tầng 2 để chỉnh plan, credit, reward package và feature flags mà không đụng lung tung vào phần free key đang chạy.
             </p>
           </div>
         </div>
@@ -540,7 +531,7 @@ export function AdminServerAppDetailPage() {
             {appDraft.public_enabled ? "Đang bật" : "Đang ẩn"}
           </Badge>
           <Button asChild variant="outline">
-            <Link to={`/apps/${appCode}/runtime`}>Mở runtime</Link>
+            <Link to={`/admin/apps/${appCode}/runtime`}>Runtime admin</Link>
           </Button>
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>
         </div>
@@ -560,21 +551,21 @@ export function AdminServerAppDetailPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói mặc định</div><div className="mt-1 break-words text-lg font-semibold">{settingsDraft.guest_plan || "classic"}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Nhãn tab key</div><div className="mt-1 break-words text-lg font-semibold">{settingsDraft.gift_tab_label || "Mã quà"}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói</div><div className="mt-1 text-lg font-semibold">{plansDraft.length}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Tính năng</div><div className="mt-1 text-lg font-semibold">{featuresDraft.length}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói quà</div><div className="mt-1 text-lg font-semibold">{packagesDraft.length}</div></CardContent></Card>
+      <div className="grid gap-3 md:grid-cols-5">
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Guest plan</div><div className="mt-1 text-2xl font-semibold">{settingsDraft.guest_plan || "classic"}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Gift tab</div><div className="mt-1 text-2xl font-semibold">{settingsDraft.gift_tab_label || "Quà tặng"}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Plans</div><div className="mt-1 text-2xl font-semibold">{plansDraft.length}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Features</div><div className="mt-1 text-2xl font-semibold">{featuresDraft.length}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Reward packages</div><div className="mt-1 text-2xl font-semibold">{packagesDraft.length}</div></CardContent></Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => { const next = new URLSearchParams(searchParams); next.set("tab", value); setSearchParams(next, { replace: true }); }} className="space-y-3">
-        <TabsList className="flex h-auto w-full flex-nowrap justify-start gap-2 overflow-x-auto rounded-2xl border bg-background p-2">
-          <TabsTrigger value="settings" className="whitespace-nowrap">Cơ bản</TabsTrigger>
-          <TabsTrigger value="plans" className="whitespace-nowrap">Gói & credit</TabsTrigger>
-          <TabsTrigger value="features" className="whitespace-nowrap">Tính năng</TabsTrigger>
-          <TabsTrigger value="wallet" className="whitespace-nowrap">Ví</TabsTrigger>
-          <TabsTrigger value="rewards" className="whitespace-nowrap">Gói quà</TabsTrigger>
+      <Tabs defaultValue="settings" className="space-y-3">
+        <TabsList className="flex w-full flex-wrap justify-start gap-2">
+          <TabsTrigger value="settings">App settings</TabsTrigger>
+          <TabsTrigger value="plans">Plans & credit</TabsTrigger>
+          <TabsTrigger value="features">Feature flags</TabsTrigger>
+          <TabsTrigger value="wallet">Wallet rules</TabsTrigger>
+          <TabsTrigger value="rewards">Reward / redeem</TabsTrigger>
         </TabsList>
 
         <TabsContent value="settings">
@@ -613,7 +604,7 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Tên tab nhập key</div>
-                  <Input value={settingsDraft.gift_tab_label || ""} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, gift_tab_label: e.target.value }))} placeholder="Mã quà / Nhập key" />
+                  <Input value={settingsDraft.gift_tab_label || ""} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, gift_tab_label: e.target.value }))} placeholder="Quà tặng / Mã quà" />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Giờ reset credit thường</div>
@@ -774,17 +765,6 @@ export function AdminServerAppDetailPage() {
                   <div className="text-sm font-medium">Số credit kim cương reset / ngày</div>
                   <Input value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: e.target.value }))} />
                 </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Ưu tiên trừ credit khi app gửi `auto`</div>
-                  <Select value={walletDraft.consume_priority || 'soft_first'} onValueChange={(value) => setWalletDraft((prev) => ({ ...prev, consume_priority: value === 'premium_first' ? 'premium_first' : 'soft_first' }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="soft_first">Credit thường trước, premium sau</SelectItem>
-                      <SelectItem value="premium_first">Premium trước, credit thường sau</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="text-xs text-muted-foreground">Find Dumps nên để `soft_first` để tiêu quota thường trước. App chỉ gửi `auto`, server sẽ quyết định thứ tự trừ thật.</div>
-                </div>
                 <div className="flex items-center justify-between rounded-2xl border p-3 md:col-span-2">
                   <div>
                     <div className="font-medium">Reset credit kim cương định kỳ</div>
@@ -794,7 +774,7 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <div className="text-sm font-medium">Ghi chú ví</div>
-                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: Find Dumps ưu tiên trừ credit thường trước, premium chỉ dùng khi soft không đủ hoặc admin ép premium..." />
+                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: credit thường dùng nhiều hơn, credit kim cương hao ít hơn, ưu tiên cho feature nặng..." />
                 </div>
               </div>
               <div className="flex justify-end">

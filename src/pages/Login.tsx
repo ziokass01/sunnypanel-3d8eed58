@@ -1,39 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAuth } from "@/auth/AuthProvider";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { user } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const nextTarget = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    return params.get("next")?.trim() || "";
-  }, [location.search]);
-
-  const redirectAfterLogin = useCallback((target?: string) => {
-    const safeTarget = String(target || "").trim();
-    if (/^https?:\/\//i.test(safeTarget)) {
-      window.location.assign(safeTarget);
-      return;
-    }
-    navigate(safeTarget || "/dashboard", { replace: true });
-  }, [navigate]);
-
-  useEffect(() => {
-    if (!user) return;
-    redirectAfterLogin(nextTarget);
-  }, [user, nextTarget, redirectAfterLogin]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,7 +21,7 @@ export function LoginPage() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      redirectAfterLogin(nextTarget);
+      navigate("/dashboard", { replace: true });
     } catch (err: any) {
       setError(err?.message ?? "Authentication failed");
     } finally {
