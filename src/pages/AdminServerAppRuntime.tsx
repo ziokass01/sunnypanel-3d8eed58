@@ -312,6 +312,67 @@ function formatJsonBlock(value: unknown) {
   }
 }
 
+
+async function invokeRuntimeWithJson(payload: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
+  if (error) {
+    let json: any = data ?? null;
+    let status: number | null = null;
+    const response = (error as any)?.context;
+    if (response) {
+      status = typeof response.status === "number" ? response.status : null;
+      if (typeof response.json === "function") {
+        try {
+          json = await response.json();
+        } catch {
+          // ignore json parse errors
+        }
+      }
+    }
+    (error as any).context = { payload, json, status };
+    throw error;
+  }
+  return { payload, data };
+}
+
+async function postAdminRuntimeOps(payload: Record<string, unknown>) {
+  const sessionResult = await supabase.auth.getSession();
+  const token = sessionResult.data.session?.access_token?.trim();
+  if (!token) {
+    const err = new Error("Bạn chưa đăng nhập admin hoặc phiên đăng nhập đã hết hạn.") as Error & {
+      code?: string;
+      status?: number;
+      context?: Record<string, unknown>;
+    };
+    err.code = "ADMIN_AUTH_REQUIRED";
+    err.status = 401;
+    err.context = {
+      payload,
+      status: 401,
+      json: { ok: false, code: "ADMIN_AUTH_REQUIRED", msg: "Missing admin session token" },
+    };
+    throw err;
+  }
+
+  try {
+    const data = await postFunction<any>("/server-app-runtime-ops", payload, { authToken: token });
+    return { payload, data };
+  } catch (error: any) {
+    const json = error?.context?.json ?? {
+      ok: false,
+      code: error?.code ?? (error?.status ? `HTTP_${error.status}` : "UNKNOWN_ERROR"),
+      msg: error?.message ?? "Request failed",
+    };
+    error.context = {
+      ...(error?.context ?? {}),
+      payload,
+      status: error?.status ?? error?.context?.status ?? null,
+      json,
+    };
+    throw error;
+  }
+}
+
 function emptyRedeemKey(appCode: string, index: number): RedeemKeyRow {
   return {
     app_code: appCode,
@@ -748,12 +809,7 @@ export function AdminServerAppRuntimePage() {
       setSimulatorStatus(`Đang gọi runtime: ${String(payload.action)}...`);
       setSimulatorResult(formatJsonBlock({ ok: false, pending: true, payload }));
 
-      const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
-      if (error) {
-        (error as any).context = { payload, json: data ?? null };
-        throw error;
-      }
-      return { payload, data };
+      return await invokeRuntimeWithJson(payload);
     },
     onSuccess: async ({ payload, data: result }) => {
       setSimulatorStatus(`Simulator chạy xong: ${String(payload.action)}`);
