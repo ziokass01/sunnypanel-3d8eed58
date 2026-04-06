@@ -399,10 +399,18 @@ function getErrorCode(error: any) {
 }
 
 function getErrorMessage(error: any) {
-  return error?.context?.json?.message
+  const direct = error?.context?.json?.friendly_message
+    ?? error?.context?.json?.message
     ?? error?.context?.json?.msg
     ?? error?.message
     ?? "Unknown error";
+
+  if (typeof direct === "string") return direct;
+  try {
+    return JSON.stringify(direct);
+  } catch {
+    return String(direct);
+  }
 }
 
 function formatMutationError(error: any) {
@@ -757,8 +765,16 @@ export function AdminServerAppRuntimePage() {
       try {
         const data = await postFunction("/server-app-runtime", payload);
         return { payload, data };
-      } catch (error) {
-        (error as any).context = { payload, json: (error as any)?.context?.json ?? null };
+      } catch (error: any) {
+        if (error?.code === "FETCH_FAILED") {
+          const { data, error: invokeError } = await supabase.functions.invoke("server-app-runtime", { body: payload });
+          if (invokeError) {
+            (invokeError as any).context = { payload, json: data ?? null, fallback: "supabase.functions.invoke" };
+            throw invokeError;
+          }
+          return { payload, data };
+        }
+        (error as any).context = { payload, json: error?.context?.json ?? null };
         throw error;
       }
     },

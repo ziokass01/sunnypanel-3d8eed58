@@ -1,4 +1,3 @@
-import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 import {
   buildRuntimeState,
   consumeRuntimeFeature,
@@ -11,6 +10,23 @@ import {
   sha256Hex,
   touchRuntimeSession,
 } from "../_shared/server_app_runtime.ts";
+
+function getAllowedOrigin(origin: string | null | undefined) {
+  const incoming = String(origin ?? "").trim();
+  const publicBase = String(Deno.env.get("PUBLIC_BASE_URL") ?? "").trim();
+  const appBase = String(Deno.env.get("APP_BASE_URL") ?? "").trim();
+  return incoming || appBase || publicBase || "*";
+}
+
+function runtimeCorsHeaders(origin?: string | null, methods = "POST,OPTIONS") {
+  return {
+    "access-control-allow-origin": getAllowedOrigin(origin),
+    "access-control-allow-headers": "authorization, x-client-info, apikey, content-type, x-fp, x-admin-key",
+    "access-control-allow-methods": methods,
+    "access-control-max-age": "86400",
+    "vary": "origin",
+  } as Record<string, string>;
+}
 
 type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
 
@@ -135,12 +151,11 @@ async function enforceControls(params: {
 }
 
 Deno.serve(async (req) => {
-  const publicBaseUrl = Deno.env.get("PUBLIC_BASE_URL") ?? "";
-  if (req.method === "OPTIONS") return handleOptions(req, publicBaseUrl, "POST,OPTIONS");
-  if (req.method !== "POST") return runtimeJson(405, { ok: false, code: "METHOD_NOT_ALLOWED" }, req.headers.get("origin"));
-
-  const headers = buildCorsHeaders(req, publicBaseUrl, "POST,OPTIONS");
   const origin = req.headers.get("origin");
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: runtimeCorsHeaders(origin, "POST,OPTIONS") });
+  if (req.method !== "POST") return runtimeJson(405, { ok: false, code: "METHOD_NOT_ALLOWED" }, origin);
+
+  const headers = runtimeCorsHeaders(origin, "POST,OPTIONS");
 
   let parsedBody: any = null;
 

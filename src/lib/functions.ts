@@ -67,10 +67,11 @@ export async function getFunction<T>(
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(String(msg)) as Error & { code?: string; status?: number };
+    const msg = (data && (data.friendly_message || data.msg || data.message || data.error)) || `Request failed (${res.status})`;
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) as Error & { code?: string; status?: number; context?: Record<string, unknown> };
     if (data?.code) err.code = String(data.code);
     err.status = res.status;
+    err.context = { json: data ?? null, status: res.status, path };
     throw err;
   }
   return data as T;
@@ -148,10 +149,11 @@ export async function postFunction<T>(
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const msg = (data && (data.msg || data.message || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(String(msg)) as Error & { code?: string; status?: number };
+    const msg = (data && (data.friendly_message || data.msg || data.message || data.error)) || `Request failed (${res.status})`;
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) as Error & { code?: string; status?: number; context?: Record<string, unknown> };
     if (data?.code) err.code = String(data.code);
     err.status = res.status;
+    err.context = { json: data ?? null, status: res.status, path };
     throw err;
   }
   return data as T;

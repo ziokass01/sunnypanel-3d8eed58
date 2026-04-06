@@ -327,7 +327,7 @@ async function updateSessionStatus(params: { sessionId: string; status: "revoked
   const nowIso = getNowIso();
 
   if (params.status === "active") {
-    const { error: revokeOthersError } = await admin
+    let revokeOthersQuery = admin
       .from("server_app_sessions")
       .update({
         status: "revoked",
@@ -337,9 +337,15 @@ async function updateSessionStatus(params: { sessionId: string; status: "revoked
       })
       .eq("app_code", asString((current as any).app_code))
       .eq("account_ref", asString((current as any).account_ref))
-      .eq("device_id", asString((current as any).device_id))
       .eq("status", "active")
       .neq("id", sessionId);
+
+    const currentDeviceId = (current as any).device_id;
+    revokeOthersQuery = currentDeviceId == null
+      ? revokeOthersQuery.is("device_id", null)
+      : revokeOthersQuery.eq("device_id", asString(currentDeviceId));
+
+    const { error: revokeOthersError } = await revokeOthersQuery;
     if (revokeOthersError) throw revokeOthersError;
   }
 
@@ -364,7 +370,15 @@ async function updateSessionStatus(params: { sessionId: string; status: "revoked
     .eq("id", sessionId)
     .select("id,account_ref,device_id,status,revoked_at,revoke_reason,last_seen_at")
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    if ((error as any)?.code === "23505") {
+      throw Object.assign(new Error("SESSION_RESTORE_CONFLICT"), {
+        status: 409,
+        code: "SESSION_RESTORE_CONFLICT",
+      });
+    }
+    throw error;
+  }
   if (!data) throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
   return data;
 }
