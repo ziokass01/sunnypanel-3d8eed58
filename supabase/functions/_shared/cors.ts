@@ -3,6 +3,8 @@ const BASE_ALLOWED_HOSTS = new Set([
   "www.mityangho.id.vn",
   "admin.mityangho.id.vn",
   "www.admin.mityangho.id.vn",
+  "app.mityangho.id.vn",
+  "www.app.mityangho.id.vn",
   "localhost",
   "127.0.0.1",
 ]);
@@ -14,6 +16,7 @@ const DEFAULT_ALLOW_HEADERS = [
   "content-type",
   "x-fp",
   "x-debug",
+  "x-admin-key",
 ].join(", ");
 
 const DEFAULT_ALLOW_METHODS = "GET,POST,PUT,DELETE,OPTIONS";
@@ -55,6 +58,10 @@ function shouldAllowLovableOrigins(): boolean {
   return Deno.env.get("ALLOW_LOVABLE_ORIGINS") === "1";
 }
 
+function isAllowedWildcardHost(host: string): boolean {
+  return host === "mityangho.id.vn" || host.endsWith(".mityangho.id.vn");
+}
+
 function buildAllowedHosts(publicBaseUrl: string): Set<string> {
   const allowedHosts = new Set(BASE_ALLOWED_HOSTS);
   const envHosts = parseAllowedOrigins(Deno.env.get("ALLOWED_ORIGINS"));
@@ -76,11 +83,11 @@ export function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
     return origin;
   }
 
-  if (originHost && allowedHosts.has(originHost)) {
+  if (originHost && (allowedHosts.has(originHost) || isAllowedWildcardHost(originHost))) {
     return origin;
   }
 
-  if (publicBaseUrl && publicHost && allowedHosts.has(publicHost)) {
+  if (publicBaseUrl && publicHost && (allowedHosts.has(publicHost) || isAllowedWildcardHost(publicHost))) {
     return publicBaseUrl;
   }
 
