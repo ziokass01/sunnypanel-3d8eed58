@@ -1,5 +1,4 @@
-import { assertAdmin, createAdminClient, json } from "../_shared/admin.ts";
-import { handleOptions } from "../_shared/cors.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { adjustRuntimeWalletBalance, cleanupRuntimeOps } from "../_shared/server_app_runtime.ts";
 
 type OpsAction =
@@ -11,6 +10,227 @@ type OpsAction =
   | "restore_session"
   | "revoke_entitlement"
   | "restore_entitlement";
+
+const BASE_ALLOWED_HOSTS = new Set([
+  "mityangho.id.vn",
+  "www.mityangho.id.vn",
+  "admin.mityangho.id.vn",
+  "www.admin.mityangho.id.vn",
+  "app.mityangho.id.vn",
+  "www.app.mityangho.id.vn",
+  "localhost",
+  "127.0.0.1",
+]);
+
+const DEFAULT_ALLOW_HEADERS = [
+  "authorization",
+  "x-client-info",
+  "apikey",
+  "content-type",
+  "x-fp",
+  "x-debug",
+  "x-admin-key",
+].join(", ");
+
+function mustEnv(name: string) {
+  const v = Deno.env.get(name);
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+function toHostname(raw: string): string | null {
+  if (!raw) return null;
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function parseAllowedOrigins(raw: string | null | undefined): Set<string> {
+  const hosts = new Set<string>();
+  for (const entry of String(raw ?? "").split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+
+    const asHost = toHostname(trimmed);
+    if (asHost) {
+      hosts.add(asHost);
+      continue;
+    }
+
+    const normalized = trimmed.replace(/^https?:\/\//i, "").replace(/\/$/, "").toLowerCase();
+    if (normalized) hosts.add(normalized);
+  }
+  return hosts;
+}
+
+function isAllowedWildcardHost(host: string) {
+  return host === "mityangho.id.vn" || host.endsWith(".mityangho.id.vn");
+}
+
+function buildAllowedHosts(publicBaseUrl: string) {
+  const allowedHosts = new Set(BASE_ALLOWED_HOSTS);
+  const envHosts = parseAllowedOrigins(Deno.env.get("ALLOWED_ORIGINS"));
+  for (const host of envHosts) allowedHosts.add(host);
+
+  const publicHost = toHostname(publicBaseUrl);
+  if (publicHost) allowedHosts.add(publicHost);
+  return allowedHosts;
+}
+
+function resolveCorsOrigin(origin: string, publicBaseUrl: string) {
+  const originHost = toHostname(origin);
+  const publicHost = toHostname(publicBaseUrl);
+  const allowedHosts = buildAllowedHosts(publicBaseUrl);
+
+  if (originHost && (allowedHosts.has(originHost) || isAllowedWildcardHost(originHost))) {
+    return origin;
+  }
+
+  if (publicBaseUrl && publicHost && (allowedHosts.has(publicHost) || isAllowedWildcardHost(publicHost))) {
+    return publicBaseUrl;
+  }
+
+  return "https://mityangho.id.vn";
+}
+
+function corsHeaders(req: Request, publicBaseUrl: string, methods = "POST,OPTIONS") {
+  const origin = (req.headers.get("origin") ?? "").trim();
+  if (!origin) {
+    return {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": methods,
+      "Access-Control-Allow-Headers": DEFAULT_ALLOW_HEADERS,
+      "Access-Control-Max-Age": "86400",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    } as Record<string, string>;
+  }
+
+  return {
+    "Access-Control-Allow-Origin": resolveCorsOrigin(origin, publicBaseUrl),
+    "Vary": "Origin",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Methods": methods,
+    "Access-Control-Allow-Headers": DEFAULT_ALLOW_HEADERS,
+    "Access-Control-Max-Age": "86400",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  } as Record<string, string>;
+}
+
+function handleOptions(req: Request) {
+  const publicBaseUrl = Deno.env.get("PUBLIC_BASE_URL") ?? "https://mityangho.id.vn";
+  return new Response(null, { status: 204, headers: corsHeaders(req, publicBaseUrl) });
+}
+
+function json(status: number, body: unknown, req: Request) {
+  const publicBaseUrl = Deno.env.get("PUBLIC_BASE_URL") ?? "https://mityangho.id.vn";
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      ...corsHeaders(req, publicBaseUrl),
+    },
+  });
+}
+
+function parseAdminEmails(raw: string | undefined | null): Set<string> {
+  return new Set(
+    String(raw ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function createAdminClient() {
+  const supabaseUrl = mustEnv("SUPABASE_URL");
+  const serviceRoleKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+    global: { headers: { "X-Client-Info": "sunnypanel-edge-admin" } },
+  });
+}
+
+async function assertAdmin(
+  req: Request,
+): Promise<{ ok: true } | { ok: false; status: number; body: { ok: false; code: string; msg: string } }> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
+  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  const runtimeOpsAdminKey = (Deno.env.get("RUNTIME_OPS_ADMIN_KEY") ?? "").trim();
+
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const bearerToken = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : authHeader.trim();
+
+  const apiKeyHeader = (req.headers.get("apikey") ?? "").trim();
+  const adminKeyHeader = (req.headers.get("x-admin-key") ?? "").trim();
+  const tokenCandidates = [bearerToken, apiKeyHeader, adminKeyHeader].filter(Boolean);
+
+  if (!supabaseUrl) {
+    return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
+  }
+
+  const directAdminKeys = [runtimeOpsAdminKey, serviceRoleKey].filter(Boolean);
+  if (directAdminKeys.length > 0 && tokenCandidates.some((token) => directAdminKeys.includes(token))) {
+    return { ok: true };
+  }
+
+  const token = tokenCandidates[0] ?? "";
+  if (!token) {
+    return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
+  }
+
+  const verifierKey = anonKey || serviceRoleKey;
+  if (!verifierKey) {
+    return {
+      ok: false,
+      status: 500,
+      body: { ok: false, code: "SERVER_MISCONFIG_MISSING_SECRET", msg: "Admin verifier not configured" },
+    };
+  }
+
+  const authed = createClient(supabaseUrl, verifierKey, {
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+
+  const { data: userData, error: userErr } = await authed.auth.getUser(token);
+  const user = userData?.user;
+  if (userErr || !user) {
+    return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
+  }
+
+  const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS"));
+  if (!adminEmails.size) {
+    return {
+      ok: false,
+      status: 500,
+      body: { ok: false, code: "SERVER_MISCONFIG_MISSING_ADMIN_EMAILS", msg: "Missing ADMIN_EMAILS secret" },
+    };
+  }
+
+  const userEmail = String(user.email ?? "").toLowerCase();
+  const emailAllowed = userEmail ? adminEmails.has(userEmail) : false;
+  const metadataAdmin = user.user_metadata?.is_admin === true || user.app_metadata?.is_admin === true;
+
+  const roleCheck = await authed.rpc("has_role", { _user_id: user.id, _role: "admin" });
+  const roleAllowed = !roleCheck.error && roleCheck.data === true;
+
+  if (!emailAllowed && !metadataAdmin && !roleAllowed) {
+    return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
+  }
+
+  return { ok: true };
+}
 
 function asString(value: unknown, fallback = "") {
   const v = String(value ?? fallback).trim();
@@ -292,19 +512,17 @@ async function updateEntitlementStatus(params: { entitlementId: string; status: 
 }
 
 Deno.serve(async (req) => {
-  const origin = req.headers.get("origin") ?? "";
-
   if (req.method === "OPTIONS") {
     return handleOptions(req);
   }
 
   if (req.method !== "POST") {
-    return json(405, { ok: false, code: "METHOD_NOT_ALLOWED", message: "POST only" }, origin);
+    return json(405, { ok: false, code: "METHOD_NOT_ALLOWED", message: "POST only" }, req);
   }
 
   const adminCheck = await assertAdmin(req);
   if (!adminCheck.ok) {
-    return json(adminCheck.status, adminCheck.body, origin);
+    return json(adminCheck.status, adminCheck.body, req);
   }
 
   try {
@@ -312,12 +530,12 @@ Deno.serve(async (req) => {
     const action = asString(body?.action).toLowerCase() as OpsAction;
     const appCode = asString(body?.app_code);
     if (!appCode) {
-      return json(400, { ok: false, code: "MISSING_APP_CODE", message: "Missing app_code" }, origin);
+      return json(400, { ok: false, code: "MISSING_APP_CODE", message: "Missing app_code" }, req);
     }
 
     if (action === "cleanup") {
       const result = await cleanupRuntimeOps(appCode);
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "adjust_wallet") {
@@ -330,7 +548,7 @@ Deno.serve(async (req) => {
         note: asString(body?.note) || null,
         metadata: typeof body?.metadata === "object" && body?.metadata ? body.metadata : { source: "runtime_ops_function" },
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "account_snapshot") {
@@ -339,7 +557,7 @@ Deno.serve(async (req) => {
         accountRef: asString(body?.account_ref),
         deviceId: asString(body?.device_id) || null,
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "redeem_preview") {
@@ -347,7 +565,7 @@ Deno.serve(async (req) => {
         appCode,
         redeemKey: asString(body?.redeem_key),
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "revoke_session") {
@@ -356,7 +574,7 @@ Deno.serve(async (req) => {
         status: "revoked",
         reason: asNullableString(body?.reason),
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "restore_session") {
@@ -364,7 +582,7 @@ Deno.serve(async (req) => {
         sessionId: asString(body?.session_id),
         status: "active",
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "revoke_entitlement") {
@@ -373,7 +591,7 @@ Deno.serve(async (req) => {
         status: "revoked",
         reason: asNullableString(body?.reason),
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
     if (action === "restore_entitlement") {
@@ -381,10 +599,10 @@ Deno.serve(async (req) => {
         entitlementId: asString(body?.entitlement_id),
         status: "active",
       });
-      return json(200, { ok: true, action, result }, origin);
+      return json(200, { ok: true, action, result }, req);
     }
 
-    return json(400, { ok: false, code: "UNKNOWN_ACTION", message: "Unknown runtime ops action" }, origin);
+    return json(400, { ok: false, code: "UNKNOWN_ACTION", message: "Unknown runtime ops action" }, req);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = Number((error as any)?.status ?? 500);
@@ -394,6 +612,6 @@ Deno.serve(async (req) => {
       code,
       message,
       friendly_message: buildFriendlyError(code, message),
-    }, origin);
+    }, req);
   }
 });
