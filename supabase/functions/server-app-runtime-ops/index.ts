@@ -315,19 +315,47 @@ async function updateSessionStatus(params: { sessionId: string; status: "revoked
   if (!sessionId) {
     throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
   }
+
+  const { data: current, error: currentError } = await admin
+    .from("server_app_sessions")
+    .select("id,app_code,account_ref,device_id,status,revoked_at,revoke_reason,last_seen_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (currentError) throw currentError;
+  if (!current) throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
+
+  const nowIso = getNowIso();
+
+  if (params.status === "active") {
+    const { error: revokeOthersError } = await admin
+      .from("server_app_sessions")
+      .update({
+        status: "revoked",
+        revoked_at: nowIso,
+        revoke_reason: "Revoked automatically before restoring another session",
+        updated_at: nowIso,
+      })
+      .eq("app_code", asString((current as any).app_code))
+      .eq("account_ref", asString((current as any).account_ref))
+      .eq("device_id", asString((current as any).device_id))
+      .eq("status", "active")
+      .neq("id", sessionId);
+    if (revokeOthersError) throw revokeOthersError;
+  }
+
   const patch = params.status === "active"
     ? {
         status: "active",
         revoked_at: null,
         revoke_reason: null,
-        last_seen_at: getNowIso(),
-        updated_at: getNowIso(),
+        last_seen_at: nowIso,
+        updated_at: nowIso,
       }
     : {
         status: "revoked",
-        revoked_at: getNowIso(),
+        revoked_at: nowIso,
         revoke_reason: asNullableString(params.reason) ?? "Revoked from runtime ops",
-        updated_at: getNowIso(),
+        updated_at: nowIso,
       };
 
   const { data, error } = await admin

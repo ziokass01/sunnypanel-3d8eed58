@@ -672,13 +672,13 @@ export function AdminServerAppRuntimePage() {
 
   const revokeEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
-      const sb = supabase as any;
-      const { error } = await sb.from("server_app_entitlements").update({
-        status: "revoked",
-        revoked_at: new Date().toISOString(),
-        revoke_reason: "Revoked from admin runtime page",
-      }).eq("id", entitlementId);
-      if (error) throw error;
+      const token = await getAdminAuthToken();
+      return await postFunction("/server-app-runtime-ops", {
+        action: "revoke_entitlement",
+        app_code: appCode,
+        entitlement_id: entitlementId,
+        reason: "Revoked from admin runtime page",
+      }, { authToken: token });
     },
     onSuccess: async () => {
       toast({ title: "Đã revoke entitlement", description: "Người dùng sẽ mất quyền cho đến khi mở lại hoặc redeem lại." });
@@ -689,14 +689,12 @@ export function AdminServerAppRuntimePage() {
 
   const restoreEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
-      const sb = supabase as any;
-      const { error } = await sb.from("server_app_entitlements").update({
-        status: "active",
-        revoked_at: null,
-        revoke_reason: null,
-        updated_at: new Date().toISOString(),
-      }).eq("id", entitlementId);
-      if (error) throw error;
+      const token = await getAdminAuthToken();
+      return await postFunction("/server-app-runtime-ops", {
+        action: "restore_entitlement",
+        app_code: appCode,
+        entitlement_id: entitlementId,
+      }, { authToken: token });
     },
     onSuccess: async () => {
       toast({ title: "Đã mở lại entitlement", description: "Entitlement đã quay lại trạng thái active." });
@@ -707,14 +705,13 @@ export function AdminServerAppRuntimePage() {
 
   const revokeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const sb = supabase as any;
-      const { error } = await sb.from("server_app_sessions").update({
-        status: "revoked",
-        revoked_at: new Date().toISOString(),
-        revoke_reason: "Revoked from admin runtime page",
-        updated_at: new Date().toISOString(),
-      }).eq("id", sessionId);
-      if (error) throw error;
+      const token = await getAdminAuthToken();
+      return await postFunction("/server-app-runtime-ops", {
+        action: "revoke_session",
+        app_code: appCode,
+        session_id: sessionId,
+        reason: "Revoked from admin runtime page",
+      }, { authToken: token });
     },
     onSuccess: async () => {
       toast({ title: "Đã revoke session", description: "Session đã bị khóa." });
@@ -725,15 +722,12 @@ export function AdminServerAppRuntimePage() {
 
   const restoreSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const sb = supabase as any;
-      const { error } = await sb.from("server_app_sessions").update({
-        status: "active",
-        revoked_at: null,
-        revoke_reason: null,
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq("id", sessionId);
-      if (error) throw error;
+      const token = await getAdminAuthToken();
+      return await postFunction("/server-app-runtime-ops", {
+        action: "restore_session",
+        app_code: appCode,
+        session_id: sessionId,
+      }, { authToken: token });
     },
     onSuccess: async () => {
       toast({ title: "Đã mở lại session", description: "Session đã quay lại active." });
@@ -760,12 +754,13 @@ export function AdminServerAppRuntimePage() {
       setSimulatorStatus(`Đang gọi runtime: ${String(payload.action)}...`);
       setSimulatorResult(formatJsonBlock({ ok: false, pending: true, payload }));
 
-      const { data, error } = await supabase.functions.invoke("server-app-runtime", { body: payload });
-      if (error) {
-        (error as any).context = { payload, json: data ?? null };
+      try {
+        const data = await postFunction("/server-app-runtime", payload);
+        return { payload, data };
+      } catch (error) {
+        (error as any).context = { payload, json: (error as any)?.context?.json ?? null };
         throw error;
       }
-      return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
       setSimulatorStatus(`Simulator chạy xong: ${String(payload.action)}`);

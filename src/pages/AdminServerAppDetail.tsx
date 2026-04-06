@@ -220,6 +220,7 @@ function isPhaseMissingMessage(message?: string) {
 
 export function AdminServerAppDetailPage() {
   const { appCode = "find-dumps" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const fallback = appFallback(appCode);
 
