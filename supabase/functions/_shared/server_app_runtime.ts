@@ -73,6 +73,7 @@ type RuntimeWalletRules = {
   premium_daily_reset_enabled: boolean;
   soft_daily_reset_amount: number;
   premium_daily_reset_amount: number;
+  consume_priority: 'soft_first' | 'premium_first';
 };
 
 type RuntimeControls = {
@@ -89,18 +90,6 @@ type RuntimeControls = {
   blocked_ip_hashes: string[];
   max_daily_redeems_per_account: number;
   max_daily_redeems_per_device: number;
-  max_requests_per_10m_per_ip: number;
-  max_requests_per_10m_per_account: number;
-  max_requests_per_10m_per_device: number;
-  max_failed_redeems_per_hour_per_ip: number;
-  max_failed_redeems_per_hour_per_account: number;
-  max_failed_redeems_per_hour_per_device: number;
-  max_accounts_per_device: number;
-  max_devices_per_account: number;
-  lock_account_to_first_device: boolean;
-  lock_account_to_first_ip: boolean;
-  success_health_logs_enabled: boolean;
-  success_heartbeat_logs_enabled: boolean;
   session_idle_timeout_minutes: number;
   session_max_age_minutes: number;
   event_retention_days: number;
@@ -211,16 +200,6 @@ function compareVersionText(left: string | null | undefined, right: string | nul
 
 function startOfUtcDayIso(base = new Date()) {
   return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 0, 0, 0, 0)).toISOString();
-}
-
-function startOfUtcHourIso(base = new Date()) {
-  return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), base.getUTCHours(), 0, 0, 0)).toISOString();
-}
-
-function startOfUtcTenMinuteIso(base = new Date()) {
-  const minute = base.getUTCMinutes();
-  const roundedMinute = Math.floor(minute / 10) * 10;
-  return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), base.getUTCHours(), roundedMinute, 0, 0)).toISOString();
 }
 
 function asNumber(value: unknown, fallback = 0) {
@@ -423,7 +402,7 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_wallet_rules")
-    .select("soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount")
+    .select("soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,consume_priority")
     .eq("app_code", appCode)
     .maybeSingle();
 
@@ -433,6 +412,7 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
     premium_daily_reset_enabled: Boolean(data?.premium_daily_reset_enabled ?? false),
     soft_daily_reset_amount: asNumber(data?.soft_daily_reset_amount),
     premium_daily_reset_amount: asNumber(data?.premium_daily_reset_amount),
+    consume_priority: String(data?.consume_priority ?? 'soft_first').trim() === 'premium_first' ? 'premium_first' : 'soft_first',
   };
 }
 
@@ -440,7 +420,7 @@ export async function getRuntimeControls(appCode: string): Promise<RuntimeContro
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_runtime_controls")
-    .select("runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,max_requests_per_10m_per_ip,max_requests_per_10m_per_account,max_requests_per_10m_per_device,max_failed_redeems_per_hour_per_ip,max_failed_redeems_per_hour_per_account,max_failed_redeems_per_hour_per_device,max_accounts_per_device,max_devices_per_account,lock_account_to_first_device,lock_account_to_first_ip,success_health_logs_enabled,success_heartbeat_logs_enabled,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days")
+    .select("runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days")
     .eq("app_code", appCode)
     .maybeSingle();
 
@@ -459,18 +439,6 @@ export async function getRuntimeControls(appCode: string): Promise<RuntimeContro
     blocked_ip_hashes: asStringArray(data?.blocked_ip_hashes),
     max_daily_redeems_per_account: Math.max(0, Math.trunc(asNumber(data?.max_daily_redeems_per_account, 0))),
     max_daily_redeems_per_device: Math.max(0, Math.trunc(asNumber(data?.max_daily_redeems_per_device, 0))),
-    max_requests_per_10m_per_ip: Math.max(0, Math.trunc(asNumber(data?.max_requests_per_10m_per_ip, 0))),
-    max_requests_per_10m_per_account: Math.max(0, Math.trunc(asNumber(data?.max_requests_per_10m_per_account, 0))),
-    max_requests_per_10m_per_device: Math.max(0, Math.trunc(asNumber(data?.max_requests_per_10m_per_device, 0))),
-    max_failed_redeems_per_hour_per_ip: Math.max(0, Math.trunc(asNumber(data?.max_failed_redeems_per_hour_per_ip, 0))),
-    max_failed_redeems_per_hour_per_account: Math.max(0, Math.trunc(asNumber(data?.max_failed_redeems_per_hour_per_account, 0))),
-    max_failed_redeems_per_hour_per_device: Math.max(0, Math.trunc(asNumber(data?.max_failed_redeems_per_hour_per_device, 0))),
-    max_accounts_per_device: Math.max(0, Math.trunc(asNumber(data?.max_accounts_per_device, 0))),
-    max_devices_per_account: Math.max(0, Math.trunc(asNumber(data?.max_devices_per_account, 0))),
-    lock_account_to_first_device: Boolean(data?.lock_account_to_first_device ?? false),
-    lock_account_to_first_ip: Boolean(data?.lock_account_to_first_ip ?? false),
-    success_health_logs_enabled: Boolean(data?.success_health_logs_enabled ?? false),
-    success_heartbeat_logs_enabled: Boolean(data?.success_heartbeat_logs_enabled ?? false),
     session_idle_timeout_minutes: Math.max(0, Math.trunc(asNumber(data?.session_idle_timeout_minutes, 1440))),
     session_max_age_minutes: Math.max(0, Math.trunc(asNumber(data?.session_max_age_minutes, 43200))),
     event_retention_days: Math.max(1, Math.trunc(asNumber(data?.event_retention_days, 30))),
@@ -526,257 +494,6 @@ export async function logRuntimeEvent(payload: Record<string, unknown>) {
 
   const { error } = await admin.from("server_app_runtime_events").insert(normalized);
   if (error) throw error;
-}
-
-type RuntimeCounterSubjectKind = "ip" | "account" | "device";
-type RuntimeCounterWindowKind = "10m" | "1h" | "1d";
-
-function getCounterWindowStart(kind: RuntimeCounterWindowKind, base = new Date()) {
-  if (kind === "10m") return startOfUtcTenMinuteIso(base);
-  if (kind === "1h") return startOfUtcHourIso(base);
-  return startOfUtcDayIso(base);
-}
-
-export async function getRuntimeCounterBucket(params: {
-  appCode: string;
-  action: string;
-  subjectKind: RuntimeCounterSubjectKind;
-  subjectValue?: string | null;
-  windowKind: RuntimeCounterWindowKind;
-  base?: Date;
-}) {
-  const subjectValue = asNullableString(params.subjectValue);
-  if (!subjectValue) return null;
-  const admin = createAdminClient();
-  const windowStart = getCounterWindowStart(params.windowKind, params.base ?? new Date());
-  const { data, error } = await admin
-    .from("server_app_runtime_counter_buckets")
-    .select("total_count,success_count,failed_count")
-    .eq("app_code", params.appCode)
-    .eq("action", params.action)
-    .eq("subject_kind", params.subjectKind)
-    .eq("subject_value", subjectValue)
-    .eq("window_kind", params.windowKind)
-    .eq("window_start", windowStart)
-    .maybeSingle();
-  if (error) throw error;
-  return {
-    total_count: Math.max(0, Math.trunc(asNumber((data as any)?.total_count, 0))),
-    success_count: Math.max(0, Math.trunc(asNumber((data as any)?.success_count, 0))),
-    failed_count: Math.max(0, Math.trunc(asNumber((data as any)?.failed_count, 0))),
-  };
-}
-
-export async function bumpRuntimeCounter(params: {
-  appCode: string;
-  action: string;
-  subjectKind: RuntimeCounterSubjectKind;
-  subjectValue?: string | null;
-  ok: boolean;
-  windowKind: RuntimeCounterWindowKind;
-  base?: Date;
-}) {
-  const subjectValue = asNullableString(params.subjectValue);
-  if (!subjectValue) return;
-  const admin = createAdminClient();
-  const windowStart = getCounterWindowStart(params.windowKind, params.base ?? new Date());
-  const key = {
-    app_code: params.appCode,
-    action: params.action,
-    subject_kind: params.subjectKind,
-    subject_value: subjectValue,
-    window_kind: params.windowKind,
-    window_start: windowStart,
-  };
-  const { data: existing, error: readError } = await admin
-    .from("server_app_runtime_counter_buckets")
-    .select("total_count,success_count,failed_count")
-    .match(key)
-    .maybeSingle();
-  if (readError) throw readError;
-
-  const nextTotal = Math.max(0, Math.trunc(asNumber((existing as any)?.total_count, 0))) + 1;
-  const nextSuccess = Math.max(0, Math.trunc(asNumber((existing as any)?.success_count, 0))) + (params.ok ? 1 : 0);
-  const nextFailed = Math.max(0, Math.trunc(asNumber((existing as any)?.failed_count, 0))) + (params.ok ? 0 : 1);
-
-  const payload = {
-    ...key,
-    total_count: nextTotal,
-    success_count: nextSuccess,
-    failed_count: nextFailed,
-    last_seen_at: getNowIso(),
-    first_seen_at: (existing as any)?.first_seen_at ?? getNowIso(),
-  };
-
-  const { error } = await admin
-    .from("server_app_runtime_counter_buckets")
-    .upsert(payload, { onConflict: "app_code,action,subject_kind,subject_value,window_kind,window_start" });
-  if (error) throw error;
-}
-
-export async function trackRuntimeAccountDevice(params: {
-  appCode: string;
-  accountRef?: string | null;
-  deviceId?: string | null;
-  ipHash?: string | null;
-  controls?: RuntimeControls | null;
-}) {
-  const appCode = asString(params.appCode);
-  const accountRef = asNullableString(params.accountRef);
-  const deviceId = asNullableString(params.deviceId);
-  const ipHash = asNullableString(params.ipHash);
-  if (!appCode || !accountRef || !deviceId) return;
-
-  const controls = params.controls ?? await getRuntimeControls(appCode);
-  const admin = createAdminClient();
-  const nowIso = getNowIso();
-
-  const { data: binding, error: bindingError } = await admin
-    .from("server_app_runtime_account_bindings")
-    .select("first_device_id,first_ip_hash,locked_until,lock_reason")
-    .eq("app_code", appCode)
-    .eq("account_ref", accountRef)
-    .maybeSingle();
-  if (bindingError) throw bindingError;
-
-  const lockedUntil = asNullableString((binding as any)?.locked_until);
-  if (lockedUntil && isFutureIso(lockedUntil)) {
-    throw Object.assign(new Error(asNullableString((binding as any)?.lock_reason) || "ACCOUNT_LOCKED_BY_RUNTIME_BINDING"), {
-      status: 423,
-      code: "ACCOUNT_LOCKED_BY_RUNTIME_BINDING",
-    });
-  }
-
-  if (controls.lock_account_to_first_device) {
-    const firstDeviceId = asNullableString((binding as any)?.first_device_id);
-    if (firstDeviceId && firstDeviceId !== deviceId) {
-      await admin
-        .from("server_app_runtime_account_bindings")
-        .upsert({
-          app_code: appCode,
-          account_ref: accountRef,
-          first_device_id: firstDeviceId,
-          first_ip_hash: asNullableString((binding as any)?.first_ip_hash),
-          last_device_id: deviceId,
-          last_ip_hash: ipHash,
-          locked_at: nowIso,
-          locked_until: nowIso,
-          lock_reason: "ACCOUNT_DEVICE_BINDING_MISMATCH",
-          metadata: { observed_device_id: deviceId },
-        }, { onConflict: "app_code,account_ref" });
-      throw Object.assign(new Error("ACCOUNT_DEVICE_BINDING_MISMATCH"), {
-        status: 423,
-        code: "ACCOUNT_DEVICE_BINDING_MISMATCH",
-      });
-    }
-  }
-
-  if (controls.lock_account_to_first_ip) {
-    const firstIpHash = asNullableString((binding as any)?.first_ip_hash);
-    if (firstIpHash && ipHash && firstIpHash !== ipHash) {
-      await admin
-        .from("server_app_runtime_account_bindings")
-        .upsert({
-          app_code: appCode,
-          account_ref: accountRef,
-          first_device_id: asNullableString((binding as any)?.first_device_id) ?? deviceId,
-          first_ip_hash: firstIpHash,
-          last_device_id: deviceId,
-          last_ip_hash: ipHash,
-          locked_at: nowIso,
-          locked_until: nowIso,
-          lock_reason: "ACCOUNT_IP_BINDING_MISMATCH",
-          metadata: { observed_ip_hash: ipHash },
-        }, { onConflict: "app_code,account_ref" });
-      throw Object.assign(new Error("ACCOUNT_IP_BINDING_MISMATCH"), {
-        status: 423,
-        code: "ACCOUNT_IP_BINDING_MISMATCH",
-      });
-    }
-  }
-
-  const { data: existingAccountDevice, error: existingAccountDeviceError } = await admin
-    .from("server_app_runtime_account_devices")
-    .select("device_id", { count: "exact", head: false })
-    .eq("app_code", appCode)
-    .eq("account_ref", accountRef)
-    .eq("device_id", deviceId);
-  if (existingAccountDeviceError) throw existingAccountDeviceError;
-  const hasAccountDevice = Array.isArray(existingAccountDevice) && existingAccountDevice.length > 0;
-  if (!hasAccountDevice && controls.max_devices_per_account > 0) {
-    const { count, error: countError } = await admin
-      .from("server_app_runtime_account_devices")
-      .select("device_id", { count: "exact", head: true })
-      .eq("app_code", appCode)
-      .eq("account_ref", accountRef);
-    if (countError) throw countError;
-    if (Number(count ?? 0) >= controls.max_devices_per_account) {
-      throw Object.assign(new Error("ACCOUNT_DEVICE_LIMIT_REACHED"), { status: 429, code: "ACCOUNT_DEVICE_LIMIT_REACHED" });
-    }
-  }
-
-  const { data: existingDeviceAccount, error: existingDeviceAccountError } = await admin
-    .from("server_app_runtime_device_accounts")
-    .select("account_ref")
-    .eq("app_code", appCode)
-    .eq("device_id", deviceId)
-    .eq("account_ref", accountRef)
-    .maybeSingle();
-  if (existingDeviceAccountError) throw existingDeviceAccountError;
-  if (!existingDeviceAccount && controls.max_accounts_per_device > 0) {
-    const { count, error: countError } = await admin
-      .from("server_app_runtime_device_accounts")
-      .select("account_ref", { count: "exact", head: true })
-      .eq("app_code", appCode)
-      .eq("device_id", deviceId);
-    if (countError) throw countError;
-    if (Number(count ?? 0) >= controls.max_accounts_per_device) {
-      throw Object.assign(new Error("DEVICE_ACCOUNT_LIMIT_REACHED"), { status: 429, code: "DEVICE_ACCOUNT_LIMIT_REACHED" });
-    }
-  }
-
-  await admin.from("server_app_runtime_account_bindings").upsert({
-    app_code: appCode,
-    account_ref: accountRef,
-    first_device_id: asNullableString((binding as any)?.first_device_id) ?? deviceId,
-    first_ip_hash: asNullableString((binding as any)?.first_ip_hash) ?? ipHash,
-    last_device_id: deviceId,
-    last_ip_hash: ipHash,
-    lock_reason: null,
-    locked_at: null,
-    locked_until: null,
-    metadata: {
-      linked_device_id: deviceId,
-      linked_ip_hash: ipHash,
-      last_seen_at: nowIso,
-    },
-  }, { onConflict: "app_code,account_ref" });
-
-  await admin.from("server_app_runtime_account_devices").upsert({
-    app_code: appCode,
-    account_ref: accountRef,
-    device_id: deviceId,
-    first_ip_hash: ipHash,
-    last_ip_hash: ipHash,
-    last_seen_at: nowIso,
-  }, { onConflict: "app_code,account_ref,device_id" });
-
-  await admin.from("server_app_runtime_device_accounts").upsert({
-    app_code: appCode,
-    device_id: deviceId,
-    account_ref: accountRef,
-    first_ip_hash: ipHash,
-    last_ip_hash: ipHash,
-    last_seen_at: nowIso,
-  }, { onConflict: "app_code,device_id,account_ref" });
-}
-
-
-export function shouldSkipSuccessRuntimeEventLog(action: string, controls?: RuntimeControls | null) {
-  const normalized = asString(action).toLowerCase();
-  if (normalized === "health") return !(controls?.success_health_logs_enabled ?? false);
-  if (normalized === "heartbeat") return !(controls?.success_heartbeat_logs_enabled ?? false);
-  return false;
 }
 
 function getPlanRank(planCode: string) {
@@ -1376,8 +1093,9 @@ async function getRuntimeContext(appCode: string) {
   const settings = normalizeSettings(config);
   const plans = await getPlans(appCode);
   const features = await getFeatures(appCode);
+  const walletRules = await getWalletRules(appCode);
   const planMap = new Map(plans.map((plan) => [plan.plan_code, plan]));
-  return { config, settings, plans, planMap, features };
+  return { config, settings: { ...settings, wallet_rules: walletRules }, plans, planMap, features };
 }
 
 export async function buildRuntimeState(appCode: string, opts?: { sessionToken?: string | null }) : Promise<RuntimeAppState> {
@@ -1474,14 +1192,6 @@ export async function touchRuntimeSession(appCode: string, sessionToken: string,
   }
 
   await enforceSessionActiveOrThrow(appCode, session);
-  const controls = await getRuntimeControls(appCode);
-  await trackRuntimeAccountDevice({
-    appCode,
-    accountRef: asString(session.account_ref),
-    deviceId: asNullableString(session.device_id),
-    ipHash: meta?.ipHash ?? null,
-    controls,
-  });
 
   const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : null;
   if (entitlement?.revoked_at) {
@@ -1568,14 +1278,6 @@ export async function redeemRuntimeKey(params: {
   }
   const reward = resolveRewardPackage(keyRow, rewardPackage);
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
-  const controls = await getRuntimeControls(appCode);
-  await trackRuntimeAccountDevice({
-    appCode,
-    accountRef,
-    deviceId,
-    ipHash: params.ipHash ?? null,
-    controls,
-  });
 
   const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
   const predictedDeviceLimit = reward.device_limit_override
@@ -1676,13 +1378,6 @@ export async function consumeRuntimeFeature(params: {
   if (!session) throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
   if (asString(session.status) !== "active") throw Object.assign(new Error("SESSION_INACTIVE"), { status: 409, code: "SESSION_INACTIVE" });
   await enforceSessionActiveOrThrow(appCode, session);
-  const controls = await getRuntimeControls(appCode);
-  await trackRuntimeAccountDevice({
-    appCode,
-    accountRef: asString(session.account_ref),
-    deviceId: asNullableString(session.device_id),
-    controls,
-  });
 
   const { settings, planMap, features } = await getRuntimeContext(appCode);
   const entitlement = session.entitlement_id
@@ -1712,18 +1407,34 @@ export async function consumeRuntimeFeature(params: {
   let premiumDelta = 0;
 
   if (feature.requires_credit) {
+    const priority = settings.wallet_rules.consume_priority;
+    const softAvailable = effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost;
+    const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
+
     if (requestedWalletKind === "soft") {
       chargeKind = "soft";
     } else if (requestedWalletKind === "premium") {
       chargeKind = "premium";
-    } else if (effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost) {
-      chargeKind = "premium";
-    } else if (effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost) {
-      chargeKind = "soft";
-    } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
-      chargeKind = "premium";
+    } else if (priority === "premium_first") {
+      if (premiumAvailable) {
+        chargeKind = "premium";
+      } else if (softAvailable) {
+        chargeKind = "soft";
+      } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
+        chargeKind = "premium";
+      } else {
+        chargeKind = "soft";
+      }
     } else {
-      chargeKind = "soft";
+      if (softAvailable) {
+        chargeKind = "soft";
+      } else if (premiumAvailable) {
+        chargeKind = "premium";
+      } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
+        chargeKind = "soft";
+      } else {
+        chargeKind = "premium";
+      }
     }
 
     if (chargeKind === "premium") {

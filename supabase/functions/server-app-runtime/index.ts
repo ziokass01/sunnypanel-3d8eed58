@@ -1,18 +1,15 @@
 import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 import {
   buildRuntimeState,
-  bumpRuntimeCounter,
   consumeRuntimeFeature,
+  countRuntimeSuccessEvents,
   getRuntimeControls,
-  getRuntimeCounterBucket,
   logRuntimeEvent,
   logoutRuntimeSession,
   redeemRuntimeKey,
   runtimeJson,
   sha256Hex,
-  shouldSkipSuccessRuntimeEventLog,
   touchRuntimeSession,
-  trackRuntimeAccountDevice,
 } from "../_shared/server_app_runtime.ts";
 
 type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
@@ -47,6 +44,10 @@ function compareVersionText(left: string | null | undefined, right: string | nul
   return a.localeCompare(b, undefined, { sensitivity: "base" });
 }
 
+function todayStartIso() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)).toISOString();
+}
 
 function makeControlError(code: string, maintenanceNotice?: string | null, status = 409) {
   const detail = maintenanceNotice ? `${code}: ${maintenanceNotice}` : code;
@@ -104,73 +105,35 @@ async function enforceControls(params: {
     throw makeControlError("IP_BLOCKED", controls.maintenance_notice, 403);
   }
 
-  const enforceWindowLimit = async (subjectKind: "ip" | "account" | "device", subjectValue: string, limit: number, code: string) => {
-    if (!subjectValue || limit <= 0) return;
-    const bucket = await getRuntimeCounterBucket({
-      appCode: params.appCode,
-      action: "request",
-      subjectKind,
-      subjectValue,
-      windowKind: "10m",
-    });
-    if (Number(bucket?.total_count ?? 0) >= limit) {
-      throw Object.assign(new Error(code), { status: 429, code });
-    }
-  };
-
-  if (ipHash) await enforceWindowLimit("ip", ipHash, controls.max_requests_per_10m_per_ip, "RUNTIME_REQUEST_LIMIT_IP");
-  if (accountRef) await enforceWindowLimit("account", accountRef, controls.max_requests_per_10m_per_account, "RUNTIME_REQUEST_LIMIT_ACCOUNT");
-  if (deviceId) await enforceWindowLimit("device", deviceId, controls.max_requests_per_10m_per_device, "RUNTIME_REQUEST_LIMIT_DEVICE");
-
   if (action === "redeem") {
-    const enforceRedeemWindow = async (subjectKind: "ip" | "account" | "device", subjectValue: string, limit: number, code: string) => {
-      if (!subjectValue || limit <= 0) return;
-      const bucket = await getRuntimeCounterBucket({
+    const sinceIso = todayStartIso();
+    if (controls.max_daily_redeems_per_account > 0 && accountRef) {
+      const accountCount = await countRuntimeSuccessEvents({
         appCode: params.appCode,
-        action: "redeem",
-        subjectKind,
-        subjectValue,
-        windowKind: "1h",
-      });
-      if (Number(bucket?.failed_count ?? 0) >= limit) {
-        throw Object.assign(new Error(code), { status: 429, code });
-      }
-    };
-
-    if (ipHash) await enforceRedeemWindow("ip", ipHash, controls.max_failed_redeems_per_hour_per_ip, "REDEEM_FAILED_LIMIT_IP");
-    if (accountRef) await enforceRedeemWindow("account", accountRef, controls.max_failed_redeems_per_hour_per_account, "REDEEM_FAILED_LIMIT_ACCOUNT");
-    if (deviceId) await enforceRedeemWindow("device", deviceId, controls.max_failed_redeems_per_hour_per_device, "REDEEM_FAILED_LIMIT_DEVICE");
-
-    const enforceDailySuccessLimit = async (subjectKind: "account" | "device", subjectValue: string, limit: number, code: string) => {
-      if (!subjectValue || limit <= 0) return;
-      const bucket = await getRuntimeCounterBucket({
-        appCode: params.appCode,
-        action: "redeem",
-        subjectKind,
-        subjectValue,
-        windowKind: "1d",
-      });
-      if (Number(bucket?.success_count ?? 0) >= limit) {
-        throw Object.assign(new Error(code), { status: 429, code });
-      }
-    };
-
-    if (accountRef) await enforceDailySuccessLimit("account", accountRef, controls.max_daily_redeems_per_account, "REDEEM_DAILY_ACCOUNT_LIMIT");
-    if (deviceId) await enforceDailySuccessLimit("device", deviceId, controls.max_daily_redeems_per_device, "REDEEM_DAILY_DEVICE_LIMIT");
-
-    if (accountRef && deviceId) {
-      await trackRuntimeAccountDevice({
-        appCode: params.appCode,
+        eventType: "redeem",
         accountRef,
-        deviceId,
-        ipHash,
-        controls,
+        sinceIso,
       });
+      if (accountCount >= controls.max_daily_redeems_per_account) {
+        throw Object.assign(new Error("REDEEM_DAILY_ACCOUNT_LIMIT"), { status: 429, code: "REDEEM_DAILY_ACCOUNT_LIMIT" });
+      }
+    }
+    if (controls.max_daily_redeems_per_device > 0 && deviceId) {
+      const deviceCount = await countRuntimeSuccessEvents({
+        appCode: params.appCode,
+        eventType: "redeem",
+        deviceId,
+        sinceIso,
+      });
+      if (deviceCount >= controls.max_daily_redeems_per_device) {
+        throw Object.assign(new Error("REDEEM_DAILY_DEVICE_LIMIT"), { status: 429, code: "REDEEM_DAILY_DEVICE_LIMIT" });
+      }
     }
   }
 
   return controls;
 }
+
 Deno.serve(async (req) => {
   const publicBaseUrl = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   if (req.method === "OPTIONS") return handleOptions(req, publicBaseUrl, "POST,OPTIONS");
@@ -216,42 +179,10 @@ Deno.serve(async (req) => {
       client_version: clientVersion,
     };
     const logSafe = async (payload: Record<string, unknown>) => {
-      const ok = Boolean(payload.ok ?? true);
-      if (ok && shouldSkipSuccessRuntimeEventLog(action)) return;
       try {
         await logRuntimeEvent({ ...logBase, ...payload });
       } catch (_err) {
         // do not mask main runtime response if event log table is temporarily unavailable
-      }
-    };
-
-    const bumpCountersSafe = async (ok: boolean) => {
-      const ops: Promise<unknown>[] = [];
-      if (ipHash) {
-        ops.push(bumpRuntimeCounter({ appCode, action: "request", subjectKind: "ip", subjectValue: ipHash, ok, windowKind: "10m" }));
-        if (action === "redeem") {
-          ops.push(bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "ip", subjectValue: ipHash, ok, windowKind: "1h" }));
-          ops.push(bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "ip", subjectValue: ipHash, ok, windowKind: "1d" }));
-        }
-      }
-      if (accountRef) {
-        ops.push(bumpRuntimeCounter({ appCode, action: "request", subjectKind: "account", subjectValue: accountRef, ok, windowKind: "10m" }));
-        if (action === "redeem") {
-          ops.push(bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "account", subjectValue: accountRef, ok, windowKind: "1h" }));
-          ops.push(bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "account", subjectValue: accountRef, ok, windowKind: "1d" }));
-        }
-      }
-      if (deviceId) {
-        ops.push(bumpRuntimeCounter({ appCode, action: "request", subjectKind: "device", subjectValue: deviceId, ok, windowKind: "10m" }));
-        if (action === "redeem") {
-          ops.push(bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "device", subjectValue: deviceId, ok, windowKind: "1h" }));
-          ops.push(bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "device", subjectValue: deviceId, ok, windowKind: "1d" }));
-        }
-      }
-      try {
-        await Promise.all(ops);
-      } catch (_counterErr) {
-        // counter writes are best-effort and should never break the main runtime response
       }
     };
 
@@ -261,7 +192,6 @@ Deno.serve(async (req) => {
     }
 
     if (action === "health") {
-      await bumpCountersSafe(true);
       await logSafe({ ok: true, code: "OK", meta: { mode: "health" } });
       return runtimeJson(200, {
         ok: true,
@@ -283,7 +213,6 @@ Deno.serve(async (req) => {
 
     if (action === "catalog" || action === "me") {
       const state = await buildRuntimeState(appCode, { sessionToken: sessionToken || null });
-      await bumpCountersSafe(true);
       await logSafe({ ok: true, code: "OK", meta: { session_bound: Boolean(sessionToken) } });
       return runtimeJson(200, {
         ok: true,
@@ -297,7 +226,6 @@ Deno.serve(async (req) => {
       if (!sessionToken) return runtimeJson(400, { ok: false, code: "MISSING_SESSION_TOKEN" }, origin);
       const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
       const state = await buildRuntimeState(appCode, { sessionToken });
-      await bumpCountersSafe(true);
       await logSafe({ ok: true, code: "OK", session_id: (touched as any)?.id ?? null });
       return runtimeJson(200, {
         ok: true,
@@ -310,7 +238,6 @@ Deno.serve(async (req) => {
     if (action === "logout") {
       if (!sessionToken) return runtimeJson(400, { ok: false, code: "MISSING_SESSION_TOKEN" }, origin);
       const loggedOut = await logoutRuntimeSession(appCode, sessionToken);
-      await bumpCountersSafe(true);
       await logSafe({ ok: true, code: "OK", session_id: (loggedOut as any)?.id ?? null });
       return runtimeJson(200, {
         ok: true,
@@ -332,7 +259,6 @@ Deno.serve(async (req) => {
         clientVersion,
         ipHash,
       });
-      await bumpCountersSafe(true);
       await logSafe({
         ok: true,
         code: "OK",
@@ -355,7 +281,6 @@ Deno.serve(async (req) => {
         featureCode,
         walletKind,
       });
-      await bumpCountersSafe(true);
       await logSafe({
         ok: true,
         code: "OK",
@@ -381,50 +306,19 @@ Deno.serve(async (req) => {
       if (body && typeof body === "object") {
         const appCode = asBodyString((body as any).app_code);
         const action = asBodyString((body as any).action);
-        const accountRef = asBodyString((body as any).account_ref) || null;
-        const deviceId = asBodyString((body as any).device_id) || null;
-        const featureCode = asBodyString((body as any).feature_code) || null;
-        const walletKind = asBodyString((body as any).wallet_kind) || null;
-        const clientVersion = asBodyString((body as any).client_version) || null;
-        const ipHash = appCode ? await sha256Hex(getIp(req)) : null;
         if (appCode && action) {
-          try {
-            if (ipHash) {
-              await bumpRuntimeCounter({ appCode, action: "request", subjectKind: "ip", subjectValue: ipHash, ok: false, windowKind: "10m" });
-              if (action === "redeem") {
-                await bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "ip", subjectValue: ipHash, ok: false, windowKind: "1h" });
-                await bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "ip", subjectValue: ipHash, ok: false, windowKind: "1d" });
-              }
-            }
-            if (accountRef) {
-              await bumpRuntimeCounter({ appCode, action: "request", subjectKind: "account", subjectValue: accountRef, ok: false, windowKind: "10m" });
-              if (action === "redeem") {
-                await bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "account", subjectValue: accountRef, ok: false, windowKind: "1h" });
-                await bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "account", subjectValue: accountRef, ok: false, windowKind: "1d" });
-              }
-            }
-            if (deviceId) {
-              await bumpRuntimeCounter({ appCode, action: "request", subjectKind: "device", subjectValue: deviceId, ok: false, windowKind: "10m" });
-              if (action === "redeem") {
-                await bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "device", subjectValue: deviceId, ok: false, windowKind: "1h" });
-                await bumpRuntimeCounter({ appCode, action: "redeem", subjectKind: "device", subjectValue: deviceId, ok: false, windowKind: "1d" });
-              }
-            }
-          } catch (_counterError) {
-            // ignore counter failures in catch path
-          }
           await logRuntimeEvent({
             app_code: appCode,
             event_type: action,
             ok: false,
             code,
             message: msg,
-            account_ref: accountRef,
-            device_id: deviceId,
-            feature_code: featureCode,
-            wallet_kind: walletKind,
-            client_version: clientVersion,
-            ip_hash: ipHash,
+            account_ref: asBodyString((body as any).account_ref) || null,
+            device_id: asBodyString((body as any).device_id) || null,
+            feature_code: asBodyString((body as any).feature_code) || null,
+            wallet_kind: asBodyString((body as any).wallet_kind) || null,
+            client_version: asBodyString((body as any).client_version) || null,
+            ip_hash: await sha256Hex(getIp(req)),
             meta: { status },
           });
         }

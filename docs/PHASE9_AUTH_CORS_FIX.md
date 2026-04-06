@@ -12,5 +12,8 @@ What changed:
 
 Required secrets after patch:
 - RUNTIME_OPS_ADMIN_KEY
-- PUBLIC_BASE_URL=https://app.mityangho.id.vn
+- PUBLIC_BASE_URL=https://mityangho.id.vn (giữ miền public gốc nếu /free, /rent, /reset-key đang dùng chung)
 - ALLOWED_ORIGINS=https://app.mityangho.id.vn,https://admin.mityangho.id.vn,https://mityangho.id.vn
+
+Frontend app-domain nên dùng biến riêng, ví dụ:
+- VITE_APP_BASE_URL=https://app.mityangho.id.vn
