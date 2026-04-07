@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { postFunction } from "@/lib/functions";
+import { postAdminFunction } from "@/lib/admin-auth";
 
 const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
@@ -21,20 +22,8 @@ const WALLET_KIND_OPTIONS = ["auto", "soft", "premium"] as const;
 const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"] as const;
 const RUNTIME_TABS = ["simulator", "ops", "controls", "redeem", "entitlements", "wallets", "sessions", "transactions", "events"] as const;
 
-async function getAdminAuthToken() {
-  const current = await supabase.auth.getSession();
-  let token = current.data.session?.access_token?.trim() ?? "";
-  if (token) return token;
 
-  const refreshed = await supabase.auth.refreshSession();
-  token = refreshed.data.session?.access_token?.trim() ?? "";
-  if (!token) {
-    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
-    err.code = "ADMIN_AUTH_REQUIRED";
-    throw err;
-  }
-  return token;
-}
+
 
 
 const FRIENDLY_ERROR_MAP: Record<string, string> = {
@@ -684,13 +673,12 @@ export function AdminServerAppRuntimePage() {
 
   const revokeEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
-      const token = await getAdminAuthToken();
-      return await postFunction("/server-app-runtime-ops", {
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "revoke_entitlement",
         app_code: appCode,
         entitlement_id: entitlementId,
         reason: "Revoked from admin runtime page",
-      }, { authToken: token });
+      });
     },
     onSuccess: async () => {
       toast({ title: "Đã revoke entitlement", description: "Người dùng sẽ mất quyền cho đến khi mở lại hoặc redeem lại." });
@@ -701,12 +689,11 @@ export function AdminServerAppRuntimePage() {
 
   const restoreEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
-      const token = await getAdminAuthToken();
-      return await postFunction("/server-app-runtime-ops", {
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "restore_entitlement",
         app_code: appCode,
         entitlement_id: entitlementId,
-      }, { authToken: token });
+      });
     },
     onSuccess: async () => {
       toast({ title: "Đã mở lại entitlement", description: "Entitlement đã quay lại trạng thái active." });
@@ -717,13 +704,12 @@ export function AdminServerAppRuntimePage() {
 
   const revokeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const token = await getAdminAuthToken();
-      return await postFunction("/server-app-runtime-ops", {
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "revoke_session",
         app_code: appCode,
         session_id: sessionId,
         reason: "Revoked from admin runtime page",
-      }, { authToken: token });
+      });
     },
     onSuccess: async () => {
       toast({ title: "Đã revoke session", description: "Session đã bị khóa." });
@@ -734,12 +720,11 @@ export function AdminServerAppRuntimePage() {
 
   const restoreSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const token = await getAdminAuthToken();
-      return await postFunction("/server-app-runtime-ops", {
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "restore_session",
         app_code: appCode,
         session_id: sessionId,
-      }, { authToken: token });
+      });
     },
     onSuccess: async () => {
       toast({ title: "Đã mở lại session", description: "Session đã quay lại active." });
@@ -808,8 +793,7 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy cleanup...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      const token = await getAdminAuthToken();
-      const data = await postFunction("/server-app-runtime-ops", payload, { authToken: token });
+      const data = await postAdminFunction("/server-app-runtime-ops", payload);
       return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
@@ -840,8 +824,7 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy adjust_wallet...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      const token = await getAdminAuthToken();
-      const data = await postFunction("/server-app-runtime-ops", payload, { authToken: token });
+      const data = await postAdminFunction("/server-app-runtime-ops", payload);
       return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {

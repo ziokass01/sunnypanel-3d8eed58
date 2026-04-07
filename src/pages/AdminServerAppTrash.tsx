@@ -19,7 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { postFunction } from "@/lib/functions";
+import { postAdminFunction } from "@/lib/admin-auth";
 
 type TrashSessionRow = {
   id: string;
@@ -52,20 +52,8 @@ type PendingDelete =
   | { kind: "entitlement"; id: string; label: string }
   | null;
 
-async function getAdminAuthToken() {
-  const current = await supabase.auth.getSession();
-  let token = current.data.session?.access_token?.trim() ?? "";
-  if (token) return token;
 
-  const refreshed = await supabase.auth.refreshSession();
-  token = refreshed.data.session?.access_token?.trim() ?? "";
-  if (!token) {
-    const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
-    err.code = "ADMIN_AUTH_REQUIRED";
-    throw err;
-  }
-  return token;
-}
+
 
 function formatTime(value?: string | null) {
   if (!value) return "-";
@@ -143,19 +131,18 @@ export function AdminServerAppTrashPage() {
 
   const hardDeleteMutation = useMutation({
     mutationFn: async (payload: NonNullable<PendingDelete>) => {
-      const authToken = await getAdminAuthToken();
       if (payload.kind === "session") {
-        return await postFunction("/server-app-runtime-ops", {
+        return await postAdminFunction("/server-app-runtime-ops", {
           action: "hard_delete_session",
           app_code: appCode,
           session_id: payload.id,
-        }, { authToken });
+        });
       }
-      return await postFunction("/server-app-runtime-ops", {
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "hard_delete_entitlement",
         app_code: appCode,
         entitlement_id: payload.id,
-      }, { authToken });
+      });
     },
     onSuccess: async (_, payload) => {
       toast({
