@@ -35,42 +35,93 @@ import { ServiceLandingPage } from "@/pages/ServiceLanding";
 import { ResetKeyPage } from "@/pages/ResetKey";
 import { ResetSettingsPage } from "@/pages/ResetSettings";
 import { ResetLogsPage } from "@/pages/ResetLogs";
-import { getAdminOrigin } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, getAdminLoginUrl } from "@/lib/appWorkspace";
+import { useAuth } from "@/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
 
-function AppHostToAdminRedirect() {
+function AppHostEntryRedirect() {
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (loading || typeof window === "undefined") return;
+
+    if (user) {
+      const lastCode = window.localStorage.getItem("sunny:lastAppCode") || "find-dumps";
+      const lastSection = window.localStorage.getItem("sunny:lastAppSection") === "config" ? "config" : "runtime";
+      window.location.replace(buildAppWorkspaceUrl(lastCode, lastSection));
+      return;
+    }
+
+    window.location.replace(getAdminLoginUrl(window.location.href));
+  }, [loading, user]);
+
+  return (
+    <div className="p-6 text-sm text-muted-foreground">
+      Đang chuyển đúng khu điều hành...
+    </div>
+  );
+}
+
+function AdminHostAppRedirect() {
+  const { appCode = "", "*": rest = "" } = useParams();
+  const location = useLocation();
+  const section = rest.startsWith("config") ? "config" : "runtime";
+  const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
+
+  useEffect(() => {
+    window.location.replace(target);
+  }, [target]);
+
+  return (
+    <div className="p-6 text-sm text-muted-foreground">
+      Đang chuyển sang app domain...
+    </div>
+  );
+}
+
+function AppSessionBridge() {
   const location = useLocation();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const target = `${getAdminOrigin()}${location.pathname}${location.search}`;
-    if (window.location.href !== target) {
-      window.location.replace(target);
-    }
-  }, [location.pathname, location.search]);
+    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+    const params = new URLSearchParams(hash);
+    const accessToken = String(params.get("access_token") ?? "").trim();
+    const refreshToken = String(params.get("refresh_token") ?? "").trim();
+    const next = String(params.get("next") ?? "/").trim();
+    const safeNext = next.startsWith("/") ? next : "/";
+
+    const run = async () => {
+      if (!accessToken || !refreshToken) {
+        window.location.replace(getAdminLoginUrl(window.location.href));
+        return;
+      }
+
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (error) {
+        await supabase.auth.signOut().catch(() => undefined);
+        window.location.replace(getAdminLoginUrl(window.location.href));
+        return;
+      }
+
+      window.location.replace(safeNext);
+    };
+
+    run();
+  }, [location.key]);
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển về admin để tránh vòng lặp đăng nhập giữa 2 domain...
+      Đang đồng bộ phiên đăng nhập cho app domain...
     </div>
   );
-}
-
-function AdminHostAppRedirect(props: { defaultSection?: "config" | "runtime" | "trash" }) {
-  const { appCode = "", "*": rest = "" } = useParams();
-  const location = useLocation();
-  const normalizedRest = String(rest ?? "").replace(/^\/+/, "");
-  const [firstSegment, ...remainingSegments] = normalizedRest ? normalizedRest.split("/") : [];
-  const allowedSections = new Set(["config", "runtime", "trash"]);
-  const section = allowedSections.has(firstSegment)
-    ? (firstSegment as "config" | "runtime" | "trash")
-    : (props.defaultSection ?? "runtime");
-  const extraPath = allowedSections.has(firstSegment) ? remainingSegments.join("/") : "";
-  const target = `/apps/${encodeURIComponent(appCode)}/${section}${extraPath ? `/${extraPath}` : ""}${location.search}`;
-
-  return <Navigate to={target} replace />;
 }
 
 const App = () => {
@@ -98,12 +149,17 @@ const App = () => {
             <Routes>
               <Route
                 path="/"
-                element={isAdminHost ? <Navigate to="/login" replace /> : isAppHost ? <AppHostToAdminRedirect /> : <ServiceLandingPage />}
+                element={isAdminHost ? <Navigate to="/login" replace /> : isAppHost ? <AppHostEntryRedirect /> : <ServiceLandingPage />}
               />
 
               <Route
                 path="/login"
-                element={isAdminHost ? <LoginPage /> : isAppHost ? <AppHostToAdminRedirect /> : <Navigate to="/" replace />}
+                element={isAdminHost ? <LoginPage /> : isAppHost ? <AppHostEntryRedirect /> : <Navigate to="/" replace />}
+              />
+
+              <Route
+                path="/auth/bridge"
+                element={isAppHost ? <AppSessionBridge /> : <Navigate to="/" replace />}
               />
 
               <Route path="/free" element={<FreeLandingPage />} />
@@ -118,60 +174,60 @@ const App = () => {
               {!isControlHost && <Route path="/reset-key" element={<ResetKeyPage />} />}
 
               {isAdminHost && (
-                <>
-                  <Route
-                    element={
-                      <AuthGate>
-                        <PanelRoute>
-                          <AdminShell />
-                        </PanelRoute>
-                      </AuthGate>
-                    }
-                  >
-                    <Route path="/dashboard" element={<DashboardPage />} />
-                    <Route path="/licenses" element={<LicensesListPage />} />
-                    <Route path="/licenses2" element={<Licenses2Page />} />
-                    <Route path="/licenses/new" element={<LicenseCreatePage />} />
-                    <Route path="/licenses2/new" element={<LicenseCreatePage />} />
-                    <Route path="/licenses/:id" element={<LicenseDetailPage />} />
-                    <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
-                    <Route path="/free-licenses" element={<AdminRoute><FreeLicensesPage /></AdminRoute>} />
-                    <Route path="/licenses/trash" element={<LicensesTrashPage />} />
-                    <Route path="/audit" element={<AuditLogsPage />} />
-                    <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
-                    <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
-                    <Route path="/admin/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect defaultSection="runtime" /></AdminRoute>} />
-                    <Route path="/admin/apps/:appCode/*" element={<AdminRoute><AdminHostAppRedirect defaultSection="runtime" /></AdminRoute>} />
-                    <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
-                    <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
-                    <Route path="/settings/reset-logs" element={<AdminRoute><ResetLogsPage /></AdminRoute>} />
-                  </Route>
-
-                  <Route
-                    path="/apps/:appCode"
-                    element={
-                      <AuthGate>
-                        <PanelRoute>
-                          <AdminRoute>
-                            <AppWorkspaceShell />
-                          </AdminRoute>
-                        </PanelRoute>
-                      </AuthGate>
-                    }
-                  >
-                    <Route index element={<Navigate to="runtime" replace />} />
-                    <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
-                    <Route path="internal" element={<Navigate to="../config" replace />} />
-                    <Route path="config" element={<AdminServerAppDetailPage />} />
-                    <Route path="runtime" element={<AdminServerAppRuntimePage />} />
-                    <Route path="trash" element={<AdminServerAppTrashPage />} />
-                  </Route>
-                </>
+                <Route
+                  element={
+                    <AuthGate>
+                      <PanelRoute>
+                        <AdminShell />
+                      </PanelRoute>
+                    </AuthGate>
+                  }
+                >
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/licenses" element={<LicensesListPage />} />
+                  <Route path="/licenses2" element={<Licenses2Page />} />
+                  <Route path="/licenses/new" element={<LicenseCreatePage />} />
+                  <Route path="/licenses2/new" element={<LicenseCreatePage />} />
+                  <Route path="/licenses/:id" element={<LicenseDetailPage />} />
+                  <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
+                  <Route path="/free-licenses" element={<AdminRoute><FreeLicensesPage /></AdminRoute>} />
+                  <Route path="/licenses/trash" element={<LicensesTrashPage />} />
+                  <Route path="/audit" element={<AuditLogsPage />} />
+                  <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
+                  <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
+                  <Route path="/admin/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
+                  <Route path="/admin/apps/:appCode/runtime" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
+                  <Route path="/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
+                  <Route path="/apps/:appCode/*" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
+                  <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
+                  <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
+                  <Route path="/settings/reset-logs" element={<AdminRoute><ResetLogsPage /></AdminRoute>} />
+                </Route>
               )}
 
-              {isAppHost && <Route path="*" element={<AppHostToAdminRedirect />} />}
+              {isAppHost && (
+                <Route
+                  path="/apps/:appCode"
+                  element={
+                    <AuthGate>
+                      <PanelRoute>
+                        <AdminRoute>
+                          <AppWorkspaceShell />
+                        </AdminRoute>
+                      </PanelRoute>
+                    </AuthGate>
+                  }
+                >
+                  <Route index element={<Navigate to="runtime" replace />} />
+                  <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
+                  <Route path="internal" element={<Navigate to="../config" replace />} />
+                  <Route path="config" element={<AdminServerAppDetailPage />} />
+                  <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                  <Route path="trash" element={<AdminServerAppTrashPage />} />
+                </Route>
+              )}
 
-              <Route path="*" element={<NotFound />} />
+              <Route path="*" element={isAppHost ? <AppHostEntryRedirect /> : <NotFound />} />
             </Routes>
           </BrowserRouter>
         </AuthProvider>

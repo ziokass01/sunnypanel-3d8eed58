@@ -1,15 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/AuthProvider";
+import { getAppWorkspaceOrigin } from "@/lib/appWorkspace";
+
+function buildAppBridgeUrl(target: string, session?: Session | null) {
+  if (!session?.access_token || !session?.refresh_token) return null;
+
+  try {
+    const url = new URL(target);
+    const appOrigin = getAppWorkspaceOrigin();
+    if (url.origin !== appOrigin) return null;
+
+    const hash = new URLSearchParams({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      next: `${url.pathname}${url.search}${url.hash}`,
+    });
+
+    return `${appOrigin}/auth/bridge#${hash.toString()}`;
+  } catch {
+    return null;
+  }
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,19 +43,20 @@ export function LoginPage() {
     return params.get("next")?.trim() || "";
   }, [location.search]);
 
-  const redirectAfterLogin = useCallback((target?: string) => {
+  const redirectAfterLogin = useCallback((target?: string, authSession?: Session | null) => {
     const safeTarget = String(target || "").trim();
     if (/^https?:\/\//i.test(safeTarget)) {
-      window.location.assign(safeTarget);
+      const bridgeUrl = buildAppBridgeUrl(safeTarget, authSession ?? session ?? null);
+      window.location.assign(bridgeUrl || safeTarget);
       return;
     }
     navigate(safeTarget || "/dashboard", { replace: true });
-  }, [navigate]);
+  }, [navigate, session]);
 
   useEffect(() => {
     if (!user) return;
-    redirectAfterLogin(nextTarget);
-  }, [user, nextTarget, redirectAfterLogin]);
+    redirectAfterLogin(nextTarget, session ?? null);
+  }, [user, session, nextTarget, redirectAfterLogin]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,9 +64,9 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      redirectAfterLogin(nextTarget);
+      redirectAfterLogin(nextTarget, data.session ?? null);
     } catch (err: any) {
       setError(err?.message ?? "Authentication failed");
     } finally {
