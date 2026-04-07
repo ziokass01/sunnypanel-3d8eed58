@@ -4,7 +4,6 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
-import type { Session } from "@supabase/supabase-js";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { LoginPage } from "@/pages/Login";
@@ -36,27 +35,10 @@ import { ServiceLandingPage } from "@/pages/ServiceLanding";
 import { ResetKeyPage } from "@/pages/ResetKey";
 import { ResetSettingsPage } from "@/pages/ResetSettings";
 import { ResetLogsPage } from "@/pages/ResetLogs";
-import { buildAppWorkspaceUrl, getAdminAppsUrl } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, getAdminLoginUrl } from "@/lib/appWorkspace";
 import { useAuth } from "@/auth/AuthProvider";
-import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
-
-function buildAppBridgeUrl(target: string, session?: Session | null) {
-  if (!session?.access_token || !session?.refresh_token) return null;
-
-  try {
-    const targetUrl = new URL(target);
-    const hash = new URLSearchParams({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      next: `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`,
-    });
-    return `${targetUrl.origin}/auth/bridge#${hash.toString()}`;
-  } catch {
-    return null;
-  }
-}
 
 function AppHostEntryRedirect() {
   const { user, loading } = useAuth();
@@ -71,109 +53,29 @@ function AppHostEntryRedirect() {
       return;
     }
 
-    window.location.replace(getAdminAppsUrl());
+    window.location.replace(getAdminLoginUrl());
   }, [loading, user]);
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển về khu quản trị...
+      Đang chuyển đúng khu điều hành...
     </div>
   );
 }
 
 function AdminHostAppRedirect() {
-  const { session, loading } = useAuth();
   const { appCode = "", "*": rest = "" } = useParams();
   const location = useLocation();
+  const section = rest.startsWith("config") ? "config" : "runtime";
+  const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
 
   useEffect(() => {
-    if (loading || typeof window === "undefined") return;
-
-    const section = rest.startsWith("config") ? "config" : "runtime";
-    const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
-
-    const run = async () => {
-      let activeSession = session ?? null;
-
-      if (!activeSession?.access_token || !activeSession?.refresh_token) {
-        const sessionRes = await supabase.auth.getSession();
-        activeSession = sessionRes.data.session ?? null;
-      }
-
-      if ((!activeSession?.access_token || !activeSession?.refresh_token) && session?.refresh_token) {
-        const refreshed = await supabase.auth.refreshSession();
-        activeSession = refreshed.data.session ?? activeSession;
-      }
-
-      const bridgeUrl = buildAppBridgeUrl(target, activeSession);
-      window.location.replace(bridgeUrl || getAdminAppsUrl());
-    };
-
-    void run();
-  }, [appCode, location.search, loading, rest, session]);
+    window.location.replace(target);
+  }, [target]);
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      Đang mở workspace app...
-    </div>
-  );
-}
-
-function AppSessionBridge() {
-  const location = useLocation();
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
-    const params = new URLSearchParams(hash);
-    const accessToken = String(params.get("access_token") ?? "").trim();
-    const refreshToken = String(params.get("refresh_token") ?? "").trim();
-    const next = String(params.get("next") ?? "/").trim();
-    const safeNext = next.startsWith("/") ? next : "/";
-
-    const run = async () => {
-      if (!accessToken || !refreshToken) {
-        window.location.replace(getAdminAppsUrl());
-        return;
-      }
-
-      const { error: setError } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-
-      if (setError) {
-        await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminAppsUrl());
-        return;
-      }
-
-      const refreshed = await supabase.auth.refreshSession();
-      const freshSession = refreshed.data.session ?? null;
-
-      if (refreshed.error || !freshSession?.access_token) {
-        await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminAppsUrl());
-        return;
-      }
-
-      const probe = await supabase.auth.getUser(freshSession.access_token);
-      if (probe.error || !probe.data.user) {
-        await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminAppsUrl());
-        return;
-      }
-
-      window.location.replace(safeNext);
-    };
-
-    void run();
-  }, [location.key]);
-
-  return (
-    <div className="p-6 text-sm text-muted-foreground">
-      Đang đồng bộ phiên đăng nhập cho app domain...
+      Đang chuyển sang app domain...
     </div>
   );
 }
@@ -209,11 +111,6 @@ const App = () => {
               <Route
                 path="/login"
                 element={isAdminHost ? <LoginPage /> : isAppHost ? <AppHostEntryRedirect /> : <Navigate to="/" replace />}
-              />
-
-              <Route
-                path="/auth/bridge"
-                element={isAppHost ? <AppSessionBridge /> : <Navigate to="/" replace />}
               />
 
               <Route path="/free" element={<FreeLandingPage />} />

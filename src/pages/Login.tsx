@@ -1,49 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/AuthProvider";
-import { getAppWorkspaceOrigin } from "@/lib/appWorkspace";
-
-
-function buildAppBridgeUrl(target: string, session?: Session | null) {
-  if (!session?.access_token || !session?.refresh_token) return null;
-
-  try {
-    const url = new URL(target);
-    const appOrigin = getAppWorkspaceOrigin();
-    if (url.origin !== appOrigin) return null;
-
-    const hash = new URLSearchParams({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      next: `${url.pathname}${url.search}${url.hash}`,
-    });
-
-    return `${appOrigin}/auth/bridge#${hash.toString()}`;
-  } catch {
-    return null;
-  }
-}
-
-async function getFreshSessionForRedirect(session?: Session | null) {
-  if (session?.access_token && session?.refresh_token) {
-    const probe = await supabase.auth.getUser(session.access_token);
-    if (!probe.error && probe.data.user) return session;
-  }
-
-  const refreshed = await supabase.auth.refreshSession();
-  return refreshed.data.session ?? session ?? null;
-}
-
 
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, session } = useAuth();
+  const { user } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -66,8 +32,8 @@ export function LoginPage() {
 
   useEffect(() => {
     if (!user) return;
-    void redirectAfterLogin(nextTarget, session ?? null);
-  }, [user, session, nextTarget, redirectAfterLogin]);
+    redirectAfterLogin(nextTarget);
+  }, [user, nextTarget, redirectAfterLogin]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -75,9 +41,9 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      await redirectAfterLogin(nextTarget, data.session ?? null);
+      redirectAfterLogin(nextTarget);
     } catch (err: any) {
       setError(err?.message ?? "Authentication failed");
     } finally {

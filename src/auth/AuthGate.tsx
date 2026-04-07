@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getAdminAppsUrl } from "@/lib/appWorkspace";
+import { getAdminLoginUrl } from "@/lib/appWorkspace";
 
 type Props = {
   children: React.ReactNode;
@@ -42,11 +42,11 @@ export function AuthGate({ children }: Props) {
     const isAppHost = host.startsWith("app.") || host === "app.mityangho.id.vn";
 
     if (isAppHost && typeof window !== "undefined") {
-      window.location.replace(getAdminAppsUrl());
+      window.location.replace(getAdminLoginUrl(window.location.href));
       return (
         <div className="min-h-svh bg-background">
           <main className="mx-auto w-full max-w-5xl p-4 md:p-6 text-sm text-muted-foreground">
-            Đang quay về server apps...
+            Đang chuyển sang trang đăng nhập admin...
           </main>
         </div>
       );
