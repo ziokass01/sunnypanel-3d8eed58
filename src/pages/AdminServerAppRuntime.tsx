@@ -22,14 +22,40 @@ const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "hear
 const RUNTIME_TABS = ["simulator", "ops", "controls", "redeem", "entitlements", "wallets", "sessions", "transactions", "events"] as const;
 
 async function getAdminAuthToken() {
-  const sess = await supabase.auth.getSession();
-  const token = sess.data.session?.access_token ?? null;
-  if (!token) {
+  const firstSession = await supabase.auth.getSession();
+  let session = firstSession.data.session ?? null;
+
+  if (!session?.access_token) {
     const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
     err.code = "ADMIN_AUTH_REQUIRED";
     throw err;
   }
-  return token;
+
+  const currentToken = String(session.access_token || "").trim();
+  const probe = await supabase.auth.getUser(currentToken);
+
+  if (!probe.error && probe.data.user) {
+    return currentToken;
+  }
+
+  const refreshed = await supabase.auth.refreshSession();
+  session = refreshed.data.session ?? null;
+
+  if (refreshed.error || !session?.access_token) {
+    const err = new Error("ADMIN_AUTH_EXPIRED") as Error & { code?: string };
+    err.code = "ADMIN_AUTH_EXPIRED";
+    throw err;
+  }
+
+  const refreshedToken = String(session.access_token || "").trim();
+  const refreshedProbe = await supabase.auth.getUser(refreshedToken);
+  if (refreshedProbe.error || !refreshedProbe.data.user) {
+    const err = new Error("ADMIN_AUTH_EXPIRED") as Error & { code?: string };
+    err.code = "ADMIN_AUTH_EXPIRED";
+    throw err;
+  }
+
+  return refreshedToken;
 }
 
 
@@ -74,6 +100,8 @@ const FRIENDLY_ERROR_MAP: Record<string, string> = {
   CONSUME_DISABLED: "Consume hiện đang bị tắt.",
   HEARTBEAT_DISABLED: "Heartbeat hiện đang bị tắt.",
   RUNTIME_DISABLED: "Runtime hiện đang bị tắt toàn bộ.",
+  ADMIN_AUTH_REQUIRED: "Phiên đăng nhập admin không còn hợp lệ.",
+  ADMIN_AUTH_EXPIRED: "Phiên đăng nhập admin đã hết hạn. Hãy đăng nhập lại.",
   EMPTY_ADJUSTMENT: "Bạn chưa nhập số cộng hoặc trừ cho ví.",
   NEGATIVE_SOFT_BALANCE: "Không thể làm credit thường âm.",
   NEGATIVE_PREMIUM_BALANCE: "Không thể làm credit kim cương âm.",

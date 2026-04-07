@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/AuthProvider";
 import { getAppWorkspaceOrigin } from "@/lib/appWorkspace";
 
+
 function buildAppBridgeUrl(target: string, session?: Session | null) {
   if (!session?.access_token || !session?.refresh_token) return null;
 
@@ -28,6 +29,17 @@ function buildAppBridgeUrl(target: string, session?: Session | null) {
   }
 }
 
+async function getFreshSessionForRedirect(session?: Session | null) {
+  if (session?.access_token && session?.refresh_token) {
+    const probe = await supabase.auth.getUser(session.access_token);
+    if (!probe.error && probe.data.user) return session;
+  }
+
+  const refreshed = await supabase.auth.refreshSession();
+  return refreshed.data.session ?? session ?? null;
+}
+
+
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -43,19 +55,18 @@ export function LoginPage() {
     return params.get("next")?.trim() || "";
   }, [location.search]);
 
-  const redirectAfterLogin = useCallback((target?: string, authSession?: Session | null) => {
+  const redirectAfterLogin = useCallback((target?: string) => {
     const safeTarget = String(target || "").trim();
     if (/^https?:\/\//i.test(safeTarget)) {
-      const bridgeUrl = buildAppBridgeUrl(safeTarget, authSession ?? session ?? null);
-      window.location.assign(bridgeUrl || safeTarget);
+      window.location.assign(safeTarget);
       return;
     }
     navigate(safeTarget || "/dashboard", { replace: true });
-  }, [navigate, session]);
+  }, [navigate]);
 
   useEffect(() => {
     if (!user) return;
-    redirectAfterLogin(nextTarget, session ?? null);
+    void redirectAfterLogin(nextTarget, session ?? null);
   }, [user, session, nextTarget, redirectAfterLogin]);
 
   async function onSubmit(e: React.FormEvent) {
@@ -66,7 +77,7 @@ export function LoginPage() {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      redirectAfterLogin(nextTarget, data.session ?? null);
+      await redirectAfterLogin(nextTarget, data.session ?? null);
     } catch (err: any) {
       setError(err?.message ?? "Authentication failed");
     } finally {

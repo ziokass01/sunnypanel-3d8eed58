@@ -81,6 +81,7 @@ function AdminHostAppRedirect() {
   );
 }
 
+
 function AppSessionBridge() {
   const location = useLocation();
 
@@ -100,12 +101,28 @@ function AppSessionBridge() {
         return;
       }
 
-      const { error } = await supabase.auth.setSession({
+      const { error: setError } = await supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
       });
 
-      if (error) {
+      if (setError) {
+        await supabase.auth.signOut().catch(() => undefined);
+        window.location.replace(getAdminLoginUrl(window.location.href));
+        return;
+      }
+
+      const refreshed = await supabase.auth.refreshSession();
+      const freshSession = refreshed.data.session ?? null;
+
+      if (refreshed.error || !freshSession?.access_token) {
+        await supabase.auth.signOut().catch(() => undefined);
+        window.location.replace(getAdminLoginUrl(window.location.href));
+        return;
+      }
+
+      const probe = await supabase.auth.getUser(freshSession.access_token);
+      if (probe.error || !probe.data.user) {
         await supabase.auth.signOut().catch(() => undefined);
         window.location.replace(getAdminLoginUrl(window.location.href));
         return;
@@ -114,7 +131,7 @@ function AppSessionBridge() {
       window.location.replace(safeNext);
     };
 
-    run();
+    void run();
   }, [location.key]);
 
   return (
