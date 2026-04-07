@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { LoginPage } from "@/pages/Login";
@@ -35,11 +36,27 @@ import { ServiceLandingPage } from "@/pages/ServiceLanding";
 import { ResetKeyPage } from "@/pages/ResetKey";
 import { ResetSettingsPage } from "@/pages/ResetSettings";
 import { ResetLogsPage } from "@/pages/ResetLogs";
-import { buildAppWorkspaceUrl, getAdminAppsUrl, getAdminLoginUrl } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, getAdminAppsUrl } from "@/lib/appWorkspace";
 import { useAuth } from "@/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
+
+function buildAppBridgeUrl(target: string, session?: Session | null) {
+  if (!session?.access_token || !session?.refresh_token) return null;
+
+  try {
+    const targetUrl = new URL(target);
+    const hash = new URLSearchParams({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      next: `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`,
+    });
+    return `${targetUrl.origin}/auth/bridge#${hash.toString()}`;
+  } catch {
+    return null;
+  }
+}
 
 function AppHostEntryRedirect() {
   const { user, loading } = useAuth();
@@ -54,29 +71,50 @@ function AppHostEntryRedirect() {
       return;
     }
 
-    window.location.replace(getAdminLoginUrl("/admin/apps"));
+    window.location.replace(getAdminAppsUrl());
   }, [loading, user]);
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển đúng khu điều hành...
+      Đang chuyển về khu quản trị...
     </div>
   );
 }
 
 function AdminHostAppRedirect() {
+  const { session, loading } = useAuth();
   const { appCode = "", "*": rest = "" } = useParams();
   const location = useLocation();
-  const section = rest.startsWith("config") ? "config" : "runtime";
-  const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
 
   useEffect(() => {
-    window.location.replace(target);
-  }, [target]);
+    if (loading || typeof window === "undefined") return;
+
+    const section = rest.startsWith("config") ? "config" : "runtime";
+    const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
+
+    const run = async () => {
+      let activeSession = session ?? null;
+
+      if (!activeSession?.access_token || !activeSession?.refresh_token) {
+        const sessionRes = await supabase.auth.getSession();
+        activeSession = sessionRes.data.session ?? null;
+      }
+
+      if ((!activeSession?.access_token || !activeSession?.refresh_token) && session?.refresh_token) {
+        const refreshed = await supabase.auth.refreshSession();
+        activeSession = refreshed.data.session ?? activeSession;
+      }
+
+      const bridgeUrl = buildAppBridgeUrl(target, activeSession);
+      window.location.replace(bridgeUrl || getAdminAppsUrl());
+    };
+
+    void run();
+  }, [appCode, location.search, loading, rest, session]);
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển sang app domain...
+      Đang mở workspace app...
     </div>
   );
 }
@@ -96,7 +134,7 @@ function AppSessionBridge() {
 
     const run = async () => {
       if (!accessToken || !refreshToken) {
-        window.location.replace(getAdminLoginUrl("/admin/apps"));
+        window.location.replace(getAdminAppsUrl());
         return;
       }
 
@@ -107,7 +145,7 @@ function AppSessionBridge() {
 
       if (setError) {
         await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminLoginUrl("/admin/apps"));
+        window.location.replace(getAdminAppsUrl());
         return;
       }
 
@@ -116,14 +154,14 @@ function AppSessionBridge() {
 
       if (refreshed.error || !freshSession?.access_token) {
         await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminLoginUrl("/admin/apps"));
+        window.location.replace(getAdminAppsUrl());
         return;
       }
 
       const probe = await supabase.auth.getUser(freshSession.access_token);
       if (probe.error || !probe.data.user) {
         await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminLoginUrl("/admin/apps"));
+        window.location.replace(getAdminAppsUrl());
         return;
       }
 
