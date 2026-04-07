@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import NotFound from "./pages/NotFound";
@@ -40,22 +41,59 @@ import { useAuth } from "@/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
+const APP_REDIRECT_FLAG = "sunny:app-login-redirected";
 
 function AppHostEntryRedirect() {
   const { user, loading } = useAuth();
+  const [showManualLogin, setShowManualLogin] = useState(false);
 
   useEffect(() => {
     if (loading || typeof window === "undefined") return;
 
     if (user) {
+      window.sessionStorage.removeItem(APP_REDIRECT_FLAG);
       const lastCode = window.localStorage.getItem("sunny:lastAppCode") || "find-dumps";
       const lastSection = window.localStorage.getItem("sunny:lastAppSection") === "config" ? "config" : "runtime";
       window.location.replace(buildAppWorkspaceUrl(lastCode, lastSection));
       return;
     }
 
+    const redirectedOnce = window.sessionStorage.getItem(APP_REDIRECT_FLAG) === "1";
+    if (redirectedOnce) {
+      setShowManualLogin(true);
+      return;
+    }
+
+    window.sessionStorage.setItem(APP_REDIRECT_FLAG, "1");
     window.location.replace(getAdminLoginUrl(window.location.href));
   }, [loading, user]);
+
+  if (showManualLogin) {
+    return (
+      <div className="min-h-svh bg-background">
+        <main className="mx-auto flex min-h-svh max-w-3xl items-center justify-center px-4 py-12">
+          <div className="w-full rounded-3xl border bg-card p-6 shadow-sm">
+            <div className="text-xl font-semibold">Phiên app chưa sẵn sàng</div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Đã thử chuyển sang admin một lần. Để tránh vòng lặp đăng nhập, app sẽ dừng tự nhảy qua lại.
+              Bấm nút dưới để mở lại trang đăng nhập admin khi bạn muốn.
+            </p>
+            <div className="mt-4 flex gap-3">
+              <Button
+                onClick={() => {
+                  if (typeof window === "undefined") return;
+                  window.sessionStorage.removeItem(APP_REDIRECT_FLAG);
+                  window.location.replace(getAdminLoginUrl(window.location.href));
+                }}
+              >
+                Mở đăng nhập admin
+              </Button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 text-sm text-muted-foreground">
@@ -81,9 +119,9 @@ function AdminHostAppRedirect() {
   );
 }
 
-
 function AppSessionBridge() {
   const location = useLocation();
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -97,7 +135,7 @@ function AppSessionBridge() {
 
     const run = async () => {
       if (!accessToken || !refreshToken) {
-        window.location.replace(getAdminLoginUrl(window.location.href));
+        setErrorMessage("Thiếu token bridge để đồng bộ phiên app.");
         return;
       }
 
@@ -108,7 +146,7 @@ function AppSessionBridge() {
 
       if (setError) {
         await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminLoginUrl(window.location.href));
+        setErrorMessage("Không đồng bộ được phiên app. Hãy mở lại đăng nhập admin.");
         return;
       }
 
@@ -117,22 +155,47 @@ function AppSessionBridge() {
 
       if (refreshed.error || !freshSession?.access_token) {
         await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminLoginUrl(window.location.href));
+        setErrorMessage("Phiên app chưa hợp lệ sau khi đồng bộ. Hãy đăng nhập lại ở admin.");
         return;
       }
 
       const probe = await supabase.auth.getUser(freshSession.access_token);
       if (probe.error || !probe.data.user) {
         await supabase.auth.signOut().catch(() => undefined);
-        window.location.replace(getAdminLoginUrl(window.location.href));
+        setErrorMessage("Không xác minh được phiên app. Hãy đăng nhập lại ở admin.");
         return;
       }
 
+      window.sessionStorage.removeItem(APP_REDIRECT_FLAG);
       window.location.replace(safeNext);
     };
 
     void run();
   }, [location.key]);
+
+  if (errorMessage) {
+    return (
+      <div className="min-h-svh bg-background">
+        <main className="mx-auto flex min-h-svh max-w-3xl items-center justify-center px-4 py-12">
+          <div className="w-full rounded-3xl border bg-card p-6 shadow-sm">
+            <div className="text-xl font-semibold">Bridge app-domain bị dừng</div>
+            <p className="mt-3 text-sm text-muted-foreground">{errorMessage}</p>
+            <div className="mt-4 flex gap-3">
+              <Button
+                onClick={() => {
+                  if (typeof window === "undefined") return;
+                  window.sessionStorage.removeItem(APP_REDIRECT_FLAG);
+                  window.location.replace(getAdminLoginUrl(window.location.href));
+                }}
+              >
+                Mở đăng nhập admin
+              </Button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 text-sm text-muted-foreground">

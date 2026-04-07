@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { getAdminLoginUrl } from "@/lib/appWorkspace";
 
 type Props = {
@@ -42,11 +43,22 @@ export function AuthGate({ children }: Props) {
     const isAppHost = host.startsWith("app.") || host === "app.mityangho.id.vn";
 
     if (isAppHost && typeof window !== "undefined") {
-      window.location.replace(getAdminLoginUrl(window.location.href));
+      const adminLoginUrl = getAdminLoginUrl(window.location.href);
       return (
         <div className="min-h-svh bg-background">
-          <main className="mx-auto w-full max-w-5xl p-4 md:p-6 text-sm text-muted-foreground">
-            Đang chuyển sang trang đăng nhập admin...
+          <main className="mx-auto flex min-h-svh max-w-3xl items-center justify-center px-4 py-12">
+            <div className="w-full rounded-3xl border bg-card p-6 shadow-sm">
+              <div className="text-xl font-semibold">App domain chưa có phiên đăng nhập</div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Để tránh vòng lặp đăng nhập giữa app và admin, trang này sẽ không tự nhảy nữa.
+                Bấm nút dưới để mở đăng nhập admin khi bạn muốn đồng bộ phiên.
+              </p>
+              <div className="mt-4 flex gap-3">
+                <Button onClick={() => window.location.replace(adminLoginUrl)}>
+                  Mở đăng nhập admin
+                </Button>
+              </div>
+            </div>
           </main>
         </div>
       );
