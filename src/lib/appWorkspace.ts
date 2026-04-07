@@ -60,3 +60,18 @@ export function getAdminLoginUrl(next?: string) {
   const safeNext = String(next ?? "").trim();
   return safeNext ? `${origin}/login?next=${encodeURIComponent(safeNext)}` : `${origin}/login`;
 }
+
+
+export function buildAdminAppUrl(
+  appCode: string,
+  section: "config" | "runtime" | "trash" = "runtime",
+  extraPath = "",
+  search = "",
+) {
+  const origin = getAdminOrigin();
+  const safeApp = encodeURIComponent(String(appCode || "").trim());
+  const safeSection = section === "config" ? "config" : section === "trash" ? "trash" : "runtime";
+  const suffix = extraPath ? `/${String(extraPath).replace(/^\/+/, "")}` : "";
+  const safeSearch = search || "";
+  return `${origin}/admin/apps/${safeApp}/${safeSection}${suffix}${safeSearch}`;
+}

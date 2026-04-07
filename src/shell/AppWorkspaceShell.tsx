@@ -125,7 +125,7 @@ export function AppWorkspaceShell() {
                 {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
                   <NavLink
                     key={key}
-                    to={`/apps/${appCode}/${key}`}
+                    to={`/admin/apps/${appCode}/${key}`}
                     className={({ isActive }) => navButtonClass(isActive)}
                     onClick={() => setMobileNavOpen(false)}
                   >
@@ -172,7 +172,7 @@ export function AppWorkspaceShell() {
 
               <div className="grid gap-2">
                 {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
-                  <NavLink key={key} to={`/apps/${appCode}/${key}`} className={({ isActive }) => navButtonClass(isActive)}>
+                  <NavLink key={key} to={`/admin/apps/${appCode}/${key}`} className={({ isActive }) => navButtonClass(isActive)}>
                     <Icon className="mr-3 h-4 w-4" />
                     {label}
                   </NavLink>
@@ -199,7 +199,7 @@ export function AppWorkspaceShell() {
                 <div className="space-y-2">
                   <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-900">
                     <AppWindow className="h-3.5 w-3.5" />
-                    App domain
+                    Server app
                   </div>
                   <div className="text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">{meta.label}</div>
                   <p className="max-w-3xl text-sm leading-6 text-slate-600">

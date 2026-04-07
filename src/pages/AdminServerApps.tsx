@@ -3,7 +3,7 @@ import { ArrowUpRight, Cog, PlayCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildAppWorkspaceUrl, getAppWorkspaceOrigin } from "@/lib/appWorkspace";
+import { buildAdminAppUrl, getAdminOrigin } from "@/lib/appWorkspace";
 
 const APPS = [
   {
@@ -23,7 +23,7 @@ const APPS = [
 ] as const;
 
 export function AdminServerAppsPage() {
-  const appOrigin = getAppWorkspaceOrigin();
+  const adminOrigin = getAdminOrigin();
 
   const openTarget = (url: string) => {
     if (!url) return;
@@ -35,7 +35,7 @@ export function AdminServerAppsPage() {
   };
 
   const openWorkspaceSection = (appCode: string, section: "config" | "runtime") => {
-    window.location.assign(buildAppWorkspaceUrl(appCode, section));
+    window.location.assign(buildAdminAppUrl(appCode, section));
   };
 
   return (
@@ -45,10 +45,10 @@ export function AdminServerAppsPage() {
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Admin tổng chỉ là cổng vào. Khi bấm <span className="font-medium text-foreground">Cấu hình app</span> hoặc <span className="font-medium text-foreground">Runtime app</span>, hệ thống sẽ chuyển thẳng sang domain riêng của app để tránh nhồi quá nhiều chức năng vào một trang trung gian.
+              Luồng server app hiện được giữ gọn trong admin để tránh loop giữa nhiều domain. Bấm <span className="font-medium text-foreground">Cấu hình app</span> hoặc <span className="font-medium text-foreground">Runtime app</span> sẽ đi thẳng vào đường dẫn quản trị ổn định.
             </p>
           </div>
-          <Badge variant="outline">{appOrigin}</Badge>
+          <Badge variant="outline">{adminOrigin}</Badge>
         </div>
       </header>
 

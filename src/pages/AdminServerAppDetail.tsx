@@ -540,7 +540,7 @@ export function AdminServerAppDetailPage() {
             {appDraft.public_enabled ? "Đang bật" : "Đang ẩn"}
           </Badge>
           <Button asChild variant="outline">
-            <Link to={`/apps/${appCode}/runtime`}>Mở runtime</Link>
+            <Link to={`/admin/apps/${appCode}/runtime`}>Mở runtime</Link>
           </Button>
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>
         </div>

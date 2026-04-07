@@ -53,8 +53,12 @@ type PendingDelete =
   | null;
 
 async function getAdminAuthToken() {
-  const sess = await supabase.auth.getSession();
-  const token = sess.data.session?.access_token ?? null;
+  const current = await supabase.auth.getSession();
+  let token = current.data.session?.access_token?.trim() ?? "";
+  if (token) return token;
+
+  const refreshed = await supabase.auth.refreshSession();
+  token = refreshed.data.session?.access_token?.trim() ?? "";
   if (!token) {
     const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
     err.code = "ADMIN_AUTH_REQUIRED";
