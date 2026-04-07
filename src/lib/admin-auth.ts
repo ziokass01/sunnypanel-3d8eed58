@@ -1,57 +1,46 @@
 import { supabase } from "@/integrations/supabase/client";
 import { postFunction } from "@/lib/functions";
 
-const ADMIN_TOKEN_SKEW_MS = 60_000;
-
-type AdminAuthError = Error & { code?: string };
-
-type PostAdminFunctionOptions = {
-  headers?: Record<string, string>;
-  withCredentials?: boolean;
-};
-
-function isSessionFresh(session: { access_token?: string | null; expires_at?: number | null } | null | undefined) {
-  const token = String(session?.access_token ?? "").trim();
-  const expiresAtSec = Number(session?.expires_at ?? 0);
-  if (!token) return false;
-  if (!Number.isFinite(expiresAtSec) || expiresAtSec <= 0) return true;
-  return (expiresAtSec * 1000) - Date.now() > ADMIN_TOKEN_SKEW_MS;
-}
-
-function buildAdminAuthRequiredError() {
-  const err = new Error("ADMIN_AUTH_REQUIRED") as AdminAuthError;
+function buildAdminAuthError(message = "ADMIN_AUTH_REQUIRED") {
+  const err = new Error(message) as Error & { code?: string };
   err.code = "ADMIN_AUTH_REQUIRED";
   return err;
 }
 
-export async function getAdminAuthToken(opts?: { forceRefresh?: boolean }) {
-  if (!opts?.forceRefresh) {
-    const current = await supabase.auth.getSession();
-    const currentSession = current.data.session;
-    if (isSessionFresh(currentSession)) {
-      return String(currentSession?.access_token ?? "").trim();
+function isTokenExpiring(expiresAt?: number | null, skewSeconds = 90) {
+  if (!expiresAt) return false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  return expiresAt <= nowSec + skewSeconds;
+}
+
+export async function getFreshAdminAuthToken(opts?: { forceRefresh?: boolean }) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  let session = sessionData.session ?? null;
+
+  if (!session?.refresh_token && !session?.access_token) {
+    throw buildAdminAuthError();
+  }
+
+  const shouldRefresh = Boolean(opts?.forceRefresh) || isTokenExpiring(session?.expires_at ?? null);
+  if (shouldRefresh) {
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+    if (!refreshError && refreshData.session?.access_token) {
+      session = refreshData.session;
     }
   }
 
-  const refreshed = await supabase.auth.refreshSession();
-  const refreshedSession = refreshed.data.session;
-  if (isSessionFresh(refreshedSession)) {
-    return String(refreshedSession?.access_token ?? "").trim();
+  const token = String(session?.access_token ?? "").trim();
+  if (!token) {
+    throw buildAdminAuthError();
   }
 
-  const fallback = await supabase.auth.getSession();
-  const fallbackSession = fallback.data.session;
-  if (isSessionFresh(fallbackSession)) {
-    return String(fallbackSession?.access_token ?? "").trim();
-  }
-
-  throw buildAdminAuthRequiredError();
+  return token;
 }
 
-function shouldRetryWithFreshToken(error: any) {
+export function isInvalidJwtError(error: any) {
   const status = Number(error?.status ?? error?.context?.status ?? 0);
-  const code = String(error?.code ?? error?.context?.json?.code ?? "").trim().toUpperCase();
-  const message = [
+  const code = String(error?.code ?? error?.context?.json?.code ?? "").toUpperCase();
+  const msg = [
     error?.message,
     error?.context?.json?.message,
     error?.context?.json?.msg,
@@ -59,23 +48,21 @@ function shouldRetryWithFreshToken(error: any) {
     error?.context?.json?.friendly_message,
   ]
     .filter(Boolean)
-    .map((item) => String(item).toLowerCase())
-    .join(" ");
+    .map((item) => String(item))
+    .join(" | ")
+    .toLowerCase();
 
-  return status === 401 || code === "UNAUTHORIZED" || message.includes("invalid jwt");
+  return msg.includes("invalid jwt") || msg.includes("jwt") || status === 401 || code === "UNAUTHORIZED" || code === "ADMIN_AUTH_REQUIRED";
 }
 
-export async function postAdminFunction<T>(
-  path: string,
-  body: unknown,
-  opts?: PostAdminFunctionOptions,
-): Promise<T> {
-  const token = await getAdminAuthToken();
+export async function postAdminRuntimeOps<T>(body: unknown) {
+  let token = await getFreshAdminAuthToken();
+
   try {
-    return await postFunction<T>(path, body, { authToken: token, ...(opts ?? {}) });
-  } catch (error: any) {
-    if (!shouldRetryWithFreshToken(error)) throw error;
-    const refreshedToken = await getAdminAuthToken({ forceRefresh: true });
-    return await postFunction<T>(path, body, { authToken: refreshedToken, ...(opts ?? {}) });
+    return await postFunction<T>("/server-app-runtime-ops", body, { authToken: token });
+  } catch (error) {
+    if (!isInvalidJwtError(error)) throw error;
+    token = await getFreshAdminAuthToken({ forceRefresh: true });
+    return await postFunction<T>("/server-app-runtime-ops", body, { authToken: token });
   }
 }
