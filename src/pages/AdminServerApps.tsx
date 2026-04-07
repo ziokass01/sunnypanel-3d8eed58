@@ -1,9 +1,10 @@
-import { ArrowUpRight, Cog, PlayCircle } from "lucide-react";
+import { ArrowUpRight, Cog, PlayCircle, Trash2 } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildAppWorkspaceUrl, getAppWorkspaceOrigin } from "@/lib/appWorkspace";
+import { buildWorkspacePath, detectWorkspaceScope } from "@/lib/appWorkspace";
 
 const APPS = [
   {
@@ -23,7 +24,8 @@ const APPS = [
 ] as const;
 
 export function AdminServerAppsPage() {
-  const appOrigin = getAppWorkspaceOrigin();
+  const location = useLocation();
+  const scope = detectWorkspaceScope(location.pathname);
 
   const openTarget = (url: string) => {
     if (!url) return;
@@ -34,8 +36,8 @@ export function AdminServerAppsPage() {
     window.location.assign(url);
   };
 
-  const openWorkspaceSection = (appCode: string, section: "config" | "runtime") => {
-    window.location.assign(buildAppWorkspaceUrl(appCode, section));
+  const openWorkspaceSection = (appCode: string, section: "config" | "runtime" | "trash") => {
+    window.location.assign(buildWorkspacePath(appCode, section, scope));
   };
 
   return (
@@ -45,10 +47,10 @@ export function AdminServerAppsPage() {
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Admin tổng chỉ là cổng vào. Khi bấm <span className="font-medium text-foreground">Cấu hình app</span> hoặc <span className="font-medium text-foreground">Runtime app</span>, hệ thống sẽ chuyển thẳng sang domain riêng của app để tránh nhồi quá nhiều chức năng vào một trang trung gian.
+              Từ đây đi thẳng vào <span className="font-medium text-foreground">Cấu hình</span>, <span className="font-medium text-foreground">Runtime</span> và <span className="font-medium text-foreground">Trash</span> ngay trong cùng một khu điều hành. Không ép nhảy qua domain khác nữa để tránh vòng lặp redirect.
             </p>
           </div>
-          <Badge variant="outline">{appOrigin}</Badge>
+          <Badge variant="outline">Điều hướng nội bộ ổn định</Badge>
         </div>
       </header>
 
@@ -69,16 +71,20 @@ export function AdminServerAppsPage() {
               <div className="rounded-2xl border bg-muted/20 p-3 text-xs text-muted-foreground break-all">
                 Server web cũ: {app.url}
               </div>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-3">
                 <Button onClick={() => openWorkspaceSection(app.code, "config")}>
                   <Cog className="mr-2 h-4 w-4" />
-                  Cấu hình app
+                  Cấu hình
                 </Button>
                 <Button variant="outline" onClick={() => openWorkspaceSection(app.code, "runtime")}>
                   <PlayCircle className="mr-2 h-4 w-4" />
-                  Runtime app
+                  Runtime
                 </Button>
-                <Button variant="outline" className="sm:col-span-2" onClick={() => openTarget(app.url)}>
+                <Button variant="outline" onClick={() => openWorkspaceSection(app.code, "trash")}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Trash
+                </Button>
+                <Button variant="outline" className="sm:col-span-3" onClick={() => openTarget(app.url)}>
                   <ArrowUpRight className="mr-2 h-4 w-4" />
                   Mở server web cũ
                 </Button>

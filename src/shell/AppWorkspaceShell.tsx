@@ -1,10 +1,10 @@
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { AppWindow, ChevronRight, Cog, Menu, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getAdminAppsUrl } from "@/lib/appWorkspace";
+import { buildWorkspacePath, detectWorkspaceScope, getWorkspaceListPath } from "@/lib/appWorkspace";
 
 const APP_META: Record<string, { label: string; note: string }> = {
   "find-dumps": {
@@ -44,7 +44,8 @@ export function AppWorkspaceShell() {
   const location = useLocation();
   const meta = resolveAppMeta(appCode);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const backToAdminUrl = useMemo(() => getAdminAppsUrl(), []);
+  const scope = detectWorkspaceScope(location.pathname);
+  const listPath = useMemo(() => getWorkspaceListPath(scope, location.pathname), [scope, location.pathname]);
   const activeKey = location.pathname.includes("/trash") ? "trash" : location.pathname.includes("/config") ? "config" : "runtime";
   const activeLabel = NAV_ITEMS.find((item) => item.key === activeKey)?.label ?? "Runtime app";
 
@@ -54,9 +55,11 @@ export function AppWorkspaceShell() {
     window.localStorage.setItem("sunny:lastAppSection", activeKey);
   }, [appCode, activeKey]);
 
-  const handleBackToAdmin = () => {
-    window.location.assign(backToAdminUrl);
+  const handleBackToList = () => {
+    window.location.assign(listPath);
   };
+
+  const buildNavPath = (section: "runtime" | "config" | "trash") => buildWorkspacePath(appCode, section, scope, "", "", location.pathname);
 
   return (
     <section className="space-y-4 px-1">
@@ -86,7 +89,7 @@ export function AppWorkspaceShell() {
 
             <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-200">{activeLabel}</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-400">Không còn trang trung gian</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-400">Không còn nhảy chéo host</span>
             </div>
           </div>
         </div>
@@ -125,7 +128,7 @@ export function AppWorkspaceShell() {
                 {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
                   <NavLink
                     key={key}
-                    to={`/apps/${appCode}/${key}`}
+                    to={buildNavPath(key)}
                     className={({ isActive }) => navButtonClass(isActive)}
                     onClick={() => setMobileNavOpen(false)}
                   >
@@ -140,10 +143,10 @@ export function AppWorkspaceShell() {
                   type="button"
                   variant="ghost"
                   className="h-12 justify-start rounded-2xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950"
-                  onClick={handleBackToAdmin}
+                  onClick={handleBackToList}
                 >
                   <ChevronRight className="mr-3 h-4 w-4 rotate-180" />
-                  Về admin tổng
+                  Về danh sách app
                 </Button>
               </div>
             </div>
@@ -172,7 +175,7 @@ export function AppWorkspaceShell() {
 
               <div className="grid gap-2">
                 {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
-                  <NavLink key={key} to={`/apps/${appCode}/${key}`} className={({ isActive }) => navButtonClass(isActive)}>
+                  <NavLink key={key} to={buildNavPath(key)} className={({ isActive }) => navButtonClass(isActive)}>
                     <Icon className="mr-3 h-4 w-4" />
                     {label}
                   </NavLink>
@@ -182,10 +185,10 @@ export function AppWorkspaceShell() {
               <Button
                 variant="ghost"
                 className="h-11 w-full justify-start rounded-2xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950"
-                onClick={handleBackToAdmin}
+                onClick={handleBackToList}
               >
                 <ChevronRight className="mr-2 h-4 w-4 rotate-180" />
-                Về admin tổng
+                Về danh sách app
               </Button>
             </div>
           </div>
@@ -199,7 +202,7 @@ export function AppWorkspaceShell() {
                 <div className="space-y-2">
                   <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-900">
                     <AppWindow className="h-3.5 w-3.5" />
-                    App domain
+                    Workspace nội bộ
                   </div>
                   <div className="text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">{meta.label}</div>
                   <p className="max-w-3xl text-sm leading-6 text-slate-600">

@@ -1,9 +1,10 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
+import { buildWorkspacePath, detectWorkspaceScope } from "@/lib/appWorkspace";
 
 const APP_META: Record<string, { label: string; description: string }> = {
   "find-dumps": {
@@ -25,7 +26,11 @@ function fallbackMeta(appCode: string) {
 
 export function AppWorkspaceDashboardPage() {
   const { appCode = "" } = useParams();
+  const location = useLocation();
   const meta = fallbackMeta(appCode);
+  const scope = detectWorkspaceScope(location.pathname);
+  const configPath = buildWorkspacePath(appCode, "config", scope);
+  const runtimePath = buildWorkspacePath(appCode, "runtime", scope);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["app-workspace-dashboard", appCode],
@@ -101,7 +106,7 @@ export function AppWorkspaceDashboardPage() {
             <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
               Khu này dành cho cấu hình nội bộ. Không đổi quyền admin, chỉ tách giao diện khỏi admin tổng để dễ tập trung.
             </div>
-            <Button asChild><Link to={`/apps/${appCode}/internal`}>Mở cấu hình nội bộ</Link></Button>
+            <Button asChild><Link to={configPath}>Mở cấu hình nội bộ</Link></Button>
           </CardContent>
         </Card>
 
@@ -116,7 +121,7 @@ export function AppWorkspaceDashboardPage() {
             <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
               Đây là khu theo dõi account, log và xử lý runtime theo app, thay vì dồn chung vào một trang admin bé và dễ nhầm.
             </div>
-            <Button asChild><Link to={`/apps/${appCode}/runtime`}>Mở runtime admin</Link></Button>
+            <Button asChild><Link to={runtimePath}>Mở runtime admin</Link></Button>
           </CardContent>
         </Card>
       </div>

@@ -1,9 +1,8 @@
-import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { LoginPage } from "@/pages/Login";
@@ -35,64 +34,36 @@ import { ServiceLandingPage } from "@/pages/ServiceLanding";
 import { ResetKeyPage } from "@/pages/ResetKey";
 import { ResetSettingsPage } from "@/pages/ResetSettings";
 import { ResetLogsPage } from "@/pages/ResetLogs";
-import { buildAppWorkspaceUrl, getAdminLoginUrl } from "@/lib/appWorkspace";
 import { useAuth } from "@/auth/AuthProvider";
+import { isAdminHostName, isAppHostName } from "@/lib/appWorkspace";
 
 const queryClient = new QueryClient();
 
-function AppHostEntryRedirect() {
+function ControlHostEntry() {
   const { user, loading } = useAuth();
+  const isAppHost = isAppHostName();
 
-  useEffect(() => {
-    if (loading || typeof window === "undefined") return;
+  if (loading) {
+    return <div className="p-6 text-sm text-muted-foreground">Đang kiểm tra phiên đăng nhập...</div>;
+  }
 
-    if (user) {
-      const lastCode = window.localStorage.getItem("sunny:lastAppCode") || "find-dumps";
-      const lastSection = window.localStorage.getItem("sunny:lastAppSection") === "config" ? "config" : "runtime";
-      window.location.replace(buildAppWorkspaceUrl(lastCode, lastSection));
-      return;
-    }
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
-    window.location.replace(getAdminLoginUrl());
-  }, [loading, user]);
-
-  return (
-    <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển đúng khu điều hành...
-    </div>
-  );
+  return <Navigate to={isAppHost ? "/apps" : "/dashboard"} replace />;
 }
 
-function AdminHostAppRedirect() {
-  const { appCode = "", "*": rest = "" } = useParams();
-  const location = useLocation();
-  const section = rest.startsWith("config") ? "config" : "runtime";
-  const target = buildAppWorkspaceUrl(appCode, section, "", location.search);
-
-  useEffect(() => {
-    window.location.replace(target);
-  }, [target]);
-
+function WorkspaceRoutes() {
   return (
-    <div className="p-6 text-sm text-muted-foreground">
-      Đang chuyển sang app domain...
-    </div>
+    <AppWorkspaceShell />
   );
 }
 
 const App = () => {
   const host = typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
-  const adminHosts = (import.meta.env.VITE_ADMIN_HOSTS ?? "")
-    .split(",")
-    .map((s: string) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const appHosts = (import.meta.env.VITE_APP_HOSTS ?? "")
-    .split(",")
-    .map((s: string) => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  const isAdminHost = host.startsWith("admin.") || adminHosts.includes(host);
-  const isAppHost = host.startsWith("app.") || appHosts.includes(host);
+  const isAdminHost = isAdminHostName(host);
+  const isAppHost = isAppHostName(host);
   const isControlHost = isAdminHost || isAppHost;
 
   return (
@@ -103,15 +74,8 @@ const App = () => {
         <AuthProvider>
           <BrowserRouter>
             <Routes>
-              <Route
-                path="/"
-                element={isAdminHost ? <Navigate to="/login" replace /> : isAppHost ? <AppHostEntryRedirect /> : <ServiceLandingPage />}
-              />
-
-              <Route
-                path="/login"
-                element={isAdminHost ? <LoginPage /> : isAppHost ? <AppHostEntryRedirect /> : <Navigate to="/" replace />}
-              />
+              <Route path="/" element={isControlHost ? <ControlHostEntry /> : <ServiceLandingPage />} />
+              <Route path="/login" element={isControlHost ? <LoginPage /> : <Navigate to="/" replace />} />
 
               <Route path="/free" element={<FreeLandingPage />} />
               <Route path="/free/gate" element={<FreeGatePage />} />
@@ -146,10 +110,29 @@ const App = () => {
                   <Route path="/audit" element={<AuditLogsPage />} />
                   <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
                   <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
-                  <Route path="/admin/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
-                  <Route path="/admin/apps/:appCode/runtime" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
-                  <Route path="/apps/:appCode" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
-                  <Route path="/apps/:appCode/*" element={<AdminRoute><AdminHostAppRedirect /></AdminRoute>} />
+                  <Route path="/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
+                  <Route
+                    path="/admin/apps/:appCode"
+                    element={<AdminRoute><WorkspaceRoutes /></AdminRoute>}
+                  >
+                    <Route index element={<Navigate to="runtime" replace />} />
+                    <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
+                    <Route path="internal" element={<Navigate to="../config" replace />} />
+                    <Route path="config" element={<AdminServerAppDetailPage />} />
+                    <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                    <Route path="trash" element={<AdminServerAppTrashPage />} />
+                  </Route>
+                  <Route
+                    path="/apps/:appCode"
+                    element={<AdminRoute><WorkspaceRoutes /></AdminRoute>}
+                  >
+                    <Route index element={<Navigate to="runtime" replace />} />
+                    <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
+                    <Route path="internal" element={<Navigate to="../config" replace />} />
+                    <Route path="config" element={<AdminServerAppDetailPage />} />
+                    <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                    <Route path="trash" element={<AdminServerAppTrashPage />} />
+                  </Route>
                   <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
                   <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
                   <Route path="/settings/reset-logs" element={<AdminRoute><ResetLogsPage /></AdminRoute>} />
@@ -157,28 +140,42 @@ const App = () => {
               )}
 
               {isAppHost && (
-                <Route
-                  path="/apps/:appCode"
-                  element={
-                    <AuthGate>
-                      <PanelRoute>
-                        <AdminRoute>
-                          <AppWorkspaceShell />
-                        </AdminRoute>
-                      </PanelRoute>
-                    </AuthGate>
-                  }
-                >
-                  <Route index element={<Navigate to="runtime" replace />} />
-                  <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
-                  <Route path="internal" element={<Navigate to="../config" replace />} />
-                  <Route path="config" element={<AdminServerAppDetailPage />} />
-                  <Route path="runtime" element={<AdminServerAppRuntimePage />} />
-                  <Route path="trash" element={<AdminServerAppTrashPage />} />
-                </Route>
+                <>
+                  <Route
+                    path="/apps"
+                    element={
+                      <AuthGate>
+                        <PanelRoute>
+                          <AdminRoute>
+                            <AdminServerAppsPage />
+                          </AdminRoute>
+                        </PanelRoute>
+                      </AuthGate>
+                    }
+                  />
+                  <Route
+                    path="/apps/:appCode"
+                    element={
+                      <AuthGate>
+                        <PanelRoute>
+                          <AdminRoute>
+                            <WorkspaceRoutes />
+                          </AdminRoute>
+                        </PanelRoute>
+                      </AuthGate>
+                    }
+                  >
+                    <Route index element={<Navigate to="runtime" replace />} />
+                    <Route path="dashboard" element={<Navigate to="../runtime" replace />} />
+                    <Route path="internal" element={<Navigate to="../config" replace />} />
+                    <Route path="config" element={<AdminServerAppDetailPage />} />
+                    <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                    <Route path="trash" element={<AdminServerAppTrashPage />} />
+                  </Route>
+                </>
               )}
 
-              <Route path="*" element={isAppHost ? <AppHostEntryRedirect /> : <NotFound />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
         </AuthProvider>

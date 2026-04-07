@@ -13,14 +13,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { postAdminRuntimeOps } from "@/lib/admin-auth";
 import { postFunction } from "@/lib/functions";
+import { postAdminFunction } from "@/lib/admin-auth";
 
 const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
 const WALLET_KIND_OPTIONS = ["auto", "soft", "premium"] as const;
 const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"] as const;
 const RUNTIME_TABS = ["simulator", "ops", "controls", "redeem", "entitlements", "wallets", "sessions", "transactions", "events"] as const;
+
+
 
 
 const FRIENDLY_ERROR_MAP: Record<string, string> = {
@@ -670,7 +672,7 @@ export function AdminServerAppRuntimePage() {
 
   const revokeEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
-      return await postAdminRuntimeOps({
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "revoke_entitlement",
         app_code: appCode,
         entitlement_id: entitlementId,
@@ -686,7 +688,7 @@ export function AdminServerAppRuntimePage() {
 
   const restoreEntitlementMutation = useMutation({
     mutationFn: async (entitlementId: string) => {
-      return await postAdminRuntimeOps({
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "restore_entitlement",
         app_code: appCode,
         entitlement_id: entitlementId,
@@ -701,7 +703,7 @@ export function AdminServerAppRuntimePage() {
 
   const revokeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      return await postAdminRuntimeOps({
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "revoke_session",
         app_code: appCode,
         session_id: sessionId,
@@ -717,7 +719,7 @@ export function AdminServerAppRuntimePage() {
 
   const restoreSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      return await postAdminRuntimeOps({
+      return await postAdminFunction("/server-app-runtime-ops", {
         action: "restore_session",
         app_code: appCode,
         session_id: sessionId,
@@ -790,7 +792,7 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy cleanup...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      const data = await postAdminRuntimeOps(payload);
+      const data = await postAdminFunction("/server-app-runtime-ops", payload);
       return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {
@@ -821,7 +823,7 @@ export function AdminServerAppRuntimePage() {
       setOpsLastPayload(formatJsonBlock(payload));
       setOpsStatus("Đang chạy adjust_wallet...");
       setOpsResult(formatJsonBlock({ ok: false, pending: true, payload }));
-      const data = await postAdminRuntimeOps(payload);
+      const data = await postAdminFunction("/server-app-runtime-ops", payload);
       return { payload, data };
     },
     onSuccess: async ({ payload, data: result }) => {

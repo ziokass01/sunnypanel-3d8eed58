@@ -19,7 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { postAdminRuntimeOps } from "@/lib/admin-auth";
+import { postAdminFunction } from "@/lib/admin-auth";
 
 type TrashSessionRow = {
   id: string;
@@ -47,10 +47,16 @@ type TrashEntitlementRow = {
   created_at: string;
 };
 
+
+async function postTrashOp(body: Record<string, unknown>) {
+  return await postAdminFunction("/server-app-runtime-ops", body);
+}
+
 type PendingDelete =
   | { kind: "session"; id: string; label: string }
   | { kind: "entitlement"; id: string; label: string }
   | null;
+
 
 function formatTime(value?: string | null) {
   if (!value) return "-";
@@ -129,13 +135,13 @@ export function AdminServerAppTrashPage() {
   const hardDeleteMutation = useMutation({
     mutationFn: async (payload: NonNullable<PendingDelete>) => {
       if (payload.kind === "session") {
-        return await postAdminRuntimeOps({
+        return await postTrashOp({
           action: "hard_delete_session",
           app_code: appCode,
           session_id: payload.id,
         });
       }
-      return await postAdminRuntimeOps({
+      return await postTrashOp({
         action: "hard_delete_entitlement",
         app_code: appCode,
         entitlement_id: payload.id,

@@ -5,6 +5,35 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/AuthProvider";
+import { buildWorkspacePath, isAppHostName } from "@/lib/appWorkspace";
+
+function defaultTarget() {
+  const isAppHost = isAppHostName();
+  if (!isAppHost) return "/dashboard";
+  const lastCode = window.localStorage.getItem("sunny:lastAppCode") || "find-dumps";
+  const rawSection = window.localStorage.getItem("sunny:lastAppSection");
+  const section = rawSection === "config" || rawSection === "trash" ? rawSection : "runtime";
+  return buildWorkspacePath(lastCode, section, "app");
+}
+
+function normalizeLoginTarget(rawTarget?: string | null) {
+  const value = String(rawTarget ?? "").trim();
+  if (!value) return defaultTarget();
+
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (url.origin === window.location.origin) {
+        return `${url.pathname}${url.search}${url.hash}`;
+      }
+    } catch {
+      return defaultTarget();
+    }
+    return defaultTarget();
+  }
+
+  return value.startsWith("/") ? value : `/${value}`;
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -18,16 +47,11 @@ export function LoginPage() {
 
   const nextTarget = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    return params.get("next")?.trim() || "";
+    return normalizeLoginTarget(params.get("next"));
   }, [location.search]);
 
   const redirectAfterLogin = useCallback((target?: string) => {
-    const safeTarget = String(target || "").trim();
-    if (/^https?:\/\//i.test(safeTarget)) {
-      window.location.assign(safeTarget);
-      return;
-    }
-    navigate(safeTarget || "/dashboard", { replace: true });
+    navigate(normalizeLoginTarget(target), { replace: true });
   }, [navigate]);
 
   useEffect(() => {

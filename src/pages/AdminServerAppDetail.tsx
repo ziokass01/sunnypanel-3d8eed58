@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { buildWorkspacePath, detectWorkspaceScope } from "@/lib/appWorkspace";
 
 const CONFIG_TABS = ["settings", "plans", "features", "wallet", "rewards"] as const;
 
@@ -220,6 +221,7 @@ function isPhaseMissingMessage(message?: string) {
 
 export function AdminServerAppDetailPage() {
   const { appCode = "find-dumps" } = useParams();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const fallback = appFallback(appCode);
@@ -519,6 +521,8 @@ export function AdminServerAppDetailPage() {
 
   const migrationHint = useMemo(() => isPhaseMissingMessage((error as Error | undefined)?.message), [error]);
   const activeTab = normalizeConfigTab(searchParams.get("tab"));
+  const workspaceScope = detectWorkspaceScope(location.pathname);
+  const runtimePath = buildWorkspacePath(appCode, "runtime", workspaceScope);
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">Đang tải cấu hình app...</div>;
@@ -540,7 +544,7 @@ export function AdminServerAppDetailPage() {
             {appDraft.public_enabled ? "Đang bật" : "Đang ẩn"}
           </Badge>
           <Button asChild variant="outline">
-            <Link to={`/apps/${appCode}/runtime`}>Mở runtime</Link>
+            <Link to={runtimePath}>Mở runtime</Link>
           </Button>
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>
         </div>

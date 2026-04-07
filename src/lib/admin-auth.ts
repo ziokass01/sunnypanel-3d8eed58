@@ -1,68 +1,65 @@
 import { supabase } from "@/integrations/supabase/client";
 import { postFunction } from "@/lib/functions";
 
-function buildAdminAuthError(message = "ADMIN_AUTH_REQUIRED") {
-  const err = new Error(message) as Error & { code?: string };
+function adminAuthRequiredError() {
+  const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
   err.code = "ADMIN_AUTH_REQUIRED";
   return err;
 }
 
-function isTokenExpiring(expiresAt?: number | null, skewSeconds = 90) {
-  if (!expiresAt) return false;
-  const nowSec = Math.floor(Date.now() / 1000);
-  return expiresAt <= nowSec + skewSeconds;
+function shouldRefreshToken(session: { access_token?: string | null; expires_at?: number | null } | null | undefined) {
+  if (!session?.access_token) return true;
+  const expiresAt = Number(session.expires_at ?? 0);
+  if (!expiresAt) return true;
+  return expiresAt * 1000 <= Date.now() + 60_000;
 }
 
-export async function getFreshAdminAuthToken(opts?: { forceRefresh?: boolean }) {
-  const { data: sessionData } = await supabase.auth.getSession();
-  let session = sessionData.session ?? null;
+function isInvalidJwtError(error: any) {
+  const status = Number(error?.status ?? error?.context?.status ?? 0);
+  const message = String(
+    error?.context?.json?.friendly_message
+      ?? error?.context?.json?.message
+      ?? error?.context?.json?.msg
+      ?? error?.message
+      ?? "",
+  ).toLowerCase();
 
-  if (!session?.refresh_token && !session?.access_token) {
-    throw buildAdminAuthError();
+  return status === 401 || message.includes("invalid jwt") || message.includes("jwt expired");
+}
+
+export async function getFreshAdminAuthToken(forceRefresh = false) {
+  let session = (await supabase.auth.getSession()).data.session;
+
+  if (forceRefresh || shouldRefreshToken(session)) {
+    const refreshed = await supabase.auth.refreshSession();
+    session = refreshed.data.session ?? (await supabase.auth.getSession()).data.session;
   }
 
-  const shouldRefresh = Boolean(opts?.forceRefresh) || isTokenExpiring(session?.expires_at ?? null);
-  if (shouldRefresh) {
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-    if (!refreshError && refreshData.session?.access_token) {
-      session = refreshData.session;
-    }
-  }
-
-  const token = String(session?.access_token ?? "").trim();
-  if (!token) {
-    throw buildAdminAuthError();
-  }
-
+  const token = session?.access_token ?? null;
+  if (!token) throw adminAuthRequiredError();
   return token;
 }
 
-export function isInvalidJwtError(error: any) {
-  const status = Number(error?.status ?? error?.context?.status ?? 0);
-  const code = String(error?.code ?? error?.context?.json?.code ?? "").toUpperCase();
-  const msg = [
-    error?.message,
-    error?.context?.json?.message,
-    error?.context?.json?.msg,
-    error?.context?.json?.error,
-    error?.context?.json?.friendly_message,
-  ]
-    .filter(Boolean)
-    .map((item) => String(item))
-    .join(" | ")
-    .toLowerCase();
-
-  return msg.includes("invalid jwt") || msg.includes("jwt") || status === 401 || code === "UNAUTHORIZED" || code === "ADMIN_AUTH_REQUIRED";
-}
-
-export async function postAdminRuntimeOps<T>(body: unknown) {
-  let token = await getFreshAdminAuthToken();
+export async function postAdminFunction<T>(
+  path: string,
+  body: unknown,
+  opts?: { headers?: Record<string, string>; withCredentials?: boolean },
+): Promise<T> {
+  const run = async (forceRefresh: boolean) => {
+    const authToken = await getFreshAdminAuthToken(forceRefresh);
+    return await postFunction<T>(path, body, {
+      authToken,
+      headers: opts?.headers,
+      withCredentials: opts?.withCredentials,
+    });
+  };
 
   try {
-    return await postFunction<T>("/server-app-runtime-ops", body, { authToken: token });
-  } catch (error) {
-    if (!isInvalidJwtError(error)) throw error;
-    token = await getFreshAdminAuthToken({ forceRefresh: true });
-    return await postFunction<T>("/server-app-runtime-ops", body, { authToken: token });
+    return await run(false);
+  } catch (error: any) {
+    if (isInvalidJwtError(error)) {
+      return await run(true);
+    }
+    throw error;
   }
 }
