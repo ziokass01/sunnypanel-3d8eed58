@@ -1,78 +1,116 @@
 # DEPLOY.md (Sunny License Manager)
 
-## TL;DR
-- Lovable chỉ **deploy frontend** (React/Vite).
-- Backend (schema/migrations + backend functions + secrets) phải được deploy/cấu hình trong **Lovable Cloud** (CLI/Cloud View).
+## Root cause (deploy mismatch)
+Live site không phản ánh code mới thường đến từ **frontend deploy mismatch**, không phải do thiếu route/component trong repo:
+- Build chạy từ sai branch/sai project/sai root directory nên artifacts không phải từ `main` của repo này.
+- `index.html` bị cache quá lâu nên browser giữ entry cũ, không tải bundle mới.
+- Custom domain có thể đang trỏ sang project deploy khác với project chứa commit mới.
+
+Repo hiện đã có đầy đủ các phần public/admin liên quan Reset Key/Reset Settings/Reset Logs. Vì vậy ưu tiên số 1 là khóa chặt cấu hình deploy frontend để luôn build đúng nguồn.
 
 ---
 
-## 0) Chốt 1 backend project duy nhất (tránh “Failed to fetch”)
-Nếu **project mismatch** (frontend gọi 1 project, backend functions/migrations lại ở project khác) thì browser sẽ báo **Failed to fetch**.
-
-✅ Checklist:
-- Project ref chuẩn (đang dùng): `ijvhlhdrncxtxosmnbtt`.
-- Frontend `.env` phải trùng: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PROJECT_ID` (và `VITE_SUPABASE_ANON_KEY` nếu có; hiện đang dùng `VITE_SUPABASE_PUBLISHABLE_KEY`).
-- CI/CLI phải `link` đúng **cùng project ref** trước khi `db push`/deploy functions.
-- Nếu bạn deploy qua GitHub Actions: đảm bảo secrets `SUPABASE_PROJECT_REF=ijvhlhdrncxtxosmnbtt` và workflow log ra project ref đang deploy.
-
-> Gặp “Failed to fetch”: 90% do **CORS** hoặc **deploy nhầm project**.
-
----
-
-## 1) CORS (trong backend settings)
-Nếu browser báo **Failed to fetch** (không có HTTP status), thường là CORS bị chặn.
-
-Trong backend → API → CORS Allowed Origins, thêm tối thiểu:
-- `https://mityangho.id.vn`
-- `https://www.mityangho.id.vn`
-- `https://sunnypanel.lovable.app`
-- `https://review--sunnypanel.lovable.app`
-
-> Lưu ý: các môi trường preview/review của Lovable cũng cần được allow (tuỳ backend settings).
+## Bất biến production (KHÔNG đổi)
+- Public domain: `https://mityangho.id.vn`
+- Admin domain: `https://admin.mityangho.id.vn`
+- Route đang dùng:
+  - `/`
+  - `/free`
+  - `/rent`
+  - `/reset-key`
+  - `/settings/reset-key`
+  - `/settings/reset-logs`
+- Supabase project ref: `ijvhlhdrncxtxosmnbtt`
+- Key format: `SUNNY-XXXX-XXXX-XXXX`
 
 ---
 
-## 2) Secrets bắt buộc (Backend)
-Thiếu secrets sẽ gây:
-- `/free` báo **FREE_NOT_READY**
-- `/admin/free-keys` bấm Test bị **UNAUTHORIZED/500**
+## Frontend production checklist (bắt buộc)
+### 1) Source mapping
+- Git repo: `ziokass01/sunnypanel-3d8eed58`
+- Production branch: `main`
+- Root directory: `.` (repo root)
+- Install command: `npm ci`
+- Build command: `npm run build`
+- Output directory: `dist`
 
-Bắt buộc:
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `PUBLIC_BASE_URL=https://mityangho.id.vn`
-- `ADMIN_EMAILS=<comma-separated admin emails>`
+### 2) Domain mapping
+- `mityangho.id.vn` và `admin.mityangho.id.vn` phải cùng map vào **đúng 1 frontend project production** build từ branch `main` nêu trên.
+- Không map custom domain sang preview project hoặc project clone.
 
-Khuyến nghị (anti-bot):
-- `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
+### 3) Chống stale frontend
+- Bắt buộc trả header cho HTML entry:
+  - `/index.html` → `Cache-Control: no-store, max-age=0, must-revalidate`
+- File đã có trong repo:
+  - `public/_headers` (static hosts hỗ trợ `_headers`)
+  - `vercel.json` (Vercel)
+  - `netlify.toml` (Netlify)
+
+### 4) SPA routing fallback
+- Mọi route frontend phải fallback về `/index.html` để tránh 404 khi F5 trực tiếp:
+  - `/reset-key`
+  - `/settings/reset-key`
+  - `/settings/reset-logs`
 
 ---
 
-## 3) Migrations FREE cần có
-Các lỗi kiểu `SERVER_RATE_LIMIT_MISCONFIG` xảy ra khi database **thiếu RPC/bảng** cho FREE rate-limit.
+## Env frontend (.env)
+Dùng đúng project production hiện tại:
 
-Tối thiểu cần có (chạy theo thứ tự timestamp bằng `db push`):
-- `supabase/migrations/20260205101000_free_schema.sql`
-- `supabase/migrations/20260205170000_free_rate_limit_and_admin_controls.sql`
-- `supabase/migrations/20260206150000_free_schema_runtime_fix.sql`
+```env
+VITE_SUPABASE_PROJECT_ID=ijvhlhdrncxtxosmnbtt
+VITE_SUPABASE_URL=https://ijvhlhdrncxtxosmnbtt.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<...>
 
----
+# Optional - define exact admin hostnames
+VITE_ADMIN_HOSTS=admin.mityangho.id.vn
 
-## 4) Deploy backend bằng CLI
-```bash
-supabase link --project-ref <PROJECT_REF>
-
-supabase db push
-
-supabase functions deploy free-config free-start free-gate free-reveal free-close \
-  admin-free-test admin-free-settings admin-free-block admin-free-unblock
+# Optional - required only if you turn on require_turnstile
+VITE_TURNSTILE_SITE_KEY=<...>
 ```
 
 ---
 
-## 5) Checklist sau deploy (Acceptance)
-1) `/admin/free-keys` → bấm **Test**: không 401, nếu thiếu `ADMIN_EMAILS` phải báo `SERVER_MISCONFIG_MISSING_ADMIN_EMAILS`.
-2) `/free` → load được config + key types, bấm **Get Key** hoạt động.
-3) `/free/gate`:
-   - chưa đủ delay → `TOO_FAST` và bị đá về `/free`.
-   - đủ delay → qua `/free/claim?...`.
-4) `/free/claim` reload không mint key mới, chỉ trả lại key đã reveal (idempotent).
+## Backend checklist (Supabase)
+### Link đúng project
+```bash
+supabase link --project-ref ijvhlhdrncxtxosmnbtt
+```
+
+### Deploy DB + functions
+```bash
+supabase db push
+
+supabase functions deploy free-config free-start free-gate free-reveal free-close free-resolve \
+  admin-free-test admin-free-settings admin-free-block admin-free-unblock reset-key verify-key
+```
+
+### Secrets tối thiểu
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `PUBLIC_BASE_URL=https://mityangho.id.vn`
+- `ADMIN_EMAILS=<comma-separated emails>`
+
+Turnstile (chỉ khi cần bật require_turnstile):
+- `TURNSTILE_SITE_KEY`
+- `TURNSTILE_SECRET_KEY`
+
+---
+
+## Quy trình redeploy frontend chuẩn
+1. Đảm bảo code đã merge vào `main`.
+2. Trigger production deploy từ `main` (không dùng preview URL làm production).
+3. Purge cache/CDN của 2 custom domains.
+4. Hard refresh trình duyệt (hoặc mở private window).
+5. Verify trực tiếp:
+   - Public `/` có 3 card: Thuê Website, Key Free, Reset Key.
+   - Public có route `/reset-key` hoạt động.
+   - Admin sidebar có `Reset Settings`, `Reset Logs`.
+
+---
+
+## Acceptance smoke tests
+- `npm run build` pass.
+- Public host render đúng card + route mới.
+- Admin host render đúng menu mới.
+- `/settings/reset-key` & `/settings/reset-logs` load bình thường.
+- Bật `require_turnstile` chỉ khi frontend có `VITE_TURNSTILE_SITE_KEY` và backend có secret tương ứng.
