@@ -1,0 +1,67 @@
+name: Deploy Supabase (DB + Edge Functions)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_db_push:
+        description: "Run supabase db push"
+        required: false
+        default: "false"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Show migration list
+        run: supabase migration list
+
+      - name: Repair legacy migration marker 20260327
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
+        run: supabase migration repair --status reverted 20260327 || true
+
+      - name: Push migrations
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
+        run: yes | supabase db push --include-all
+
+      - name: Deploy standard Edge Functions
+        run: |
+          find supabase/functions -mindepth 1 -maxdepth 1 -type d \
+            ! -name '_shared' \
+            ! -name 'server-app-runtime' \
+            ! -name 'server-app-runtime-ops' \
+            -printf '%f\n' | while read -r fn; do
+              echo "Deploying ${fn}"
+              supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
+            done
+
+      - name: Deploy runtime functions with verify_jwt disabled
+        run: |
+          supabase functions deploy server-app-runtime --project-ref "$PROJECT_REF" --no-verify-jwt
+          supabase functions deploy server-app-runtime-ops --project-ref "$PROJECT_REF" --no-verify-jwt
+
+      - name: Set function secrets
+        run: |
+          supabase secrets set \
+            ADMIN_EMAILS="${{ secrets.ADMIN_EMAILS }}" \
+            PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}" \
+            VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
+            TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
+            TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}" \
+            RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}"
