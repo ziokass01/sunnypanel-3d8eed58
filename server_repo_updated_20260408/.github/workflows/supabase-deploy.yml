@@ -40,8 +40,21 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_db_push == 'true' }}
         run: yes | supabase db push --include-all
 
-      - name: Deploy all Edge Functions
-        run: supabase functions deploy --project-ref "$PROJECT_REF"
+      - name: Deploy standard Edge Functions
+        run: |
+          find supabase/functions -mindepth 1 -maxdepth 1 -type d \
+            ! -name '_shared' \
+            ! -name 'server-app-runtime' \
+            ! -name 'server-app-runtime-ops' \
+            -printf '%f\n' | while read -r fn; do
+              echo "Deploying ${fn}"
+              supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
+            done
+
+      - name: Deploy runtime functions with verify_jwt disabled
+        run: |
+          supabase functions deploy server-app-runtime --project-ref "$PROJECT_REF" --no-verify-jwt
+          supabase functions deploy server-app-runtime-ops --project-ref "$PROJECT_REF" --no-verify-jwt
 
       - name: Set function secrets
         run: |
@@ -50,4 +63,5 @@ jobs:
             PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}" \
             VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
             TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
-            TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}"
+            TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}" \
+            RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}"
