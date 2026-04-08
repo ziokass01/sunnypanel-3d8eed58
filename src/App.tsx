@@ -37,6 +37,8 @@ import { ResetSettingsPage } from "@/pages/ResetSettings";
 import { ResetLogsPage } from "@/pages/ResetLogs";
 import { useAuth } from "@/auth/AuthProvider";
 import { isAdminHostName, isAppHostName } from "@/lib/appWorkspace";
+import { MobileGoogleStartPage } from "@/pages/MobileGoogleStart";
+import { MobileGoogleCallbackPage } from "@/pages/MobileGoogleCallback";
 
 const queryClient = new QueryClient();
 
@@ -77,6 +79,8 @@ const App = () => {
             <Routes>
               <Route path="/" element={isControlHost ? <ControlHostEntry /> : <ServiceLandingPage />} />
               <Route path="/login" element={isControlHost ? <LoginPage /> : <Navigate to="/" replace />} />
+              <Route path="/mobile-auth/google" element={<MobileGoogleStartPage />} />
+              <Route path="/mobile-auth/callback" element={<MobileGoogleCallbackPage />} />
 
               <Route path="/free" element={<FreeLandingPage />} />
               <Route path="/free/gate" element={<FreeGatePage />} />
