@@ -4,7 +4,7 @@ import { AppWindow, ChevronRight, Cog, Coins, Menu, Trash2, X } from "lucide-rea
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { buildWorkspacePath, detectWorkspaceScope, getWorkspaceListPath } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, buildWorkspacePath, detectWorkspaceScope, getWorkspaceListPath, isAdminHostName } from "@/lib/appWorkspace";
 
 const APP_META: Record<string, { label: string; note: string }> = {
   "find-dumps": {
@@ -56,6 +56,16 @@ export function AppWorkspaceShell() {
     window.localStorage.setItem("sunny:lastAppSection", activeKey);
   }, [appCode, activeKey]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !appCode) return;
+    if (!isAdminHostName(window.location.hostname)) return;
+    const target = buildAppWorkspaceUrl(appCode, activeKey as "runtime" | "config" | "charge" | "trash", "", window.location.search || "") + (window.location.hash || "");
+    const current = `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (current !== target) {
+      window.location.replace(target);
+    }
+  }, [appCode, activeKey, location.pathname, location.search, location.hash]);
+
   const handleBackToList = () => {
     window.location.assign(listPath);
   };
@@ -65,23 +75,23 @@ export function AppWorkspaceShell() {
   return (
     <section className="space-y-4 px-1">
       <div className="space-y-4 xl:hidden">
-        <div className="overflow-hidden rounded-[28px] border-slate-800 bg-[linear-gradient(135deg,#0b1220_0%,#111827_100%)] text-white shadow-[0_22px_55px_rgba(2,6,23,0.35)]">
+        <div className="overflow-hidden rounded-[26px] border border-slate-200/70 bg-white text-slate-950 shadow-[0_14px_34px_rgba(15,23,42,0.08)]">
           <div className="p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
-                  <AppWindow className="h-5 w-5 text-slate-950" />
+                  <AppWindow className="h-5 w-5 text-slate-700" />
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-white">{meta.label}</div>
-                  <div className="truncate text-xs text-slate-400">Runtime, cấu hình, charge rules và trash</div>
+                  <div className="truncate text-sm font-semibold text-slate-950">{meta.label}</div>
+                  <div className="truncate text-xs text-slate-500">Runtime, cấu hình, charge rules và trash</div>
                 </div>
               </div>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950"
+                className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-950 hover:text-white"
                 onClick={() => setMobileNavOpen(true)}
               >
                 <Menu className="h-5 w-5" />
@@ -89,8 +99,8 @@ export function AppWorkspaceShell() {
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-200">{activeLabel}</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-400">Không còn nhảy chéo host</span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-700">{activeLabel}</span>
+              <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-500">Không còn nhảy chéo host</span>
             </div>
           </div>
         </div>
@@ -103,26 +113,26 @@ export function AppWorkspaceShell() {
               className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px]"
               onClick={() => setMobileNavOpen(false)}
             />
-            <div className="absolute left-0 top-0 h-full w-[84vw] max-w-[340px] overflow-y-auto border-r border-white/10 bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] p-4 text-white shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+            <div className="absolute left-0 top-0 h-full w-[84vw] max-w-[340px] overflow-y-auto border-r border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)] p-4 text-slate-950 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-base font-semibold">Menu app</div>
-                  <div className="text-xs text-slate-400">Mở đúng mục cần dùng</div>
+                  <div className="text-base font-semibold text-slate-950">Menu app</div>
+                  <div className="text-xs text-slate-500">Mở đúng mục cần dùng</div>
                 </div>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950"
+                  className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-950 hover:text-white"
                   onClick={() => setMobileNavOpen(false)}
                 >
                   <X className="h-5 w-5" />
                 </Button>
               </div>
 
-              <div className="mt-5 rounded-[24px] border border-white/10 bg-white/6 p-4">
-                <div className="text-sm font-semibold text-white break-all">{meta.label}</div>
-                <div className="mt-2 text-xs leading-6 text-slate-400">{meta.note}</div>
+              <div className="mt-5 rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                <div className="text-sm font-semibold text-slate-950 break-all">{meta.label}</div>
+                <div className="mt-2 text-xs leading-6 text-slate-600">{meta.note}</div>
               </div>
 
               <div className="mt-5 grid gap-2">
@@ -143,7 +153,7 @@ export function AppWorkspaceShell() {
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-12 justify-start rounded-2xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950"
+                  className="h-12 justify-start rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-950 hover:text-white"
                   onClick={handleBackToList}
                 >
                   <ChevronRight className="mr-3 h-4 w-4 rotate-180" />
@@ -157,21 +167,21 @@ export function AppWorkspaceShell() {
 
       <div className="grid gap-6 xl:grid-cols-[288px_minmax(0,1fr)]">
         <aside className="hidden xl:sticky xl:top-6 xl:block xl:self-start">
-          <div className="overflow-hidden rounded-[30px] border-slate-800/80 bg-[linear-gradient(180deg,#0f172a_0%,#111827_100%)] text-white shadow-[0_30px_90px_rgba(2,6,23,0.34)]">
+          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white text-slate-950 shadow-[0_18px_44px_rgba(15,23,42,0.08)]">
             <div className="space-y-5 p-5">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
                   <AppWindow className="h-5 w-5 text-slate-950" />
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold tracking-wide text-white">{meta.label}</div>
-                  <div className="text-xs text-slate-400">Điều hướng nhanh tới từng khu app</div>
+                  <div className="truncate text-sm font-semibold tracking-wide text-slate-950">{meta.label}</div>
+                  <div className="text-xs text-slate-500">Điều hướng nhanh tới từng khu app</div>
                 </div>
               </div>
 
-              <div className="rounded-[24px] border border-white/10 bg-white/6 p-4">
-                <div className="text-sm font-medium text-slate-200">Khu điều hành app</div>
-                <div className="mt-2 text-xs leading-6 text-slate-400">{meta.note}</div>
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="text-sm font-medium text-slate-900">Khu điều hành app</div>
+                <div className="mt-2 text-xs leading-6 text-slate-600">{meta.note}</div>
               </div>
 
               <div className="grid gap-2">
@@ -185,7 +195,7 @@ export function AppWorkspaceShell() {
 
               <Button
                 variant="ghost"
-                className="h-11 w-full justify-start rounded-2xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950"
+                className="h-11 w-full justify-start rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-950 hover:text-white"
                 onClick={handleBackToList}
               >
                 <ChevronRight className="mr-2 h-4 w-4 rotate-180" />
