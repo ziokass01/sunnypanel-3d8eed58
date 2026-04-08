@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
-import { AppWindow, ChevronRight, Cog, Menu, Trash2, X } from "lucide-react";
+import { AppWindow, ChevronRight, Cog, Coins, Menu, Trash2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,17 +9,18 @@ import { buildWorkspacePath, detectWorkspaceScope, getWorkspaceListPath } from "
 const APP_META: Record<string, { label: string; note: string }> = {
   "find-dumps": {
     label: "Find Dumps",
-    note: "Khu app này giữ 3 mục chính: runtime, cấu hình và trash. Không còn trang trung gian thừa.",
+    note: "Khu app này giữ 4 mục chính: runtime, cấu hình, charge rules và trash. Không còn trang trung gian thừa.",
   },
   "free-fire": {
     label: "Free Fire",
-    note: "Khu app riêng của Free Fire. Giữ runtime, cấu hình và trash để dọn dữ liệu cuối cùng.",
+    note: "Khu app riêng của Free Fire. Giữ runtime, cấu hình, charge rules và trash để dọn dữ liệu cuối cùng.",
   },
 };
 
 const NAV_ITEMS = [
   { key: "runtime", label: "Runtime app", icon: AppWindow },
   { key: "config", label: "Cấu hình app", icon: Cog },
+  { key: "charge", label: "Charge / Credit Rules", icon: Coins },
   { key: "trash", label: "Trash", icon: Trash2 },
 ] as const;
 
@@ -46,7 +47,7 @@ export function AppWorkspaceShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const scope = detectWorkspaceScope(location.pathname);
   const listPath = useMemo(() => getWorkspaceListPath(scope, location.pathname), [scope, location.pathname]);
-  const activeKey = location.pathname.includes("/trash") ? "trash" : location.pathname.includes("/config") ? "config" : "runtime";
+  const activeKey = location.pathname.includes("/trash") ? "trash" : location.pathname.includes("/charge") ? "charge" : location.pathname.includes("/config") ? "config" : "runtime";
   const activeLabel = NAV_ITEMS.find((item) => item.key === activeKey)?.label ?? "Runtime app";
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export function AppWorkspaceShell() {
     window.location.assign(listPath);
   };
 
-  const buildNavPath = (section: "runtime" | "config" | "trash") => buildWorkspacePath(appCode, section, scope, "", "", location.pathname);
+  const buildNavPath = (section: "runtime" | "config" | "charge" | "trash") => buildWorkspacePath(appCode, section, scope, "", "", location.pathname);
 
   return (
     <section className="space-y-4 px-1">
@@ -73,7 +74,7 @@ export function AppWorkspaceShell() {
                 </div>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-white">{meta.label}</div>
-                  <div className="truncate text-xs text-slate-400">Runtime, cấu hình và trash</div>
+                  <div className="truncate text-xs text-slate-400">Runtime, cấu hình, charge rules và trash</div>
                 </div>
               </div>
               <Button

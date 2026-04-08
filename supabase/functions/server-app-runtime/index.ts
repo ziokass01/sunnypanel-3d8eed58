@@ -178,6 +178,7 @@ Deno.serve(async (req) => {
     const redeemKey = asBodyString((body as any).redeem_key);
     const featureCode = asBodyString((body as any).feature_code);
     const walletKind = asBodyString((body as any).wallet_kind, "auto") || "auto";
+    const quantity = Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1));
     const ipHash = await sha256Hex(getIp(req));
 
     if (!action) return runtimeJson(400, { ok: false, code: "MISSING_ACTION" }, origin);
@@ -295,6 +296,7 @@ Deno.serve(async (req) => {
         sessionToken,
         featureCode,
         walletKind,
+        quantity,
       });
       await logSafe({
         ok: true,
@@ -334,7 +336,7 @@ Deno.serve(async (req) => {
             wallet_kind: asBodyString((body as any).wallet_kind) || null,
             client_version: asBodyString((body as any).client_version) || null,
             ip_hash: await sha256Hex(getIp(req)),
-            meta: { status },
+            meta: { status, quantity: Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1)) },
           });
         }
       }

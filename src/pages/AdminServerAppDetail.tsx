@@ -65,6 +65,14 @@ type ServerAppFeatureRow = {
   premium_cost: string | number;
   reset_period: string | null;
   sort_order: number;
+  category: string | null;
+  group_key: string | null;
+  icon_key: string | null;
+  badge_label: string | null;
+  visible_to_guest: boolean;
+  charge_unit: number;
+  charge_on_success_only: boolean;
+  client_accumulate_units: boolean;
 };
 
 type ServerAppWalletRuleRow = {
@@ -77,6 +85,12 @@ type ServerAppWalletRuleRow = {
   soft_daily_reset_amount: string | number;
   premium_daily_reset_amount: string | number;
   consume_priority: 'soft_first' | 'premium_first';
+  soft_daily_reset_mode: 'legacy_floor' | 'debt_floor';
+  premium_daily_reset_mode: 'legacy_floor' | 'debt_floor';
+  soft_floor_credit: string | number;
+  premium_floor_credit: string | number;
+  soft_allow_negative: boolean | null;
+  premium_allow_negative: boolean | null;
   notes: string | null;
 };
 
@@ -129,15 +143,19 @@ const PLAN_TEMPLATES: Record<string, ServerAppPlanRow[]> = {
 
 const FEATURE_TEMPLATES: Record<string, ServerAppFeatureRow[]> = {
   "find-dumps": [
-    { app_code: "find-dumps", feature_code: "search_basic", title: "Search cơ bản", description: "Tìm class, method, offset cơ bản", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10 },
-    { app_code: "find-dumps", feature_code: "batch_search", title: "Batch search", description: "Tìm nhiều dòng trong 1 file truy vấn", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 0.75, premium_cost: 0.25, reset_period: "daily", sort_order: 20 },
-    { app_code: "find-dumps", feature_code: "export_json", title: "Export JSON", description: "Xuất kết quả dạng JSON", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1.2, premium_cost: 0.45, reset_period: "daily", sort_order: 30 },
-    { app_code: "find-dumps", feature_code: "background_queue", title: "Background queue", description: "Xử lý batch nền và ưu tiên hàng đợi", enabled: true, min_plan: "pro", requires_credit: true, soft_cost: 2.4, premium_cost: 0.9, reset_period: "daily", sort_order: 40 },
+    { app_code: "find-dumps", feature_code: "search_basic", title: "Search cơ bản", description: "Tìm class, method, offset cơ bản", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "search", group_key: "find", icon_key: "search", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "batch_search", title: "Batch search", description: "Tìm nhiều dòng trong 1 file truy vấn", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 20, category: "search", group_key: "batch", icon_key: "batch", badge_label: "Thường", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
+    { app_code: "find-dumps", feature_code: "export_plain", title: "Export", description: "Xuất kết quả text thường", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 25, category: "export", group_key: "result", icon_key: "export", badge_label: "Thường", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "export_json", title: "Export JSON", description: "Xuất kết quả dạng JSON", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 30, category: "export", group_key: "result", icon_key: "json", badge_label: "JSON", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "background_queue", title: "Background queue", description: "Xử lý batch nền và ưu tiên hàng đợi", enabled: true, min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 40, category: "search", group_key: "batch", icon_key: "queue", badge_label: "VIP", visible_to_guest: false, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "convert_image", title: "Convert image", description: "Đổi ảnh sang header .h", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 50, category: "tools", group_key: "image", icon_key: "image", badge_label: "Tool", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "encode_decode", title: "Encode / Decode", description: "Bộ codec kiểu toolbox", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 60, category: "tools", group_key: "codec", icon_key: "codec", badge_label: "Tool", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "hex_edit", title: "Hex edit", description: "Mở file và sửa hex rồi lưu", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 70, category: "tools", group_key: "hex", icon_key: "hex", badge_label: "Tool", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
   ],
   "free-fire": [
-    { app_code: "free-fire", feature_code: "free_key", title: "Free key", description: "Luồng vượt free nhận key", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10 },
-    { app_code: "free-fire", feature_code: "vip_2pass", title: "VIP 2-pass", description: "Loại key cần vượt 2 lượt", enabled: true, min_plan: "go", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 20 },
-    { app_code: "free-fire", feature_code: "reset_key", title: "Reset key", description: "Khả năng reset nếu key cho phép", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 0.9, premium_cost: 0.3, reset_period: "daily", sort_order: 30 },
+    { app_code: "free-fire", feature_code: "free_key", title: "Free key", description: "Luồng vượt free nhận key", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "key", group_key: "free", icon_key: "key", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "free-fire", feature_code: "vip_2pass", title: "VIP 2-pass", description: "Loại key cần vượt 2 lượt", enabled: true, min_plan: "go", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 20, category: "key", group_key: "vip", icon_key: "key", badge_label: "VIP", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "free-fire", feature_code: "reset_key", title: "Reset key", description: "Khả năng reset nếu key cho phép", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 30, category: "key", group_key: "reset", icon_key: "reset", badge_label: "Thường", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
   ],
 };
 
@@ -161,11 +179,17 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     premium_wallet_label: "Credit kim cương",
     allow_decimal: true,
     soft_daily_reset_enabled: true,
-    premium_daily_reset_enabled: false,
+    premium_daily_reset_enabled: true,
     soft_daily_reset_amount: 5,
-    premium_daily_reset_amount: 0,
+    premium_daily_reset_amount: 5,
     consume_priority: 'soft_first',
-    notes: "Credit thường reset mỗi ngày. Credit kim cương giữ lâu hơn và hao ít hơn.",
+    soft_daily_reset_mode: 'debt_floor',
+    premium_daily_reset_mode: 'debt_floor',
+    soft_floor_credit: 5,
+    premium_floor_credit: 5,
+    soft_allow_negative: true,
+    premium_allow_negative: true,
+    notes: "Credit âm được trừ nợ ở kỳ reset kế tiếp. Ưu tiên hao credit thường trước, credit kim cương sau.",
   },
   "free-fire": {
     app_code: "free-fire",
@@ -177,6 +201,12 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     soft_daily_reset_amount: 3,
     premium_daily_reset_amount: 0,
     consume_priority: 'soft_first',
+    soft_daily_reset_mode: 'debt_floor',
+    premium_daily_reset_mode: 'legacy_floor',
+    soft_floor_credit: 3,
+    premium_floor_credit: 0,
+    soft_allow_negative: true,
+    premium_allow_negative: false,
     notes: "Dùng decimal để tránh cảm giác lạm phát credit.",
   },
 };
@@ -189,6 +219,11 @@ function numericInput(value: string | number | null | undefined) {
 function normalizeDecimal(value: string | number | null | undefined) {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? Number(num.toFixed(2)) : 0;
+}
+
+function normalizeInteger(value: string | number | null | undefined, fallback = 1) {
+  const num = Number(value ?? fallback);
+  return Number.isFinite(num) ? Math.max(1, Math.trunc(num)) : fallback;
 }
 
 function appFallback(appCode?: string) {
@@ -372,6 +407,14 @@ export function AdminServerAppDetailPage() {
           premium_cost: normalizeDecimal(row.premium_cost),
           reset_period: row.reset_period || "daily",
           sort_order: row.sort_order || (index + 1) * 10,
+          category: row.category?.trim() || 'tools',
+          group_key: row.group_key?.trim() || 'general',
+          icon_key: row.icon_key?.trim() || null,
+          badge_label: row.badge_label?.trim() || null,
+          visible_to_guest: Boolean(row.visible_to_guest ?? true),
+          charge_unit: normalizeInteger(row.charge_unit, 1),
+          charge_on_success_only: Boolean(row.charge_on_success_only ?? true),
+          client_accumulate_units: Boolean(row.client_accumulate_units ?? false),
         }))
         .filter((row) => row.feature_code);
       const keepCodes = new Set(payload.map((row) => row.feature_code));
@@ -407,6 +450,12 @@ export function AdminServerAppDetailPage() {
         soft_daily_reset_amount: normalizeDecimal(walletDraft.soft_daily_reset_amount),
         premium_daily_reset_amount: normalizeDecimal(walletDraft.premium_daily_reset_amount),
         consume_priority: walletDraft.consume_priority === 'premium_first' ? 'premium_first' : 'soft_first',
+        soft_daily_reset_mode: walletDraft.soft_daily_reset_mode === 'legacy_floor' ? 'legacy_floor' : 'debt_floor',
+        premium_daily_reset_mode: walletDraft.premium_daily_reset_mode === 'legacy_floor' ? 'legacy_floor' : 'debt_floor',
+        soft_floor_credit: normalizeDecimal(walletDraft.soft_floor_credit),
+        premium_floor_credit: normalizeDecimal(walletDraft.premium_floor_credit),
+        soft_allow_negative: Boolean(walletDraft.soft_allow_negative ?? true),
+        premium_allow_negative: Boolean(walletDraft.premium_allow_negative ?? true),
         notes: walletDraft.notes?.trim() || null,
       };
       const res = await sb.from("server_app_wallet_rules").upsert(payload, { onConflict: "app_code" });
@@ -475,6 +524,14 @@ export function AdminServerAppDetailPage() {
         premium_cost: 0,
         reset_period: "daily",
         sort_order: (prev.length + 1) * 10,
+        category: 'tools',
+        group_key: 'general',
+        icon_key: '',
+        badge_label: '',
+        visible_to_guest: true,
+        charge_unit: 1,
+        charge_on_success_only: true,
+        client_accumulate_units: false,
       },
     ]));
   };
@@ -728,6 +785,18 @@ export function AdminServerAppDetailPage() {
                     <div className="space-y-2"><div className="text-sm font-medium">Chu kỳ reset</div><Select value={feature.reset_period || "daily"} onValueChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, reset_period: value } : item))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">Daily</SelectItem><SelectItem value="weekly">Weekly</SelectItem><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="none">None</SelectItem></SelectContent></Select></div>
                     <div className="flex items-center justify-between rounded-2xl border p-3"><div><div className="font-medium">Cần credit</div><div className="text-xs text-muted-foreground">Tắt nếu chỉ cần đúng plan là dùng được.</div></div><Switch checked={feature.requires_credit} onCheckedChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, requires_credit: value } : item))} /></div>
                   </div>
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div className="space-y-2"><div className="text-sm font-medium">Nhóm lớn</div><Input value={feature.category || ""} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, category: e.target.value } : item))} placeholder="search / export / tools" /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Nhóm con</div><Input value={feature.group_key || ""} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, group_key: e.target.value } : item))} placeholder="find / batch / codec" /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Icon key</div><Input value={feature.icon_key || ""} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, icon_key: e.target.value } : item))} placeholder="search / json / hex" /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Badge</div><Input value={feature.badge_label || ""} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, badge_label: e.target.value } : item))} placeholder="Miễn phí / JSON / Tool" /></div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div className="space-y-2"><div className="text-sm font-medium">Charge unit</div><Input value={String(feature.charge_unit ?? 1)} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, charge_unit: Number(e.target.value || 1) } : item))} placeholder="1 hoặc 5" /></div>
+                    <div className="flex items-center justify-between rounded-2xl border p-3"><div><div className="font-medium">Hiện cho guest</div><div className="text-xs text-muted-foreground">Tắt nếu chỉ muốn user đã login mới thấy.</div></div><Switch checked={Boolean(feature.visible_to_guest ?? true)} onCheckedChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, visible_to_guest: value } : item))} /></div>
+                    <div className="flex items-center justify-between rounded-2xl border p-3"><div><div className="font-medium">Charge khi thành công</div><div className="text-xs text-muted-foreground">App sẽ chỉ sync charge sau khi thao tác xong.</div></div><Switch checked={Boolean(feature.charge_on_success_only ?? true)} onCheckedChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, charge_on_success_only: value } : item))} /></div>
+                    <div className="flex items-center justify-between rounded-2xl border p-3"><div><div className="font-medium">Cộng dồn local</div><div className="text-xs text-muted-foreground">Ví dụ batch 5 dòng mới charge 1 lần.</div></div><Switch checked={Boolean(feature.client_accumulate_units ?? false)} onCheckedChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, client_accumulate_units: value } : item))} /></div>
+                  </div>
                 </div>
               ))}
               <div className="flex flex-wrap justify-between gap-2">
@@ -763,21 +832,6 @@ export function AdminServerAppDetailPage() {
                   </div>
                   <Switch checked={Boolean(walletDraft.allow_decimal ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, allow_decimal: value }))} />
                 </div>
-                <div className="flex items-center justify-between rounded-2xl border p-3">
-                  <div>
-                    <div className="font-medium">Reset credit thường mỗi ngày</div>
-                    <div className="text-xs text-muted-foreground">Thường nên bật để user có quota free hàng ngày.</div>
-                  </div>
-                  <Switch checked={Boolean(walletDraft.soft_daily_reset_enabled ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_enabled: value }))} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Số credit thường reset / ngày</div>
-                  <Input value={numericInput(walletDraft.soft_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_amount: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Số credit kim cương reset / ngày</div>
-                  <Input value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: e.target.value }))} />
-                </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Ưu tiên trừ credit khi app gửi `auto`</div>
                   <Select value={walletDraft.consume_priority || 'soft_first'} onValueChange={(value) => setWalletDraft((prev) => ({ ...prev, consume_priority: value === 'premium_first' ? 'premium_first' : 'soft_first' }))}>
@@ -789,6 +843,38 @@ export function AdminServerAppDetailPage() {
                   </Select>
                   <div className="text-xs text-muted-foreground">Find Dumps nên để `soft_first` để tiêu quota thường trước. App chỉ gửi `auto`, server sẽ quyết định thứ tự trừ thật.</div>
                 </div>
+                <div className="flex items-center justify-between rounded-2xl border p-3">
+                  <div>
+                    <div className="font-medium">Reset credit thường mỗi ngày</div>
+                    <div className="text-xs text-muted-foreground">Bật để áp quy tắc floor/debt hàng ngày.</div>
+                  </div>
+                  <Switch checked={Boolean(walletDraft.soft_daily_reset_enabled ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_enabled: value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Mức reset credit thường</div>
+                  <Input value={numericInput(walletDraft.soft_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_amount: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Floor credit thường</div>
+                  <Input value={numericInput(walletDraft.soft_floor_credit)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_floor_credit: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Reset mode thường</div>
+                  <Select value={walletDraft.soft_daily_reset_mode || 'debt_floor'} onValueChange={(value) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_mode: value === 'legacy_floor' ? 'legacy_floor' : 'debt_floor' }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="debt_floor">Reset về floor và trừ nợ trước</SelectItem>
+                      <SelectItem value="legacy_floor">Legacy floor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border p-3">
+                  <div>
+                    <div className="font-medium">Cho phép âm credit thường</div>
+                    <div className="text-xs text-muted-foreground">Nếu bật, thao tác thành công vẫn trừ và ví có thể âm.</div>
+                  </div>
+                  <Switch checked={Boolean(walletDraft.soft_allow_negative ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, soft_allow_negative: value }))} />
+                </div>
                 <div className="flex items-center justify-between rounded-2xl border p-3 md:col-span-2">
                   <div>
                     <div className="font-medium">Reset credit kim cương định kỳ</div>
@@ -796,9 +882,34 @@ export function AdminServerAppDetailPage() {
                   </div>
                   <Switch checked={Boolean(walletDraft.premium_daily_reset_enabled ?? false)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_enabled: value }))} />
                 </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Mức reset credit kim cương</div>
+                  <Input value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Floor credit kim cương</div>
+                  <Input value={numericInput(walletDraft.premium_floor_credit)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_floor_credit: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Reset mode kim cương</div>
+                  <Select value={walletDraft.premium_daily_reset_mode || 'debt_floor'} onValueChange={(value) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_mode: value === 'legacy_floor' ? 'legacy_floor' : 'debt_floor' }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="debt_floor">Reset về floor và trừ nợ trước</SelectItem>
+                      <SelectItem value="legacy_floor">Legacy floor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border p-3">
+                  <div>
+                    <div className="font-medium">Cho phép âm credit kim cương</div>
+                    <div className="text-xs text-muted-foreground">Nên bật khi muốn app tiếp tục chạy rồi trừ nợ ở kỳ reset.</div>
+                  </div>
+                  <Switch checked={Boolean(walletDraft.premium_allow_negative ?? true)} onCheckedChange={(value) => setWalletDraft((prev) => ({ ...prev, premium_allow_negative: value }))} />
+                </div>
                 <div className="space-y-2 md:col-span-2">
                   <div className="text-sm font-medium">Ghi chú ví</div>
-                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: Find Dumps ưu tiên trừ credit thường trước, premium chỉ dùng khi soft không đủ hoặc admin ép premium..." />
+                  <Textarea rows={4} value={walletDraft.notes || ""} onChange={(e) => setWalletDraft((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Ví dụ: soft first, cho âm ví, batch 5 dòng mới sync charge 1 lần." />
                 </div>
               </div>
               <div className="flex justify-end">

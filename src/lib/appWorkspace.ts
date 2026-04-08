@@ -74,7 +74,7 @@ export function getWorkspaceListPath(scope: WorkspaceScope = "auto", pathname?: 
 
 export function buildWorkspacePath(
   appCode: string,
-  section: "config" | "runtime" | "trash" = "runtime",
+  section: "config" | "runtime" | "charge" | "trash" = "runtime",
   scope: WorkspaceScope = "auto",
   extraPath = "",
   search = "",
@@ -82,7 +82,7 @@ export function buildWorkspacePath(
 ) {
   const base = getWorkspaceListPath(scope, pathname);
   const safeApp = encodeURIComponent(String(appCode || "").trim());
-  const safeSection = section === "config" ? "config" : section === "trash" ? "trash" : "runtime";
+  const safeSection = section === "config" ? "config" : section === "charge" ? "charge" : section === "trash" ? "trash" : "runtime";
   const suffix = extraPath ? `/${String(extraPath).replace(/^\/+/, "")}` : "";
   const safeSearch = search || "";
   return `${base}/${safeApp}/${safeSection}${suffix}${safeSearch}`;
@@ -94,13 +94,13 @@ export function getAdminAppsUrl() {
 
 export function buildAppWorkspaceUrl(
   appCode: string,
-  section: "config" | "runtime" | "trash" = "runtime",
+  section: "config" | "runtime" | "charge" | "trash" = "runtime",
   extraPath = "",
   search = "",
 ) {
   const origin = getAppWorkspaceOrigin();
   const safeApp = encodeURIComponent(String(appCode || "").trim());
-  const safeSection = section === "config" ? "config" : section === "trash" ? "trash" : "runtime";
+  const safeSection = section === "config" ? "config" : section === "charge" ? "charge" : section === "trash" ? "trash" : "runtime";
   const suffix = extraPath ? `/${String(extraPath).replace(/^\/+/, "")}` : "";
   const safeSearch = search || "";
   return `${origin}/apps/${safeApp}/${safeSection}${suffix}${safeSearch}`;

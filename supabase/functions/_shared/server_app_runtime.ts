@@ -21,6 +21,14 @@ export type RuntimeFeature = {
   premium_cost: number;
   reset_period: string;
   sort_order: number;
+  category: string;
+  group_key: string;
+  icon_key: string | null;
+  badge_label: string | null;
+  visible_to_guest: boolean;
+  charge_unit: number;
+  charge_on_success_only: boolean;
+  client_accumulate_units: boolean;
 };
 
 export type RuntimeAppState = {
@@ -74,6 +82,12 @@ type RuntimeWalletRules = {
   soft_daily_reset_amount: number;
   premium_daily_reset_amount: number;
   consume_priority: 'soft_first' | 'premium_first';
+  soft_daily_reset_mode: 'legacy_floor' | 'debt_floor';
+  premium_daily_reset_mode: 'legacy_floor' | 'debt_floor';
+  soft_floor_credit: number;
+  premium_floor_credit: number;
+  soft_allow_negative: boolean;
+  premium_allow_negative: boolean;
 };
 
 type RuntimeControls = {
@@ -209,6 +223,18 @@ function asNumber(value: unknown, fallback = 0) {
 
 function round2(value: number) {
   return Number(value.toFixed(2));
+}
+
+function applyResetFloorWithDebt(prevBalance: number, target: number, mode: "legacy_floor" | "debt_floor") {
+  const safeTarget = round2(Math.max(0, target));
+  const prev = round2(prevBalance);
+  if (safeTarget <= 0) return prev;
+  if (mode === "legacy_floor") {
+    return round2(Math.max(prev, safeTarget));
+  }
+  if (prev >= safeTarget) return prev;
+  if (prev >= 0) return safeTarget;
+  return round2(prev + safeTarget);
 }
 
 function getNowIso() {
@@ -379,7 +405,7 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_features")
-    .select("feature_code,title,description,min_plan,requires_credit,soft_cost,premium_cost,reset_period,sort_order")
+    .select("feature_code,title,description,min_plan,requires_credit,soft_cost,premium_cost,reset_period,sort_order,category,group_key,icon_key,badge_label,visible_to_guest,charge_unit,charge_on_success_only,client_accumulate_units")
     .eq("app_code", appCode)
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
@@ -395,6 +421,14 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
     premium_cost: asNumber(row.premium_cost),
     reset_period: asString(row.reset_period, "daily"),
     sort_order: Math.trunc(asNumber(row.sort_order)),
+    category: asString(row.category, "tools"),
+    group_key: asString(row.group_key, "general"),
+    icon_key: asNullableString(row.icon_key),
+    badge_label: asNullableString(row.badge_label),
+    visible_to_guest: Boolean(row.visible_to_guest ?? true),
+    charge_unit: Math.max(1, Math.trunc(asNumber(row.charge_unit, 1))),
+    charge_on_success_only: Boolean(row.charge_on_success_only ?? true),
+    client_accumulate_units: Boolean(row.client_accumulate_units ?? false),
   }));
 }
 
@@ -402,7 +436,7 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_wallet_rules")
-    .select("soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,consume_priority")
+    .select("soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,consume_priority,soft_daily_reset_mode,premium_daily_reset_mode,soft_floor_credit,premium_floor_credit,soft_allow_negative,premium_allow_negative")
     .eq("app_code", appCode)
     .maybeSingle();
 
@@ -413,6 +447,12 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
     soft_daily_reset_amount: asNumber(data?.soft_daily_reset_amount),
     premium_daily_reset_amount: asNumber(data?.premium_daily_reset_amount),
     consume_priority: String(data?.consume_priority ?? 'soft_first').trim() === 'premium_first' ? 'premium_first' : 'soft_first',
+    soft_daily_reset_mode: String(data?.soft_daily_reset_mode ?? 'debt_floor').trim() === 'legacy_floor' ? 'legacy_floor' : 'debt_floor',
+    premium_daily_reset_mode: String(data?.premium_daily_reset_mode ?? 'debt_floor').trim() === 'legacy_floor' ? 'legacy_floor' : 'debt_floor',
+    soft_floor_credit: asNumber(data?.soft_floor_credit, 5),
+    premium_floor_credit: asNumber(data?.premium_floor_credit, 5),
+    soft_allow_negative: Boolean(data?.soft_allow_negative ?? true),
+    premium_allow_negative: Boolean(data?.premium_allow_negative ?? true),
   };
 }
 
@@ -641,17 +681,17 @@ async function ensureWalletFresh(appCode: string, accountRef: string, currentPla
   let touched = false;
 
   const softTarget = round2(Math.max(
-    walletRules.soft_daily_reset_enabled ? walletRules.soft_daily_reset_amount : 0,
+    walletRules.soft_daily_reset_enabled ? Math.max(walletRules.soft_daily_reset_amount, walletRules.soft_floor_credit) : 0,
     currentPlan?.daily_soft_credit ?? 0,
   ));
   const premiumTarget = round2(Math.max(
-    walletRules.premium_daily_reset_enabled ? walletRules.premium_daily_reset_amount : 0,
+    walletRules.premium_daily_reset_enabled ? Math.max(walletRules.premium_daily_reset_amount, walletRules.premium_floor_credit) : 0,
     currentPlan?.daily_premium_credit ?? 0,
   ));
 
   if (walletRules.soft_daily_reset_enabled && (!wallet.last_soft_reset_at || wallet.last_soft_reset_at < cycleStartIso)) {
     const prev = nextSoftBalance;
-    nextSoftBalance = round2(Math.max(nextSoftBalance, softTarget));
+    nextSoftBalance = applyResetFloorWithDebt(nextSoftBalance, softTarget, walletRules.soft_daily_reset_mode);
     nextSoftResetAt = getNowIso();
     touched = true;
     if (nextSoftBalance !== prev) {
@@ -674,7 +714,7 @@ async function ensureWalletFresh(appCode: string, accountRef: string, currentPla
 
   if (walletRules.premium_daily_reset_enabled && (!wallet.last_premium_reset_at || wallet.last_premium_reset_at < cycleStartIso)) {
     const prev = nextPremiumBalance;
-    nextPremiumBalance = round2(Math.max(nextPremiumBalance, premiumTarget));
+    nextPremiumBalance = applyResetFloorWithDebt(nextPremiumBalance, premiumTarget, walletRules.premium_daily_reset_mode);
     nextPremiumResetAt = getNowIso();
     touched = true;
     if (nextPremiumBalance !== prev) {
@@ -1147,9 +1187,10 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     const minRank = getPlanRank(feature.min_plan);
     const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
+    const guestVisible = session?.account_ref ? true : feature.visible_to_guest;
     return {
       ...feature,
-      allowed: currentPlanRank >= minRank,
+      allowed: guestVisible && currentPlanRank >= minRank,
       effective_soft_cost: round2(feature.soft_cost * softMultiplier),
       effective_premium_cost: round2(feature.premium_cost * premiumMultiplier),
     };
@@ -1366,11 +1407,13 @@ export async function consumeRuntimeFeature(params: {
   sessionToken: string;
   featureCode: string;
   walletKind?: string | null;
+  quantity?: number | null;
 }) {
   const appCode = asString(params.appCode);
   const sessionToken = asString(params.sessionToken);
   const featureCode = asString(params.featureCode);
   const requestedWalletKind = asString(params.walletKind, "auto").toLowerCase();
+  const quantity = Math.max(1, Math.trunc(asNumber(params.quantity, 1)));
   if (!sessionToken) throw Object.assign(new Error("MISSING_SESSION_TOKEN"), { status: 400, code: "MISSING_SESSION_TOKEN" });
   if (!featureCode) throw Object.assign(new Error("MISSING_FEATURE_CODE"), { status: 400, code: "MISSING_FEATURE_CODE" });
 
@@ -1399,8 +1442,8 @@ export async function consumeRuntimeFeature(params: {
   }
 
   const wallet = await ensureWalletFresh(appCode, asString(session.account_ref), currentPlan, settings, asNullableString(session.device_id));
-  const effectiveSoftCost = round2(feature.soft_cost * (currentPlan?.soft_cost_multiplier ?? 1));
-  const effectivePremiumCost = round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1));
+  const effectiveSoftCost = round2(feature.soft_cost * (currentPlan?.soft_cost_multiplier ?? 1) * quantity);
+  const effectivePremiumCost = round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1) * quantity);
 
   let chargeKind: "none" | "soft" | "premium" = "none";
   let softDelta = 0;
@@ -1410,15 +1453,17 @@ export async function consumeRuntimeFeature(params: {
     const priority = settings.wallet_rules.consume_priority;
     const softAvailable = effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost;
     const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
+    const softCanGoDebt = Boolean(settings.wallet_rules.soft_allow_negative) && effectiveSoftCost > 0;
+    const premiumCanGoDebt = Boolean(settings.wallet_rules.premium_allow_negative) && effectivePremiumCost > 0;
 
     if (requestedWalletKind === "soft") {
       chargeKind = "soft";
     } else if (requestedWalletKind === "premium") {
       chargeKind = "premium";
     } else if (priority === "premium_first") {
-      if (premiumAvailable) {
+      if (premiumAvailable || premiumCanGoDebt) {
         chargeKind = "premium";
-      } else if (softAvailable) {
+      } else if (softAvailable || softCanGoDebt) {
         chargeKind = "soft";
       } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
         chargeKind = "premium";
@@ -1426,9 +1471,9 @@ export async function consumeRuntimeFeature(params: {
         chargeKind = "soft";
       }
     } else {
-      if (softAvailable) {
+      if (softAvailable || softCanGoDebt) {
         chargeKind = "soft";
-      } else if (premiumAvailable) {
+      } else if (premiumAvailable || premiumCanGoDebt) {
         chargeKind = "premium";
       } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
         chargeKind = "soft";
@@ -1441,7 +1486,7 @@ export async function consumeRuntimeFeature(params: {
       if (effectivePremiumCost <= 0) {
         throw Object.assign(new Error("PREMIUM_COST_NOT_CONFIGURED"), { status: 409, code: "PREMIUM_COST_NOT_CONFIGURED" });
       }
-      if (wallet.premium_balance < effectivePremiumCost) {
+      if (!settings.wallet_rules.premium_allow_negative && wallet.premium_balance < effectivePremiumCost) {
         throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
       }
       premiumDelta = round2(-effectivePremiumCost);
@@ -1449,7 +1494,7 @@ export async function consumeRuntimeFeature(params: {
       if (effectiveSoftCost <= 0) {
         throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
       }
-      if (wallet.soft_balance < effectiveSoftCost) {
+      if (!settings.wallet_rules.soft_allow_negative && wallet.soft_balance < effectiveSoftCost) {
         throw Object.assign(new Error("INSUFFICIENT_SOFT_BALANCE"), { status: 409, code: "INSUFFICIENT_SOFT_BALANCE" });
       }
       softDelta = round2(-effectiveSoftCost);
@@ -1494,6 +1539,7 @@ export async function consumeRuntimeFeature(params: {
     feature_code: featureCode,
     transaction_type: "consume",
     wallet_kind: chargeKind,
+    consume_quantity: quantity,
     soft_delta: softDelta,
     premium_delta: premiumDelta,
     soft_balance_after: nextSoft,
@@ -1504,6 +1550,8 @@ export async function consumeRuntimeFeature(params: {
       effective_soft_cost: effectiveSoftCost,
       effective_premium_cost: effectivePremiumCost,
       plan_code: currentPlanCode,
+      quantity,
+      charge_unit: feature.charge_unit,
     },
   });
 
@@ -1516,8 +1564,12 @@ export async function consumeRuntimeFeature(params: {
       requires_credit: feature.requires_credit,
       effective_soft_cost: effectiveSoftCost,
       effective_premium_cost: effectivePremiumCost,
+      charge_unit: feature.charge_unit,
+      charge_on_success_only: feature.charge_on_success_only,
+      client_accumulate_units: feature.client_accumulate_units,
     },
     wallet_kind: chargeKind,
+    quantity,
     charged_soft: Math.abs(softDelta),
     charged_premium: Math.abs(premiumDelta),
     state,
