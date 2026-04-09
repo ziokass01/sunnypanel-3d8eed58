@@ -1,7 +1,27 @@
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
+function getPublicApiBaseUrl() {
+  const direct = String(import.meta.env.VITE_PUBLIC_API_BASE_URL ?? "").trim();
+  if (!direct) return undefined;
+  return trimTrailingSlash(direct);
+}
+
+function getSupabaseFunctionsBaseUrl() {
+  const base = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+  if (!base) return undefined;
+  return `${trimTrailingSlash(base)}/functions/v1`;
+}
+
 export function getFunctionsBaseUrl() {
-  const base = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  if (!base) throw new Error("Missing backend URL");
-  return `${base}/functions/v1`;
+  const publicBase = getPublicApiBaseUrl();
+  if (publicBase) return publicBase;
+
+  const supabaseBase = getSupabaseFunctionsBaseUrl();
+  if (supabaseBase) return supabaseBase;
+
+  throw new Error("Missing backend URL");
 }
 
 function getAnonKey() {
@@ -153,7 +173,7 @@ export async function postFunction<T>(
     const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) as Error & { code?: string; status?: number; context?: Record<string, unknown> };
     if (data?.code) err.code = String(data.code);
     err.status = res.status;
-    err.context = { json: data ?? null, status: res.status, path };
+    err.context = { json: data ?? null, status: res.status, path, triedUrls };
     throw err;
   }
   return data as T;

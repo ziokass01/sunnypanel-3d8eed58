@@ -1337,7 +1337,7 @@ export function RentPortalPage() {
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="space-y-4">
                   <div className="text-base font-semibold text-slate-950">API verify</div>
-                  <code className={subtleCodeClass}>POST {import.meta.env.VITE_SUPABASE_URL}/functions/v1/rent-verify-key</code>
+                  <code className={subtleCodeClass}>POST {import.meta.env.VITE_PUBLIC_API_BASE_URL ?? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`}/rent-verify-key</code>
                   <div className="text-sm text-muted-foreground">JSON mẫu chỉ dùng <code>sig_user</code>. Master secret đã nằm trong server.</div>
                   <pre className={subtlePreClass}>{`{
   "username": "${account?.username ?? "name"}",

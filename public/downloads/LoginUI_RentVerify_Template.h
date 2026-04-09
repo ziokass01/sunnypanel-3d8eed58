@@ -8,7 +8,7 @@
 
 // 1) Endpoint:
 static inline const char* RENT_VERIFY_URL() {
-    return "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/rent-verify-key";
+        return "https://mityangho.id.vn/api/rent-verify-key";
 }
 
 // 2) device_id (Android ID hoặc ID bạn tự tạo):

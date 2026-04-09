@@ -1,5 +1,4 @@
 import {
-  bootstrapRuntimeSession,
   buildRuntimeState,
   consumeRuntimeFeature,
   countRuntimeSuccessEvents,
@@ -29,7 +28,7 @@ function runtimeCorsHeaders(origin?: string | null, methods = "POST,OPTIONS") {
   } as Record<string, string>;
 }
 
-type RuntimeAction = "health" | "catalog" | "me" | "bootstrap" | "redeem" | "consume" | "heartbeat" | "logout";
+type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
 
 function getIp(req: Request) {
   return req.headers.get("cf-connecting-ip")
@@ -203,7 +202,7 @@ Deno.serve(async (req) => {
       }
     };
 
-    if (!["health", "catalog", "me", "bootstrap", "redeem", "consume", "heartbeat", "logout"].includes(action)) {
+    if (!["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"].includes(action)) {
       await logSafe({ ok: false, code: "UNKNOWN_ACTION", message: action || null });
       return runtimeJson(400, { ok: false, code: "UNKNOWN_ACTION", action }, origin);
     }
@@ -229,36 +228,13 @@ Deno.serve(async (req) => {
     });
 
     if (action === "catalog" || action === "me") {
-      const state = await buildRuntimeState(appCode, {
-        sessionToken: sessionToken || null,
-        accountRef: accountRef || null,
-        deviceId: deviceId || null,
-      });
-      await logSafe({ ok: true, code: "OK", meta: { session_bound: Boolean(state.session?.session_bound), session_source: state.session?.source ?? null } });
+      const state = await buildRuntimeState(appCode, { sessionToken: sessionToken || null });
+      await logSafe({ ok: true, code: "OK", meta: { session_bound: Boolean(sessionToken) } });
       return runtimeJson(200, {
         ok: true,
         action,
         state,
-        session_bound: Boolean(state.session?.session_bound),
-        session_source: state.session?.source ?? null,
-      }, origin);
-    }
-
-    if (action === "bootstrap") {
-      if (!accountRef) return runtimeJson(400, { ok: false, code: "MISSING_ACCOUNT_REF" }, origin);
-      if (!deviceId) return runtimeJson(400, { ok: false, code: "MISSING_DEVICE_ID" }, origin);
-      const bootstrapped = await bootstrapRuntimeSession({
-        appCode,
-        accountRef,
-        deviceId,
-        clientVersion,
-        ipHash,
-      });
-      await logSafe({ ok: true, code: "OK", session_id: (bootstrapped as any)?.session?.id ?? null, meta: { bootstrapped: true } });
-      return runtimeJson(200, {
-        ok: true,
-        action,
-        ...bootstrapped,
+        session_bound: Boolean(sessionToken),
       }, origin);
     }
 

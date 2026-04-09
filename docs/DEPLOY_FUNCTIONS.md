@@ -6,7 +6,8 @@ Mục tiêu: tránh lỗi trình duyệt **“Failed to fetch”** khi gọi bac
 
 ## 1) Chốt đúng project
 
-- Backend URL (trong FE): `VITE_SUPABASE_URL = https://<PROJECT_REF>.supabase.co`
+- Backend URL cho auth/admin: `VITE_SUPABASE_URL = https://<PROJECT_REF>.supabase.co`
+- Backend URL cho function gateway: `VITE_PUBLIC_API_BASE_URL = https://mityangho.id.vn/api`
 - Khi deploy bằng CLI: luôn truyền `--project-ref <PROJECT_REF>` đúng với backend URL.
 
 ## 2) Deploy các function cần gọi từ browser với `--no-verify-jwt`

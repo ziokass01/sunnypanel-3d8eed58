@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verify Gateway</title>
+    <script src="/verify-gateway-config.js"></script>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 24px; }
+      .card { max-width: 720px; margin: 0 auto; background: #111827; border: 1px solid #334155; border-radius: 20px; padding: 24px; }
+      input, textarea { width: 100%; margin-top: 8px; margin-bottom: 16px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 12px; padding: 12px; }
+      button { background: #2563eb; color: white; border: 0; border-radius: 12px; padding: 12px 16px; cursor: pointer; }
+      pre { background: #020617; border: 1px solid #334155; border-radius: 12px; padding: 16px; overflow: auto; }
+      label { display: block; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1 id="title">Verify Gateway</h1>
+      <p>Dùng trang này để test nhanh route cố định, không còn phụ thuộc tên project Supabase ở frontend.</p>
+      <label>API URL</label>
+      <input id="apiUrl" />
+      <label>Payload JSON</label>
+      <textarea id="payload" rows="12">{
+  "username": "name",
+  "key": "XXXX-XXXX-XXXX-XXXX",
+  "device_id": "browser-client",
+  "ts": 1710000000,
+  "sig_user": "HMAC_SHA256_HEX(user_hmac_secret, username|key|device_id|ts)"
+}</textarea>
+      <button id="sendBtn">Gửi verify</button>
+      <pre id="result">Chưa có dữ liệu</pre>
+    </div>
+    <script>
+      const cfg = {
+        apiUrl: window.VERIFY_GATEWAY_API_URL || "",
+        title: window.VERIFY_GATEWAY_TITLE || "Verify Gateway",
+      };
+      document.getElementById('title').textContent = cfg.title;
+      document.getElementById('apiUrl').value = cfg.apiUrl;
+      document.getElementById('sendBtn').addEventListener('click', async () => {
+        const apiUrl = document.getElementById('apiUrl').value.trim();
+        const output = document.getElementById('result');
+        try {
+          const payload = JSON.parse(document.getElementById('payload').value);
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => null);
+          output.textContent = JSON.stringify({ status: res.status, data }, null, 2);
+        } catch (error) {
+          output.textContent = String(error?.message || error);
+        }
+      });
+    </script>
+  </body>
+</html>

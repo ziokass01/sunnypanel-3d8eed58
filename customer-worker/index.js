@@ -1,12 +1,5 @@
-const textEncoder = new TextEncoder();
-
-function normalizeKey(input) {
-  return String(input ?? "")
-    .normalize("NFKC")
-    .toUpperCase()
-    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
-    .replace(/\s+/g, "")
-    .replace(/[^A-Z0-9-]/g, "");
+function trimTrailingSlash(value) {
+  return String(value ?? "").trim().replace(/\/+$/, "");
 }
 
 function allowedOrigin(origin, env) {
@@ -22,7 +15,7 @@ function corsHeaders(origin, env) {
   const allowOrigin = allowedOrigin(origin, env);
   const headers = {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,Hmac",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -40,24 +33,91 @@ function json(data, status, origin, env) {
   });
 }
 
-async function hmacSha256Hex(secret, message) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    textEncoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, textEncoder.encode(message));
-  return [...new Uint8Array(signature)].map((b) => b.toString(16).padStart(2, "0")).join("");
+function getAllowedFunctions(env) {
+  const raw = String(env.ALLOWED_FUNCTIONS ?? "").trim();
+  if (raw) {
+    return new Set(raw.split(",").map((item) => item.trim()).filter(Boolean));
+  }
+  return new Set([
+    "verify-key",
+    "rent-verify-key",
+    "free-config",
+    "free-start",
+    "free-gate",
+    "free-reveal",
+    "free-resolve",
+    "free-close",
+    "reset-key",
+    "generate-license-key",
+    "admin-free-test",
+    "free-admin-test",
+    "admin-free-block",
+    "admin-free-delete-session",
+    "admin-free-delete-issued",
+    "admin-rent",
+    "admin-rent-integrations",
+    "rent-user",
+    "server-app-runtime",
+    "server-app-runtime-ops",
+  ]);
 }
 
-function buildDeviceId(req, provided) {
-  const clean = String(provided ?? "").trim();
-  if (clean) return clean.slice(0, 256);
-  const ua = req.headers.get("user-agent") || "browser";
-  const lang = req.headers.get("accept-language") || "unknown";
-  return `web-${ua.slice(0, 80).replace(/\s+/g, "_")}-${lang.slice(0, 24).replace(/\s+/g, "_")}`.slice(0, 256);
+function resolveFunctionsBase(env) {
+  const direct = trimTrailingSlash(env.ACTIVE_FUNCTIONS_BASE_URL || env.UPSTREAM_FUNCTIONS_BASE_URL || "");
+  if (direct) return direct;
+  const supabase = trimTrailingSlash(env.ACTIVE_SUPABASE_URL || env.UPSTREAM_SUPABASE_URL || env.SUPABASE_URL || "");
+  if (!supabase) return "";
+  return `${supabase}/functions/v1`;
+}
+
+function extractRoute(pathname) {
+  if (pathname === "/health" || pathname === "/api/health") {
+    return { kind: "health" };
+  }
+
+  const clean = pathname.replace(/^\/+/, "");
+  const parts = clean.split("/").filter(Boolean);
+  if (!parts.length) return { kind: "none" };
+
+  if (parts[0] === "api") {
+    if (parts.length < 2) return { kind: "none" };
+    return { kind: "function", name: parts[1] };
+  }
+
+  return { kind: "function", name: parts[0] };
+}
+
+function buildForwardHeaders(req, env) {
+  const headers = new Headers();
+  const contentType = req.headers.get("Content-Type");
+  if (contentType) headers.set("Content-Type", contentType);
+
+  const auth = req.headers.get("Authorization");
+  if (auth) headers.set("Authorization", auth);
+
+  const apikey = req.headers.get("apikey") || String(env.UPSTREAM_ANON_KEY || env.UPSTREAM_APIKEY || "").trim();
+  if (apikey) headers.set("apikey", apikey);
+
+  const hmac = req.headers.get("Hmac");
+  if (hmac) headers.set("Hmac", hmac);
+
+  const clientInfo = req.headers.get("X-Client-Info");
+  if (clientInfo) headers.set("X-Client-Info", clientInfo);
+
+  const forwardedFor = req.headers.get("CF-Connecting-IP") || req.headers.get("X-Forwarded-For");
+  if (forwardedFor) headers.set("X-Forwarded-For", forwardedFor);
+
+  return headers;
+}
+
+async function forwardRequest(req, upstreamUrl, env) {
+  const method = req.method.toUpperCase();
+  const headers = buildForwardHeaders(req, env);
+  const init = { method, headers };
+  if (method !== "GET" && method !== "HEAD") {
+    init.body = await req.text();
+  }
+  return await fetch(upstreamUrl, init);
 }
 
 export default {
@@ -69,67 +129,49 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin, env) });
     }
 
-    if (url.pathname === "/health") {
-      return json({ ok: true, service: "customer-verify-proxy" }, 200, origin, env);
+    const route = extractRoute(url.pathname);
+    if (route.kind === "health") {
+      return json({
+        ok: true,
+        service: "fixed-api-gateway",
+        public_api_base_url: trimTrailingSlash(env.PUBLIC_API_BASE_URL || `${url.origin}/api`),
+        active_functions_base_url: resolveFunctionsBase(env) || null,
+      }, 200, origin, env);
     }
 
-    if (url.pathname !== "/verify") {
+    if (route.kind !== "function") {
       return json({ ok: false, code: "NOT_FOUND" }, 404, origin, env);
     }
 
-    if (req.method !== "POST") {
-      return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    const fnName = String(route.name || "").trim();
+    const allowed = getAllowedFunctions(env);
+    if (!allowed.has(fnName)) {
+      return json({ ok: false, code: "FUNCTION_NOT_ALLOWED", function_name: fnName }, 403, origin, env);
     }
 
-    const verifyUrl = String(env.SUPABASE_VERIFY_URL || env.VERIFY_URL || "").trim();
-    const username = String(env.NOVA_USERNAME || "").trim().toLowerCase();
-    const userSecret = String(env.NOVA_USER_HMAC_SECRET || "").trim();
-    const hmacHeader = String(env.NOVA_HMAC_HEADER || "").trim();
-
-    if (!verifyUrl || !username || !userSecret) {
-      return json({ ok: false, code: "SERVER_MISCONFIG", msg: "Missing verify config" }, 503, origin, env);
+    const functionsBase = resolveFunctionsBase(env);
+    if (!functionsBase) {
+      return json({ ok: false, code: "SERVER_MISCONFIG", msg: "Missing ACTIVE_FUNCTIONS_BASE_URL or ACTIVE_SUPABASE_URL" }, 503, origin, env);
     }
 
-    let body = {};
-    try {
-      body = await req.json();
-    } catch {
-      body = {};
-    }
-
-    const key = normalizeKey(body.key);
-    const device_id = buildDeviceId(req, body.device_id);
-    if (!key) {
-      return json({ ok: false, code: "MISSING_KEY", msg: "Thiếu key" }, 400, origin, env);
-    }
-
-    const ts = Math.floor(Date.now() / 1000);
-    const payloadText = `${username}|${key}|${device_id}|${ts}`;
-    const sig_user = await hmacSha256Hex(userSecret, payloadText);
-
-    const upstreamHeaders = {
-      "Content-Type": "application/json",
-    };
-    if (hmacHeader) upstreamHeaders.Hmac = hmacHeader;
+    const search = url.search || "";
+    const upstreamUrl = `${functionsBase}/${fnName}${search}`;
 
     let upstream;
     try {
-      upstream = await fetch(verifyUrl, {
-        method: "POST",
-        headers: upstreamHeaders,
-        body: JSON.stringify({
-          username,
-          key,
-          device_id,
-          ts,
-          sig_user,
-        }),
-      });
+      upstream = await forwardRequest(req, upstreamUrl, env);
     } catch (error) {
-      return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: String(error?.message || error) }, 502, origin, env);
+      return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: String(error?.message || error), upstream_url: upstreamUrl }, 502, origin, env);
     }
 
-    const data = await upstream.json().catch(() => null);
-    return json(data ?? { ok: false, code: "BAD_UPSTREAM_RESPONSE" }, upstream.status, origin, env);
+    const responseHeaders = new Headers(corsHeaders(origin, env));
+    const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
+    responseHeaders.set("Content-Type", contentType);
+    responseHeaders.set("X-Gateway-Project", trimTrailingSlash(env.ACTIVE_SUPABASE_URL || env.UPSTREAM_SUPABASE_URL || "") || "custom-functions-base");
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
   },
 };

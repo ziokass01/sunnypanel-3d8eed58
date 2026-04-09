@@ -7,7 +7,7 @@ Các chỗ cần điền được đánh dấu dạng **`<...>`**.
 
 ## 1) Endpoint và payload chuẩn (Supabase Edge Function)
 
-**POST** `https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/rent-verify-key`  
+**POST** `https://mityangho.id.vn/api/rent-verify-key`  
 Header:
 - `Content-Type: application/json`
 

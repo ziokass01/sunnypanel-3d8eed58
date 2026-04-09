@@ -1,9 +1,27 @@
 project_id = "ijvhlhdrncxtxosmnbtt"
 
-[functions.verify-key]
+[functions.admin-free-block]
 verify_jwt = false
 
-[functions.generate-license-key]
+[functions.admin-free-delete-issued]
+verify_jwt = false
+
+[functions.admin-free-delete-session]
+verify_jwt = false
+
+[functions.admin-free-test]
+verify_jwt = false
+
+[functions.admin-rent]
+verify_jwt = false
+
+[functions.admin-rent-integrations]
+verify_jwt = false
+
+[functions.free-admin-test]
+verify_jwt = false
+
+[functions.free-close]
 verify_jwt = false
 
 [functions.free-config]
@@ -12,31 +30,16 @@ verify_jwt = false
 [functions.free-gate]
 verify_jwt = false
 
-[functions.free-start]
+[functions.free-resolve]
 verify_jwt = false
 
 [functions.free-reveal]
 verify_jwt = false
 
-[functions.free-close]
+[functions.free-start]
 verify_jwt = false
 
-[functions.admin-free-test]
-verify_jwt = false
-
-[functions.free-admin-test]
-verify_jwt = false
-
-[functions.admin-free-block]
-verify_jwt = false
-
-[functions.admin-free-delete-session]
-verify_jwt = false
-
-[functions.admin-free-delete-issued]
-verify_jwt = false
-
-[functions.admin-rent]
+[functions.generate-license-key]
 verify_jwt = false
 
 [functions.rent-user]
@@ -47,3 +50,13 @@ verify_jwt = false
 
 [functions.reset-key]
 verify_jwt = false
+
+[functions.server-app-runtime]
+verify_jwt = false
+
+[functions.server-app-runtime-ops]
+verify_jwt = false
+
+[functions.verify-key]
+verify_jwt = false
+

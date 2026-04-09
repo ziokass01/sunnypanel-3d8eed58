@@ -19,7 +19,7 @@ import { postAdminFunction } from "@/lib/admin-auth";
 const PLAN_OPTIONS = ["classic", "go", "plus", "pro"] as const;
 const REWARD_MODE_OPTIONS = ["package", "plan", "soft_credit", "premium_credit", "mixed"] as const;
 const WALLET_KIND_OPTIONS = ["auto", "soft", "premium"] as const;
-const SIMULATOR_ACTIONS = ["health", "catalog", "me", "bootstrap", "redeem", "consume", "heartbeat", "logout"] as const;
+const SIMULATOR_ACTIONS = ["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"] as const;
 const RUNTIME_TABS = ["simulator", "ops", "controls", "redeem", "entitlements", "wallets", "sessions", "transactions", "events"] as const;
 
 
@@ -50,7 +50,6 @@ const FRIENDLY_ERROR_MAP: Record<string, string> = {
   SESSION_EXPIRED: "Session đã hết hạn.",
   SESSION_IDLE_TIMEOUT: "Session đã hết hạn do không hoạt động quá lâu.",
   SESSION_MAX_AGE_EXPIRED: "Session đã quá tuổi tối đa.",
-  NO_ACTIVE_ENTITLEMENT: "Account này chưa có entitlement active để cấp session runtime.",
   FEATURE_NOT_FOUND: "Không tìm thấy feature code này.",
   FEATURE_PLAN_LOCKED: "Tính năng này bị khóa theo plan hiện tại.",
   INSUFFICIENT_SOFT_BALANCE: "Không đủ credit thường để consume tính năng này.",
@@ -428,8 +427,6 @@ function getSimulatorHelp(action: SimulatorAction) {
   switch (action) {
     case "redeem":
       return "Redeem cần account_ref, device_id và redeem_key. Session token sẽ tự đổ vào form sau khi chạy thành công.";
-    case "bootstrap":
-      return "Bootstrap sẽ cấp session runtime mới từ account_ref + device_id nếu account đang có entitlement active. Hợp cho case app bị mất session token local.";
     case "consume":
       return "Consume cần session_token và feature_code. Không dùng redeem_key ở bước này.";
     case "heartbeat":

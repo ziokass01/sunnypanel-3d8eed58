@@ -2,7 +2,7 @@
 
 ## Tích hợp nhanh
 
-- Verify URL: `POST <supabase_url>/functions/v1/rent-verify-key`
+- Verify URL: `POST https://mityangho.id.vn/api/rent-verify-key`
 - Dữ liệu gửi lên gồm `username`, `key`, `device_id`, `ts`, `sig_user`
 - `sig_user` là HMAC SHA256 của chuỗi `username|key|device_id|ts`
 
