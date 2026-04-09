@@ -8,12 +8,14 @@ create table if not exists rent.client_integrations (
   label text not null,
   allowed_origins text[] not null default '{}',
   worker_secret_hash text,
-  rate_limit_per_minute integer not null default 60,
+  rate_limit_per_minute integer not null default 60
+    constraint client_integrations_rate_limit_check check (rate_limit_per_minute between 10 and 100000),
   is_enabled boolean not null default true,
   note text,
   last_used_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint client_integrations_account_id_key unique (account_id)
 );
 
 create index if not exists client_integrations_account_idx

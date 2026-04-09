@@ -4,37 +4,54 @@
 -- 2) one account => one integration row
 -- 3) rate limit stays in a sane range
 
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'client_integrations_account_id_key'
-      and conrelid = 'rent.client_integrations'::regclass
-  ) then
-    alter table rent.client_integrations
-      add constraint client_integrations_account_id_key unique (account_id);
-  end if;
-end
+DO $$
+DECLARE
+  v_rel regclass := to_regclass('rent.client_integrations');
+BEGIN
+  IF v_rel IS NULL THEN
+    RAISE NOTICE 'skip: rent.client_integrations does not exist yet';
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'client_integrations_account_id_key'
+      AND conrelid = v_rel
+  ) THEN
+    ALTER TABLE rent.client_integrations
+      ADD CONSTRAINT client_integrations_account_id_key UNIQUE (account_id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'client_integrations_rate_limit_check'
+      AND conrelid = v_rel
+  ) THEN
+    ALTER TABLE rent.client_integrations
+      ADD CONSTRAINT client_integrations_rate_limit_check
+      CHECK (rate_limit_per_minute BETWEEN 10 AND 100000);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'client_integrations_account_id_key'
+      AND conrelid = v_rel
+  ) THEN
+    COMMENT ON CONSTRAINT client_integrations_account_id_key ON rent.client_integrations IS
+      'Each rent account may have at most one customer integration row. This makes SQL previews and edit-form setup deterministic.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'client_integrations_rate_limit_check'
+      AND conrelid = v_rel
+  ) THEN
+    COMMENT ON CONSTRAINT client_integrations_rate_limit_check ON rent.client_integrations IS
+      'Reject obviously broken or abusive rate limit values.';
+  END IF;
+END
 $$;
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'client_integrations_rate_limit_check'
-      and conrelid = 'rent.client_integrations'::regclass
-  ) then
-    alter table rent.client_integrations
-      add constraint client_integrations_rate_limit_check
-      check (rate_limit_per_minute between 10 and 100000);
-  end if;
-end
-$$;
-
-comment on constraint client_integrations_account_id_key on rent.client_integrations is
-  'Each rent account may have at most one customer integration row. This makes SQL previews and edit-form setup deterministic.';
-
-comment on constraint client_integrations_rate_limit_check on rent.client_integrations is
-  'Reject obviously broken or abusive rate limit values.';
