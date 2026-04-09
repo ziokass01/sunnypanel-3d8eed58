@@ -1,6 +1,4 @@
--- Đổi EMAIL_HELPER thành email tài khoản phụ quản lý panel.
--- Metadata role sẽ luôn được set trước.
--- Nếu public.user_roles đã tồn tại, script sẽ backfill luôn vào bảng role.
+-- Đổi EMAIL_HELPER thành email tài khoản phụ quản lý panel
 
 update auth.users
 set raw_app_meta_data =
@@ -15,8 +13,6 @@ begin
     from auth.users
     where email = 'EMAIL_HELPER'
     on conflict (user_id, role) do nothing;
-  else
-    raise notice 'public.user_roles is missing, metadata updated only';
   end if;
 end
 $$;

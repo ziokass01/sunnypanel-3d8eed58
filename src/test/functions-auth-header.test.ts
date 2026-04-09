@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { postFunction } from "../lib/functions";
+import { getFunction, postFunction } from "../lib/functions";
 
 describe("functions auth headers", () => {
   beforeEach(() => {
@@ -52,5 +52,51 @@ describe("functions auth headers", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer user.jwt.token");
+  });
+
+  it("falls back to direct Supabase functions when gateway says function not found", async () => {
+    vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ message: "Requested function was not found" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, source: "direct" }),
+      });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const data = await postFunction("/admin-rent", { action: "list" }, { authToken: "user.jwt.token" });
+
+    expect(data).toEqual({ ok: true, source: "direct" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/admin-rent");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/admin-rent");
+  });
+
+  it("falls back to direct Supabase functions for GET when gateway is temporarily unavailable", async () => {
+    vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
+
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("gateway down"))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, source: "direct" }),
+      });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const data = await getFunction("/free-config");
+
+    expect(data).toEqual({ ok: true, source: "direct" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/free-config");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-config");
   });
 });

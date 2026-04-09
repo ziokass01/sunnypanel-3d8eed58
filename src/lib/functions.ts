@@ -14,13 +14,24 @@ function getSupabaseFunctionsBaseUrl() {
   return `${trimTrailingSlash(base)}/functions/v1`;
 }
 
+function getFunctionUrl(baseUrl: string, path: string) {
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function getPrimaryFunctionsBaseUrl() {
+  return getPublicApiBaseUrl() ?? getSupabaseFunctionsBaseUrl();
+}
+
+function getFallbackFunctionsBaseUrl(primaryBaseUrl?: string) {
+  const direct = getSupabaseFunctionsBaseUrl();
+  if (!direct) return undefined;
+  if (primaryBaseUrl && direct === primaryBaseUrl) return undefined;
+  return direct;
+}
+
 export function getFunctionsBaseUrl() {
-  const publicBase = getPublicApiBaseUrl();
-  if (publicBase) return publicBase;
-
-  const supabaseBase = getSupabaseFunctionsBaseUrl();
-  if (supabaseBase) return supabaseBase;
-
+  const primary = getPrimaryFunctionsBaseUrl();
+  if (primary) return primary;
   throw new Error("Missing backend URL");
 }
 
@@ -39,7 +50,18 @@ function getAnonJwt() {
 
 function shouldSkipAnonJwtFallback(path: string) {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  return ["/reset-key", "/free-config", "/free-start", "/free-gate", "/free-reveal", "/free-close"].includes(normalized);
+  return [
+    "/verify-key",
+    "/rent-verify-key",
+    "/reset-key",
+    "/free-config",
+    "/free-start",
+    "/free-gate",
+    "/free-reveal",
+    "/free-resolve",
+    "/free-close",
+    "/generate-license-key",
+  ].includes(normalized);
 }
 
 function buildAuthHeader(path: string, authToken?: string | null) {
@@ -48,53 +70,139 @@ function buildAuthHeader(path: string, authToken?: string | null) {
 
   if (shouldSkipAnonJwtFallback(path)) return {};
 
-  // Some edge functions still rely on anon JWT when verify_jwt=true.
-  // Never fall back to publishable key here because it is not a JWT bearer token.
   const anonJwt = getAnonJwt();
   return anonJwt ? { Authorization: `Bearer ${anonJwt}` } : {};
+}
+
+type RequestError = Error & {
+  code?: string;
+  status?: number;
+  context?: Record<string, unknown>;
+  meta?: Record<string, unknown>;
+};
+
+function readErrorMessage(data: any, status: number) {
+  const raw = data && (data.friendly_message || data.msg || data.message || data.error);
+  if (typeof raw === "string" && raw.trim()) return raw;
+  if (raw != null) return JSON.stringify(raw);
+  return `Request failed (${status})`;
+}
+
+function buildRequestError(path: string, status: number, data: any, extra?: Record<string, unknown>) {
+  const err = new Error(readErrorMessage(data, status)) as RequestError;
+  if (data?.code) err.code = String(data.code);
+  err.status = status;
+  err.context = { json: data ?? null, status, path, ...(extra ?? {}) };
+  return err;
+}
+
+function buildFetchFailedError(path: string, extra?: Record<string, unknown>) {
+  const err = new Error(`Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`) as RequestError;
+  err.code = "FETCH_FAILED";
+  err.meta = { path, ...(extra ?? {}) };
+  return err;
+}
+
+function isLikelyRoutingOrDeployError(status: number, data: any) {
+  const code = String(data?.code ?? "").trim().toUpperCase();
+  const message = readErrorMessage(data, status).toLowerCase();
+  if ([404, 502, 503].includes(status)) return true;
+  if (["FUNCTION_NOT_ALLOWED", "SERVER_MISCONFIG", "UPSTREAM_FETCH_FAILED", "BOOT_ERROR", "FUNCTION_INVOCATION_FAILED"].includes(code)) return true;
+  return message.includes("requested function was not found")
+    || message.includes("function not found")
+    || message.includes("worker response")
+    || message.includes("upstream")
+    || message.includes("failed to fetch");
+}
+
+async function invokeJson<T>(opts: {
+  method: "GET" | "POST";
+  path: string;
+  body?: unknown;
+  authToken?: string | null;
+  headers?: Record<string, string>;
+  withCredentials?: boolean;
+}) {
+  const anonKey = getAnonKey();
+  if (!anonKey) throw new Error("Missing backend anon key");
+
+  const primaryBaseUrl = getFunctionsBaseUrl();
+  const fallbackBaseUrl = getFallbackFunctionsBaseUrl(primaryBaseUrl);
+  const pathCandidates = opts.path === "/admin-free-test" ? [opts.path, "/free-admin-test"] : [opts.path];
+  const attemptUrls: string[] = [];
+  const problems: RequestError[] = [];
+
+  const baseEntries = [
+    { baseUrl: primaryBaseUrl, allowFallback: true },
+    ...(fallbackBaseUrl ? [{ baseUrl: fallbackBaseUrl, allowFallback: false }] : []),
+  ];
+
+  for (const baseEntry of baseEntries) {
+    for (const candidatePath of pathCandidates) {
+      const url = getFunctionUrl(baseEntry.baseUrl, candidatePath);
+      attemptUrls.push(url);
+
+      let res: Response;
+      try {
+        const authHeader = buildAuthHeader(candidatePath, opts.authToken);
+        res = await fetch(url, {
+          method: opts.method,
+          headers: {
+            ...(opts.method === "POST" ? { "Content-Type": "application/json" } : {}),
+            apikey: anonKey,
+            ...authHeader,
+            ...(opts.headers ?? {}),
+          },
+          credentials: opts.withCredentials ? "include" : "omit",
+          ...(opts.method === "POST" ? { body: JSON.stringify(opts.body ?? {}) } : {}),
+        });
+      } catch {
+        if (baseEntry.allowFallback && fallbackBaseUrl && baseEntry.baseUrl != fallbackBaseUrl) {
+          continue;
+        }
+        if (candidatePath != pathCandidates[pathCandidates.length - 1]) {
+          continue;
+        }
+        throw buildFetchFailedError(opts.path, { attemptUrls });
+      }
+
+      const data = await res.json().catch(() => null);
+      if (res.ok) return data as T;
+
+      const err = buildRequestError(opts.path, res.status, data, {
+        attemptUrls,
+        requestedPath: candidatePath,
+        baseUrl: baseEntry.baseUrl,
+      });
+      problems.push(err);
+
+      const canTryAlias = candidatePath != pathCandidates[pathCandidates.length - 1];
+      if (canTryAlias && isLikelyRoutingOrDeployError(res.status, data)) {
+        continue;
+      }
+
+      if (baseEntry.allowFallback && fallbackBaseUrl && baseEntry.baseUrl != fallbackBaseUrl && isLikelyRoutingOrDeployError(res.status, data)) {
+        break;
+      }
+
+      throw err;
+    }
+  }
+
+  throw problems[problems.length - 1] ?? buildFetchFailedError(opts.path, { attemptUrls });
 }
 
 export async function getFunction<T>(
   path: string,
   opts?: { authToken?: string | null; withCredentials?: boolean; headers?: Record<string, string> },
 ): Promise<T> {
-  const url = `${getFunctionsBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
-
-  const anonKey = getAnonKey();
-  if (!anonKey) throw new Error("Missing backend anon key");
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "GET",
-      headers: {
-        apikey: anonKey,
-        ...buildAuthHeader(path, opts?.authToken),
-        ...(opts?.headers ?? {}),
-      },
-      // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
-      credentials: opts?.withCredentials ? "include" : "omit",
-    });
-  } catch (e: any) {
-    // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
-    const err = new Error(
-      `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
-    ) as Error & { code?: string; meta?: Record<string, unknown> };
-    err.code = "FETCH_FAILED";
-    err.meta = { path };
-    throw err;
-  }
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = (data && (data.friendly_message || data.msg || data.message || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) as Error & { code?: string; status?: number; context?: Record<string, unknown> };
-    if (data?.code) err.code = String(data.code);
-    err.status = res.status;
-    err.context = { json: data ?? null, status: res.status, path };
-    throw err;
-  }
-  return data as T;
+  return await invokeJson<T>({
+    method: "GET",
+    path,
+    authToken: opts?.authToken,
+    withCredentials: opts?.withCredentials,
+    headers: opts?.headers,
+  });
 }
 
 export async function postFunction<T>(
@@ -102,79 +210,21 @@ export async function postFunction<T>(
   body: unknown,
   opts?: { authToken?: string | null; headers?: Record<string, string>; withCredentials?: boolean },
 ): Promise<T> {
-  const makeUrl = (p: string) => `${getFunctionsBaseUrl()}${p.startsWith("/") ? p : `/${p}`}`;
-  const primaryUrl = makeUrl(path);
-
-  const anonKey = getAnonKey();
-  if (!anonKey) throw new Error("Missing backend anon key");
-
   const normalizedPath = (path.startsWith("/") ? path.slice(1) : path).trim();
   const isAdminFn = normalizedPath.startsWith("admin-");
 
-  // Admin functions MUST be called with a real user JWT; never fall back to anon.
   if (isAdminFn && !opts?.authToken) {
     const err = new Error("ADMIN_AUTH_REQUIRED") as Error & { code?: string };
     err.code = "ADMIN_AUTH_REQUIRED";
     throw err;
   }
 
-  // Some repos historically used both /admin-free-test and /free-admin-test.
-  // If the primary one fails at the network layer (CORS / wrong deploy / wrong function name), retry once.
-  const fallbackPath = path === "/admin-free-test" ? "/free-admin-test" : null;
-
-  const triedUrls: string[] = [];
-
-  const doFetch = async (u: string) => {
-    triedUrls.push(u);
-    const authHeader = buildAuthHeader(path, opts?.authToken);
-    return await fetch(u, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        ...authHeader,
-        ...(opts?.headers ?? {}),
-      },
-      // IMPORTANT: include cookies for flows that rely on httpOnly cookies (e.g. fk_fp/fk_sess)
-      credentials: opts?.withCredentials ? "include" : "omit",
-      body: JSON.stringify(body ?? {}),
-    });
-  };
-
-  let res: Response;
-  try {
-    res = await doFetch(primaryUrl);
-  } catch (e: any) {
-    // Browser-level network error (CORS blocked / DNS / mixed content / wrong project URL)
-    if (fallbackPath) {
-      try {
-        res = await doFetch(makeUrl(fallbackPath));
-      } catch {
-        const err = new Error(
-          `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
-        ) as Error & { code?: string; meta?: Record<string, unknown> };
-        err.code = "FETCH_FAILED";
-        err.meta = { path };
-        throw err;
-      }
-    } else {
-      const err = new Error(
-        `Failed to fetch when calling function ${path}. Vui lòng thử lại sau.`,
-      ) as Error & { code?: string; meta?: Record<string, unknown> };
-      err.code = "FETCH_FAILED";
-      err.meta = { path };
-      throw err;
-    }
-  }
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = (data && (data.friendly_message || data.msg || data.message || data.error)) || `Request failed (${res.status})`;
-    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) as Error & { code?: string; status?: number; context?: Record<string, unknown> };
-    if (data?.code) err.code = String(data.code);
-    err.status = res.status;
-    err.context = { json: data ?? null, status: res.status, path, triedUrls };
-    throw err;
-  }
-  return data as T;
+  return await invokeJson<T>({
+    method: "POST",
+    path,
+    body,
+    authToken: opts?.authToken,
+    withCredentials: opts?.withCredentials,
+    headers: opts?.headers,
+  });
 }

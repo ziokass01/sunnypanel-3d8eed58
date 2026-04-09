@@ -8,18 +8,47 @@ create table if not exists rent.client_integrations (
   label text not null,
   allowed_origins text[] not null default '{}',
   worker_secret_hash text,
-  rate_limit_per_minute integer not null default 60
-    constraint client_integrations_rate_limit_check check (rate_limit_per_minute between 10 and 100000),
+  rate_limit_per_minute integer not null default 60,
   is_enabled boolean not null default true,
   note text,
   last_used_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint client_integrations_account_id_key unique (account_id)
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists client_integrations_account_idx
   on rent.client_integrations(account_id, created_at desc);
+
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'client_integrations_account_id_key'
+      and conrelid = to_regclass('rent.client_integrations')
+  ) then
+    alter table rent.client_integrations
+      add constraint client_integrations_account_id_key unique (account_id);
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'client_integrations_rate_limit_check'
+      and conrelid = to_regclass('rent.client_integrations')
+  ) then
+    alter table rent.client_integrations
+      add constraint client_integrations_rate_limit_check
+      check (rate_limit_per_minute between 10 and 100000);
+  end if;
+end
+$$;
+
 
 create table if not exists rent.client_request_logs (
   id uuid primary key default gen_random_uuid(),

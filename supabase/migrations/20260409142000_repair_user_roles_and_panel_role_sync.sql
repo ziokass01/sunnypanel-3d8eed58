@@ -1,8 +1,4 @@
 begin;
-
--- Repair migration for projects where public.user_roles was removed manually
--- or is otherwise missing even though older migrations are marked applied.
-
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -16,7 +12,6 @@ BEGIN
   END IF;
 END
 $$;
-
 CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -24,10 +19,8 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (user_id, role)
 );
-
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_roles FORCE ROW LEVEL SECURITY;
-
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role)
 RETURNS boolean
 LANGUAGE sql
@@ -42,14 +35,12 @@ AS $$
       AND role = _role
   )
 $$;
-
 DROP POLICY IF EXISTS "Users can read own roles" ON public.user_roles;
 CREATE POLICY "Users can read own roles"
 ON public.user_roles
 FOR SELECT
 TO authenticated
 USING (auth.uid() = user_id);
-
 DROP POLICY IF EXISTS "Admins manage roles" ON public.user_roles;
 CREATE POLICY "Admins manage roles"
 ON public.user_roles
@@ -57,7 +48,6 @@ FOR ALL
 TO authenticated
 USING (public.has_role(auth.uid(), 'admin'::public.app_role))
 WITH CHECK (public.has_role(auth.uid(), 'admin'::public.app_role));
-
 CREATE OR REPLACE FUNCTION public.get_my_panel_role()
 RETURNS text
 LANGUAGE sql
@@ -73,9 +63,7 @@ AS $$
     ELSE NULL
   END;
 $$;
-
 GRANT EXECUTE ON FUNCTION public.get_my_panel_role() TO authenticated;
-
 CREATE OR REPLACE FUNCTION public.sync_panel_role_from_auth_metadata()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -90,23 +78,17 @@ BEGIN
     VALUES (NEW.id, v_role::public.app_role)
     ON CONFLICT (user_id, role) DO NOTHING;
   END IF;
-
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_sync_panel_role_from_auth_metadata ON auth.users;
 CREATE TRIGGER trg_sync_panel_role_from_auth_metadata
 AFTER INSERT OR UPDATE OF raw_app_meta_data ON auth.users
 FOR EACH ROW
 EXECUTE FUNCTION public.sync_panel_role_from_auth_metadata();
-
 INSERT INTO public.user_roles(user_id, role)
-SELECT
-  u.id,
-  lower(coalesce(u.raw_app_meta_data ->> 'panel_role', u.raw_app_meta_data ->> 'role'))::public.app_role
+SELECT u.id, lower(coalesce(u.raw_app_meta_data ->> 'panel_role', u.raw_app_meta_data ->> 'role'))::public.app_role
 FROM auth.users u
 WHERE lower(coalesce(u.raw_app_meta_data ->> 'panel_role', u.raw_app_meta_data ->> 'role', '')) IN ('admin', 'moderator', 'user')
 ON CONFLICT (user_id, role) DO NOTHING;
-
 commit;

@@ -16,30 +16,36 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-
       - name: Link project
         run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
-      - name: Deploy standard Edge Functions
+      - name: Deploy public/admin Edge Functions with verify_jwt disabled
         run: |
-          find supabase/functions -mindepth 1 -maxdepth 1 -type d \
-            ! -name '_shared' \
-            ! -name 'server-app-runtime' \
-            ! -name 'server-app-runtime-ops' \
-            -printf '%f\n' | while read -r fn; do
+          set -euo pipefail
+          no_verify_functions=(
+            admin-free-block admin-free-delete-issued admin-free-delete-session admin-free-test
+            admin-rent admin-rent-integrations free-admin-test free-close free-config free-gate
+            free-resolve free-reveal free-start generate-license-key rent-user rent-verify-key
+            reset-key server-app-runtime server-app-runtime-ops verify-key
+          )
+          for fn in "${no_verify_functions[@]}"; do
+            if [ -d "supabase/functions/${fn}" ]; then
+              echo "Deploying ${fn} with --no-verify-jwt"
+              supabase functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt
+            fi
+          done
+      - name: Deploy remaining Edge Functions with default verify_jwt
+        run: |
+          set -euo pipefail
+          remaining_functions=(mobile-auth-email)
+          for fn in "${remaining_functions[@]}"; do
+            if [ -d "supabase/functions/${fn}" ]; then
               echo "Deploying ${fn}"
               supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
-            done
-
-      - name: Deploy runtime functions with verify_jwt disabled
-        run: |
-          supabase functions deploy server-app-runtime --project-ref "$PROJECT_REF" --no-verify-jwt
-          supabase functions deploy server-app-runtime-ops --project-ref "$PROJECT_REF" --no-verify-jwt
-
+            fi
+          done
       - name: Set function secrets
         run: |
           supabase secrets set \
