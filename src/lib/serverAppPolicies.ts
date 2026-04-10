@@ -59,6 +59,76 @@ export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
   { code: "hex-tools", title: "Hex / codec tools", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
 ];
 
+
+
+export type FeatureUnlockPolicy = {
+  accessCode: string;
+  title: string;
+  description: string;
+  unlockFeatureCode: string;
+  guardedFeatureCodes: string[];
+  defaultDurationHours: number;
+  softUnlockCost: number;
+  premiumUnlockCost: number;
+  freePlans: string[];
+  renewable: boolean;
+  enabled: boolean;
+};
+
+export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
+  {
+    accessCode: "binary_workspace",
+    title: "Binary Workspace",
+    description: "Mở quyền vào Binary Workspace. Sau khi mở khóa, scan, browser sâu, diff, save/restore và export vẫn trừ credit theo feature riêng.",
+    unlockFeatureCode: "unlock_binary_workspace",
+    guardedFeatureCodes: [
+      "binary_scan_quick",
+      "binary_scan_full",
+      "ida_export_import",
+      "ida_workspace_save",
+      "ida_workspace_export",
+      "ida_workspace_restore",
+      "workspace_batch",
+      "workspace_note",
+      "workspace_export_result",
+      "workspace_browser",
+      "workspace_diff",
+    ],
+    defaultDurationHours: 24,
+    softUnlockCost: 2,
+    premiumUnlockCost: 1,
+    freePlans: ["pro"],
+    renewable: true,
+    enabled: true,
+  },
+  {
+    accessCode: "batch_tools",
+    title: "Batch Search & diện rộng",
+    description: "Mở quyền cho batch search, profile search và hàng đợi nền. Mở khóa chỉ cho phép dùng, còn mỗi lượt chạy vẫn trừ credit như thường.",
+    unlockFeatureCode: "unlock_batch_tools",
+    guardedFeatureCodes: ["batch_search", "background_queue", "profile_search"],
+    defaultDurationHours: 24,
+    softUnlockCost: 1,
+    premiumUnlockCost: 0.5,
+    freePlans: ["plus", "pro"],
+    renewable: true,
+    enabled: true,
+  },
+  {
+    accessCode: "export_tools",
+    title: "Export ra ngoài",
+    description: "Mở quyền export TXT/JSON/CSV và đầu ra lớn. Sau khi mở khóa, mỗi lượt export vẫn đi qua lớp tiêu hao credit riêng.",
+    unlockFeatureCode: "unlock_export_tools",
+    guardedFeatureCodes: ["export_json", "workspace_export_result", "ida_workspace_export"],
+    defaultDurationHours: 24,
+    softUnlockCost: 0.5,
+    premiumUnlockCost: 0.2,
+    freePlans: ["go", "plus", "pro"],
+    renewable: true,
+    enabled: true,
+  },
+];
+
 export type DailyResetPreview = {
   packageCode: string;
   softAmount: number;

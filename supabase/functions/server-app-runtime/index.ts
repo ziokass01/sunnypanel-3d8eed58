@@ -9,6 +9,7 @@ import {
   runtimeJson,
   sha256Hex,
   touchRuntimeSession,
+  unlockRuntimeFeatureAccess,
 } from "../_shared/server_app_runtime.ts";
 
 function getAllowedOrigin(origin: string | null | undefined) {
@@ -28,7 +29,7 @@ function runtimeCorsHeaders(origin?: string | null, methods = "POST,OPTIONS") {
   } as Record<string, string>;
 }
 
-type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout";
+type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout" | "unlock_feature";
 
 function getIp(req: Request) {
   return req.headers.get("cf-connecting-ip")
@@ -94,8 +95,8 @@ async function enforceControls(params: {
   if (action === "redeem" && !controls.redeem_enabled) {
     throw makeControlError("REDEEM_DISABLED", controls.maintenance_notice);
   }
-  if (action === "consume" && !controls.consume_enabled) {
-    throw makeControlError("CONSUME_DISABLED", controls.maintenance_notice);
+  if ((action === "consume" || action === "unlock_feature") && !controls.consume_enabled) {
+    throw makeControlError(action === "unlock_feature" ? "UNLOCK_DISABLED" : "CONSUME_DISABLED", controls.maintenance_notice);
   }
   if (action === "heartbeat" && !controls.heartbeat_enabled) {
     throw makeControlError("HEARTBEAT_DISABLED", controls.maintenance_notice);
@@ -179,6 +180,7 @@ Deno.serve(async (req) => {
     const featureCode = asBodyString((body as any).feature_code);
     const walletKind = asBodyString((body as any).wallet_kind, "auto") || "auto";
     const quantity = Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1));
+    const durationSeconds = Math.max(0, Math.trunc(Number((body as any).duration_seconds ?? 0) || 0));
     const traceId = asBodyString((body as any).trace_id) || null;
     const ipHash = await sha256Hex(getIp(req));
 
@@ -204,7 +206,7 @@ Deno.serve(async (req) => {
       }
     };
 
-    if (!["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout"].includes(action)) {
+    if (!["health", "catalog", "me", "redeem", "consume", "heartbeat", "logout", "unlock_feature"].includes(action)) {
       await logSafe({ ok: false, code: "UNKNOWN_ACTION", message: action || null });
       return runtimeJson(400, { ok: false, code: "UNKNOWN_ACTION", action }, origin);
     }
@@ -302,6 +304,7 @@ Deno.serve(async (req) => {
         featureCode,
         walletKind,
         quantity,
+        traceId,
       });
       await logSafe({
         ok: true,
@@ -315,6 +318,31 @@ Deno.serve(async (req) => {
         action,
         trace_id: (consumed as any)?.trace_id ?? traceId ?? null,
         ...consumed,
+      }, origin);
+    }
+
+    if (action === "unlock_feature") {
+      if (!sessionToken) return runtimeJson(400, { ok: false, code: "MISSING_SESSION_TOKEN" }, origin);
+      if (!featureCode) return runtimeJson(400, { ok: false, code: "MISSING_FEATURE_CODE" }, origin);
+      const unlocked = await unlockRuntimeFeatureAccess({
+        appCode,
+        sessionToken,
+        accessCode: featureCode,
+        walletKind,
+        durationSeconds: durationSeconds > 0 ? durationSeconds : null,
+        traceId,
+      });
+      await logSafe({
+        ok: true,
+        code: "OK",
+        trace_id: traceId ?? null,
+        meta: { access_code: featureCode, expires_at: (unlocked as any)?.expires_at ?? null, free_by_plan: (unlocked as any)?.free_by_plan ?? false },
+      });
+      return runtimeJson(200, {
+        ok: true,
+        action,
+        unlock_feature_code: featureCode,
+        ...unlocked,
       }, origin);
     }
 

@@ -29,6 +29,13 @@ export type RuntimeFeature = {
   charge_unit: number;
   charge_on_success_only: boolean;
   client_accumulate_units: boolean;
+  unlock_required?: boolean;
+  unlocked?: boolean;
+  unlock_expires_at?: string | null;
+  unlock_label?: string | null;
+  unlock_feature_code?: string | null;
+  unlock_soft_cost?: number;
+  unlock_premium_cost?: number;
 };
 
 export type RuntimeAppState = {
@@ -179,6 +186,31 @@ type RuntimeResolvedReward = {
   device_limit_override: number | null;
   account_limit_override: number | null;
 };
+type RuntimeFeatureUnlockRule = {
+  access_code: string;
+  title: string;
+  description: string | null;
+  enabled: boolean;
+  unlock_required: boolean;
+  unlock_duration_seconds: number;
+  soft_unlock_cost: number;
+  premium_unlock_cost: number;
+  free_for_plans: string[];
+  guarded_feature_codes: string[];
+  renewable: boolean;
+  revalidate_online: boolean;
+  notes: string | null;
+};
+
+type RuntimeFeatureUnlockState = {
+  id: string;
+  access_code: string;
+  status: string;
+  started_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+};
+
 
 function asString(value: unknown, fallback = "") {
   const v = String(value ?? fallback).trim();
@@ -440,6 +472,188 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
     charge_on_success_only: Boolean(row.charge_on_success_only ?? true),
     client_accumulate_units: Boolean(row.client_accumulate_units ?? false),
   }));
+}
+
+async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnlockRule[]> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_feature_unlock_rules")
+    .select("access_code,title,description,enabled,unlock_required,unlock_duration_seconds,soft_unlock_cost,premium_unlock_cost,free_for_plans,guarded_feature_codes,renewable,revalidate_online,notes")
+    .eq("app_code", appCode)
+    .eq("enabled", true)
+    .order("sort_order", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    access_code: asString(row.access_code),
+    title: asString(row.title, asString(row.access_code)),
+    description: asNullableString(row.description),
+    enabled: Boolean(row.enabled ?? true),
+    unlock_required: Boolean(row.unlock_required ?? true),
+    unlock_duration_seconds: Math.max(3600, Math.trunc(asNumber(row.unlock_duration_seconds, 86400))),
+    soft_unlock_cost: asNumber(row.soft_unlock_cost, 0),
+    premium_unlock_cost: asNumber(row.premium_unlock_cost, 0),
+    free_for_plans: asStringArray(row.free_for_plans).map((item) => item.toLowerCase()),
+    guarded_feature_codes: asStringArray(row.guarded_feature_codes).map((item) => item.toLowerCase()),
+    renewable: Boolean(row.renewable ?? true),
+    revalidate_online: Boolean(row.revalidate_online ?? true),
+    notes: asNullableString(row.notes),
+  }));
+}
+
+async function getLatestFeatureUnlockStates(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeFeatureUnlockState[]> {
+  const admin = createAdminClient();
+  let query = admin
+    .from("server_app_feature_unlocks")
+    .select("id,access_code,status,started_at,expires_at,revoked_at")
+    .eq("app_code", appCode)
+    .eq("account_ref", accountRef)
+    .eq("status", "active")
+    .order("started_at", { ascending: false });
+  const normalizedDeviceId = asNullableString(deviceId);
+  if (normalizedDeviceId) query = query.or(`device_id.is.null,device_id.eq.${normalizedDeviceId}`);
+  const { data, error } = await query;
+  if (error) throw error;
+  const now = Date.now();
+  const chosen = new Map<string, RuntimeFeatureUnlockState>();
+  for (const row of (data ?? []) as any[]) {
+    const accessCode = asString(row.access_code).toLowerCase();
+    if (!accessCode || chosen.has(accessCode)) continue;
+    const expiresAt = asNullableString(row.expires_at);
+    if (row.revoked_at) continue;
+    if (expiresAt && new Date(expiresAt).getTime() <= now) continue;
+    chosen.set(accessCode, {
+      id: asString(row.id),
+      access_code: accessCode,
+      status: asString(row.status, "active"),
+      started_at: asString(row.started_at),
+      expires_at: expiresAt,
+      revoked_at: asNullableString(row.revoked_at),
+    });
+  }
+  return Array.from(chosen.values());
+}
+
+function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan: RuntimePlan | null, unlockRules: RuntimeFeatureUnlockRule[], unlockMap: Map<string, RuntimeFeatureUnlockState>) {
+  const normalizedCode = asString(featureCode).toLowerCase();
+  const directRule = unlockRules.find((rule) => rule.access_code.toLowerCase() === normalizedCode);
+  const guardedRule = directRule ?? unlockRules.find((rule) => rule.guarded_feature_codes.includes(normalizedCode));
+  if (!guardedRule) {
+    return {
+      unlock_required: false,
+      unlocked: false,
+      unlock_expires_at: null,
+      unlock_label: null,
+      unlock_feature_code: null,
+      unlock_soft_cost: 0,
+      unlock_premium_cost: 0,
+    };
+  }
+  const planCode = asString(currentPlan, "classic").toLowerCase();
+  const freeByPlan = guardedRule.free_for_plans.includes(planCode);
+  const activeUnlock = unlockMap.get(guardedRule.access_code.toLowerCase()) ?? null;
+  const unlocked = freeByPlan || Boolean(activeUnlock);
+  const softMultiplier = plan?.soft_cost_multiplier ?? 1;
+  const premiumMultiplier = plan?.premium_cost_multiplier ?? 1;
+  return {
+    unlock_required: Boolean(guardedRule.unlock_required),
+    unlocked,
+    unlock_expires_at: freeByPlan ? null : (activeUnlock?.expires_at ?? null),
+    unlock_label: guardedRule.title,
+    unlock_feature_code: guardedRule.access_code,
+    unlock_soft_cost: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost * softMultiplier),
+    unlock_premium_cost: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost * premiumMultiplier),
+  };
+}
+
+export async function unlockRuntimeFeatureAccess(params: { appCode: string; sessionToken: string; accessCode: string; walletKind?: string | null; durationSeconds?: number | null; traceId?: string | null }) {
+  const session = await findSession(params.appCode, params.sessionToken);
+  if (!session) {
+    throw Object.assign(new Error("SESSION_NOT_FOUND"), { status: 404, code: "SESSION_NOT_FOUND" });
+  }
+  if (session.status !== "active") {
+    throw Object.assign(new Error("SESSION_INACTIVE"), { status: 409, code: "SESSION_INACTIVE" });
+  }
+  const accountRef = asString(session.account_ref);
+  if (!accountRef) {
+    throw Object.assign(new Error("ACCOUNT_REQUIRED"), { status: 409, code: "ACCOUNT_REQUIRED" });
+  }
+  const controls = await enforceSessionActiveOrThrow(params.appCode, session);
+  void controls;
+  const { settings, planMap } = await getRuntimeContext(params.appCode);
+  const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : await getLatestActiveEntitlement(params.appCode, accountRef);
+  const currentPlan = entitlement?.plan_code ? asString(entitlement.plan_code, settings.guest_plan) : settings.guest_plan;
+  const activePlan = planMap.get(currentPlan) ?? null;
+  const rules = await getFeatureUnlockRules(params.appCode);
+  const accessCode = asString(params.accessCode).toLowerCase();
+  const rule = rules.find((item) => item.access_code.toLowerCase() === accessCode);
+  if (!rule || !rule.enabled) {
+    throw Object.assign(new Error("UNLOCK_RULE_NOT_FOUND"), { status: 404, code: "UNLOCK_RULE_NOT_FOUND" });
+  }
+  const freeByPlan = rule.free_for_plans.includes(currentPlan.toLowerCase());
+  const existingMap = new Map((await getLatestFeatureUnlockStates(params.appCode, accountRef, asNullableString(session.device_id))).map((item) => [item.access_code.toLowerCase(), item]));
+  const existing = existingMap.get(accessCode) ?? null;
+  if (existing && !rule.renewable) {
+    return { access_code: accessCode, unlocked: true, expires_at: existing.expires_at, free_by_plan: freeByPlan, state: await buildRuntimeState(params.appCode, { sessionToken: params.sessionToken }) };
+  }
+  if (!freeByPlan) {
+    const walletKind = asString(params.walletKind, "auto") === "vip" ? "vip" : "normal";
+    const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
+    const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
+    const softCost = round2(rule.soft_unlock_cost * softMultiplier);
+    const premiumCost = round2(rule.premium_unlock_cost * premiumMultiplier);
+    if (softCost > 0 || premiumCost > 0) {
+      await consumeRuntimeFeature({
+        appCode: params.appCode,
+        sessionToken: params.sessionToken,
+        featureCode: accessCode,
+        walletKind,
+        quantity: 1,
+        traceId: asNullableString(params.traceId),
+        overrideCost: { softCost, premiumCost },
+      });
+    }
+  }
+  const admin = createAdminClient();
+  const nowIso = getNowIso();
+  const durationSeconds = Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds)));
+  const expiresAt = addSecondsIso(nowIso, durationSeconds);
+  if (existing) {
+    const { error } = await admin.from("server_app_feature_unlocks").update({
+      expires_at: expiresAt,
+      revoked_at: null,
+      status: "active",
+      trace_id: asNullableString(params.traceId),
+      updated_at: nowIso,
+    }).eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await admin.from("server_app_feature_unlocks").insert({
+      app_code: params.appCode,
+      access_code: accessCode,
+      account_ref: accountRef,
+      device_id: asNullableString(session.device_id),
+      status: "active",
+      started_at: nowIso,
+      expires_at: expiresAt,
+      trace_id: asNullableString(params.traceId),
+      unlock_source: freeByPlan ? "plan_free" : "credit_purchase",
+    });
+    if (error) throw error;
+  }
+  await logRuntimeEvent({
+    app_code: params.appCode,
+    event_type: "unlock_feature",
+    ok: true,
+    code: "OK",
+    account_ref: accountRef,
+    device_id: asNullableString(session.device_id),
+    session_id: asString(session.id),
+    feature_code: accessCode,
+    wallet_kind: null,
+    meta: { expires_at: expiresAt, free_by_plan: freeByPlan },
+  });
+  return { access_code: accessCode, unlocked: true, expires_at: expiresAt, free_by_plan: freeByPlan, state: await buildRuntimeState(params.appCode, { sessionToken: params.sessionToken }) };
 }
 
 async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
@@ -1158,12 +1372,13 @@ async function getRuntimeContext(appCode: string) {
   const plans = await getPlans(appCode);
   const features = await getFeatures(appCode);
   const walletRules = await getWalletRules(appCode);
+  const unlockRules = await getFeatureUnlockRules(appCode);
   const planMap = new Map(plans.map((plan) => [plan.plan_code, plan]));
-  return { config, settings: { ...settings, wallet_rules: walletRules }, plans, planMap, features };
+  return { config, settings: { ...settings, wallet_rules: walletRules }, plans, planMap, features, unlockRules };
 }
 
 export async function buildRuntimeState(appCode: string, opts?: { sessionToken?: string | null }) : Promise<RuntimeAppState> {
-  const { config, settings, planMap, features } = await getRuntimeContext(appCode);
+  const { config, settings, planMap, features, unlockRules } = await getRuntimeContext(appCode);
 
   const sessionToken = asNullableString(opts?.sessionToken);
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
@@ -1207,16 +1422,23 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     last_premium_reset_at: asNullableString(walletRow?.last_premium_reset_at),
   };
 
+  const unlockStates = session?.account_ref
+    ? await getLatestFeatureUnlockStates(appCode, asString(session.account_ref), asNullableString(session.device_id))
+    : [];
+  const unlockMap = new Map(unlockStates.map((item) => [item.access_code.toLowerCase(), item]));
+
   const decoratedFeatures = features.map((feature) => {
     const minRank = getPlanRank(feature.min_plan);
     const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
     const guestVisible = session?.account_ref ? true : feature.visible_to_guest;
+    const unlockMeta = resolveFeatureUnlockMeta(feature.feature_code, currentPlan, activePlan, unlockRules, unlockMap);
     return {
       ...feature,
       allowed: guestVisible && currentPlanRank >= minRank,
       effective_soft_cost: round2(feature.soft_cost * softMultiplier),
       effective_premium_cost: round2(feature.premium_cost * premiumMultiplier),
+      ...unlockMeta,
     };
   });
 
@@ -1433,6 +1655,8 @@ export async function consumeRuntimeFeature(params: {
   featureCode: string;
   walletKind?: string | null;
   quantity?: number | null;
+  traceId?: string | null;
+  overrideCost?: { softCost?: number | null; premiumCost?: number | null } | null;
 }) {
   const appCode = asString(params.appCode);
   const sessionToken = asString(params.sessionToken);
@@ -1467,8 +1691,12 @@ export async function consumeRuntimeFeature(params: {
   }
 
   const wallet = await ensureWalletFresh(appCode, asString(session.account_ref), currentPlan, settings, asNullableString(session.device_id));
-  const effectiveSoftCost = round2(feature.soft_cost * (currentPlan?.soft_cost_multiplier ?? 1) * quantity);
-  const effectivePremiumCost = round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1) * quantity);
+  const effectiveSoftCost = params.overrideCost
+    ? round2(asNumber(params.overrideCost?.softCost, 0) * quantity)
+    : round2(feature.soft_cost * (currentPlan?.soft_cost_multiplier ?? 1) * quantity);
+  const effectivePremiumCost = params.overrideCost
+    ? round2(asNumber(params.overrideCost?.premiumCost, 0) * quantity)
+    : round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1) * quantity);
 
   let chargeKind: "none" | "soft" | "premium" = "none";
   let softDelta = 0;

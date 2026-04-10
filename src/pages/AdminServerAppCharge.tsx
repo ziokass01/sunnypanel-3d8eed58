@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { FIND_DUMPS_CREDITS, FIND_DUMPS_FEATURES, FIND_DUMPS_PACKAGES, computeFindDumpsFeatureCost, formatCredit, getServerAppMeta } from "@/lib/serverAppPolicies";
+import { FIND_DUMPS_CREDITS, FIND_DUMPS_FEATURES, FIND_DUMPS_PACKAGES, FIND_DUMPS_UNLOCKS, computeFindDumpsFeatureCost, formatCredit, getServerAppMeta } from "@/lib/serverAppPolicies";
 
 function asNumber(value: unknown, fallback = 0) {
   const n = Number(value);
@@ -37,10 +37,24 @@ function normalizePlanRows(rows: any[] | null | undefined) {
 
 function normalizeFeatureRows(rows: any[] | null | undefined) {
   const map = new Map((rows || []).map((row: any) => [String(row.feature_code || "").trim().toLowerCase(), row]));
-  return FIND_DUMPS_FEATURES.map((feature) => {
-    const hit = map.get(feature.code);
+  const seeds = new Map(FIND_DUMPS_FEATURES.map((feature) => [feature.code, feature]));
+  const orderedCodes = Array.from(new Set([
+    ...FIND_DUMPS_FEATURES.map((feature) => feature.code),
+    ...(rows || []).map((row: any) => String(row.feature_code || "").trim().toLowerCase()).filter(Boolean),
+  ])).filter((code) => !code.startsWith("unlock_"));
+  return orderedCodes.map((code) => {
+    const feature = seeds.get(code) || {
+      code,
+      title: code,
+      baseCredit: 0,
+      vipCredit: 0,
+      freeForClassic: false,
+      discountablePlans: ["classic", "go", "plus", "pro"],
+      limitLabel: "Theo rule server",
+    };
+    const hit = map.get(code);
     return {
-      code: feature.code,
+      code,
       title: hit?.title || feature.title,
       enabled: hit?.enabled ?? true,
       requiresCredit: hit?.requires_credit ?? ((feature.baseCredit > 0) || (feature.vipCredit > 0)),
@@ -50,6 +64,33 @@ function normalizeFeatureRows(rows: any[] | null | undefined) {
       badgeLabel: String(hit?.badge_label || (feature.baseCredit > 0 ? "Tính credit" : "Free")),
       limitLabel: feature.limitLabel,
       discountablePlans: feature.discountablePlans,
+    };
+  });
+}
+
+
+
+function normalizeUnlockRows(rows: any[] | null | undefined) {
+  const map = new Map((rows || []).map((row: any) => [String(row.access_code || "").trim().toLowerCase(), row]));
+  return FIND_DUMPS_UNLOCKS.map((rule) => {
+    const hit = map.get(rule.unlockFeatureCode);
+    const freePlans = Array.isArray(hit?.free_for_plans) ? hit.free_for_plans : rule.freePlans;
+    const featureCodes = Array.isArray(hit?.guarded_feature_codes) ? hit.guarded_feature_codes : rule.guardedFeatureCodes;
+    return {
+      accessCode: rule.accessCode,
+      unlockFeatureCode: rule.unlockFeatureCode,
+      title: hit?.title || rule.title,
+      description: hit?.description || rule.description,
+      enabled: hit?.enabled ?? rule.enabled,
+      unlockRequired: hit?.unlock_required ?? true,
+      durationHours: asNumber((hit?.unlock_duration_seconds ?? rule.defaultDurationHours * 3600) / 3600, rule.defaultDurationHours),
+      softUnlockCost: asNumber(hit?.soft_unlock_cost, rule.softUnlockCost),
+      premiumUnlockCost: asNumber(hit?.premium_unlock_cost, rule.premiumUnlockCost),
+      freePlans: Array.isArray(freePlans) ? freePlans.map((item: any) => String(item || "").trim()).filter(Boolean) : rule.freePlans,
+      guardedFeatureCodes: Array.isArray(featureCodes) ? featureCodes.map((item: any) => String(item || "").trim()).filter(Boolean) : rule.guardedFeatureCodes,
+      renewable: hit?.renewable ?? rule.renewable,
+      revalidateOnline: hit?.revalidate_online ?? true,
+      notes: String(hit?.notes || ""),
     };
   });
 }
@@ -75,18 +116,21 @@ export function AdminServerAppChargePage() {
   const query = useQuery({
     queryKey: ["server-app-charge-lite", appCode],
     queryFn: async () => {
-      const [plansRes, featuresRes, walletRes] = await Promise.all([
+      const [plansRes, featuresRes, walletRes, unlockRes] = await Promise.all([
         supabase.from("server_app_plans").select("app_code,plan_code,label,enabled,daily_soft_credit,daily_premium_credit,soft_cost_multiplier,premium_cost_multiplier").eq("app_code", appCode).order("sort_order", { ascending: true }),
         supabase.from("server_app_features").select("app_code,feature_code,title,enabled,requires_credit,soft_cost,premium_cost,min_plan,badge_label").eq("app_code", appCode).order("sort_order", { ascending: true }),
         supabase.from("server_app_wallet_rules").select("app_code,soft_wallet_label,premium_wallet_label,allow_decimal,soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,notes").eq("app_code", appCode).maybeSingle(),
+        supabase.from("server_app_feature_unlock_rules").select("app_code,access_code,title,description,enabled,unlock_required,unlock_duration_seconds,soft_unlock_cost,premium_unlock_cost,free_for_plans,guarded_feature_codes,renewable,revalidate_online,notes").eq("app_code", appCode).order("sort_order", { ascending: true }),
       ]);
       if (plansRes.error) throw plansRes.error;
       if (featuresRes.error) throw featuresRes.error;
       if (walletRes.error) throw walletRes.error;
+      if (unlockRes.error) throw unlockRes.error;
       return {
         plans: normalizePlanRows(plansRes.data as any[]),
         features: normalizeFeatureRows(featuresRes.data as any[]),
         wallet: normalizeWalletRow(walletRes.data as any),
+        unlocks: normalizeUnlockRows(unlockRes.data as any[]),
       };
     },
     retry: false,
@@ -95,12 +139,14 @@ export function AdminServerAppChargePage() {
   const [planDrafts, setPlanDrafts] = useState<any[]>(normalizePlanRows([]));
   const [featureDrafts, setFeatureDrafts] = useState<any[]>(normalizeFeatureRows([]));
   const [walletDraft, setWalletDraft] = useState<any>(normalizeWalletRow(null));
+  const [unlockDrafts, setUnlockDrafts] = useState<any[]>(normalizeUnlockRows([]));
 
   useEffect(() => {
     if (!query.data) return;
     setPlanDrafts(query.data.plans);
     setFeatureDrafts(query.data.features);
     setWalletDraft(query.data.wallet);
+    setUnlockDrafts(query.data.unlocks);
   }, [query.data]);
 
   const saveMutation = useMutation({
@@ -127,6 +173,23 @@ export function AdminServerAppChargePage() {
         badge_label: feature.badgeLabel,
         sort_order: (index + 1) * 10,
       }));
+      const unlockPayload = unlockDrafts.map((rule, index) => ({
+        app_code: appCode,
+        access_code: rule.unlockFeatureCode,
+        title: rule.title,
+        description: rule.description,
+        enabled: Boolean(rule.enabled),
+        unlock_required: Boolean(rule.unlockRequired),
+        unlock_duration_seconds: Math.max(3600, Math.trunc(asNumber(rule.durationHours, 24) * 3600)),
+        soft_unlock_cost: asNumber(rule.softUnlockCost),
+        premium_unlock_cost: asNumber(rule.premiumUnlockCost),
+        free_for_plans: (rule.freePlans || []).map((item: any) => String(item || "").trim()).filter(Boolean),
+        guarded_feature_codes: (rule.guardedFeatureCodes || []).map((item: any) => String(item || "").trim()).filter(Boolean),
+        renewable: Boolean(rule.renewable),
+        revalidate_online: Boolean(rule.revalidateOnline),
+        notes: String(rule.notes || "").trim() || null,
+        sort_order: 300 + (index + 1) * 10,
+      }));
       const walletPayload = {
         app_code: appCode,
         soft_wallet_label: String(walletDraft.soft_wallet_label || "Credit thường"),
@@ -138,18 +201,20 @@ export function AdminServerAppChargePage() {
         premium_daily_reset_amount: asNumber(walletDraft.premium_daily_reset_amount),
         notes: String(walletDraft.notes || "").trim() || null,
       };
-      const [plansWrite, featuresWrite, walletWrite] = await Promise.all([
+      const [plansWrite, featuresWrite, walletWrite, unlockWrite] = await Promise.all([
         supabase.from("server_app_plans").upsert(planPayload, { onConflict: "app_code,plan_code" }),
         supabase.from("server_app_features").upsert(featurePayload, { onConflict: "app_code,feature_code" }),
         supabase.from("server_app_wallet_rules").upsert(walletPayload, { onConflict: "app_code" }),
+        supabase.from("server_app_feature_unlock_rules").upsert(unlockPayload, { onConflict: "app_code,access_code" }),
       ]);
       if (plansWrite.error) throw plansWrite.error;
       if (featuresWrite.error) throw featuresWrite.error;
       if (walletWrite.error) throw walletWrite.error;
+      if (unlockWrite.error) throw unlockWrite.error;
     },
     onSuccess: async () => {
       await query.refetch();
-      toast({ title: "Đã lưu Charge / Credit Rules", description: "Giảm giá theo gói, reset hằng ngày và giá từng chức năng đã được cập nhật." });
+      toast({ title: "Đã lưu Charge / Credit Rules", description: "Giảm giá theo gói, reset hằng ngày, giá từng chức năng và rule mở khóa đã được cập nhật." });
     },
     onError: (error: any) => toast({ title: "Không lưu được Charge / Credit Rules", description: error?.message || "Vui lòng kiểm tra các bảng server_app_plans, server_app_features, server_app_wallet_rules.", variant: "destructive" }),
   });
@@ -172,11 +237,12 @@ export function AdminServerAppChargePage() {
         <p className="max-w-4xl text-sm text-muted-foreground">Tab này được chia nhỏ thành 3 cụm: gói, credit và chức năng app. Mỗi chức năng chỉ bung ra khi bấm vào để tránh một trang dài ngoằng khó quản lý.</p>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Gói</div><div className="mt-2 text-2xl font-semibold">{planDrafts.length}</div></CardContent></Card>
         <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Credit type</div><div className="mt-2 text-2xl font-semibold">{FIND_DUMPS_CREDITS.length}</div></CardContent></Card>
         <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Function tính credit</div><div className="mt-2 text-2xl font-semibold">{featureDrafts.filter((item) => item.requiresCredit).length}</div></CardContent></Card>
         <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Decimal credit</div><div className="mt-2 text-2xl font-semibold">{walletDraft.allow_decimal ? "Bật" : "Tắt"}</div></CardContent></Card>
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Rule mở khóa</div><div className="mt-2 text-2xl font-semibold">{unlockDrafts.filter((item) => item.unlockRequired).length}</div></CardContent></Card>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
@@ -294,6 +360,54 @@ export function AdminServerAppChargePage() {
                 </AccordionItem>
               );
             })}
+          </Accordion>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Mở khóa chức năng</CardTitle>
+          <CardDescription>Tab này không thay cho tiêu hao credit. Mở khóa chỉ mở quyền đi qua cổng sử dụng. Khi chạy batch, search diện rộng, Binary Workspace hoặc export lớn thì app vẫn tiêu hao credit theo feature tương ứng.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Accordion type="multiple" className="space-y-3">
+            {unlockDrafts.map((rule, index) => (
+              <AccordionItem key={rule.unlockFeatureCode} value={rule.unlockFeatureCode} className="rounded-2xl border px-4">
+                <AccordionTrigger>
+                  <div className="flex flex-1 flex-wrap items-center justify-between gap-2 pr-4 text-left">
+                    <div>
+                      <div className="font-medium">{rule.title}</div>
+                      <div className="text-xs text-muted-foreground">{rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · hết hạn sau {formatCredit(rule.durationHours)} giờ</div>
+                    </div>
+                    <Badge variant={rule.enabled ? "outline" : "secondary"}>{rule.enabled ? "Đang bật" : "Tắt"}</Badge>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4 pb-4">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-2"><div className="text-sm font-medium">Tên hiển thị</div><Input value={rule.title} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Thời hạn mở (giờ)</div><Input type="number" step="1" value={rule.durationHours} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, durationHours: Number(e.target.value || 0) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Giá mở khóa thường</div><Input type="number" step="0.1" value={rule.softUnlockCost} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, softUnlockCost: Number(e.target.value || 0) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Giá mở khóa VIP</div><Input type="number" step="0.1" value={rule.premiumUnlockCost} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premiumUnlockCost: Number(e.target.value || 0) } : item))} /></div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2"><div className="text-sm font-medium">Mô tả</div><Input value={rule.description} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Gói được mở free</div><Input value={(rule.freePlans || []).join(", ")} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, freePlans: e.target.value.split(",").map((part) => part.trim()).filter(Boolean) } : item))} placeholder="go, plus, pro" /></div>
+                  </div>
+                  <div className="space-y-2"><div className="text-sm font-medium">Các feature bị chặn bởi rule này</div><Input value={(rule.guardedFeatureCodes || []).join(", ")} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, guardedFeatureCodes: e.target.value.split(",").map((part) => part.trim()).filter(Boolean) } : item))} placeholder="binary_scan_full, workspace_batch, export_json" /></div>
+                  <div className="flex flex-wrap items-center gap-3 rounded-2xl border px-4 py-3">
+                    <div className="min-w-[220px] flex-1">
+                      <div className="text-sm font-medium">Bật rule mở khóa</div>
+                      <div className="text-xs text-muted-foreground">Tắt rule này nghĩa là app sẽ không chặn trước cửa nhóm chức năng tương ứng.</div>
+                    </div>
+                    <Switch checked={Boolean(rule.enabled)} onCheckedChange={(checked) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: checked } : item))} />
+                    <span className="text-xs text-muted-foreground">Yêu cầu mở khóa</span>
+                    <Switch checked={Boolean(rule.unlockRequired)} onCheckedChange={(checked) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, unlockRequired: checked } : item))} />
+                    <span className="text-xs text-muted-foreground">Cho gia hạn</span>
+                    <Switch checked={Boolean(rule.renewable)} onCheckedChange={(checked) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, renewable: checked } : item))} />
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
           </Accordion>
         </CardContent>
       </Card>
