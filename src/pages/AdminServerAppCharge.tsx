@@ -43,7 +43,7 @@ function normalizeFeatureRows(rows: any[] | null | undefined) {
       code: feature.code,
       title: hit?.title || feature.title,
       enabled: hit?.enabled ?? true,
-      requiresCredit: hit?.requires_credit ?? feature.baseCredit > 0 || feature.vipCredit > 0,
+      requiresCredit: hit?.requires_credit ?? ((feature.baseCredit > 0) || (feature.vipCredit > 0)),
       softCost: asNumber(hit?.soft_cost, feature.baseCredit),
       vipCost: asNumber(hit?.premium_cost, feature.vipCredit),
       minPlan: String(hit?.min_plan || (feature.discountablePlans[0] || "classic")),
