@@ -95,6 +95,13 @@ function normalizeUnlockRows(rows: any[] | null | undefined) {
   });
 }
 
+
+function isMissingUnlockTableError(error: any) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || error?.details || "").toLowerCase();
+  return code === "PGRST205" || code === "42P01" || message.includes("server_app_feature_unlock_rules");
+}
+
 function normalizeWalletRow(row: any | null | undefined) {
   return {
     soft_wallet_label: String(row?.soft_wallet_label || "Credit thường"),
@@ -125,12 +132,14 @@ export function AdminServerAppChargePage() {
       if (plansRes.error) throw plansRes.error;
       if (featuresRes.error) throw featuresRes.error;
       if (walletRes.error) throw walletRes.error;
-      if (unlockRes.error) throw unlockRes.error;
+      const unlockRows = unlockRes.error
+        ? (isMissingUnlockTableError(unlockRes.error) ? [] : (() => { throw unlockRes.error; })())
+        : (unlockRes.data as any[]);
       return {
         plans: normalizePlanRows(plansRes.data as any[]),
         features: normalizeFeatureRows(featuresRes.data as any[]),
         wallet: normalizeWalletRow(walletRes.data as any),
-        unlocks: normalizeUnlockRows(unlockRes.data as any[]),
+        unlocks: normalizeUnlockRows(unlockRows as any[]),
       };
     },
     retry: false,

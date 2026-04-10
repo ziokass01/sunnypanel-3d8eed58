@@ -51,12 +51,15 @@ export const FIND_DUMPS_CREDITS: CreditPolicy[] = [
 ];
 
 export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
-  { code: "search-basic", title: "Search cơ bản", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Không giới hạn" },
-  { code: "batch-search", title: "Batch search", baseCredit: 1.0, vipCredit: 0.5, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Quota theo ngày" },
-  { code: "export-json", title: "Export JSON", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo phiên" },
-  { code: "pseudo-browser", title: "Browser + pseudo", baseCredit: 1.5, vipCredit: 0.8, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
-  { code: "binary-scan-full", title: "Full scan", baseCredit: 2.0, vipCredit: 1.0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt quét" },
-  { code: "hex-tools", title: "Hex / codec tools", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "search_basic", title: "Search cơ bản", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Không giới hạn" },
+  { code: "batch_search", title: "Batch search", baseCredit: 1.0, vipCredit: 0.5, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Quota theo ngày" },
+  { code: "export_plain", title: "Export text", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
+  { code: "export_json", title: "Export JSON", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo lượt xuất" },
+  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 1.5, vipCredit: 0.8, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
+  { code: "binary_scan_full", title: "Full scan", baseCredit: 2.0, vipCredit: 1.0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt quét" },
+  { code: "convert_image", title: "Convert image", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "encode_decode", title: "Encode / Decode", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "hex_edit", title: "Hex edit", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
 ];
 
 
@@ -119,7 +122,7 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
     title: "Export ra ngoài",
     description: "Mở quyền export TXT/JSON/CSV và đầu ra lớn. Sau khi mở khóa, mỗi lượt export vẫn đi qua lớp tiêu hao credit riêng.",
     unlockFeatureCode: "unlock_export_tools",
-    guardedFeatureCodes: ["export_json", "workspace_export_result", "ida_workspace_export"],
+    guardedFeatureCodes: ["export_plain", "export_text", "export_json", "workspace_export_result", "ida_workspace_export"],
     defaultDurationHours: 24,
     softUnlockCost: 0.5,
     premiumUnlockCost: 0.2,

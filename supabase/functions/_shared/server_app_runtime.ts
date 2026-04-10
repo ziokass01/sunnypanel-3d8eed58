@@ -222,6 +222,16 @@ function asNullableString(value: unknown): string | null {
   return v || null;
 }
 
+
+function isMissingRelationError(error: any, relationName: string) {
+  const code = String(error?.code ?? "");
+  const msg = String(error?.message ?? error?.details ?? "").toLowerCase();
+  const relation = String(relationName || "").toLowerCase();
+  if (code === "PGRST205" || code === "42P01") return true;
+  if (!relation) return false;
+  return msg.includes("could not find the table") || msg.includes("relation") && msg.includes(relation) && msg.includes("does not exist");
+}
+
 function asStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return Array.from(new Set(value.map((item) => asString(item)).filter(Boolean)));
@@ -483,7 +493,10 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_app_feature_unlock_rules")) return [];
+    throw error;
+  }
   return (data ?? []).map((row: any) => ({
     access_code: asString(row.access_code),
     title: asString(row.title, asString(row.access_code)),
@@ -513,7 +526,10 @@ async function getLatestFeatureUnlockStates(appCode: string, accountRef: string,
   const normalizedDeviceId = asNullableString(deviceId);
   if (normalizedDeviceId) query = query.or(`device_id.is.null,device_id.eq.${normalizedDeviceId}`);
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_app_feature_unlocks")) return [];
+    throw error;
+  }
   const now = Date.now();
   const chosen = new Map<string, RuntimeFeatureUnlockState>();
   for (const row of (data ?? []) as any[]) {
