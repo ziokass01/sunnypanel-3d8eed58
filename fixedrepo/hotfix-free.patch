@@ -1,0 +1,123 @@
+--- a/src/pages/AdminFreeKeys.tsx
++++ b/src/pages/AdminFreeKeys.tsx
+@@ -243,6 +243,17 @@
+   return out.slice(0, 8);
+ }
+ 
++const NEW_FREE_SETTINGS_COLUMNS = [
++  "free_daily_limit_per_ip",
++  "free_gate_require_ip_match",
++  "free_gate_require_ua_match",
++] as const;
++
++function isMissingFreeSettingsColumnError(error: any) {
++  const msg = String(error?.message || error?.details || error?.hint || "");
++  return NEW_FREE_SETTINGS_COLUMNS.some((col) => msg.includes(col));
++}
++
+ export function AdminFreeKeysPage() {
+   const { toast } = useToast();
+ 
+@@ -271,9 +282,7 @@
+     queryFn: async () => {
+       const { data, error } = await supabase
+         .from("licenses_free_settings")
+-        .select(
+-          "id,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days,free_session_waiting_limit,free_link4m_rotate_nonce_pass1,free_link4m_rotate_nonce_pass2,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_gate_require_ip_match,free_gate_require_ua_match,free_enabled,free_disabled_message,free_min_delay_enabled,free_return_seconds,free_daily_limit_per_fingerprint,free_daily_limit_per_ip,free_require_link4m_referrer,free_public_note,free_public_links,free_download_enabled,free_download_name,free_download_info,free_download_path,free_download_url,free_download_size,updated_at,updated_by",
+-        )
++        .select("*")
+         .eq("id", 1)
+         .maybeSingle();
+       if (error) throw error;
+@@ -449,13 +458,27 @@
+       };
+ 
+       const query: any = supabase.from("licenses_free_settings");
+-      const { data, error } = await query
++      const attempt = await query
+         .upsert({ id: 1, ...patch }, { onConflict: "id" })
+         .select("id")
+         .single();
+ 
+-      if (error) throw error;
+-      return data;
++      if (!attempt.error) return attempt.data;
++      if (!isMissingFreeSettingsColumnError(attempt.error)) throw attempt.error;
++
++      const legacyPatch = { ...patch } as any;
++      delete legacyPatch.free_daily_limit_per_ip;
++      delete legacyPatch.free_gate_require_ip_match;
++      delete legacyPatch.free_gate_require_ua_match;
++
++      const legacyAttempt = await supabase
++        .from("licenses_free_settings")
++        .upsert({ id: 1, ...legacyPatch }, { onConflict: "id" })
++        .select("id")
++        .single();
++
++      if (legacyAttempt.error) throw legacyAttempt.error;
++      return legacyAttempt.data;
+     },
+     onSuccess: async () => {
+       toast({ title: "Saved", description: "Free settings updated." });
+--- a/supabase/functions/free-config/index.ts
++++ b/supabase/functions/free-config/index.ts
+@@ -104,33 +104,7 @@
+   // Load settings row id=1
+   const { data: settings, error: sErr } = await sb
+     .from("licenses_free_settings")
+-    .select(`
+-  free_outbound_url,
+-  free_outbound_url_pass2,
+-  free_enabled,
+-  free_disabled_message,
+-  free_min_delay_seconds,
+-  free_min_delay_seconds_pass2,
+-  free_gate_antibypass_enabled,
+-  free_gate_antibypass_seconds,
+-  free_link4m_rotate_days,
+-  free_session_waiting_limit,
+-  free_link4m_rotate_nonce_pass1,
+-  free_link4m_rotate_nonce_pass2,
+-  free_return_seconds,
+-  free_daily_limit_per_fingerprint,
+-  free_daily_limit_per_ip,
+-  free_gate_require_ip_match,
+-  free_gate_require_ua_match,
+-  free_require_link4m_referrer,
+-  free_public_note,
+-  free_public_links,
+-  free_download_enabled,
+-  free_download_name,
+-  free_download_info,
+-  free_download_url,
+-  free_download_size
+-`)
++    .select("*")
+     .eq("id", 1)
+     .maybeSingle();
+ 
+--- a/supabase/functions/free-gate/index.ts
++++ b/supabase/functions/free-gate/index.ts
+@@ -366,9 +366,7 @@
+   // Settings
+   const { data: settings, error: sErr } = await sb
+     .from("licenses_free_settings")
+-    .select(
+-      "free_enabled,free_disabled_message,free_min_delay_enabled,free_min_delay_seconds,free_min_delay_seconds_pass2,free_gate_antibypass_enabled,free_gate_antibypass_seconds,free_gate_require_ip_match,free_gate_require_ua_match,free_require_link4m_referrer,free_outbound_url,free_outbound_url_pass2,free_link4m_rotate_days",
+-    )
++    .select("*")
+     .eq("id", 1)
+     .maybeSingle();
+ 
+--- a/supabase/functions/free-reveal/index.ts
++++ b/supabase/functions/free-reveal/index.ts
+@@ -235,7 +235,7 @@
+   // Settings
+   const { data: settings, error: sErr } = await sb
+     .from("licenses_free_settings")
+-.select("free_enabled,free_disabled_message,free_daily_limit_per_fingerprint,free_daily_limit_per_ip,free_return_seconds")
++    .select("*")
+     .eq("id", 1)
+     .maybeSingle();
+ 
