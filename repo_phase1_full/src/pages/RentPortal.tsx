@@ -1,0 +1,1552 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { postFunction } from "@/lib/functions";
+import { useToast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error-message";
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { RentApiQuickNotes } from "@/components/rent/RentApiQuickNotes";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Activity, Download, FileClock, Gauge, History, House, KeyRound, LockKeyhole, LogOut, Menu, ShieldCheck, Sparkles, UserRound, Waypoints, X } from "lucide-react";
+
+type ApiOk<T> = { ok: true } & T;
+
+type RentAccount = {
+  id: string;
+  username: string;
+  created_at: string;
+  activated_at: string | null;
+  expires_at: string | null;
+  max_devices: number;
+  is_disabled: boolean;
+  hmac_secret: string | null;
+  has_hmac_view_password?: boolean;
+  hmac_view_locked_until?: string | null;
+};
+
+type RentKey = {
+  id: string;
+  key: string;
+  created_at: string;
+  expires_at: string | null;
+  is_active: boolean;
+  note: string | null;
+  starts_on_first_use: boolean;
+  duration_days: number | null;
+  duration_value?: number | null;
+  duration_unit?: "hour" | "day" | null;
+  max_devices?: number | null;
+  first_used_at: string | null;
+};
+
+type RentKeyDevice = {
+  id: string;
+  device_id: string;
+  first_seen: string;
+  last_seen: string;
+};
+
+type RentKeyAuditLog = {
+  id: string;
+  key_id: string | null;
+  action: string;
+  result: string | null;
+  device_id: string | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type DownloadItem = {
+  id: string;
+  title: string;
+  url: string;
+  note: string | null;
+};
+
+type KeyStatusFilter = "all" | "on" | "off";
+type KeyStartMode = "immediate" | "first_use";
+type DurationUnit = "hour" | "day";
+
+type TabValue = "status" | "dashboard" | "create" | "history" | "audit" | "password" | "account" | "api";
+
+const LS_TOKEN = "rent_token_v1";
+const BRAND_CAT_SRC = "/android-chrome-512x512.png";
+
+function fmtDate(value: string | null | undefined) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return String(value);
+  }
+}
+
+export function normalizeKeyInput(input: string) {
+  return input
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+function isAuthTokenError(error: unknown) {
+  const msg = getErrorMessage(error as any).toLowerCase();
+  return (
+    msg.includes("invalid token") ||
+    msg.includes("missing token") ||
+    msg.includes("session expired") ||
+    msg.includes("session revoked") ||
+    msg.includes("session not found") ||
+    msg.includes("unauthorized")
+  );
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function maskSecret(secret: string, show: boolean) {
+  if (show) return secret;
+  return "•".repeat(Math.max(16, Math.min(32, secret.length || 16)));
+}
+
+function shortId(input: string | null | undefined, keep = 8) {
+  if (!input) return "-";
+  return input.length <= keep ? input : `${input.slice(0, keep)}…`;
+}
+
+function statusPillClass(active: boolean) {
+  return active
+    ? "inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700"
+    : "inline-flex rounded-full border border-muted-foreground/20 bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
+}
+
+function keyModeLabel(key: Pick<RentKey, "starts_on_first_use">) {
+  return key.starts_on_first_use ? "Dùng lần đầu mới chạy" : "Chạy ngay";
+}
+
+function keyExpiryLabel(key: Pick<RentKey, "starts_on_first_use" | "first_used_at" | "expires_at">) {
+  if (key.starts_on_first_use && !key.first_used_at) return "Chưa bắt đầu";
+  if (!key.expires_at) return "Không giới hạn";
+  return fmtDate(key.expires_at);
+}
+
+function getDurationValue(key: RentKey) {
+  return Number(key.duration_value ?? key.duration_days ?? 0);
+}
+
+function getDurationUnit(key: RentKey): DurationUnit {
+  return key.duration_unit === "hour" ? "hour" : "day";
+}
+
+export function keyDurationLabel(key: Pick<RentKey, "duration_value" | "duration_unit" | "duration_days">) {
+  const value = Number(key.duration_value ?? key.duration_days ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  const unit = key.duration_unit === "hour" ? "giờ" : "ngày";
+  return `${value} ${unit}`;
+}
+
+function mapAuditAction(action: string) {
+  const map: Record<string, string> = {
+    verify: "Xác thực key",
+    create_key_random: "Tạo key ngẫu nhiên",
+    create_key_custom: "Tạo key tự chọn",
+    update_key_config: "Cập nhật key",
+    enable_key: "Bật key",
+    disable_key: "Tắt key",
+    delete_key: "Xóa key",
+    start_key_first_use: "Bắt đầu tính hạn",
+    set_hmac_view_password: "Đặt mật khẩu xem HMAC",
+    unlock_hmac_view_password_success: "Mở khóa HMAC thành công",
+    unlock_hmac_view_password_failed: "Mở khóa HMAC thất bại",
+    copy_hmac_secret: "Sao chép HMAC",
+    admin_clear_hmac_view_password: "Admin xóa mật khẩu xem HMAC",
+  };
+  return map[action] ?? action;
+}
+
+export function mapAuditResult(result: string | null | undefined) {
+  if (!result) return "-";
+  const map: Record<string, string> = {
+    VALID: "Hợp lệ",
+    KEY_NOT_FOUND: "Không tìm thấy key",
+    BAD_SIGNATURE: "Sai chữ ký",
+    BAD_TIMESTAMP: "Sai thời gian",
+    KEY_DISABLED: "Key đã tắt",
+    KEY_EXPIRED: "Key đã hết hạn",
+    DEVICE_LIMIT: "Vượt quá số thiết bị",
+    KEY_BAD_DURATION: "Thời lượng không hợp lệ",
+    KEY_TAMPERED: "Key không hợp lệ",
+    ok: "Thành công",
+    success: "Thành công",
+  };
+  return map[result] ?? result;
+}
+
+function formatLockTime(iso: string | null | undefined) {
+  if (!iso) return null;
+  const remainMs = new Date(iso).getTime() - Date.now();
+  if (remainMs <= 0) return null;
+  const sec = Math.ceil(remainMs / 1000);
+  if (sec < 60) return `${sec} giây`;
+  const min = Math.ceil(sec / 60);
+  return `${min} phút`;
+}
+
+function isSoonExpired(key: RentKey) {
+  if (!key.expires_at) return false;
+  const diff = new Date(key.expires_at).getTime() - Date.now();
+  return diff > 0 && diff <= 3 * 24 * 60 * 60 * 1000;
+}
+
+export function buildTongQuanStats(keys: RentKey[]) {
+  const total = keys.length;
+  const enabled = keys.filter((key) => key.is_active).length;
+  const disabled = Math.max(0, total - enabled);
+  const firstUse = keys.filter((key) => key.starts_on_first_use).length;
+  const soonExpired = keys.filter((key) => isSoonExpired(key)).length;
+  return { total, enabled, disabled, firstUse, soonExpired };
+}
+
+function calcCountdown(endAtMs: number | null) {
+  if (!endAtMs) return 0;
+  return Math.max(0, Math.ceil((endAtMs - Date.now()) / 1000));
+}
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
+
+const NAV_ITEMS = [
+  { value: "status" as TabValue, label: "Trạng thái", icon: House },
+  { value: "dashboard" as TabValue, label: "Tổng quan", icon: Gauge },
+  { value: "create" as TabValue, label: "Tạo key", icon: KeyRound },
+  { value: "history" as TabValue, label: "Lịch sử key", icon: History },
+  { value: "audit" as TabValue, label: "Audit log", icon: ShieldCheck },
+  { value: "password" as TabValue, label: "Đổi mật khẩu", icon: LockKeyhole },
+  { value: "account" as TabValue, label: "Tài khoản", icon: UserRound },
+  { value: "api" as TabValue, label: "API & Tải xuống", icon: Download },
+];
+
+const panelCardClass = "border-slate-200/80 bg-white/95 text-slate-900 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur";
+const metricCardClass = "rounded-[24px] border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_30px_rgba(15,23,42,0.06)]";
+const fieldClass = "h-12 rounded-2xl !border-slate-300 !bg-white !text-slate-950 caret-slate-950 placeholder:!text-slate-400 shadow-[0_8px_20px_rgba(15,23,42,0.06)] ring-offset-white focus-visible:!border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
+const heroFieldClass = "h-14 rounded-[22px] !border-slate-300 !bg-white !text-slate-950 caret-slate-950 placeholder:!text-slate-400 shadow-[0_12px_24px_rgba(15,23,42,0.07)] ring-offset-white focus-visible:!border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
+const textareaClass = "min-h-[120px] rounded-[22px] !border-slate-300 !bg-white !text-slate-950 caret-slate-950 placeholder:!text-slate-400 shadow-[0_8px_20px_rgba(15,23,42,0.06)] ring-offset-white focus-visible:!border-amber-400 focus-visible:ring-4 focus-visible:ring-amber-100";
+const selectTriggerClass = "h-12 rounded-2xl !border-slate-300 !bg-white !text-slate-950 shadow-[0_8px_20px_rgba(15,23,42,0.06)] focus:!border-amber-400 focus:ring-4 focus:ring-amber-100";
+const readableFieldStyle = { color: "#0f172a", backgroundColor: "#ffffff", WebkitTextFillColor: "#0f172a", caretColor: "#0f172a" } as const;
+const dialogCardClass = "border-slate-200/80 bg-white/95 text-slate-900 shadow-[0_28px_70px_rgba(15,23,42,0.18)]";
+const tableWrapClass = "hidden rounded-[24px] border border-slate-200/80 bg-white/80 shadow-[0_12px_28px_rgba(15,23,42,0.05)] md:block";
+const tabListDesktopClass = "grid h-auto w-full gap-2 rounded-[26px] bg-white/10 p-2";
+const tabTriggerDesktopClass = "justify-start gap-3 rounded-2xl border border-transparent px-3 py-3 text-left text-slate-300 transition-all data-[state=active]:border-amber-300/30 data-[state=active]:bg-white data-[state=active]:text-slate-950 data-[state=active]:shadow-[0_10px_20px_rgba(15,23,42,0.14)]";
+const tabListMobileClass = "inline-flex h-auto min-w-max gap-2 rounded-[22px] bg-white/90 p-1.5 shadow-[0_10px_26px_rgba(15,23,42,0.08)]";
+const tabTriggerMobileClass = "gap-2 rounded-2xl px-3 py-2.5 text-slate-600 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-[0_10px_20px_rgba(15,23,42,0.16)]";
+const amberButtonClass = "rounded-2xl bg-amber-400 text-slate-950 shadow-[0_10px_24px_rgba(251,191,36,0.28)] hover:bg-amber-300";
+const softButtonClass = "rounded-2xl border border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200 hover:text-slate-950";
+const slateButtonClass = "rounded-2xl bg-slate-600 text-white shadow-[0_10px_24px_rgba(71,85,105,0.16)] hover:bg-slate-500";
+const subtleCodeClass = "block overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 font-mono text-xs leading-6 text-slate-800 shadow-inner break-all";
+const subtlePreClass = "overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-800 shadow-inner";
+
+export function RentPortalPage() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const authErrorHandledRef = useRef(false);
+
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem(LS_TOKEN);
+  });
+
+  const [tab, setTab] = useState<TabValue>("status");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [activationKey, setActivationKey] = useState("");
+  const [customKey, setCustomKey] = useState("");
+  const [keyNote, setKeyNote] = useState("");
+  const [durationValue, setDurationValue] = useState("30");
+  const [durationUnit, setDurationUnit] = useState<DurationUnit>("day");
+  const [maxDevicesValue, setMaxDevicesValue] = useState("1");
+  const [keyStartMode, setKeyStartMode] = useState<KeyStartMode>("immediate");
+  const [resetCode, setResetCode] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [lastCreatedKey, setLastCreatedKey] = useState<string | null>(null);
+  const [keySearch, setKeySearch] = useState("");
+  const [keyStatusFilter, setKeyStatusFilter] = useState<KeyStatusFilter>("all");
+  const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  const [editDurationValue, setEditDurationValue] = useState("30");
+  const [editDurationUnit, setEditDurationUnit] = useState<DurationUnit>("day");
+  const [editMaxDevicesValue, setEditMaxDevicesValue] = useState("1");
+  const [editKeyStartMode, setEditKeyStartMode] = useState<KeyStartMode>("immediate");
+  const [editKeyNote, setEditKeyNote] = useState("");
+  const [hmacDialogOpen, setHmacDialogOpen] = useState(false);
+  const [hmacPassword, setHmacPassword] = useState("");
+  const [hmacPasswordConfirm, setHmacPasswordConfirm] = useState("");
+  const [hmacUnlockPassword, setHmacUnlockPassword] = useState("");
+  const [showHmac, setShowHmac] = useState(false);
+  const [hmacSecret, setHmacSecret] = useState<string | null>(null);
+  const [hmacVisibleUntil, setHmacVisibleUntil] = useState<number | null>(null);
+
+  const logout = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(LS_TOKEN);
+    }
+    setToken(null);
+    setShowHmac(false);
+    setHmacSecret(null);
+    setHmacVisibleUntil(null);
+    setLastCreatedKey(null);
+    setSelectedKeyId(null);
+    setKeyDialogOpen(false);
+    setHmacDialogOpen(false);
+    qc.clear();
+  };
+
+  useEffect(() => {
+    if (!showHmac || !hmacVisibleUntil) return;
+    const timer = window.setInterval(() => {
+      if (Date.now() >= hmacVisibleUntil) {
+        setShowHmac(false);
+        setHmacSecret(null);
+        setHmacVisibleUntil(null);
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [showHmac, hmacVisibleUntil]);
+
+  const meQ = useQuery({
+    queryKey: ["rent", "me", token],
+    enabled: !!token,
+    queryFn: async () => {
+      const res = await postFunction<ApiOk<{ account: RentAccount }>>(
+        "/rent-user",
+        { action: "me" },
+        { authToken: token ?? undefined },
+      );
+      return res.account;
+    },
+    retry: false,
+  });
+
+  const account = meQ.data;
+  const isActive = !!account?.expires_at && new Date(account.expires_at).getTime() > Date.now() && !account.is_disabled;
+
+  useEffect(() => {
+    if (!token) {
+      authErrorHandledRef.current = false;
+      return;
+    }
+    if (meQ.error && isAuthTokenError(meQ.error) && !authErrorHandledRef.current) {
+      authErrorHandledRef.current = true;
+      logout();
+      toast({
+        title: "Phiên đăng nhập đã hết hạn",
+        description: "Token phiên không còn hợp lệ. Vui lòng đăng nhập lại rồi kích hoạt tiếp.",
+        variant: "destructive",
+      });
+    }
+  }, [meQ.error, token]);
+
+  const keysQ = useQuery({
+    queryKey: ["rent", "keys", token],
+    enabled: !!token && isActive,
+    queryFn: async () => {
+      const res = await postFunction<ApiOk<{ keys: RentKey[] }>>(
+        "/rent-user",
+        { action: "list_keys" },
+        { authToken: token ?? undefined },
+      );
+      return res.keys;
+    },
+    retry: false,
+  });
+
+  const logsQ = useQuery({
+    queryKey: ["rent", "key_logs", token],
+    enabled: !!token && isActive,
+    queryFn: async () => {
+      const res = await postFunction<ApiOk<{ logs: RentKeyAuditLog[] }>>(
+        "/rent-user",
+        { action: "list_key_logs", limit: 100 },
+        { authToken: token ?? undefined },
+      );
+      return res.logs;
+    },
+    retry: false,
+  });
+
+  const downloadsQ = useQuery({
+    queryKey: ["rent", "downloads", token],
+    enabled: !!token,
+    queryFn: async () => {
+      const res = await postFunction<ApiOk<{ items: DownloadItem[] }>>(
+        "/rent-user",
+        { action: "list_downloads" },
+        { authToken: token ?? undefined },
+      );
+      return res.items;
+    },
+    retry: false,
+  });
+
+  const selectedKey = useMemo(
+    () => (keysQ.data ?? []).find((row) => row.id === selectedKeyId) ?? null,
+    [keysQ.data, selectedKeyId],
+  );
+
+  const keyDevicesQ = useQuery({
+    queryKey: ["rent", "key_devices", token, selectedKeyId],
+    enabled: !!token && isActive && !!selectedKeyId,
+    queryFn: async () => {
+      const res = await postFunction<ApiOk<{ devices: RentKeyDevice[] }>>(
+        "/rent-user",
+        { action: "list_key_devices", key_id: selectedKeyId },
+        { authToken: token ?? undefined },
+      );
+      return res.devices;
+    },
+    retry: false,
+  });
+
+  const keyLogsQ = useQuery({
+    queryKey: ["rent", "key_logs", token, selectedKeyId],
+    enabled: !!token && isActive && !!selectedKeyId,
+    queryFn: async () => {
+      const res = await postFunction<ApiOk<{ logs: RentKeyAuditLog[] }>>(
+        "/rent-user",
+        { action: "list_key_logs", key_id: selectedKeyId, limit: 30 },
+        { authToken: token ?? undefined },
+      );
+      return res.logs;
+    },
+    retry: false,
+  });
+
+  const loginM = useMutation({
+    mutationFn: async () => {
+      const res = await postFunction<ApiOk<{ token: string }>>(
+        "/rent-user",
+        { action: "login", username: username.trim(), password },
+        {},
+      );
+      return res.token;
+    },
+    onSuccess: (nextToken) => {
+      if (typeof window !== "undefined") window.localStorage.setItem(LS_TOKEN, nextToken);
+      setToken(nextToken);
+      setPassword("");
+      toast({ title: "Đăng nhập thành công" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Đăng nhập thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const activateM = useMutation({
+    mutationFn: async () => {
+      const res = await postFunction<ApiOk<{ expires_at: string; activated_at: string | null }>>(
+        "/rent-user",
+        { action: "activate", code: normalizeKeyInput(activationKey) },
+        { authToken: token ?? undefined },
+      );
+      return res;
+    },
+    onSuccess: (res) => {
+      toast({ title: "Kích hoạt thành công", description: `Hết hạn: ${fmtDate(res.expires_at)}` });
+      setActivationKey("");
+      qc.invalidateQueries({ queryKey: ["rent", "me"] });
+      qc.invalidateQueries({ queryKey: ["rent", "keys"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+    },
+    onError: (error: any) => {
+      if (isAuthTokenError(error)) {
+        authErrorHandledRef.current = true;
+        logout();
+        toast({
+          title: "Phiên đăng nhập đã hết hạn",
+          description: "Token phiên không còn hợp lệ. Vui lòng đăng nhập lại rồi nhập lại key kích hoạt.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({ title: "Kích hoạt thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const buildDurationPayload = (value: string, unit: DurationUnit) => {
+    const parsed = Math.max(1, Math.min(999999, parseInt(value || "0", 10) || 1));
+    return { duration_value: parsed, duration_unit: unit };
+  };
+
+  const createKeyM = useMutation({
+    mutationFn: async (mode: "random" | "custom") => {
+      const res = await postFunction<ApiOk<{ key: RentKey }>>(
+        "/rent-user",
+        {
+          action: mode === "random" ? "generate_key" : "create_key",
+          key: mode === "custom" ? normalizeKeyInput(customKey) : null,
+          note: keyNote.trim() || null,
+          start_mode: keyStartMode,
+          max_devices: Math.max(1, Math.min(999999, parseInt(maxDevicesValue || "0", 10) || 1)),
+          ...buildDurationPayload(durationValue, durationUnit),
+        },
+        { authToken: token ?? undefined },
+      );
+      return res.key;
+    },
+    onSuccess: (createdKey) => {
+      setLastCreatedKey(createdKey.key);
+      setCustomKey("");
+      setKeyNote("");
+      setDurationValue("30");
+      setDurationUnit("day");
+      setMaxDevicesValue("1");
+      setKeyStartMode("immediate");
+      qc.invalidateQueries({ queryKey: ["rent", "keys"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+      toast({ title: "Đã tạo key" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Tạo key thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const updateKeyM = useMutation({
+    mutationFn: async () => {
+      if (!selectedKey) throw new Error("Chưa chọn key");
+      const res = await postFunction<ApiOk<{ key: RentKey }>>(
+        "/rent-user",
+        {
+          action: "update_key",
+          key_id: selectedKey.id,
+          note: editKeyNote.trim() || null,
+          start_mode: editKeyStartMode,
+          max_devices: Math.max(1, Math.min(999999, parseInt(editMaxDevicesValue || "0", 10) || 1)),
+          ...buildDurationPayload(editDurationValue, editDurationUnit),
+        },
+        { authToken: token ?? undefined },
+      );
+      return res.key;
+    },
+    onSuccess: () => {
+      toast({ title: "Đã cập nhật key" });
+      qc.invalidateQueries({ queryKey: ["rent", "keys"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs", token, selectedKeyId] });
+      setKeyDialogOpen(false);
+    },
+    onError: (error: any) => {
+      toast({ title: "Cập nhật thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const toggleKeyM = useMutation({
+    mutationFn: async (key: RentKey) => {
+      const res = await postFunction<ApiOk<{ key: RentKey }>>(
+        "/rent-user",
+        { action: "toggle_key", key_id: key.id, is_active: !key.is_active },
+        { authToken: token ?? undefined },
+      );
+      return res.key;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["rent", "keys"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Đổi trạng thái thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const deleteKeyM = useMutation({
+    mutationFn: async (keyId: string) => {
+      await postFunction<ApiOk<Record<string, never>>>(
+        "/rent-user",
+        { action: "delete_key", key_id: keyId },
+        { authToken: token ?? undefined },
+      );
+    },
+    onSuccess: () => {
+      toast({ title: "Đã xóa key" });
+      qc.invalidateQueries({ queryKey: ["rent", "keys"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+      setKeyDialogOpen(false);
+    },
+    onError: (error: any) => {
+      toast({ title: "Xóa key thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const resetPassM = useMutation({
+    mutationFn: async () => {
+      await postFunction<ApiOk<Record<string, never>>>(
+        "/rent-user",
+        { action: "reset_password", username: account?.username ?? username.trim(), code: resetCode.trim(), new_password: newPass },
+        {},
+      );
+    },
+    onSuccess: () => {
+      setResetCode("");
+      setNewPass("");
+      toast({ title: "Đổi mật khẩu thành công" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Đổi mật khẩu thất bại", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const logoutM = useMutation({
+    mutationFn: async () => {
+      await postFunction<ApiOk<Record<string, never>>>(
+        "/rent-user",
+        { action: "logout" },
+        { authToken: token ?? undefined },
+      );
+    },
+    onSettled: () => {
+      logout();
+    },
+  });
+
+  const setHmacPasswordM = useMutation({
+    mutationFn: async (passwordValue: string) => {
+      const res = await postFunction<ApiOk<{ hmac_secret: string }>>(
+        "/rent-user",
+        { action: "set_hmac_view_password", password: passwordValue },
+        { authToken: token ?? undefined },
+      );
+      return res;
+    },
+    onSuccess: (res) => {
+      const until = Date.now() + 60_000;
+      setHmacSecret(res.hmac_secret);
+      setShowHmac(true);
+      setHmacVisibleUntil(until);
+      setHmacDialogOpen(false);
+      setHmacPassword("");
+      setHmacPasswordConfirm("");
+      qc.invalidateQueries({ queryKey: ["rent", "me"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+      toast({ title: "Đã đặt mật khẩu xem HMAC" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Không đặt được mật khẩu", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const unlockHmacM = useMutation({
+    mutationFn: async () => {
+      const res = await postFunction<ApiOk<{ hmac_secret: string }>>(
+        "/rent-user",
+        { action: "unlock_hmac_view_password", password: hmacUnlockPassword },
+        { authToken: token ?? undefined },
+      );
+      return res;
+    },
+    onSuccess: (res) => {
+      const until = Date.now() + 60_000;
+      setHmacSecret(res.hmac_secret);
+      setShowHmac(true);
+      setHmacVisibleUntil(until);
+      setHmacDialogOpen(false);
+      setHmacUnlockPassword("");
+      qc.invalidateQueries({ queryKey: ["rent", "me"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+      toast({ title: "Đã mở khóa HMAC" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Không mở khóa được", description: getErrorMessage(error), variant: "destructive" });
+      qc.invalidateQueries({ queryKey: ["rent", "me"] });
+      qc.invalidateQueries({ queryKey: ["rent", "key_logs"] });
+    },
+  });
+
+  const copyHmacM = useMutation({
+    mutationFn: async () => {
+      await postFunction<ApiOk<Record<string, never>>>(
+        "/rent-user",
+        { action: "log_copy_hmac_secret" },
+        { authToken: token ?? undefined },
+      );
+    },
+  });
+
+  const keys = keysQ.data ?? [];
+  const logs = logsQ.data ?? [];
+
+  const filteredKeys = useMemo(() => {
+    const q = keySearch.trim().toLowerCase();
+    return keys.filter((key) => {
+      const passStatus = keyStatusFilter === "all"
+        ? true
+        : keyStatusFilter === "on"
+          ? key.is_active
+          : !key.is_active;
+      if (!passStatus) return false;
+      if (!q) return true;
+      return [key.key, key.note ?? "", keyModeLabel(key), keyDurationLabel(key), keyExpiryLabel(key)]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [keys, keySearch, keyStatusFilter]);
+
+  const dashboardStats = useMemo(() => buildTongQuanStats(keys), [keys]);
+
+  const openKeyDialog = (key: RentKey) => {
+    setSelectedKeyId(key.id);
+    setEditDurationValue(String(getDurationValue(key) || 30));
+    setEditDurationUnit(getDurationUnit(key));
+    setEditMaxDevicesValue(String(key.max_devices ?? 1));
+    setEditKeyStartMode(key.starts_on_first_use ? "first_use" : "immediate");
+    setEditKeyNote(key.note ?? "");
+    setKeyDialogOpen(true);
+  };
+
+  const handleOpenHmac = () => {
+    if (!account) return;
+    setHmacPassword("");
+    setHmacPasswordConfirm("");
+    setHmacUnlockPassword("");
+    setHmacDialogOpen(true);
+  };
+
+  const hmacCountdown = calcCountdown(hmacVisibleUntil);
+  const lockRemain = formatLockTime(account?.hmac_view_locked_until);
+
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.16),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#f6f7fb_100%)] px-4 py-10">
+        <div className="mx-auto flex min-h-[80vh] max-w-5xl items-center justify-center">
+          <div className="grid w-full max-w-4xl gap-8 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="hidden rounded-[34px] border border-amber-200/70 bg-[linear-gradient(135deg,#fff8e8_0%,#fffdf8_55%,#f8fbff_100%)] p-8 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.08)] lg:block">
+              <div className="inline-flex rounded-full border border-amber-200 bg-white/80 px-4 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-amber-900">
+                SUNNY RENT PORTAL
+              </div>
+              <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-tight">
+                Đăng nhập để mở khu quản lý tài khoản thuê của bạn.
+              </h1>
+              <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
+                Trang quản lý được tối ưu lại theo hướng gọn gàng, dễ đọc và dễ thao tác hơn trên điện thoại lẫn máy tính.
+              </p>
+              <div className="mt-8 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-3xl border border-white bg-white/80 p-5 shadow-sm">
+                  <div className="text-sm font-medium text-slate-500">Điểm mạnh</div>
+                  <div className="mt-2 text-xl font-semibold text-slate-900">Dễ đọc hơn</div>
+                  <div className="mt-2 text-sm leading-6 text-slate-600">Nền sáng dịu, khoảng cách thoáng, nút bấm rõ cấp bậc.</div>
+                </div>
+                <div className="rounded-3xl border border-white bg-white/80 p-5 shadow-sm">
+                  <div className="text-sm font-medium text-slate-500">Dùng trên mobile</div>
+                  <div className="mt-2 text-xl font-semibold text-slate-900">Đỡ rối hơn</div>
+                  <div className="mt-2 text-sm leading-6 text-slate-600">Ô nhập, tab và các khối nội dung được chỉnh để nhìn đỡ chật.</div>
+                </div>
+              </div>
+            </div>
+
+            <Card className="rounded-[34px] border-amber-200/80 bg-white/95 text-slate-900 shadow-[0_28px_80px_rgba(15,23,42,0.10)] backdrop-blur">
+              <CardHeader className="space-y-3 px-6 pb-2 pt-7 sm:px-8">
+                <div className="inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-amber-100 bg-white shadow-sm">
+                  <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                </div>
+                <CardTitle className="text-3xl font-semibold tracking-tight text-slate-950">Đăng nhập trang thuê</CardTitle>
+                <CardDescription className="text-base leading-7 text-slate-500">
+                  Nhập tài khoản và mật khẩu để vào trang quản lý của bạn.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5 px-6 pb-7 pt-3 sm:px-8">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-slate-700">Tài khoản</Label>
+                  <Input
+                    style={readableFieldStyle} className={heroFieldClass}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Nhập tài khoản"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-slate-700">Mật khẩu</Label>
+                  <Input
+                    style={readableFieldStyle} className={heroFieldClass}
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Nhập mật khẩu"
+                  />
+                </div>
+                <Button
+                  className="h-14 w-full rounded-2xl bg-amber-400 text-base font-semibold text-slate-950 hover:bg-amber-300"
+                  onClick={() => loginM.mutate()}
+                  disabled={loginM.isPending}
+                >
+                  {loginM.isPending ? "Đang đăng nhập..." : "Đăng nhập"}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
+      <Tabs value={tab} onValueChange={(value) => { setTab(value as TabValue); setMobileNavOpen(false); }} className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 xl:px-8">
+        <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
+          <aside className="hidden xl:sticky xl:top-6 xl:block xl:self-start">
+            <Card className="overflow-hidden rounded-[30px] border-slate-800/80 bg-[linear-gradient(180deg,#0f172a_0%,#111827_100%)] text-white shadow-[0_30px_90px_rgba(2,6,23,0.34)]">
+              <CardContent className="space-y-5 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                      <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold tracking-wide text-white">SUNNY Rent Portal</div>
+                      <div className="text-xs text-slate-400">Điều hướng nhanh tới từng khu quản lý</div>
+                    </div>
+                  </div>
+                  <div className="rounded-full border border-white/10 bg-white/5 p-2 text-amber-300"><Sparkles className="h-4 w-4" /></div>
+                </div>
+
+                <div className="rounded-[24px] border border-white/10 bg-white/6 p-4">
+                  <div className="text-sm font-medium text-slate-200">Xin chào, {account?.username ?? "-"}</div>
+                  <div className="mt-2 text-xs leading-6 text-slate-400">Chọn đúng mục bạn cần ở menu bên dưới. Thông tin trạng thái chi tiết đã được gom về tab tài khoản để đỡ rối mắt hơn.</div>
+                </div>
+
+                <TabsList className={tabListDesktopClass}>
+                  {NAV_ITEMS.map(({ value, label, icon: Icon }) => (
+                    <TabsTrigger key={value} className={tabTriggerDesktopClass} value={value}>
+                      <Icon className="h-4 w-4" />
+                      <span>{label}</span>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                <Button variant="ghost" className="h-11 w-full justify-start rounded-2xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  {logoutM.isPending ? "Đang thoát..." : "Đăng xuất"}
+                </Button>
+              </CardContent>
+            </Card>
+          </aside>
+
+          <div className="space-y-6">
+            <div className="xl:hidden space-y-4">
+              <Card className="overflow-hidden rounded-[28px] border-slate-800 bg-[linear-gradient(135deg,#0b1220_0%,#111827_100%)] text-white shadow-[0_22px_55px_rgba(2,6,23,0.35)]">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                        <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-white">SUNNY Rent Portal</div>
+                        <div className="truncate text-xs text-slate-400">Chọn từng mục từ menu để giao diện gọn hơn</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950" onClick={() => setMobileNavOpen(true)}>
+                        <Menu className="h-5 w-5" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950" onClick={() => logoutM.mutate()} disabled={logoutM.isPending}>
+                        <LogOut className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-200">Đang mở: {NAV_ITEMS.find((item) => item.value === tab)?.label ?? "Trạng thái"}</span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-400">Thông tin tài khoản đã chuyển sang tab tài khoản</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {mobileNavOpen ? (
+                <div className="fixed inset-0 z-50 xl:hidden">
+                  <button type="button" aria-label="Đóng menu" className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px]" onClick={() => setMobileNavOpen(false)} />
+                  <div className="absolute left-0 top-0 h-full w-[84vw] max-w-[340px] overflow-y-auto border-r border-white/10 bg-[linear-gradient(180deg,#0b1220_0%,#111827_100%)] p-4 text-white shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-base font-semibold">Điều hướng</div>
+                        <div className="text-xs text-slate-400">Chọn khu bạn muốn mở</div>
+                      </div>
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 text-white hover:bg-white hover:text-slate-950" onClick={() => setMobileNavOpen(false)}>
+                        <X className="h-5 w-5" />
+                      </Button>
+                    </div>
+
+                    <div className="mt-5 rounded-[24px] border border-white/10 bg-white/6 p-4">
+                      <div className="text-sm font-semibold text-white break-all">{account?.username ?? "-"}</div>
+                      <div className="mt-2 text-xs text-slate-400">Hết hạn {fmtDate(account?.expires_at)}</div>
+                    </div>
+
+                    <div className="mt-5 grid gap-2">
+                      {NAV_ITEMS.map(({ value, label, icon: Icon }) => (
+                        <Button
+                          key={value}
+                          type="button"
+                          variant="ghost"
+                          className={cx(
+                            "h-12 justify-start rounded-2xl border px-4 text-left text-sm",
+                            tab === value
+                              ? "border-amber-300/35 bg-white text-slate-950 shadow-[0_10px_20px_rgba(15,23,42,0.18)] hover:bg-white"
+                              : "border-white/10 bg-white/5 text-slate-200 hover:bg-white hover:text-slate-950"
+                          )}
+                          onClick={() => {
+                            setTab(value);
+                            setMobileNavOpen(false);
+                          }}
+                        >
+                          <Icon className="mr-3 h-4 w-4" />
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+        <TabsContent value="status" className="mt-0 space-y-4">
+          <Card className="overflow-hidden rounded-[34px] border-slate-200/80 bg-white text-slate-900 shadow-[0_24px_72px_rgba(15,23,42,0.08)]">
+            <div className="h-1.5 bg-[linear-gradient(90deg,#0f172a_0%,#334155_40%,#fbbf24_100%)]" />
+            <CardContent className="p-6 sm:p-8">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900"><Waypoints className="h-3.5 w-3.5" /> Trạng thái</div>
+              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                {isActive ? "Chào mừng quay lại khu quản lý tài khoản thuê." : "Kích hoạt tài khoản để mở đầy đủ khu quản lý."}
+              </h1>
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
+                {isActive
+                  ? "Theo dõi nhanh tình trạng key, số lượng tệp hỗ trợ và các mục cần chú ý. Những phần như tạo key, lịch sử, audit log và API đã nằm gọn đúng tab của chúng để giao diện bớt chiếm spotlight."
+                  : "Sau khi xác thực thành công, các mục tạo key, lịch sử, audit log và API sẽ hiện đầy đủ trong giao diện. Tab này giữ vai trò như màn hình chào và khu kiểm tra trạng thái tổng quan."}
+              </p>
+            </CardContent>
+          </Card>
+
+          {isActive ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Đang bật</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.enabled}</div><div className="mt-2 text-sm text-slate-500">Key có thể xác thực</div></div>
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><LockKeyhole className="h-4 w-4 text-rose-500" /> Đang tắt</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.disabled}</div><div className="mt-2 text-sm text-slate-500">Key tạm ngưng</div></div>
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Sparkles className="h-4 w-4 text-amber-500" /> Dùng lần đầu</div><div className="mt-2 text-2xl font-semibold text-slate-950">{dashboardStats.firstUse}</div><div className="mt-2 text-sm text-slate-500">Chưa đốt thời gian ngay</div></div>
+              <div className={metricCardClass}><div className="flex items-center gap-2 text-sm text-slate-500"><Download className="h-4 w-4 text-slate-700" /> Files / Downloads</div><div className="mt-2 text-2xl font-semibold text-slate-950">{downloadsQ.data?.length ?? 0}</div><div className="mt-2 text-sm text-slate-500">Tệp hỗ trợ sẵn có</div></div>
+            </div>
+          ) : null}
+
+          {!isActive ? (
+            <Card className="border-amber-200 bg-[#fffaf0] text-slate-900">
+              <CardHeader>
+                <CardTitle className="text-amber-900">Kích hoạt tài khoản</CardTitle>
+                <CardDescription className="text-amber-900/80">Nhập key kích hoạt hợp lệ để mở khóa tài khoản thuê. Khi key sai, trang sẽ báo lỗi nhưng sẽ không còn bày các khối số liệu gây rối mắt nữa.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Activation key</Label>
+                  <Input style={readableFieldStyle} className={fieldClass} value={activationKey} onChange={(e) => setActivationKey(normalizeKeyInput(e.target.value))} placeholder="XXXX-XXXX-XXXX-XXXX" />
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button className={amberButtonClass} onClick={() => activateM.mutate()} disabled={activateM.isPending || !activationKey.trim()}>
+                    {activateM.isPending ? "Đang kích hoạt..." : "Kích hoạt"}
+                  </Button>
+                  <Button variant="outline" className={softButtonClass} onClick={() => setActivationKey("")}>Xóa ô nhập</Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>Trạng thái</CardTitle>
+              <CardDescription>Kiểm tra tài khoản thuê đã kích hoạt và còn hạn hay chưa.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Tài khoản</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Kích hoạt lúc</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Hết hạn</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Khóa tài khoản</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "Có" : "Không"}</div></div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="dashboard" className="mt-0">
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>Tổng quan</CardTitle>
+              <CardDescription>Xem nhanh tình trạng key🔑 hiện có.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Tổng số key</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.total}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Đang bật</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.enabled}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Đang tắt</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.disabled}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Khởi động lần đầu</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.firstUse}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Sắp hết hạn</div><div className="mt-2 text-2xl font-semibold">{dashboardStats.soonExpired}</div></div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button className={amberButtonClass} onClick={() => setTab("create")}>Tạo key</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => setTab("history")}>Lịch sử key</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => setTab("audit")}>Audit log</Button>
+                <Button variant="outline" className={softButtonClass} onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="create" className="mt-0">
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>Tạo key</CardTitle>
+              <CardDescription>Tạo key mới để dùng với menu hoặc ứng dụng của bạn.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Key🔑 tự nhập (để trống nếu muốn random)</Label>
+                <Input style={readableFieldStyle} className={fieldClass} value={customKey} onChange={(e) => setCustomKey(e.target.value)} placeholder="ABCD-EFGH-IJKL-MNOP" />
+                <p className="text-xs text-muted-foreground">4 nhóm x 4 ký tự, chỉ A-Z và 0-9.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Ghi chú</Label>
+                <Textarea style={readableFieldStyle} className={textareaClass} value={keyNote} onChange={(e) => setKeyNote(e.target.value)} placeholder="Ghi chú cho key" rows={3} />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Thời lượng⏰</Label>
+                  <Input style={readableFieldStyle} className={fieldClass} type="number" min={1} max={999999} value={durationValue} onChange={(e) => setDurationValue(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Đơn vị🖍</Label>
+                  <Select value={durationUnit} onValueChange={(value) => setDurationUnit(value as DurationUnit)}>
+                    <SelectTrigger style={readableFieldStyle} className={selectTriggerClass}><SelectValue placeholder="Chọn đơn vị" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hour">Giờ</SelectItem>
+                      <SelectItem value="day">Ngày</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Số máy tối đa📱</Label>
+                <Input
+                  style={readableFieldStyle} className={fieldClass}
+                  type="number"
+                  min={1}
+                  max={999999}
+                  value={maxDevicesValue}
+                  onChange={(e) => setMaxDevicesValue(e.target.value)}
+                  placeholder="1"
+                />
+                <p className="text-xs text-muted-foreground">Mặc định một máy📱.</p>
+
+                <Label>Kiểu chạy📌</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant={keyStartMode === "immediate" ? "default" : "outline"} className={keyStartMode === "immediate" ? amberButtonClass : softButtonClass} onClick={() => setKeyStartMode("immediate")}>Kích hoạt ngay</Button>
+                  <Button variant={keyStartMode === "first_use" ? "default" : "outline"} className={keyStartMode === "first_use" ? amberButtonClass : softButtonClass} onClick={() => setKeyStartMode("first_use")}>Bắt đầu ở lần dùng đầu</Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button className={amberButtonClass} onClick={() => createKeyM.mutate("random")} disabled={createKeyM.isPending}>Tạo ngẫu nhiên</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => createKeyM.mutate("custom")} disabled={createKeyM.isPending || !customKey.trim()}>Tạo key tự chọn</Button>
+              </div>
+              {lastCreatedKey ? (
+                <div className="rounded-xl border border-slate-200 bg-stone-50/90 p-3 text-sm shadow-sm">
+                  <div className="text-xs text-muted-foreground">Key vừa tạo📖</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <code className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-slate-800 break-all">{lastCreatedKey}</code>
+                    <Button size="sm" variant="soft" onClick={async () => { const ok = await copyText(lastCreatedKey); toast({ title: ok ? "Đã sao chép" : "Không sao chép được" }); }}>Sao chép</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setLastCreatedKey(null)}>Ẩn</Button>
+                  </div>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-0">
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>Lịch sử key🗒</CardTitle>
+              <CardDescription>Tìm kiếm, xem và chỉnh sửa key của bạn.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-[1fr,auto,auto,auto,auto] md:items-end">
+                <div className="space-y-2">
+                  <Label>Tìm key / ghi chú / kiểu chạy</Label>
+                  <Input style={readableFieldStyle} className={fieldClass} value={keySearch} onChange={(e) => setKeySearch(e.target.value)} placeholder="Tìm kiếm key" />
+                </div>
+                <Button variant={keyStatusFilter === "all" ? "default" : "outline"} className={keyStatusFilter === "all" ? amberButtonClass : softButtonClass} onClick={() => setKeyStatusFilter("all")}>Tất cả</Button>
+                <Button variant={keyStatusFilter === "on" ? "default" : "outline"} className={keyStatusFilter === "on" ? slateButtonClass : softButtonClass} onClick={() => setKeyStatusFilter("on")}>Đang bật</Button>
+                <Button variant={keyStatusFilter === "off" ? "default" : "outline"} className={keyStatusFilter === "off" ? slateButtonClass : softButtonClass} onClick={() => setKeyStatusFilter("off")}>Đang tắt</Button>
+                <Button variant="secondary" className={slateButtonClass} onClick={() => { keysQ.refetch(); logsQ.refetch(); }}>Làm mới</Button>
+              </div>
+
+              <div className="grid gap-3 md:hidden">
+                {keysQ.isLoading ? <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">Đang tải key...</div> : null}
+                {!keysQ.isLoading && filteredKeys.length === 0 ? <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">Chưa có key phù hợp.</div> : null}
+                {filteredKeys.map((key) => (
+                  <div key={key.id} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                    <div className="font-mono text-sm break-all">{key.key}</div>
+                    <div className="grid gap-2 text-sm">
+                      <div><span className="text-muted-foreground">Hết hạn:</span> {keyExpiryLabel(key)}</div>
+                      <div><span className="text-muted-foreground">Trạng thái:</span> <span className={statusPillClass(key.is_active)}>{key.is_active ? "ON" : "OFF"}</span></div>
+                      <div><span className="text-muted-foreground">Kiểu chạy:</span> {keyModeLabel(key)}</div>
+                      <div><span className="text-muted-foreground">Thời lượng:</span> {keyDurationLabel(key)}</div>
+                      {key.note ? <div><span className="text-muted-foreground">Ghi chú:</span> {key.note}</div> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="soft" onClick={() => openKeyDialog(key)}>Xem / Sửa</Button>
+                      <Button size="sm" variant="outline" onClick={async () => { const ok = await copyText(key.key); toast({ title: ok ? "Đã sao chép" : "Không sao chép được" }); }}>Sao chép</Button>
+                      <Button size="sm" variant="secondary" onClick={() => toggleKeyM.mutate(key)} disabled={toggleKeyM.isPending}>{key.is_active ? "Tắt" : "Bật"}</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteKeyM.mutate(key.id)} disabled={deleteKeyM.isPending}>Xóa</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className={tableWrapClass}>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Kiểu chạy</TableHead>
+                        <TableHead>Thời lượng</TableHead>
+                        <TableHead>Hết hạn</TableHead>
+                        <TableHead>Trạng thái</TableHead>
+                        <TableHead>Ghi chú</TableHead>
+                        <TableHead className="text-right">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {keysQ.isLoading ? (
+                        <TableRow><TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Đang tải key...</TableCell></TableRow>
+                      ) : filteredKeys.length === 0 ? (
+                        <TableRow><TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Chưa có key phù hợp.</TableCell></TableRow>
+                      ) : filteredKeys.map((key) => (
+                        <TableRow key={key.id}>
+                          <TableCell><div className="font-mono text-xs break-all">{key.key}</div></TableCell>
+                          <TableCell className="whitespace-nowrap">{fmtDate(key.created_at)}</TableCell>
+                          <TableCell>{keyModeLabel(key)}</TableCell>
+                          <TableCell>{keyDurationLabel(key)}</TableCell>
+                          <TableCell className="whitespace-nowrap">{keyExpiryLabel(key)}</TableCell>
+                          <TableCell><span className={statusPillClass(key.is_active)}>{key.is_active ? "ON" : "OFF"}</span></TableCell>
+                          <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">{key.note || "-"}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button size="sm" variant="soft" onClick={() => openKeyDialog(key)}>Xem / Sửa</Button>
+                              <Button size="sm" variant="outline" onClick={async () => { const ok = await copyText(key.key); toast({ title: ok ? "Đã sao chép" : "Không sao chép được" }); }}>Sao chép</Button>
+                              <Button size="sm" variant="secondary" onClick={() => toggleKeyM.mutate(key)} disabled={toggleKeyM.isPending}>{key.is_active ? "Tắt" : "Bật"}</Button>
+                              <Button size="sm" variant="destructive" onClick={() => deleteKeyM.mutate(key.id)} disabled={deleteKeyM.isPending}>Xóa</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="audit" className="mt-0">
+          <Card className={panelCardClass}>
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <div>
+                <CardTitle>Audit log</CardTitle>
+                <CardDescription>Lịch sử xác thực và thao tác gần đây.</CardDescription>
+              </div>
+              <Button variant="secondary" onClick={() => logsQ.refetch()} disabled={logsQ.isFetching}>Làm mới</Button>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:hidden">
+                {logsQ.isLoading ? <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">Đang tải log...</div> : null}
+                {!logsQ.isLoading && logs.length === 0 ? <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">Chưa có log nào.</div> : null}
+                {logs.map((log) => {
+                  const keyValue = keys.find((row) => row.id === log.key_id)?.key ?? "-";
+                  return (
+                    <div key={log.id} className="rounded-xl border p-4 space-y-2 text-sm">
+                      <div className="font-medium">{mapAuditAction(log.action)}</div>
+                      <div className="text-muted-foreground">{fmtDate(log.created_at)}</div>
+                      <div>Kết quả: {mapAuditResult(log.result)}</div>
+                      <div>Thiết bị: {shortId(log.device_id, 12)}</div>
+                      <div className="break-all">Key: {keyValue}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={tableWrapClass}>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Thời gian</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Kết quả</TableHead>
+                        <TableHead>Thiết bị</TableHead>
+                        <TableHead>Key</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {logsQ.isLoading ? <TableRow><TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Đang tải log...</TableCell></TableRow> : null}
+                      {!logsQ.isLoading && logs.length === 0 ? <TableRow><TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">Chưa có log nào.</TableCell></TableRow> : null}
+                      {logs.map((log) => {
+                        const keyValue = keys.find((row) => row.id === log.key_id)?.key ?? "-";
+                        return (
+                          <TableRow key={log.id}>
+                            <TableCell className="whitespace-nowrap">{fmtDate(log.created_at)}</TableCell>
+                            <TableCell>{mapAuditAction(log.action)}</TableCell>
+                            <TableCell>{mapAuditResult(log.result)}</TableCell>
+                            <TableCell>{shortId(log.device_id, 12)}</TableCell>
+                            <TableCell className="font-mono text-xs break-all">{keyValue}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="password" className="mt-0">
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>Đổi mật khẩu</CardTitle>
+              <CardDescription>Nhập code và mật khẩu mới.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 max-w-xl">
+              <div className="space-y-2">
+                <Label>Reset code</Label>
+                <Input style={readableFieldStyle} className={fieldClass} value={resetCode} onChange={(e) => setResetCode(e.target.value)} placeholder="RC-XXXX-XXXX-XXXX" />
+              </div>
+              <div className="space-y-2">
+                <Label>Mật khẩu mới</Label>
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Nhập mật khẩu mới" />
+              </div>
+              <Button onClick={() => resetPassM.mutate()} disabled={resetPassM.isPending || !resetCode.trim() || !newPass.trim()}>
+                {resetPassM.isPending ? "Đang đổi mật khẩu..." : "Đổi mật khẩu"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="account" className="mt-0 space-y-4">
+          <Card className="overflow-hidden rounded-[30px] border-slate-800/80 bg-[linear-gradient(135deg,#0b1220_0%,#111827_100%)] text-white shadow-[0_22px_55px_rgba(2,6,23,0.24)]">
+            <CardContent className="p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-amber-300/20 bg-white shadow-[0_10px_24px_rgba(251,191,36,0.15)]">
+                    <img src={BRAND_CAT_SRC} alt="Sunny logo" className="h-full w-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-sm text-slate-300">Tài khoản hiện tại</div>
+                    <div className="mt-1 text-xl font-semibold break-all text-white">{account?.username ?? "-"}</div>
+                    <div className="mt-2 text-sm text-slate-400">Kích hoạt: {fmtDate(account?.activated_at)}</div>
+                  </div>
+                </div>
+                <span className={account?.is_disabled ? "rounded-full border border-rose-400/25 bg-rose-500/15 px-3 py-1.5 text-sm text-rose-100" : isActive ? "rounded-full border border-emerald-400/25 bg-emerald-500/15 px-3 py-1.5 text-sm text-emerald-100" : "rounded-full border border-amber-300/25 bg-amber-400/15 px-3 py-1.5 text-sm text-amber-100"}>
+                  {account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>Thông tin tài khoản</CardTitle>
+              <CardDescription>Thông tin cơ bản và trạng thái của tài khoản thuê.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Username</div><div className="mt-2 text-lg font-semibold break-all">{account?.username ?? "-"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Trạng thái tài khoản</div><div className="mt-2 text-lg font-semibold">{account?.is_disabled ? "Đã khóa" : isActive ? "Đang hoạt động" : "Chưa kích hoạt / hết hạn"}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Ngày tạo</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.created_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Kích hoạt lúc</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.activated_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Hết hạn</div><div className="mt-2 text-lg font-semibold">{fmtDate(account?.expires_at)}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm"><div className="text-sm text-muted-foreground">Số máy tối đa</div><div className="mt-2 text-lg font-semibold">{account?.max_devices ?? 0}</div></div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="api" className="mt-0">
+          <Card className={panelCardClass}>
+            <CardHeader>
+              <CardTitle>API &amp; Tải xuống</CardTitle>
+              <CardDescription>Thông tin xác thực, JSON mẫu và các tệp hỗ trợ.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium">HMAC</div>
+                    <div className="text-sm text-muted-foreground">Dùng để ký <code>sig_user</code>. Master secret đã tích hợp trong server, bạn không cần và cũng không thể gửi từ client.</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" className={slateButtonClass} onClick={handleOpenHmac}>Xem HMAC</Button>
+                    {showHmac ? <Button variant="ghost" className={softButtonClass} onClick={() => { setShowHmac(false); setHmacSecret(null); setHmacVisibleUntil(null); }}>Ẩn HMAC</Button> : null}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm text-slate-800 shadow-inner break-all">{maskSecret(hmacSecret ?? "", showHmac)}</div>
+                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  {showHmac && hmacCountdown > 0 ? <span>Còn {hmacCountdown} giây</span> : null}
+                  {lockRemain ? <span>Đang khóa tạm: {lockRemain}</span> : null}
+                </div>
+                {showHmac && hmacCountdown > 0 ? (
+                  <Button
+                    className={amberButtonClass}
+                    variant="soft"
+                    onClick={async () => {
+                      const ok = await copyText(hmacSecret ?? "");
+                      if (ok) copyHmacM.mutate();
+                      toast({ title: ok ? "Đã sao chép" : "Không sao chép được" });
+                    }}
+                  >
+                    Sao chép
+                  </Button>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="space-y-4">
+                  <div className="text-base font-semibold text-slate-950">API verify</div>
+                  <code className={subtleCodeClass}>POST {import.meta.env.VITE_PUBLIC_API_BASE_URL ?? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`}/rent-verify-key</code>
+                  <div className="text-sm text-muted-foreground">JSON mẫu chỉ dùng <code>sig_user</code>. Master secret đã nằm trong server.</div>
+                  <pre className={subtlePreClass}>{`{
+  "username": "${account?.username ?? "name"}",
+  "key": "XXXX-XXXX-XXXX-XXXX",
+  "device_id": "device-name",
+  "ts": 1710000000,
+  "sig_user": "HMAC_SHA256_HEX(user_hmac_secret, username|key|device_id|ts)"
+}`}</pre>
+                </div>
+              </div>
+
+              <RentApiQuickNotes />
+
+              <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-4 shadow-sm">
+                <div>
+                  <div className="font-medium">Files / Downloads</div>
+                  <div className="text-sm text-muted-foreground">Tải các tệp hỗ trợ sử dụng cho app, menu hoặc C++/libcurl.</div>
+                </div>
+                <div className="grid gap-3">
+                  {(downloadsQ.data ?? []).map((item) => (
+                    <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 flex flex-col gap-3 shadow-sm md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="font-medium">{item.title}</div>
+                        {item.note ? <div className="text-sm text-muted-foreground">{item.note}</div> : null}
+                      </div>
+                      <Button asChild className={slateButtonClass}>
+                        <a href={item.url} target="_blank" rel="noreferrer">Tải xuống</a>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm space-y-2 shadow-sm">
+                  <div className="font-medium">Hướng dẫn C++ / libcurl</div>
+                  <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                    <li>Tải file CA pack về máy và giải nén.</li>
+                    <li>Trỏ <code>CURLOPT_CAINFO</code> tới file CA bundle đã giải nén.</li>
+                    <li>Nếu dùng <code>SunnyCABundle.h</code>, hãy ghi bundle ra file rồi set lại <code>CURLOPT_CAINFO</code>.</li>
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+          </div>
+        </div>
+      </Tabs>
+
+      <Dialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen}>
+        <DialogContent className={cx(dialogCardClass, "max-h-[90vh] overflow-y-auto sm:max-w-3xl")}>
+          <DialogHeader>
+            <DialogTitle>Chi tiết key</DialogTitle>
+            <DialogDescription>Xem thiết bị đã dùng và chỉnh sửa cấu hình key.</DialogDescription>
+          </DialogHeader>
+          {selectedKey ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-stone-50/90 p-4 shadow-sm">
+                <div className="font-mono text-sm break-all">{selectedKey.key}</div>
+                <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
+                  <div>Ngày tạo: {fmtDate(selectedKey.created_at)}</div>
+                  <div>Hết hạn: {keyExpiryLabel(selectedKey)}</div>
+                  <div>Kiểu chạy: {keyModeLabel(selectedKey)}</div>
+                  <div>Thời lượng: {keyDurationLabel(selectedKey)}</div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Thời lượng</Label>
+                  <Input style={readableFieldStyle} className={fieldClass} type="number" min={1} max={999999} value={editDurationValue} onChange={(e) => setEditDurationValue(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Đơn vị</Label>
+                  <Select value={editDurationUnit} onValueChange={(value) => setEditDurationUnit(value as DurationUnit)}>
+                    <SelectTrigger style={readableFieldStyle} className={selectTriggerClass}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hour">Giờ</SelectItem>
+                      <SelectItem value="day">Ngày</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Số máy tối đa</Label>
+                <Input
+                  style={readableFieldStyle} className={fieldClass}
+                  type="number"
+                  min={1}
+                  max={999999}
+                  value={editMaxDevicesValue}
+                  onChange={(e) => setEditMaxDevicesValue(e.target.value)}
+                  placeholder="1"
+                />
+                <p className="text-xs text-muted-foreground">Từ 1 đến 999999 máy.</p>
+
+                <Label>Kiểu chạy</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant={editKeyStartMode === "immediate" ? "default" : "outline"} onClick={() => setEditKeyStartMode("immediate")}>Chạy ngay</Button>
+                  <Button variant={editKeyStartMode === "first_use" ? "default" : "outline"} onClick={() => setEditKeyStartMode("first_use")}>Dùng lần đầu mới chạy</Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Ghi chú</Label>
+                <Textarea style={readableFieldStyle} className={textareaClass} value={editKeyNote} onChange={(e) => setEditKeyNote(e.target.value)} rows={3} />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => updateKeyM.mutate()} disabled={updateKeyM.isPending}>{updateKeyM.isPending ? "Đang lưu..." : "Lưu thay đổi"}</Button>
+                <Button variant="secondary" onClick={() => toggleKeyM.mutate(selectedKey)} disabled={toggleKeyM.isPending}>{selectedKey.is_active ? "Tắt key" : "Bật key"}</Button>
+                <Button variant="outline" onClick={async () => { const ok = await copyText(selectedKey.key); toast({ title: ok ? "Đã sao chép" : "Không sao chép được" }); }}>Sao chép</Button>
+                <Button variant="destructive" onClick={() => deleteKeyM.mutate(selectedKey.id)} disabled={deleteKeyM.isPending}>Xóa key</Button>
+              </div>
+
+              <Separator />
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card className={panelCardClass}>
+                  <CardHeader>
+                    <CardTitle className="text-base">Thiết bị đã dùng</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    {keyDevicesQ.isLoading ? <div className="text-muted-foreground">Đang tải thiết bị...</div> : null}
+                    {(keyDevicesQ.data ?? []).length === 0 && !keyDevicesQ.isLoading ? <div className="text-muted-foreground">Chưa có thiết bị nào.</div> : null}
+                    {(keyDevicesQ.data ?? []).map((device) => (
+                      <div key={device.id} className="rounded-lg border p-3">
+                        <div className="font-mono break-all">{device.device_id}</div>
+                        <div className="mt-1 text-muted-foreground">Lần đầu: {fmtDate(device.first_seen)}</div>
+                        <div className="text-muted-foreground">Lần cuối: {fmtDate(device.last_seen)}</div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+                <Card className={panelCardClass}>
+                  <CardHeader>
+                    <CardTitle className="text-base">Audit log của key</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    {keyLogsQ.isLoading ? <div className="text-muted-foreground">Đang tải log...</div> : null}
+                    {(keyLogsQ.data ?? []).length === 0 && !keyLogsQ.isLoading ? <div className="text-muted-foreground">Chưa có log nào.</div> : null}
+                    {(keyLogsQ.data ?? []).map((log) => (
+                      <div key={log.id} className="rounded-lg border p-3">
+                        <div className="font-medium">{mapAuditAction(log.action)}</div>
+                        <div className="text-muted-foreground">{fmtDate(log.created_at)}</div>
+                        <div>Kết quả: {mapAuditResult(log.result)}</div>
+                        <div>Thiết bị: {shortId(log.device_id, 12)}</div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={hmacDialogOpen} onOpenChange={setHmacDialogOpen}>
+        <DialogContent className={cx(dialogCardClass, "sm:max-w-md")}>
+          <DialogHeader>
+            <DialogTitle>Mật khẩu xem HMAC</DialogTitle>
+            <DialogDescription>
+              {account?.has_hmac_view_password ? "Nhập đúng mật khẩu để mở HMAC trong 60 giây." : "Bạn cần đặt mật khẩu xem HMAC trước khi mở."}
+            </DialogDescription>
+          </DialogHeader>
+          {account?.has_hmac_view_password ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Mật khẩu xem HMAC</Label>
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={hmacUnlockPassword} onChange={(e) => setHmacUnlockPassword(e.target.value)} placeholder="Nhập mật khẩu" />
+              </div>
+              {lockRemain ? <div className="text-sm text-destructive">Bạn đang bị khóa tạm. Thử lại sau {lockRemain}.</div> : null}
+              <Button onClick={() => unlockHmacM.mutate()} disabled={unlockHmacM.isPending || !hmacUnlockPassword.trim() || !!lockRemain}>
+                {unlockHmacM.isPending ? "Đang mở khóa..." : "Xem HMAC"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Mật khẩu mới</Label>
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={hmacPassword} onChange={(e) => setHmacPassword(e.target.value)} placeholder="Ví dụ: vip2026" />
+              </div>
+              <div className="space-y-2">
+                <Label>Nhập lại mật khẩu mới</Label>
+                <Input style={readableFieldStyle} className={fieldClass} type="password" value={hmacPasswordConfirm} onChange={(e) => setHmacPasswordConfirm(e.target.value)} placeholder="Nhập lại mật khẩu" />
+              </div>
+              <p className="text-xs text-muted-foreground">Tối thiểu 4 ký tự, có cả chữ và số.</p>
+              <Button
+                onClick={() => {
+                  const pwd = hmacPassword.trim();
+                  if (!/[A-Za-z]/.test(pwd) || !/[0-9]/.test(pwd) || pwd.length < 4) {
+                    toast({ title: "Mật khẩu chưa hợp lệ", description: "Cần ít nhất 4 ký tự và phải có cả chữ lẫn số.", variant: "destructive" });
+                    return;
+                  }
+                  if (pwd !== hmacPasswordConfirm.trim()) {
+                    toast({ title: "Mật khẩu chưa khớp", description: "Hai ô nhập lại phải giống nhau.", variant: "destructive" });
+                    return;
+                  }
+                  setHmacPassword(pwd);
+                  setHmacPasswordConfirm(hmacPasswordConfirm.trim());
+                  setHmacPasswordM.mutate(pwd);
+                }}
+                disabled={setHmacPasswordM.isPending || !hmacPassword.trim() || !hmacPasswordConfirm.trim()}
+              >
+                {setHmacPasswordM.isPending ? "Đang lưu..." : "Đặt mật khẩu và mở HMAC"}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
