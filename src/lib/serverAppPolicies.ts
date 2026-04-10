@@ -15,6 +15,7 @@ export type PackagePolicy = {
   resetDaily: boolean;
   expiresFromClaim: boolean;
   oneTimeUse: boolean;
+  defaultDays: number;
 };
 
 export type CreditPolicy = {
@@ -38,15 +39,15 @@ export type FeaturePolicy = {
 };
 
 export const FIND_DUMPS_PACKAGES: PackagePolicy[] = [
-  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 0, dailyVipCredit: 0, resetDaily: false, expiresFromClaim: true, oneTimeUse: true },
-  { code: "go", label: "Go", enabled: true, discountPercent: 8, dailyCredit: 3, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true },
-  { code: "plus", label: "Plus", enabled: true, discountPercent: 20, dailyCredit: 5, dailyVipCredit: 1, resetDaily: true, expiresFromClaim: true, oneTimeUse: true },
-  { code: "pro", label: "Pro", enabled: true, discountPercent: 35, dailyCredit: 8, dailyVipCredit: 2, resetDaily: true, expiresFromClaim: true, oneTimeUse: true },
+  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 0, dailyVipCredit: 0, resetDaily: false, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
+  { code: "go", label: "Go", enabled: true, discountPercent: 8, dailyCredit: 3, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 7 },
+  { code: "plus", label: "Plus", enabled: true, discountPercent: 20, dailyCredit: 5, dailyVipCredit: 1, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "pro", label: "Pro", enabled: true, discountPercent: 35, dailyCredit: 8, dailyVipCredit: 2, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
 ];
 
 export const FIND_DUMPS_CREDITS: CreditPolicy[] = [
-  { code: "credit-normal", label: "Credit thường", defaultAmount: 1.5, allowDecimal: true, expiresHours: 72, oneTimeUse: true, walletKind: "normal" },
-  { code: "credit-vip", label: "Credit VIP", defaultAmount: 0.5, allowDecimal: true, expiresHours: 48, oneTimeUse: true, walletKind: "vip" },
+  { code: "credit-normal", label: "Credit thường", defaultAmount: 1.5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "normal" },
+  { code: "credit-vip", label: "Credit VIP", defaultAmount: 0.5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "vip" },
 ];
 
 export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
@@ -153,9 +154,10 @@ export function getServerAppMeta(appCode: string) {
       code: "free-fire",
       label: "Free Fire",
       mode: "legacy" as const,
-      description: "Nhánh legacy đang chạy thật. Chỉ rút gọn đường vào, không đại phẫu cấu trúc key hiện có.",
+      description: "Nhánh legacy đang chạy thật. Admin free key hiện tại chính là server key của Free Fire.",
       serverUrl: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || "/admin/free-keys?app=free-fire",
       tabs: ["server"] as const,
+      note: "Giữ nguyên luồng cũ, chỉ rút gọn cửa vào.",
     };
   }
 
@@ -164,7 +166,8 @@ export function getServerAppMeta(appCode: string) {
     label: "Find Dumps",
     mode: "app-host" as const,
     description: "Nhánh app-host mới với 6 tab tách riêng cấu hình, runtime, server key, charge rules, audit log và trash.",
-    serverUrl: buildAppWorkspaceUrl("find-dumps", "config"),
+    serverUrl: buildAppWorkspaceUrl("find-dumps", "keys"),
     tabs: ["config", "runtime", "keys", "charge", "audit", "trash"] as const,
+    note: "Server key, credit và audit tách riêng để dễ quản lý.",
   };
 }
