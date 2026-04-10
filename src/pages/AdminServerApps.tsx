@@ -1,32 +1,14 @@
-import { ArrowUpRight, Cog, PlayCircle, Trash2 } from "lucide-react";
-import { useLocation } from "react-router-dom";
+import { ArrowUpRight, AppWindow } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildAppWorkspaceUrl, detectWorkspaceScope } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl } from "@/lib/appWorkspace";
+import { getServerAppMeta } from "@/lib/serverAppPolicies";
 
-const APPS = [
-  {
-    code: "free-fire",
-    label: "Free Fire",
-    description: "Server web hiện tại cho app Free Fire. Dùng để quản lý free key, luồng vượt và các gói mở rộng sau này.",
-    url: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || "/admin/free-keys?app=free-fire",
-    mode: "current",
-  },
-  {
-    code: "find-dumps",
-    label: "Find Dumps",
-    description: "Server web dành cho app Find Dumps. Tại đây bạn có thể chuẩn bị cấu hình gói, credit và feature flags riêng cho app này.",
-    url: (import.meta.env.VITE_SERVER_APP_FIND_DUMPS_URL as string | undefined)?.trim() || "/admin/free-keys?app=find-dumps",
-    mode: "new",
-  },
-] as const;
+const APPS = [getServerAppMeta("free-fire"), getServerAppMeta("find-dumps")] as const;
 
 export function AdminServerAppsPage() {
-  const location = useLocation();
-  const scope = detectWorkspaceScope(location.pathname);
-
   const openTarget = (url: string) => {
     if (!url) return;
     if (/^https?:\/\//i.test(url)) {
@@ -36,21 +18,15 @@ export function AdminServerAppsPage() {
     window.location.assign(url);
   };
 
-  const openWorkspaceSection = (appCode: string, section: "config" | "runtime" | "charge" | "trash") => {
-    window.location.assign(buildAppWorkspaceUrl(appCode, section));
-  };
-
   return (
     <section className="space-y-4">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
-            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Từ đây chọn app rồi mở thẳng sang <span className="font-medium text-foreground">app-host</span> để chỉnh runtime, cấu hình, charge rules và trash. Tránh mở nhầm workspace trên admin-host.
-            </p>
+            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">Free Fire giữ đường server key legacy đang chạy ổn. Find Dumps đi theo app-host mới với cấu hình, runtime, server key, charge rules, audit log và trash tách riêng.</p>
           </div>
-          <Badge variant="outline">Mở sang app-host</Badge>
+          <Badge variant="outline">Legacy + App-host</Badge>
         </div>
       </header>
 
@@ -61,38 +37,26 @@ export function AdminServerAppsPage() {
             <CardHeader className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle>{app.label}</CardTitle>
-                <Badge variant={app.mode === "current" ? "secondary" : "outline"}>
-                  {app.mode === "current" ? "Đang dùng" : "Chuẩn bị mở rộng"}
-                </Badge>
+                <Badge variant={app.mode === "legacy" ? "secondary" : "outline"}>{app.mode === "legacy" ? "Legacy" : "App-host mới"}</Badge>
               </div>
               <CardDescription>{app.description}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-muted/20 p-3 text-xs text-muted-foreground break-all">
-                Server web cũ: {app.url}
-              </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <Button onClick={() => openWorkspaceSection(app.code, "config")}>
-                  <Cog className="mr-2 h-4 w-4" />
-                  Cấu hình
-                </Button>
-                <Button variant="outline" onClick={() => openWorkspaceSection(app.code, "runtime")}>
-                  <PlayCircle className="mr-2 h-4 w-4" />
-                  Runtime
-                </Button>
-                <Button variant="outline" onClick={() => openWorkspaceSection(app.code, "charge")}>
+              <div className="rounded-2xl border bg-muted/20 p-3 text-xs text-muted-foreground break-all">Điểm vào: {app.serverUrl}</div>
+              {app.code === "free-fire" ? (
+                <Button className="w-full" onClick={() => openTarget(app.serverUrl)}>
                   <ArrowUpRight className="mr-2 h-4 w-4" />
-                  Charge
+                  Server
                 </Button>
-                <Button variant="outline" onClick={() => openWorkspaceSection(app.code, "trash")}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Trash
-                </Button>
-                <Button variant="outline" className="sm:col-span-3" onClick={() => openTarget(app.url)}>
-                  <ArrowUpRight className="mr-2 h-4 w-4" />
-                  Mở server web cũ
-                </Button>
-              </div>
+              ) : (
+                <div className="grid gap-2">
+                  <Button className="w-full" onClick={() => openTarget(buildAppWorkspaceUrl("find-dumps", "config"))}>
+                    <AppWindow className="mr-2 h-4 w-4" />
+                    Server
+                  </Button>
+                  <div className="rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600">6 tab đã chốt: Cấu hình app · Runtime app · Server key · Charge / Credit Rules · Audit Log · Trash</div>
+                </div>
+              )}
             </CardContent>
           </Card>
         ))}

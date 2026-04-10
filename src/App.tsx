@@ -29,6 +29,8 @@ import { AdminServerAppDetailPage } from "@/pages/AdminServerAppDetail";
 import { AdminServerAppRuntimePage } from "@/pages/AdminServerAppRuntime";
 import { AdminServerAppChargePage } from "@/pages/AdminServerAppCharge";
 import { AdminServerAppTrashPage } from "@/pages/AdminServerAppTrash";
+import { AdminServerAppKeysPage } from "@/pages/AdminServerAppKeys";
+import { AdminServerAppAuditPage } from "@/pages/AdminServerAppAudit";
 import { RentPortalPage } from "@/pages/RentPortal";
 import { RentAdminCustomerSetupPage } from "@/pages/RentAdminCustomerSetup";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
@@ -123,7 +125,9 @@ const App = () => {
                     <Route path="internal" element={<Navigate to="../config" replace />} />
                     <Route path="config" element={<AdminServerAppDetailPage />} />
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                    <Route path="keys" element={<AdminServerAppKeysPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
+                    <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>
                   <Route
@@ -135,7 +139,9 @@ const App = () => {
                     <Route path="internal" element={<Navigate to="../config" replace />} />
                     <Route path="config" element={<AdminServerAppDetailPage />} />
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                    <Route path="keys" element={<AdminServerAppKeysPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
+                    <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>
                   <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
@@ -175,7 +181,9 @@ const App = () => {
                     <Route path="internal" element={<Navigate to="../config" replace />} />
                     <Route path="config" element={<AdminServerAppDetailPage />} />
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
+                    <Route path="keys" element={<AdminServerAppKeysPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
+                    <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>
                 </>

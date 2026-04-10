@@ -108,3 +108,38 @@ export function getFreeStartMeta(): { startedAtMs: number; minDelaySeconds: numb
     return null;
   }
 }
+
+
+const FREE_APP_CODE_STORAGE = "free_app_code";
+const FREE_FIND_DUMPS_MODE_STORAGE = "find_dumps_free_choice_mode";
+const FREE_FIND_DUMPS_REWARD_STORAGE = "find_dumps_free_reward_code";
+const FREE_FIND_DUMPS_WALLET_STORAGE = "find_dumps_free_wallet_kind";
+
+export function setSelectedAppCode(appCode: string) {
+  try { localStorage.setItem(FREE_APP_CODE_STORAGE, String(appCode || "free-fire")); } catch {}
+}
+
+export function getSelectedAppCode() {
+  try { return String(localStorage.getItem(FREE_APP_CODE_STORAGE) || "free-fire").trim() || "free-fire"; } catch { return "free-fire"; }
+}
+
+export function setFindDumpsFreeSelection(mode: string, rewardCode: string, walletKind?: string | null) {
+  try {
+    localStorage.setItem(FREE_FIND_DUMPS_MODE_STORAGE, String(mode || "package"));
+    localStorage.setItem(FREE_FIND_DUMPS_REWARD_STORAGE, String(rewardCode || "classic"));
+    if (walletKind) localStorage.setItem(FREE_FIND_DUMPS_WALLET_STORAGE, String(walletKind));
+    else localStorage.removeItem(FREE_FIND_DUMPS_WALLET_STORAGE);
+  } catch {}
+}
+
+export function getFindDumpsFreeSelection() {
+  try {
+    return {
+      mode: String(localStorage.getItem(FREE_FIND_DUMPS_MODE_STORAGE) || "package").trim() || "package",
+      rewardCode: String(localStorage.getItem(FREE_FIND_DUMPS_REWARD_STORAGE) || "classic").trim() || "classic",
+      walletKind: String(localStorage.getItem(FREE_FIND_DUMPS_WALLET_STORAGE) || "").trim() || null,
+    };
+  } catch {
+    return { mode: "package", rewardCode: "classic", walletKind: null };
+  }
+}

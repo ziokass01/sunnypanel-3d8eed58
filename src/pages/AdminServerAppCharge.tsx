@@ -93,17 +93,6 @@ const FEATURE_TEMPLATES: Record<string, ServerAppFeatureRow[]> = {
     { app_code: "find-dumps", feature_code: "convert_image", title: "Convert image", description: "Đổi ảnh sang header .h", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 50, category: "tools", group_key: "image", icon_key: "image", badge_label: "Tool", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
     { app_code: "find-dumps", feature_code: "encode_decode", title: "Encode / Decode", description: "Bộ codec kiểu toolbox", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 60, category: "tools", group_key: "codec", icon_key: "codec", badge_label: "Tool", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
     { app_code: "find-dumps", feature_code: "hex_edit", title: "Hex edit", description: "Mở file và sửa hex rồi lưu", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 70, category: "tools", group_key: "hex", icon_key: "hex", badge_label: "Tool", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "binary_scan_quick", title: "Binary quick scan", description: "Quét nhanh ELF/binary để lấy snapshot nền", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 80, category: "analysis", group_key: "workspace", icon_key: "scan", badge_label: "Quick", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "binary_scan_full", title: "Binary full scan", description: "Quét sâu ELF/binary và dựng snapshot chi tiết hơn", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 90, category: "analysis", group_key: "workspace", icon_key: "scan", badge_label: "Full", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "ida_export_import", title: "Import artifact pack", description: "Nhập sections, symbols, relocations, functions, disassembly, strings từ PC", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 100, category: "analysis", group_key: "workspace", icon_key: "import", badge_label: "Pack", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "ida_workspace_save", title: "Save workspace snapshot", description: "Lưu snapshot và đồng bộ chỉ mục nội bộ", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 110, category: "workspace", group_key: "snapshot", icon_key: "save", badge_label: "Free", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "ida_workspace_restore", title: "Restore workspace snapshot", description: "Khôi phục snapshot đã lưu từ storage nội bộ hoặc file import", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 120, category: "workspace", group_key: "snapshot", icon_key: "restore", badge_label: "Free", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "ida_workspace_export", title: "Export workspace snapshot", description: "Xuất snapshot dạng JSON, TXT, CSV hoặc bundle", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 130, category: "workspace", group_key: "snapshot", icon_key: "export", badge_label: "Export", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "workspace_batch", title: "Workspace batch", description: "Chạy nhiều truy vấn trên snapshot hiện tại", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 140, category: "search", group_key: "workspace", icon_key: "batch", badge_label: "Batch", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
-    { app_code: "find-dumps", feature_code: "workspace_note", title: "Workspace note", description: "Gắn ghi chú vào function, symbol, string hoặc snapshot", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 150, category: "workspace", group_key: "note", icon_key: "note", badge_label: "Note", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "workspace_export_result", title: "Export current view", description: "Xuất màn hình kết quả hiện tại ra TXT, JSON, CSV hoặc Markdown", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 160, category: "export", group_key: "workspace", icon_key: "export", badge_label: "View", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "workspace_browser", title: "Browser + pseudo", description: "Mở browser, xref và pseudo/decompile-lite từ snapshot hiện tại", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 170, category: "analysis", group_key: "workspace", icon_key: "browser", badge_label: "Pseudo", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "workspace_diff", title: "Workspace diff", description: "So sánh hai snapshot để xem added, removed, changed", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 180, category: "analysis", group_key: "workspace", icon_key: "diff", badge_label: "Diff", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
   ],
   "free-fire": [
     { app_code: "free-fire", feature_code: "free_key", title: "Free key", description: "Luồng vượt free nhận key", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "key", group_key: "free", icon_key: "key", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
@@ -494,6 +483,66 @@ export function AdminServerAppChargePage() {
               </div>
             </CardContent>
           </Card>
+
+          {appCode === "find-dumps" ? (
+            <Card className="rounded-[28px] border-slate-200/80 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+              <CardHeader>
+                <CardTitle className="text-lg">Preview gói, discount và reset theo ngày</CardTitle>
+                <CardDescription>Khối này mô phỏng cách hệ package tác động thật lên giá feature và ví hằng ngày của Find Dumps. Giá giữ dạng thập phân thật, không làm tròn giả.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {planPreviewRows.map((row) => (
+                    <div key={row.plan.code} className="rounded-[24px] border p-4 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-base font-semibold">{row.plan.label}</div>
+                          <div className="text-xs text-muted-foreground">Discount {formatCredit(row.plan.discountPercent)}% · reset ngày {row.plan.resetDaily ? "bật" : "tắt"}</div>
+                        </div>
+                        <Badge variant="secondary">{row.plan.code}</Badge>
+                      </div>
+                      <div className="mt-3 rounded-2xl border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        Ngày mới cấp <span className="font-medium text-foreground">{formatCredit(row.plan.dailyCredit)}</span> credit thường và <span className="font-medium text-foreground">{formatCredit(row.plan.dailyVipCredit)}</span> credit VIP.
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        {row.featureCosts.map((item) => (
+                          <div key={item.feature.code} className="rounded-2xl border p-3">
+                            <div className="font-medium">{item.feature.title}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">{item.feature.limitLabel}</div>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm">
+                              <div className="rounded-xl border p-2">
+                                <div className="text-xs text-muted-foreground">Ví thường</div>
+                                <div className="font-medium">{item.normal.free ? "Miễn phí" : `${formatCredit(item.normal.effectiveCost)} credit`}</div>
+                                <div className="text-xs text-muted-foreground">Giá gốc {formatCredit(item.normal.baseCost)} · giảm {formatCredit(item.normal.discountPercent)}%</div>
+                              </div>
+                              <div className="rounded-xl border p-2">
+                                <div className="text-xs text-muted-foreground">Ví VIP</div>
+                                <div className="font-medium">{item.vip.free ? "Miễn phí" : `${formatCredit(item.vip.effectiveCost)} credit`}</div>
+                                <div className="text-xs text-muted-foreground">Giá gốc {formatCredit(item.vip.baseCost)} · giảm {formatCredit(item.vip.discountPercent)}%</div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <div className="font-medium">Reset hằng ngày theo gói</div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {dailyResetPreview.map((item) => (
+                      <div key={item.packageCode} className="rounded-2xl border bg-muted/20 p-3 text-sm">
+                        <div className="font-medium uppercase tracking-wide">{item.packageCode}</div>
+                        <div className="mt-1 text-muted-foreground">Reset: {item.resetDaily ? "Có" : "Không"}</div>
+                        <div className="mt-2">Soft: <span className="font-medium text-foreground">{formatCredit(item.softAmount)}</span></div>
+                        <div>VIP: <span className="font-medium text-foreground">{formatCredit(item.vipAmount)}</span></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
 
         <div className="space-y-6">

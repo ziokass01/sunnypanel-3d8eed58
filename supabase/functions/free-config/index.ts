@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Credentials": "true",
     // Include x-debug to allow troubleshooting calls from browsers.
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp, x-debug",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp, x-debug, x-app-code",
     "Access-Control-Max-Age": "86400",
   };
   const jsonResponse = (data: unknown, status = 200) =>
@@ -127,6 +127,7 @@ Deno.serve(async (req) => {
   }
 
   const sb = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+  const requestedAppCode = String(req.headers.get("x-app-code") ?? "").trim().toLowerCase();
 
   // Load settings row id=1
   const { data: settings, error: sErr } = await sb
@@ -209,11 +210,12 @@ if (!free_download_cards.length) {
 
 
   // Load enabled key types
-  const { data: keyTypes, error: kErr } = await sb
+  let keyTypesQuery = sb
     .from("licenses_free_key_types")
     .select("*")
-    .eq("enabled", true)
-    .order("sort_order", { ascending: true });
+    .eq("enabled", true);
+  if (requestedAppCode) keyTypesQuery = keyTypesQuery.eq("app_code", requestedAppCode);
+  const { data: keyTypes, error: kErr } = await keyTypesQuery.order("sort_order", { ascending: true });
 
   if (kErr) {
     return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: kErr.message }, 503);
@@ -240,21 +242,24 @@ if (!free_download_cards.length) {
 
   let fpUsedToday = 0;
   if (fpHash) {
-    const fpQuota = await sb
+    let fpQuota = sb
       .from("licenses_free_issues")
       .select("issue_id", { count: "exact", head: true })
       .gte("created_at", dayRange.startUtcIso)
       .lt("created_at", dayRange.nextStartUtcIso)
       .eq("fingerprint_hash", fpHash);
-    fpUsedToday = Number(fpQuota.count ?? 0);
+    if (requestedAppCode) fpQuota = fpQuota.eq("app_code", requestedAppCode);
+    const fpQuotaRes = await fpQuota;
+    fpUsedToday = Number(fpQuotaRes.count ?? 0);
   }
 
-  const ipQuota = await sb
+  let ipQuota = sb
     .from("licenses_free_issues")
     .select("issue_id", { count: "exact", head: true })
     .gte("created_at", dayRange.startUtcIso)
     .lt("created_at", dayRange.nextStartUtcIso)
     .eq("ip_hash", ipHash);
+  if (requestedAppCode) ipQuota = ipQuota.eq("app_code", requestedAppCode);
   const ipUsedToday = Number(ipQuota.count ?? 0);
 
   const fpRemaining = free_daily_limit_per_fingerprint <= 0

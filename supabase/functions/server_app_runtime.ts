@@ -130,6 +130,8 @@ type RuntimeRedeemKey = {
   id: string;
   reward_package_id: string | null;
   redeem_key: string;
+  trace_id: string | null;
+  source_free_session_id: string | null;
   enabled: boolean;
   starts_at: string | null;
   expires_at: string | null;
@@ -422,6 +424,7 @@ export async function logRuntimeEvent(payload: Record<string, unknown>) {
     device_id: asNullableString(payload.device_id),
     session_id: asNullableString(payload.session_id),
     redeem_key_id: asNullableString(payload.redeem_key_id),
+    trace_id: asNullableString(payload.trace_id),
     feature_code: asNullableString(payload.feature_code),
     wallet_kind: asNullableString(payload.wallet_kind),
     ip_hash: asNullableString(payload.ip_hash),
@@ -449,7 +452,7 @@ async function findSession(appCode: string, sessionToken: string) {
   const tokenHash = await sha256Hex(sessionToken);
   const { data, error } = await admin
     .from("server_app_sessions")
-    .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version")
+    .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version,trace_id")
     .eq("app_code", appCode)
     .eq("session_token_hash", tokenHash)
     .maybeSingle();
@@ -681,7 +684,7 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_redeem_keys")
-    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override,blocked_at,blocked_reason")
+    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override,blocked_at,blocked_reason,trace_id,source_free_session_id")
     .eq("app_code", appCode)
     .eq("redeem_key", redeemKey)
     .maybeSingle();
@@ -692,6 +695,8 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
     id: asString((data as any).id),
     reward_package_id: asNullableString((data as any).reward_package_id),
     redeem_key: asString((data as any).redeem_key),
+    trace_id: asNullableString((data as any).trace_id),
+    source_free_session_id: asNullableString((data as any).source_free_session_id),
     enabled: Boolean((data as any).enabled ?? true),
     starts_at: asNullableString((data as any).starts_at),
     expires_at: asNullableString((data as any).expires_at),
@@ -807,6 +812,7 @@ async function createRuntimeSession(params: {
   deviceId: string;
   entitlementId: string | null;
   redeemKeyId: string | null;
+  traceId?: string | null;
   clientVersion?: string | null;
   ipHash?: string | null;
 }) {
@@ -821,6 +827,7 @@ async function createRuntimeSession(params: {
     device_id: params.deviceId,
     entitlement_id: params.entitlementId,
     redeem_key_id: params.redeemKeyId,
+    trace_id: asNullableString(params.traceId),
     session_token_hash: tokenHash,
     status: "active",
     started_at: nowIso,
@@ -870,6 +877,7 @@ async function upsertRuntimeEntitlement(params: {
   planDefaults: RuntimePlan | null;
   redeemKeyId: string;
   rewardPackageId: string | null;
+  traceId?: string | null;
   settings: RuntimeSettings;
 }) {
   const shouldGrantEntitlement = Boolean(
@@ -923,6 +931,7 @@ async function upsertRuntimeEntitlement(params: {
       last_redeem_key_id: params.redeemKeyId,
       last_reward_package_id: params.rewardPackageId,
       granted_at: nowIso,
+      trace_id: asNullableString(params.traceId),
     },
   };
 
@@ -1174,6 +1183,7 @@ export async function logoutRuntimeSession(appCode: string, sessionToken: string
 export async function redeemRuntimeKey(params: {
   appCode: string;
   redeemKey: string;
+  traceId?: string | null;
   accountRef: string;
   deviceId: string;
   clientVersion?: string | null;
@@ -1188,6 +1198,7 @@ export async function redeemRuntimeKey(params: {
   if (!deviceId) throw Object.assign(new Error("MISSING_DEVICE_ID"), { status: 400, code: "MISSING_DEVICE_ID" });
 
   const { settings, planMap } = await getRuntimeContext(appCode);
+  const requestedTraceId = asNullableString(params.traceId);
   const keyRow = await getRedeemKeyByValue(appCode, redeemKey);
   if (!keyRow) throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
   if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
@@ -1230,6 +1241,7 @@ export async function redeemRuntimeKey(params: {
     planDefaults,
     redeemKeyId: keyRow.id,
     rewardPackageId: rewardPackage?.id ?? null,
+    traceId: keyRow.trace_id ?? requestedTraceId,
     settings,
   });
 
@@ -1243,6 +1255,7 @@ export async function redeemRuntimeKey(params: {
     entitlementId: entitlement?.id ?? null,
     redeemKeyId: keyRow.id,
     rewardPackageId: rewardPackage?.id ?? null,
+    traceId: keyRow.trace_id ?? requestedTraceId,
     softAmount: reward.soft_credit_amount,
     premiumAmount: reward.premium_credit_amount,
   });
@@ -1260,6 +1273,7 @@ export async function redeemRuntimeKey(params: {
     deviceId,
     entitlementId: entitlement?.id ?? null,
     redeemKeyId: keyRow.id,
+    traceId: keyRow.trace_id ?? requestedTraceId,
     clientVersion: params.clientVersion,
     ipHash: params.ipHash,
   });
@@ -1288,6 +1302,8 @@ export async function redeemRuntimeKey(params: {
     },
     wallet,
     state,
+    trace_id: keyRow.trace_id ?? requestedTraceId,
+    source_free_session_id: keyRow.source_free_session_id,
   };
 }
 
@@ -1296,6 +1312,7 @@ export async function consumeRuntimeFeature(params: {
   sessionToken: string;
   featureCode: string;
   walletKind?: string | null;
+  quantity?: number;
 }) {
   const appCode = asString(params.appCode);
   const sessionToken = asString(params.sessionToken);
@@ -1419,6 +1436,7 @@ export async function consumeRuntimeFeature(params: {
     wallet_balance_id: wallet.id,
     entitlement_id: session.entitlement_id,
     redeem_key_id: session.redeem_key_id,
+    trace_id: asNullableString((session as any).trace_id),
     account_ref: session.account_ref,
     device_id: session.device_id,
     feature_code: featureCode,
@@ -1434,6 +1452,8 @@ export async function consumeRuntimeFeature(params: {
       effective_soft_cost: effectiveSoftCost,
       effective_premium_cost: effectivePremiumCost,
       plan_code: currentPlanCode,
+      quantity: Math.max(1, Math.trunc(Number(params.quantity ?? 1) || 1)),
+      trace_id: asNullableString((session as any).trace_id),
     },
   });
 
@@ -1451,6 +1471,7 @@ export async function consumeRuntimeFeature(params: {
     charged_soft: Math.abs(softDelta),
     charged_premium: Math.abs(premiumDelta),
     state,
+    trace_id: asNullableString((session as any).trace_id),
   };
 }
 

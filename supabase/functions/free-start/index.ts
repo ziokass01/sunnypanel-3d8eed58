@@ -34,9 +34,13 @@ function base64url(bytesLen = 32) {
 }
 
 const BodySchema = z.object({
-  key_type_code: z.string().min(2).max(8),
+  key_type_code: z.string().min(2).max(16),
   fingerprint: z.string().min(6).max(128).optional(),
   test_mode: z.boolean().optional().default(false),
+  app_code: z.string().min(2).max(64).optional(),
+  package_code: z.string().min(2).max(64).nullable().optional(),
+  credit_code: z.string().min(2).max(64).nullable().optional(),
+  wallet_kind: z.string().min(2).max(32).nullable().optional(),
 });
 
 function isMissingRateLimitSetup(error: { message?: string | null; details?: string | null; hint?: string | null } | null | undefined) {
@@ -74,6 +78,7 @@ const now = new Date();
       fingerprint_hash: payload.fpHash,
       key_type_code: payload.keyTypeCode,
       duration_seconds: 0,
+      trace_id: String((payload as any).traceId ?? "").trim() || null,
       started_at: now.toISOString(),
       expires_at: new Date(now.getTime() + 3 * 60 * 1000).toISOString(),
       last_error: payload.lastError,
@@ -92,7 +97,7 @@ Deno.serve(async (req) => {
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST,OPTIONS",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fp, x-app-code",
     "Access-Control-Max-Age": "86400",
   };
   const jsonResponse = (data: unknown, status = 200) =>
@@ -124,7 +129,14 @@ Deno.serve(async (req) => {
     }
 
     const sb: any = createClient<any>(supabaseUrl, serviceRole, { auth: { persistSession: false } });
-    const safeLogSecurity = async (event_type: string, details: Record<string, unknown>, ip_hash?: string, fingerprint_hash?: string | null) => {
+    const safeLogSecurity = async (
+      event_type: string,
+      details: Record<string, unknown>,
+      ip_hash?: string,
+      fingerprint_hash?: string | null,
+      session_id?: string | null,
+      trace_id?: string | null,
+    ) => {
       try {
         await sb.from("licenses_free_security_logs").insert({
           event_type,
@@ -132,6 +144,8 @@ Deno.serve(async (req) => {
           details,
           ip_hash: ip_hash ?? null,
           fingerprint_hash: fingerprint_hash ?? null,
+          session_id: session_id ?? null,
+          trace_id: trace_id ?? null,
         });
       } catch {
         // no-op
@@ -151,6 +165,10 @@ Deno.serve(async (req) => {
     }
 
     const { key_type_code, test_mode } = parsed.data;
+    const requestedAppCode = String((parsed.data as any).app_code ?? "").trim().toLowerCase();
+    const requestedPackageCode = String((parsed.data as any).package_code ?? "").trim().toLowerCase();
+    const requestedCreditCode = String((parsed.data as any).credit_code ?? "").trim().toLowerCase();
+    const requestedWalletKind = String((parsed.data as any).wallet_kind ?? "").trim().toLowerCase();
     const fpFromHeader = (req.headers.get("x-fp") ?? "").trim();
     const fingerprint = fpFromHeader || parsed.data.fingerprint || "";
 
@@ -359,7 +377,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
     // We'll build gate_url AFTER we have session_id.
     const { data: kt, error: kErr } = await sb
       .from("licenses_free_key_types")
-      .select("code,label,duration_seconds,enabled,requires_double_gate")
+      .select("code,label,duration_seconds,enabled,requires_double_gate,app_code,app_label,key_signature,allow_reset")
       .eq("code", key_type_code)
       .maybeSingle();
 
@@ -368,6 +386,22 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
     }
     if (!kt || !kt.enabled) {
       return jsonResponse({ ok: false, msg: "KEY_TYPE_DISABLED" }, 400);
+    }
+
+    const keyTypeAppCode = String((kt as any)?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire";
+    const sessionAppCode = requestedAppCode || keyTypeAppCode;
+    if (requestedAppCode && requestedAppCode !== keyTypeAppCode) {
+      return jsonResponse({ ok: false, code: "APP_KEY_TYPE_MISMATCH", msg: "APP_KEY_TYPE_MISMATCH" }, 400);
+    }
+    if (sessionAppCode === "find-dumps") {
+      const hasPackage = Boolean(requestedPackageCode);
+      const hasCredit = Boolean(requestedCreditCode);
+      if (hasPackage === hasCredit) {
+        return jsonResponse({ ok: false, code: "FIND_DUMPS_SELECTION_REQUIRED", msg: "FIND_DUMPS_SELECTION_REQUIRED" }, 400);
+      }
+      if (hasCredit && requestedWalletKind && !["normal", "vip"].includes(requestedWalletKind)) {
+        return jsonResponse({ ok: false, code: "INVALID_WALLET_KIND", msg: "INVALID_WALLET_KIND" }, 400);
+      }
     }
 
     const requiresDoubleGate = Boolean((kt as any).requires_double_gate);
@@ -504,6 +538,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       .from("licenses_free_sessions")
       .select("session_id", { count: "exact", head: true })
       .eq("fingerprint_hash", fpHash)
+      .eq("app_code", sessionAppCode)
       .in("status", pendingStatuses)
       .gte("created_at", pendingWindowFrom);
 
@@ -542,6 +577,19 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       rotate_bucket,
       rotate_bucket_pass2,
       out_token_hash_pass2,
+      app_code: sessionAppCode,
+      package_code: requestedPackageCode || null,
+      credit_code: requestedCreditCode || null,
+      wallet_kind: requestedCreditCode ? (requestedWalletKind || null) : null,
+      trace_id,
+      selection_meta: {
+        app_code: sessionAppCode,
+        package_code: requestedPackageCode || null,
+        credit_code: requestedCreditCode || null,
+        wallet_kind: requestedCreditCode ? (requestedWalletKind || null) : null,
+        key_signature: String((kt as any)?.key_signature ?? (sessionAppCode === "find-dumps" ? "FD" : "FF")),
+        trace_id,
+      },
     }).select("session_id").single();
 
     if (insErr || !insData?.session_id) {
@@ -549,7 +597,16 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
     }
 
     const session_id = insData.session_id as string;
-    
+    await safeLogSecurity("FLOW_STARTED", {
+      session_id,
+      key_type_code,
+      app_code: sessionAppCode,
+      package_code: requestedPackageCode || null,
+      credit_code: requestedCreditCode || null,
+      wallet_kind: requestedCreditCode ? (requestedWalletKind || null) : null,
+      test_mode: test_mode,
+    }, ipHash, fpHash || null, session_id, trace_id);
+
 
 // Keep Link4M target stable within the rotate bucket.
 // Session/token stay in local bundle and are verified at /free/gate, so we do not
@@ -598,7 +655,7 @@ if (!test_mode) {
     const minDelayPass2Raw = Number((settings as any)?.free_min_delay_seconds_pass2 ?? min_delay_seconds);
     const min_delay_seconds_pass2 = Math.max(0, minDelayEnabled ? (Math.floor(minDelayPass2Raw) || min_delay_seconds) : 0);
 
-    return jsonResponse({ ok: true, out_token, out_token_pass2: out_token_pass2 || null, session_id, outbound_url, outbound_url_pass2: builtOutboundPass2, gate_url: gate_url_pass1, gate_url_pass2, claim_base_url, min_delay_seconds, min_delay_seconds_pass2, passes_required: requiresDoubleGate ? 2 : 1, rotate_bucket }, 200);
+    return jsonResponse({ ok: true, out_token, out_token_pass2: out_token_pass2 || null, session_id, trace_id, outbound_url, outbound_url_pass2: builtOutboundPass2, gate_url: gate_url_pass1, gate_url_pass2, claim_base_url, min_delay_seconds, min_delay_seconds_pass2, passes_required: requiresDoubleGate ? 2 : 1, rotate_bucket }, 200);
   } catch (error) {
     console.error("free-start error", error);
     return jsonResponse({

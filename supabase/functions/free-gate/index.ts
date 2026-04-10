@@ -48,6 +48,7 @@ async function insertGateLog(sb: any, payload: {
   fingerprint_hash?: string | null;
   ip_hash?: string | null;
   ua_hash?: string | null;
+  trace_id?: string | null;
 }) {
   try {
     await sb.from("licenses_free_gate_logs").insert({
@@ -59,6 +60,7 @@ async function insertGateLog(sb: any, payload: {
       fingerprint_hash: payload.fingerprint_hash ?? null,
       ip_hash: payload.ip_hash ?? null,
       ua_hash: payload.ua_hash ?? null,
+      trace_id: payload.trace_id ?? null,
     });
   } catch {
     // ignore log failures
@@ -71,6 +73,7 @@ async function maybeAutoBlockGateFailures(sb: any, args: {
   session_id?: string | null;
   key_type_code?: string | null;
   pass_no?: number | null;
+  trace_id?: string | null;
 }) {
   const windowStart = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   let failCount = 0;
@@ -125,6 +128,7 @@ async function maybeAutoBlockGateFailures(sb: any, args: {
     detail: { fail_count_10m: failCount, blocked_until: blockedUntil, reason: "AUTO_GATE_FAIL_5_IN_10M" },
     fingerprint_hash: args.fingerprint_hash,
     ip_hash: args.ip_hash,
+    trace_id: args.trace_id ?? null,
   });
 }
 
@@ -301,8 +305,8 @@ const BodySchema = z.object({
 type JsonErr = { ok: false; code?: string; msg: string; detail?: unknown };
 
 type NextOk =
-  | { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number }
-  | { ok: true; next: "CLAIM"; claim_token: string; claim_url: string };
+  | { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number; trace_id?: string | null }
+  | { ok: true; next: "CLAIM"; claim_token: string; claim_url: string; trace_id?: string | null };
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
@@ -407,7 +411,7 @@ Deno.serve(async (req) => {
   const { data: sess, error: qErr } = await sb
     .from("licenses_free_sessions")
     .select(
-      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash,out_token_hash_pass2,key_type_code,passes_required,passes_completed,current_pass,rotate_bucket,rotate_bucket_pass2,pass2_started_at",
+      "session_id,status,created_at,expires_at,started_at,fingerprint_hash,ua_hash,ip_hash,reveal_count,claim_token_hash,claim_expires_at,out_token_hash,out_token_hash_pass2,key_type_code,passes_required,passes_completed,current_pass,rotate_bucket,rotate_bucket_pass2,pass2_started_at,trace_id",
     )
     .eq("session_id", sid)
     .maybeSingle();
@@ -432,6 +436,7 @@ Deno.serve(async (req) => {
   if (fingerprintMismatch || uaMismatch || ipMismatch) {
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: pass,
       event_code: "DEVICE_MISMATCH",
@@ -442,6 +447,7 @@ Deno.serve(async (req) => {
     });
     await maybeAutoBlockGateFailures(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: pass,
       fingerprint_hash: fpHash,
@@ -504,6 +510,7 @@ Deno.serve(async (req) => {
   if (requireRef && r && !hostOk) {
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: resolvedPass,
       event_code: "BAD_REFERRER",
@@ -514,6 +521,7 @@ Deno.serve(async (req) => {
     });
     await maybeAutoBlockGateFailures(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: resolvedPass,
       fingerprint_hash: fpHash,
@@ -535,6 +543,7 @@ Deno.serve(async (req) => {
   if (requireRef && !r && !missingRefFallbackOk) {
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: resolvedPass,
       event_code: "REFERRER_REQUIRED",
@@ -551,6 +560,7 @@ Deno.serve(async (req) => {
     });
     await maybeAutoBlockGateFailures(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: resolvedPass,
       fingerprint_hash: fpHash,
@@ -576,6 +586,7 @@ Deno.serve(async (req) => {
   if (!tokenVerified) {
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: resolvedPass,
       event_code: "OUT_TOKEN_MISMATCH",
@@ -586,6 +597,7 @@ Deno.serve(async (req) => {
     });
     await maybeAutoBlockGateFailures(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: resolvedPass,
       fingerprint_hash: fpHash,
@@ -635,6 +647,7 @@ Deno.serve(async (req) => {
         }
         await insertGateLog(sb, {
           session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
           key_type_code: (sess as any).key_type_code ?? null,
           pass_no: resolvedPass,
           event_code: "GATE_TOO_EARLY",
@@ -645,6 +658,7 @@ Deno.serve(async (req) => {
         });
         await maybeAutoBlockGateFailures(sb, {
           session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
           key_type_code: (sess as any).key_type_code ?? null,
           pass_no: resolvedPass,
           fingerprint_hash: fpHash,
@@ -677,6 +691,7 @@ Deno.serve(async (req) => {
       }
       await insertGateLog(sb, {
         session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
         key_type_code: (sess as any).key_type_code ?? null,
         pass_no: resolvedPass,
         event_code: "TOO_FAST",
@@ -687,6 +702,7 @@ Deno.serve(async (req) => {
       });
       await maybeAutoBlockGateFailures(sb, {
         session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
         key_type_code: (sess as any).key_type_code ?? null,
         pass_no: resolvedPass,
         fingerprint_hash: fpHash,
@@ -719,6 +735,7 @@ Deno.serve(async (req) => {
       }
       await insertGateLog(sb, {
         session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
         key_type_code: (sess as any).key_type_code ?? null,
         pass_no: resolvedPass,
         event_code: "TOO_FAST_PASS2",
@@ -729,6 +746,7 @@ Deno.serve(async (req) => {
       });
       await maybeAutoBlockGateFailures(sb, {
         session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
         key_type_code: (sess as any).key_type_code ?? null,
         pass_no: resolvedPass,
         fingerprint_hash: fpHash,
@@ -790,6 +808,7 @@ Deno.serve(async (req) => {
 
     await insertGateLog(sb, {
       session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
       key_type_code: (sess as any).key_type_code ?? null,
       pass_no: 1,
       event_code: "PASS1_OK",
@@ -798,7 +817,7 @@ Deno.serve(async (req) => {
       ip_hash: ipHash,
       ua_hash: uaHash,
     });
-    const result: NextOk = { ok: true, next: "PASS2", out_token: "", outbound_url: outbound2, min_delay_seconds: minDelay2 };
+    const result: NextOk = { ok: true, next: "PASS2", out_token: "", outbound_url: outbound2, min_delay_seconds: minDelay2, trace_id: String((sess as any).trace_id ?? "").trim() || null };
     return json(result, 200);
   }
 
@@ -837,6 +856,7 @@ Deno.serve(async (req) => {
 
   await insertGateLog(sb, {
     session_id: (sess as any).session_id,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
     key_type_code: (sess as any).key_type_code ?? null,
     pass_no: resolvedPass,
     event_code: "GATE_OK",
@@ -845,6 +865,6 @@ Deno.serve(async (req) => {
     ip_hash: ipHash,
     ua_hash: uaHash,
   });
-  const result: NextOk = { ok: true, next: "CLAIM", claim_token, claim_url };
+  const result: NextOk = { ok: true, next: "CLAIM", claim_token, claim_url, trace_id: String((sess as any).trace_id ?? "").trim() || null };
   return json(result, 200);
 });

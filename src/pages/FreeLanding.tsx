@@ -18,6 +18,7 @@ import {
   setFreeStartMeta,
   setOutToken,
   setSelectedKeyTypeCode,
+  getSelectedAppCode,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -36,6 +37,7 @@ type StartOk = {
   min_delay_seconds: number;
   min_delay_seconds_pass2?: number;
   passes_required?: number;
+  trace_id?: string | null;
 };
 type StartErr = { ok: false; msg: string; code?: string; detail?: any };
 type LastFreeKey = {
@@ -196,7 +198,7 @@ export function FreeLandingPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve(fetchFreeConfig({ fingerprint: getOrCreateFingerprint() }))
+    Promise.resolve(fetchFreeConfig({ fingerprint: getOrCreateFingerprint(), appCode: getSelectedAppCode() }))
       .then((c) => {
         if (cancelled) return;
         setCfg(c);
@@ -222,6 +224,17 @@ export function FreeLandingPage() {
       cancelled = true;
     };
   }, []);
+
+
+  const selectedKeyMeta = useMemo(() => (cfg?.key_types ?? []).find((item) => item.code === selected) ?? null, [cfg?.key_types, selected]);
+  const selectedAppCode = useMemo(() => String(selectedKeyMeta?.app_code || getSelectedAppCode() || "free-fire").trim() || "free-fire", [selectedKeyMeta]);
+  const isFindDumpsSelected = selectedAppCode === "find-dumps";
+  const effectiveFindDumpsReward = useMemo(() => {
+    if (!isFindDumpsSelected) return null;
+    return findDumpsChoiceKind === "credit"
+      ? getFindDumpsFreeFlowDefaults("credit", findDumpsRewardCode)
+      : getFindDumpsFreeFlowDefaults("package", findDumpsRewardCode);
+  }, [findDumpsChoiceKind, findDumpsRewardCode, isFindDumpsSelected]);
 
   const missingText = useMemo(() => {
     const m = cfg?.missing ?? [];
@@ -312,6 +325,52 @@ export function FreeLandingPage() {
               </Select>
             </div>
 
+            {isFindDumpsSelected ? (
+              <div className="space-y-4 rounded-2xl border bg-background/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Nhánh riêng cho Find Dumps</div>
+                    <div className="text-xs text-muted-foreground">Chọn gói hoặc credit trước khi bắt đầu get/gate/claim/reveal. Free Fire vẫn giữ flow cũ.</div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">App-host</Badge>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Loại phần thưởng</div>
+                    <Select value={findDumpsChoiceKind} onValueChange={(v) => setFindDumpsChoiceKind(v === "credit" ? "credit" : "package")}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="package">Gói thời hạn</SelectItem>
+                        <SelectItem value="credit">Code credit</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Mục đang nhận</div>
+                    <Select value={findDumpsRewardCode} onValueChange={setFindDumpsRewardCode}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {(findDumpsChoiceKind === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
+                          <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  {findDumpsChoiceKind === "credit" ? (
+                    <>
+                      Credit <span className="font-medium text-foreground">{getFindDumpsCredit(findDumpsRewardCode).label}</span> dùng ví <span className="font-medium text-foreground">{effectiveFindDumpsReward?.walletKind === "vip" ? "VIP" : "thường"}</span>, giá trị mặc định <span className="font-medium text-foreground">{formatCredit(Number(effectiveFindDumpsReward?.creditAmount || 0))}</span>, tự hết hạn sau <span className="font-medium text-foreground">{effectiveFindDumpsReward?.expiresHours}</span> giờ tính từ lúc nhận.
+                    </>
+                  ) : (
+                    <>
+                      Gói <span className="font-medium text-foreground">{getFindDumpsPackage(findDumpsRewardCode).label}</span> bật reset hằng ngày <span className="font-medium text-foreground">{getFindDumpsPackage(findDumpsRewardCode).resetDaily ? "có" : "không"}</span>, discount feature <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).discountPercent)}%</span>, cấp ngày <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).dailyCredit)}</span> credit thường và <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).dailyVipCredit)}</span> credit VIP.
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             <Button
               className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
               size="lg"
@@ -325,7 +384,7 @@ export function FreeLandingPage() {
                 if (!selected) return;
 
                 // Start a new flow atomically: clear old bundle first (avoid mixing tokens across sessions)
-                clearBundle();
+                clearBundle(selectedAppCode);
                 markFreeAttempt();
                 setDeviceHistory(readFreeDeviceHistory());
 
@@ -346,6 +405,10 @@ export function FreeLandingPage() {
                     "/free-start",
                     {
                       key_type_code: selected,
+                      app_code: selectedAppCode,
+                      package_code: isFindDumpsSelected && findDumpsChoiceKind === "package" ? findDumpsRewardCode : null,
+                      credit_code: isFindDumpsSelected && findDumpsChoiceKind === "credit" ? findDumpsRewardCode : null,
+                      wallet_kind: isFindDumpsSelected && findDumpsChoiceKind === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
                       fingerprint: fp,
                       // Only send when debugMode explicitly enabled
                       test_mode: testMode,
@@ -388,7 +451,7 @@ export function FreeLandingPage() {
                   try {
                     const sid = String((res as any).session_id ?? "").trim();
                     if (sid) {
-                      writeBundle({ session_id: sid, out_token: String(res.out_token) });
+                      writeBundle({ session_id: sid, out_token: String(res.out_token), trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
                     }
                   } catch {
                     // ignore
@@ -413,6 +476,8 @@ export function FreeLandingPage() {
                     localStorage.setItem("free_started_at_ms", String(Date.now()));
                     localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
                     localStorage.setItem("free_key_type_code", String(selected));
+                    setSelectedAppCode(selectedAppCode);
+                    if (isFindDumpsSelected) setFindDumpsFreeSelection(findDumpsChoiceKind, findDumpsRewardCode, effectiveFindDumpsReward?.walletKind ?? null);
                     const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
                     if (pass2Tok) localStorage.setItem("free_out_token_pass2", pass2Tok);
                     const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
@@ -485,6 +550,7 @@ export function FreeLandingPage() {
                   <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Hết hạn: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.expires_at)}</span></div>
                   <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Tạo lúc: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.created_at)}</span></div>
                   <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Session: <span className="font-medium text-foreground">{shortHash(lastFreeKey.session_id, 12)}</span></div>
+                  {readBundle(getSelectedAppCode())?.trace_id ? (<div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Trace: <span className="font-medium text-foreground">{shortHash(readBundle(getSelectedAppCode())?.trace_id, 12)}</span></div>) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button

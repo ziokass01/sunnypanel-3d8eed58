@@ -480,7 +480,7 @@ export function AdminServerAppRuntimePage() {
         sb.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
         sb.from("server_app_runtime_controls").select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,blocked_accounts,blocked_devices,blocked_ip_hashes,max_daily_redeems_per_account,max_daily_redeems_per_device,session_idle_timeout_minutes,session_max_age_minutes,event_retention_days").eq("app_code", appCode).maybeSingle(),
         sb.from("server_app_wallet_rules").select("app_code,soft_wallet_label,premium_wallet_label,consume_priority").eq("app_code", appCode).maybeSingle(),
-        sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
+        sb.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,ip_hash,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
       ]);
 
       const firstError = [appRes, packageRes, featureRes, redeemRes, entitlementRes, walletRes, sessionRes, txRes, controlsRes, walletRulesRes, eventsRes].find((item) => item.error)?.error;
@@ -1442,6 +1442,7 @@ export function AdminServerAppRuntimePage() {
                       </div>
                       <div className="text-sm font-medium">{item.account_ref || "guest"}</div>
                       <div className="text-xs text-muted-foreground">Device: {item.device_id || "-"} · Feature: {item.feature_code || "-"} · Wallet: {item.wallet_kind || "-"}</div>
+                      <div className="text-[11px] text-muted-foreground">Trace: {item.trace_id || "-"}</div>
                       <div className="text-xs text-muted-foreground">Client: {item.client_version || "-"} · IP hash: {item.ip_hash || "-"}</div>
                     </div>
                     <div className="text-xs text-muted-foreground">{formatTime(item.created_at)}</div>

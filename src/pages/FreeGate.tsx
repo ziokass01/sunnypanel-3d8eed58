@@ -7,7 +7,7 @@ import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { FreeFlowSteps, markFreeAttemptFail } from "@/features/free/flow-ux";
 import { readBundle, writeBundle } from "@/lib/freeFlow";
-import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
+import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, getSelectedAppCode, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
 type GateNextPass2 = { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number };
 type GateNextClaim = { ok: true; next: "CLAIM"; claim_token: string; claim_url?: string | null };
@@ -42,6 +42,7 @@ function pad2(n: number) {
 
 export function FreeGatePage() {
   const nav = useNavigate();
+  const findDumpsSelection = getFindDumpsFreeSelection();
   const [sp] = useSearchParams();
   const [cfgReturn, setCfgReturn] = useState<number>(10);
   const [gateAntiBypassEnabled, setGateAntiBypassEnabled] = useState<boolean>(false);
@@ -103,7 +104,7 @@ export function FreeGatePage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchFreeConfig()
+    fetchFreeConfig({ appCode: getSelectedAppCode() })
       .then((c) => {
         if (cancelled) return;
         const r = Math.max(10, Number(c.free_return_seconds ?? 10));
@@ -173,7 +174,7 @@ export function FreeGatePage() {
           }
           if (nextTok) {
             setOutToken(nextTok);
-            writeBundle({ session_id: sid, out_token: nextTok });
+            writeBundle({ session_id: sid, out_token: nextTok, trace_id: String((ok as any).trace_id ?? "").trim() || undefined });
             try {
               localStorage.setItem("free_out_token_v1", nextTok);
               localStorage.setItem("free_out_token", nextTok);
@@ -210,7 +211,7 @@ export function FreeGatePage() {
         } catch {
           // ignore
         }
-        writeBundle({ session_id: sid, out_token: tok, claim_token: claim });
+        writeBundle({ session_id: sid, out_token: tok, claim_token: claim, trace_id: String((ok as any).trace_id ?? "").trim() || undefined });
 
         const base = String(ok.claim_url || `${window.location.origin}/free/claim`);
         const url = new URL(base, window.location.origin);

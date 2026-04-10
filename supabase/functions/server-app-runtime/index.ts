@@ -179,6 +179,7 @@ Deno.serve(async (req) => {
     const featureCode = asBodyString((body as any).feature_code);
     const walletKind = asBodyString((body as any).wallet_kind, "auto") || "auto";
     const quantity = Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1));
+    const traceId = asBodyString((body as any).trace_id) || null;
     const ipHash = await sha256Hex(getIp(req));
 
     if (!action) return runtimeJson(400, { ok: false, code: "MISSING_ACTION" }, origin);
@@ -191,6 +192,7 @@ Deno.serve(async (req) => {
       device_id: deviceId || null,
       feature_code: featureCode || null,
       wallet_kind: walletKind || null,
+      trace_id: traceId,
       ip_hash: ipHash,
       client_version: clientVersion,
     };
@@ -272,6 +274,7 @@ Deno.serve(async (req) => {
         redeemKey,
         accountRef,
         deviceId,
+        traceId,
         clientVersion,
         ipHash,
       });
@@ -279,11 +282,13 @@ Deno.serve(async (req) => {
         ok: true,
         code: "OK",
         session_id: (redeemed as any)?.session?.id ?? null,
-        meta: { reward: (redeemed as any)?.reward ?? null },
+        trace_id: (redeemed as any)?.trace_id ?? traceId ?? null,
+        meta: { reward: (redeemed as any)?.reward ?? null, source_free_session_id: (redeemed as any)?.source_free_session_id ?? null },
       });
       return runtimeJson(200, {
         ok: true,
         action,
+        trace_id: (redeemed as any)?.trace_id ?? traceId ?? null,
         ...redeemed,
       }, origin);
     }
@@ -302,11 +307,13 @@ Deno.serve(async (req) => {
         ok: true,
         code: "OK",
         session_id: (consumed as any)?.session?.id ?? null,
+        trace_id: (consumed as any)?.trace_id ?? traceId ?? null,
         meta: { balances: (consumed as any)?.wallet ?? null },
       });
       return runtimeJson(200, {
         ok: true,
         action,
+        trace_id: (consumed as any)?.trace_id ?? traceId ?? null,
         ...consumed,
       }, origin);
     }
@@ -334,6 +341,7 @@ Deno.serve(async (req) => {
             device_id: asBodyString((body as any).device_id) || null,
             feature_code: asBodyString((body as any).feature_code) || null,
             wallet_kind: asBodyString((body as any).wallet_kind) || null,
+            trace_id: asBodyString((body as any).trace_id) || null,
             client_version: asBodyString((body as any).client_version) || null,
             ip_hash: await sha256Hex(getIp(req)),
             meta: { status, quantity: Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1)) },

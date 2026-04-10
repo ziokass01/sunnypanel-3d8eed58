@@ -95,9 +95,13 @@ export type FreeConfig = {
   missing: string[];
 };
 
-export async function fetchFreeConfig(opts?: { fingerprint?: string | null }) {
+export async function fetchFreeConfig(opts?: { fingerprint?: string | null; appCode?: string | null }) {
   const fp = String(opts?.fingerprint ?? "").trim();
+  const appCode = String(opts?.appCode ?? "").trim();
+  const headers: Record<string, string> = {};
+  if (fp) headers["x-fp"] = fp;
+  if (appCode) headers["x-app-code"] = appCode;
   return getFunction<FreeConfig>("/free-config", {
-    headers: fp ? { "x-fp": fp } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
   });
 }

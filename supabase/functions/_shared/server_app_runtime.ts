@@ -139,6 +139,7 @@ type RuntimeRewardPackage = {
   soft_credit_amount: number;
   premium_credit_amount: number;
   entitlement_days: number;
+  entitlement_seconds: number;
   device_limit_override: number | null;
   account_limit_override: number | null;
 };
@@ -157,10 +158,12 @@ type RuntimeRedeemKey = {
   soft_credit_amount: number;
   premium_credit_amount: number;
   entitlement_days: number;
+  entitlement_seconds: number;
   device_limit_override: number | null;
   account_limit_override: number | null;
   blocked_at: string | null;
   blocked_reason: string | null;
+  metadata: Record<string, unknown>;
 };
 
 type RuntimeResolvedReward = {
@@ -171,6 +174,8 @@ type RuntimeResolvedReward = {
   soft_credit_amount: number;
   premium_credit_amount: number;
   entitlement_days: number;
+  entitlement_seconds: number;
+  claim_bound_expires_at: string | null;
   device_limit_override: number | null;
   account_limit_override: number | null;
 };
@@ -301,6 +306,11 @@ async function enforceSessionActiveOrThrow(appCode: string, session: any) {
 function addDaysIso(baseIso: string, days: number) {
   const baseMs = new Date(baseIso).getTime();
   return new Date(baseMs + Math.max(0, days) * 86_400_000).toISOString();
+}
+
+function addSecondsIso(baseIso: string, seconds: number) {
+  const baseMs = new Date(baseIso).getTime();
+  return new Date(baseMs + Math.max(0, Math.trunc(seconds)) * 1000).toISOString();
 }
 
 function isFutureIso(iso: string | null | undefined) {
@@ -758,7 +768,7 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_reward_packages")
-    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
     .eq("id", packageId)
     .maybeSingle();
 
@@ -784,7 +794,7 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_redeem_keys")
-    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override,blocked_at,blocked_reason")
+    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
     .eq("app_code", appCode)
     .eq("redeem_key", redeemKey)
     .maybeSingle();
@@ -805,15 +815,23 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
     blocked_at: asNullableString((data as any).blocked_at),
     blocked_reason: asNullableString((data as any).blocked_reason),
+    metadata: typeof (data as any).metadata === "object" && (data as any).metadata != null ? (data as any).metadata : {},
   };
 }
 
 function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackage | null): RuntimeResolvedReward {
+  const claimStartsEntitlement = Boolean((keyRow.metadata as any)?.claim_starts_entitlement);
+  const claimBoundExpiresAt = claimStartsEntitlement ? asNullableString(keyRow.expires_at) : null;
+  const remainingClaimSeconds = claimBoundExpiresAt
+    ? Math.max(0, Math.floor((new Date(claimBoundExpiresAt).getTime() - Date.now()) / 1000))
+    : 0;
   if (keyRow.reward_package_id && pkg) {
+    const pkgSeconds = Math.max(0, pkg.entitlement_seconds);
     return {
       reward_mode: asString(pkg.reward_mode, keyRow.reward_mode),
       package_code: pkg.package_code,
@@ -822,6 +840,8 @@ function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackag
       soft_credit_amount: round2(pkg.soft_credit_amount),
       premium_credit_amount: round2(pkg.premium_credit_amount),
       entitlement_days: Math.max(0, pkg.entitlement_days),
+      entitlement_seconds: claimStartsEntitlement && remainingClaimSeconds > 0 ? remainingClaimSeconds : pkgSeconds,
+      claim_bound_expires_at: claimBoundExpiresAt,
       device_limit_override: pkg.device_limit_override,
       account_limit_override: pkg.account_limit_override,
     };
@@ -835,6 +855,8 @@ function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackag
     soft_credit_amount: round2(keyRow.soft_credit_amount),
     premium_credit_amount: round2(keyRow.premium_credit_amount),
     entitlement_days: Math.max(0, keyRow.entitlement_days),
+    entitlement_seconds: claimStartsEntitlement && remainingClaimSeconds > 0 ? remainingClaimSeconds : Math.max(0, keyRow.entitlement_seconds),
+    claim_bound_expires_at: claimBoundExpiresAt,
     device_limit_override: keyRow.device_limit_override,
     account_limit_override: keyRow.account_limit_override,
   };
@@ -1003,9 +1025,11 @@ async function upsertRuntimeEntitlement(params: {
   const baseExpiry = usableExisting?.expires_at && isFutureIso(usableExisting.expires_at)
     ? usableExisting.expires_at
     : nowIso;
-  const nextExpiry = params.reward.entitlement_days > 0
-    ? addDaysIso(baseExpiry, params.reward.entitlement_days)
-    : (params.settings.key_persist_until_revoked ? null : usableExisting?.expires_at ?? null);
+  const nextExpiry = params.reward.entitlement_seconds > 0
+    ? addSecondsIso(baseExpiry, params.reward.entitlement_seconds)
+    : params.reward.entitlement_days > 0
+      ? addDaysIso(baseExpiry, params.reward.entitlement_days)
+      : (params.settings.key_persist_until_revoked ? null : usableExisting?.expires_at ?? null);
 
   const payload = {
     app_code: params.appCode,
@@ -1396,6 +1420,7 @@ export async function redeemRuntimeKey(params: {
       soft_credit_amount: reward.soft_credit_amount,
       premium_credit_amount: reward.premium_credit_amount,
       entitlement_days: reward.entitlement_days,
+      entitlement_seconds: reward.entitlement_seconds,
     },
     wallet,
     state,
