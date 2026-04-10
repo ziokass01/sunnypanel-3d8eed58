@@ -1,4 +1,4 @@
-import { buildAppWorkspaceUrl } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, getAdminOrigin } from "@/lib/appWorkspace";
 
 export type ServerAppCode = "free-fire" | "find-dumps";
 export type WorkspaceSection = "config" | "runtime" | "keys" | "charge" | "audit" | "trash";
@@ -155,7 +155,7 @@ export function getServerAppMeta(appCode: string) {
       label: "Free Fire",
       mode: "legacy" as const,
       description: "Nhánh legacy đang chạy thật. Admin free key hiện tại chính là server key của Free Fire.",
-      serverUrl: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || "/admin/free-keys?app=free-fire",
+      serverUrl: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || `${getAdminOrigin()}/admin/free-keys?app=free-fire`,
       tabs: ["server"] as const,
       note: "Giữ nguyên luồng cũ, chỉ rút gọn cửa vào.",
     };

@@ -12,6 +12,7 @@ import { PublicInfo } from "@/features/free/PublicInfo";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory, syncFreeNextEligibleAt } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, writeBundle } from "@/lib/freeFlow";
+import { FIND_DUMPS_CREDITS, FIND_DUMPS_PACKAGES, formatCredit, getFindDumpsCredit, getFindDumpsFreeFlowDefaults, getFindDumpsPackage } from "@/lib/serverAppPolicies";
 import {
   getFreeTestMode,
   getOrCreateFingerprint,
@@ -19,6 +20,8 @@ import {
   setOutToken,
   setSelectedKeyTypeCode,
   getSelectedAppCode,
+  getFindDumpsFreeSelection,
+  setFindDumpsFreeSelection,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -99,6 +102,9 @@ export function FreeLandingPage() {
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
   const [showClosedDialog, setShowClosedDialog] = useState(false);
+  const storedFindDumpsSelection = getFindDumpsFreeSelection();
+  const [findDumpsChoiceKind, setFindDumpsChoiceKind] = useState<"package" | "credit">(storedFindDumpsSelection.mode === "credit" ? "credit" : "package");
+  const [findDumpsRewardCode, setFindDumpsRewardCode] = useState<string>(storedFindDumpsSelection.rewardCode || "classic");
 
   const isPendingSessionError = useMemo(() => {
     const message = String(err ?? "").toLowerCase();
@@ -229,12 +235,20 @@ export function FreeLandingPage() {
   const selectedKeyMeta = useMemo(() => (cfg?.key_types ?? []).find((item) => item.code === selected) ?? null, [cfg?.key_types, selected]);
   const selectedAppCode = useMemo(() => String(selectedKeyMeta?.app_code || getSelectedAppCode() || "free-fire").trim() || "free-fire", [selectedKeyMeta]);
   const isFindDumpsSelected = selectedAppCode === "find-dumps";
+  const findDumpsFlowMode = useMemo(() => {
+    const code = String(selectedKeyMeta?.code || "").trim().toLowerCase();
+    if (!isFindDumpsSelected) return "mixed" as const;
+    if (code.includes("credit")) return "credit" as const;
+    if (code.includes("package")) return "package" as const;
+    return "mixed" as const;
+  }, [isFindDumpsSelected, selectedKeyMeta?.code]);
   const effectiveFindDumpsReward = useMemo(() => {
     if (!isFindDumpsSelected) return null;
-    return findDumpsChoiceKind === "credit"
+    const effectiveKind = findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode;
+    return effectiveKind === "credit"
       ? getFindDumpsFreeFlowDefaults("credit", findDumpsRewardCode)
       : getFindDumpsFreeFlowDefaults("package", findDumpsRewardCode);
-  }, [findDumpsChoiceKind, findDumpsRewardCode, isFindDumpsSelected]);
+  }, [findDumpsChoiceKind, findDumpsFlowMode, findDumpsRewardCode, isFindDumpsSelected]);
 
   const missingText = useMemo(() => {
     const m = cfg?.missing ?? [];
@@ -242,6 +256,17 @@ export function FreeLandingPage() {
   }, [cfg]);
 
   const debugMode = useMemo(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "1", []);
+
+  useEffect(() => {
+    if (!isFindDumpsSelected) return;
+    if (findDumpsFlowMode === "credit") {
+      setFindDumpsChoiceKind("credit");
+      return;
+    }
+    if (findDumpsFlowMode === "package") {
+      setFindDumpsChoiceKind("package");
+    }
+  }, [findDumpsFlowMode, isFindDumpsSelected]);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
@@ -335,22 +360,29 @@ export function FreeLandingPage() {
                   <Badge variant="secondary" className="rounded-full">App-host</Badge>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
+                  {findDumpsFlowMode === "mixed" ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Loại phần thưởng</div>
+                      <Select value={findDumpsChoiceKind} onValueChange={(v) => setFindDumpsChoiceKind(v === "credit" ? "credit" : "package")}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="package">Gói thời hạn</SelectItem>
+                          <SelectItem value="credit">Code credit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Nhánh đã chốt từ server</div>
+                      <div className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">{findDumpsFlowMode === "credit" ? "Key này chỉ nhận code credit. Không cần chọn thêm loại gói ở đây." : "Key này chỉ nhận gói Find Dumps. Thời gian/hạn dùng đã chốt ở server key nên không cần chỉnh lại ở đây."}</div>
+                    </div>
+                  )}
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">Loại phần thưởng</div>
-                    <Select value={findDumpsChoiceKind} onValueChange={(v) => setFindDumpsChoiceKind(v === "credit" ? "credit" : "package")}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="package">Gói thời hạn</SelectItem>
-                        <SelectItem value="credit">Code credit</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Mục đang nhận</div>
+                    <div className="text-sm font-medium">{(findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? "Loại credit" : "Gói đang nhận"}</div>
                     <Select value={findDumpsRewardCode} onValueChange={setFindDumpsRewardCode}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {(findDumpsChoiceKind === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
+                        {((findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
                           <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
                         ))}
                       </SelectContent>
@@ -358,7 +390,7 @@ export function FreeLandingPage() {
                   </div>
                 </div>
                 <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {findDumpsChoiceKind === "credit" ? (
+                  {((findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit") ? (
                     <>
                       Credit <span className="font-medium text-foreground">{getFindDumpsCredit(findDumpsRewardCode).label}</span> dùng ví <span className="font-medium text-foreground">{effectiveFindDumpsReward?.walletKind === "vip" ? "VIP" : "thường"}</span>, giá trị mặc định <span className="font-medium text-foreground">{formatCredit(Number(effectiveFindDumpsReward?.creditAmount || 0))}</span>, tự hết hạn sau <span className="font-medium text-foreground">{effectiveFindDumpsReward?.expiresHours}</span> giờ tính từ lúc nhận.
                     </>
@@ -406,9 +438,9 @@ export function FreeLandingPage() {
                     {
                       key_type_code: selected,
                       app_code: selectedAppCode,
-                      package_code: isFindDumpsSelected && findDumpsChoiceKind === "package" ? findDumpsRewardCode : null,
-                      credit_code: isFindDumpsSelected && findDumpsChoiceKind === "credit" ? findDumpsRewardCode : null,
-                      wallet_kind: isFindDumpsSelected && findDumpsChoiceKind === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
+                      package_code: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "package" ? findDumpsRewardCode : null,
+                      credit_code: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? findDumpsRewardCode : null,
+                      wallet_kind: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
                       fingerprint: fp,
                       // Only send when debugMode explicitly enabled
                       test_mode: testMode,

@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FIND_DUMPS_CREDITS, FIND_DUMPS_PACKAGES } from "@/lib/serverAppPolicies";
 
 type SettingsRow = {
   id: number;
@@ -745,25 +746,52 @@ export function AdminFreeKeysPage() {
   const [newValue, setNewValue] = useState<number>(1);
   const [newLabel, setNewLabel] = useState<string>("");
   const [newAppCode, setNewAppCode] = useState<string>(initialAppCode);
+  const [newFindDumpsFlow, setNewFindDumpsFlow] = useState<"package" | "credit">("package");
+  const [newFindDumpsRewardCode, setNewFindDumpsRewardCode] = useState<string>("classic");
   const [newKeySignature, setNewKeySignature] = useState<string>(getAppMeta(initialAppCode).signature);
   const [newAllowReset, setNewAllowReset] = useState<boolean>(true);
 
   useEffect(() => {
     setNewKeySignature(getAppMeta(newAppCode).signature);
+    if (newAppCode === "find-dumps") {
+      setNewAllowReset(false);
+    }
   }, [newAppCode]);
+
+  useEffect(() => {
+    if (newAppCode !== "find-dumps") return;
+    setNewFindDumpsRewardCode(newFindDumpsFlow === "credit" ? "credit-normal" : "classic");
+  }, [newAppCode, newFindDumpsFlow]);
 
   const createKeyType = useMutation({
     mutationFn: async () => {
       const appMeta = getAppMeta(newAppCode);
       const signature = (newKeySignature.trim().toUpperCase() || appMeta.signature).replace(/[^A-Z0-9]/g, "") || appMeta.signature;
-      const v = Math.max(1, Math.floor(Number(newValue) || 1));
-      const max = newKind === "hour" ? 24 : 30;
-      const value = Math.min(max, v);
-      const baseCode = `${newKind === "hour" ? "h" : "d"}${pad2(value)}`;
-      const code = `${signature.toLowerCase()}_${baseCode}`;
-      const label = (newLabel?.trim() || `${signature} | ${appMeta.label} | ${value} ${newKind === "hour" ? "giờ" : "ngày"}`);
-      const duration_seconds = newKind === "hour" ? value * 3600 : value * 86400;
-      const sort_order = (newAppCode === "find-dumps" ? 1000 : 0) + (newKind === "hour" ? value : 100 + value);
+      let value = 1;
+      let code = "";
+      let label = "";
+      let duration_seconds = 86400;
+      let sort_order = 0;
+      let effectiveKind: "hour" | "day" = newKind;
+
+      if (newAppCode === "find-dumps") {
+        code = `${signature.toLowerCase()}_${newFindDumpsFlow}`;
+        label = newLabel?.trim() || `${signature} | ${appMeta.label} | ${newFindDumpsFlow === "credit" ? "Credit" : "Gói"}`;
+        duration_seconds = 86400;
+        value = 1;
+        effectiveKind = "day";
+        sort_order = newFindDumpsFlow === "credit" ? 1100 : 1000;
+      } else {
+        const v = Math.max(1, Math.floor(Number(newValue) || 1));
+        const max = newKind === "hour" ? 24 : 30;
+        value = Math.min(max, v);
+        const baseCode = `${newKind === "hour" ? "h" : "d"}${pad2(value)}`;
+        code = `${signature.toLowerCase()}_${baseCode}`;
+        label = newLabel?.trim() || `${signature} | ${appMeta.label} | ${value} ${newKind === "hour" ? "giờ" : "ngày"}`;
+        duration_seconds = newKind === "hour" ? value * 3600 : value * 86400;
+        effectiveKind = newKind;
+        sort_order = newKind === "hour" ? value : 100 + value;
+      }
 
       const { error } = await supabase
         .from("licenses_free_key_types")
@@ -771,7 +799,7 @@ export function AdminFreeKeysPage() {
           {
             code,
             label,
-            kind: newKind,
+            kind: effectiveKind,
             value,
             duration_seconds,
             sort_order,
@@ -779,7 +807,7 @@ export function AdminFreeKeysPage() {
             app_code: newAppCode,
             app_label: appMeta.label,
             key_signature: signature,
-            allow_reset: newAllowReset,
+            allow_reset: newAppCode === "find-dumps" ? false : newAllowReset,
           },
           { onConflict: "code" },
         );
@@ -1614,53 +1642,100 @@ export function AdminFreeKeysPage() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Loại</div>
-                <Select value={newKind} onValueChange={(v) => setNewKind(v as any)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hour">Giờ (1..24)</SelectItem>
-                    <SelectItem value="day">Ngày (1..30)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {newAppCode === "find-dumps" ? (
+                <>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Nhánh key</div>
+                    <Select value={newFindDumpsFlow} onValueChange={(v) => setNewFindDumpsFlow(v === "credit" ? "credit" : "package")}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="package">Gói Find Dumps</SelectItem>
+                        <SelectItem value="credit">Credit Find Dumps</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Số</div>
-                <Input
-                  type="number"
-                  value={newValue}
-                  min={1}
-                  max={newKind === "hour" ? 24 : 30}
-                  onChange={(e) => setNewValue(Number(e.target.value))}
-                />
-              </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Mục bung thêm ở /free</div>
+                    <Select value={newFindDumpsRewardCode} onValueChange={setNewFindDumpsRewardCode}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {(newFindDumpsFlow === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
+                          <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Chữ ký key</div>
-                <Input
-                  value={newKeySignature}
-                  onChange={(e) => setNewKeySignature(e.target.value.toUpperCase())}
-                  placeholder="FF / FD"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Chữ ký key</div>
+                    <Input
+                      value={newKeySignature}
+                      onChange={(e) => setNewKeySignature(e.target.value.toUpperCase())}
+                      placeholder="FD"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tên hiển thị (optional)</div>
-                <Input
-                  value={newLabel}
-                  onChange={(e) => setNewLabel(e.target.value)}
-                  placeholder={newKind === "hour" ? "Ví dụ: 6 giờ" : "Ví dụ: 3 ngày"}
-                />
-              </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <div className="text-sm font-medium">Tên hiển thị (optional)</div>
+                    <Input
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder={newFindDumpsFlow === "credit" ? "Ví dụ: FD | Find Dumps | Credit" : "Ví dụ: FD | Find Dumps | Gói"}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Loại</div>
+                    <Select value={newKind} onValueChange={(v) => setNewKind(v as any)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hour">Giờ (1..24)</SelectItem>
+                        <SelectItem value="day">Ngày (1..30)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Số</div>
+                    <Input
+                      type="number"
+                      value={newValue}
+                      min={1}
+                      max={newKind === "hour" ? 24 : 30}
+                      onChange={(e) => setNewValue(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Chữ ký key</div>
+                    <Input
+                      value={newKeySignature}
+                      onChange={(e) => setNewKeySignature(e.target.value.toUpperCase())}
+                      placeholder="FF / FD"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Tên hiển thị (optional)</div>
+                    <Input
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder={newKind === "hour" ? "Ví dụ: 6 giờ" : "Ví dụ: 3 ngày"}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="mt-3 flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="font-medium">Cho reset key</div>
-                <div className="text-xs text-muted-foreground">Admin chọn trước loại key này có hỗ trợ reset hay không.</div>
+                <div className="text-xs text-muted-foreground">Admin chọn trước loại key này có hỗ trợ reset hay không. Với Find Dumps, reset được chốt ở server key nên nhánh này tự tắt.</div>
               </div>
               <Switch checked={newAllowReset} onCheckedChange={setNewAllowReset} />
             </div>

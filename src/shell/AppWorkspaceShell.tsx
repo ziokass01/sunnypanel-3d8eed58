@@ -4,7 +4,7 @@ import { AppWindow, ChevronRight, Cog, Coins, KeyRound, Logs, Menu, Trash2, X } 
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { buildAppWorkspaceUrl, buildWorkspacePath, detectWorkspaceScope, getWorkspaceListPath, isAdminHostName } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, buildWorkspacePath, detectWorkspaceScope, getAdminAppsUrl, getWorkspaceListPath, isAdminHostName } from "@/lib/appWorkspace";
 import { getServerAppMeta, type WorkspaceSection } from "@/lib/serverAppPolicies";
 
 const NAV_ITEMS = [
@@ -60,7 +60,13 @@ export function AppWorkspaceShell() {
     }
   }, [appCode, activeKey, location.pathname, location.search, location.hash]);
 
-  const handleBackToList = () => window.location.assign(listPath);
+  const handleBackToList = () => {
+    if (typeof window !== "undefined" && window.location.hostname.startsWith("app.")) {
+      window.location.assign(getAdminAppsUrl());
+      return;
+    }
+    window.location.assign(listPath);
+  };
   const buildNavPath = (section: WorkspaceSection) => buildWorkspacePath(appCode, section, scope, "", "", location.pathname);
 
   return (

@@ -14,8 +14,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { getServerAppMeta } from "@/lib/serverAppPolicies";
 
 function toCsvLines(value: string) {
-  return value
-    .split(/[\r\n,]+/)
+  return String(value || "")
+    .split(/[\n,]+/)
     .map((item) => item.trim())
     .filter(Boolean)
     .join("\n");
@@ -55,13 +55,12 @@ export function AdminServerAppRuntimePage() {
 
   useEffect(() => {
     if (!runtimeQuery.data) return;
-    const next = runtimeQuery.data as any;
     setDraft((prev: any) => ({
       ...prev,
-      ...next,
-      blocked_client_versions: Array.isArray(next?.blocked_client_versions)
-        ? next.blocked_client_versions.join("\n")
-        : String(next?.blocked_client_versions || ""),
+      ...runtimeQuery.data,
+      blocked_client_versions: Array.isArray((runtimeQuery.data as any)?.blocked_client_versions)
+        ? (runtimeQuery.data as any).blocked_client_versions.join("\n")
+        : String((runtimeQuery.data as any)?.blocked_client_versions || ""),
     }));
   }, [runtimeQuery.data]);
 
@@ -88,11 +87,7 @@ export function AdminServerAppRuntimePage() {
       toast({ title: "Đã lưu Runtime app", description: "Các công tắc vận hành đã được cập nhật." });
     },
     onError: (error: any) => {
-      toast({
-        title: "Không lưu được Runtime app",
-        description: error?.message || "Vui lòng kiểm tra bảng server_app_runtime_controls.",
-        variant: "destructive",
-      });
+      toast({ title: "Không lưu được Runtime app", description: error?.message || "Vui lòng kiểm tra bảng server_app_runtime_controls.", variant: "destructive" });
     },
   });
 
@@ -101,42 +96,41 @@ export function AdminServerAppRuntimePage() {
       <section className="space-y-4">
         <Badge variant="secondary">Legacy runtime</Badge>
         <h1 className="text-2xl font-semibold">Free Fire không dùng runtime app-host</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          Free Fire giữ nguyên tuyến admin / free-key hiện tại. Khu Runtime app ở app-host chỉ dành cho Find Dumps và các app mới về sau.
-        </p>
+        <p className="max-w-3xl text-sm text-muted-foreground">Free Fire giữ nguyên tuyến admin / free-key hiện tại. Khu Runtime app ở app-host chỉ dành cho Find Dumps và các app mới về sau.</p>
       </section>
     );
   }
 
   return (
     <section className="space-y-5">
-      <div className="space-y-1">
+      <header className="space-y-2">
         <Badge variant="outline">Runtime app</Badge>
-        <h1 className="text-2xl font-semibold">{meta.name} · Runtime app</h1>
-        <p className="text-sm text-muted-foreground">
-          Chỉ giữ phần điều khiển vận hành thật. Những khối theo dõi như ví, session, giao dịch và sự kiện đã được chuyển sang Audit Log.
-        </p>
+        <h1 className="text-2xl font-semibold">Runtime app cho {meta.label}</h1>
+        <p className="max-w-4xl text-sm text-muted-foreground">Tab này chỉ giữ các công tắc vận hành thật: bật/tắt runtime, maintenance, min version, block build/version và timeout. Các phần Ví, Session, Giao dịch, Sự kiện đã chuyển sang Audit Log.</p>
+      </header>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Runtime</div><div className="mt-2 text-2xl font-semibold">{draft.runtime_enabled ? "Bật" : "Tắt"}</div></CardContent></Card>
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Redeem</div><div className="mt-2 text-2xl font-semibold">{draft.redeem_enabled ? "Cho phép" : "Khóa"}</div></CardContent></Card>
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Phiên</div><div className="mt-2 text-2xl font-semibold">{Number(draft.session_idle_timeout_minutes || 0)} / {Number(draft.session_max_age_minutes || 0)} phút</div></CardContent></Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Wrench className="h-4 w-4 text-primary" /> Công tắc runtime</CardTitle>
-            <CardDescription>Bật/tắt các đường xử lý chính của app.</CardDescription>
+            <CardTitle className="flex items-center gap-2"><Wrench className="h-4 w-4 text-primary" /> Công tắc vận hành</CardTitle>
+            <CardDescription>Bật/tắt đúng những gì liên quan runtime. Audit và theo dõi được tách riêng để màn hình gọn hơn.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {[
-              ["runtime_enabled", "Runtime tổng"],
-              ["catalog_enabled", "Catalog"],
-              ["redeem_enabled", "Redeem"],
-              ["consume_enabled", "Consume"],
-              ["heartbeat_enabled", "Heartbeat"],
+              ["runtime_enabled", "Bật runtime tổng"],
+              ["catalog_enabled", "Bật catalog / danh mục"],
+              ["redeem_enabled", "Cho phép redeem key"],
+              ["consume_enabled", "Cho phép tiêu hao credit"],
+              ["heartbeat_enabled", "Bật heartbeat / nhịp sống"],
             ].map(([key, label]) => (
-              <div key={key} className="flex items-center justify-between rounded-xl border p-3">
-                <div>
-                  <div className="text-sm font-medium">{label}</div>
-                  <div className="text-xs text-muted-foreground">Điều khiển nhánh {label.toLowerCase()}.</div>
-                </div>
+              <div key={key} className="flex items-center justify-between rounded-2xl border px-4 py-3">
+                <div className="text-sm font-medium">{label}</div>
                 <Switch checked={Boolean(draft[key])} onCheckedChange={(checked) => setDraft((prev: any) => ({ ...prev, [key]: checked }))} />
               </div>
             ))}
@@ -146,7 +140,7 @@ export function AdminServerAppRuntimePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-primary" /> Bản vá và chặn phiên bản</CardTitle>
-            <CardDescription>Block version/build ở đây để ép user cập nhật bản vá. Nên lưu cả version hiển thị lẫn build identity ở backend.</CardDescription>
+            <CardDescription>Block version/build ở đây để ép user cập nhật bản vá. Trường block nên lưu cả version hiển thị lẫn build identity ở backend.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -155,12 +149,7 @@ export function AdminServerAppRuntimePage() {
             </div>
             <div className="space-y-2">
               <div className="text-sm font-medium">Danh sách version / build bị chặn</div>
-              <Textarea
-                value={draft.blocked_client_versions || ""}
-                onChange={(e) => setDraft((prev: any) => ({ ...prev, blocked_client_versions: e.target.value }))}
-                rows={6}
-                placeholder={"Ví dụ:\n2.0.1\nbuild:fd-2026-04-10-a"}
-              />
+              <Textarea value={draft.blocked_client_versions || ""} onChange={(e) => setDraft((prev: any) => ({ ...prev, blocked_client_versions: e.target.value }))} rows={6} placeholder={"Ví dụ:\n2.0.1\nbuild:fd-2026-04-10-a"} />
             </div>
             <div className="space-y-2">
               <div className="text-sm font-medium">Maintenance notice</div>
@@ -168,32 +157,28 @@ export function AdminServerAppRuntimePage() {
             </div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" /> Timeout và tuổi thọ phiên</CardTitle>
-            <CardDescription>Giới hạn thời gian idle và tuổi thọ tối đa của session runtime.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Session idle timeout (phút)</div>
-              <Input type="number" value={draft.session_idle_timeout_minutes ?? 30} onChange={(e) => setDraft((prev: any) => ({ ...prev, session_idle_timeout_minutes: Number(e.target.value || 0) }))} />
-            </div>
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Session max age (phút)</div>
-              <Input type="number" value={draft.session_max_age_minutes ?? 720} onChange={(e) => setDraft((prev: any) => ({ ...prev, session_max_age_minutes: Number(e.target.value || 0) }))} />
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" /> Timeout và tuổi thọ phiên</CardTitle>
+          <CardDescription>Các giá trị này nên phản ánh đúng runtime thật để tránh session treo quá lâu hoặc dùng lại bản cũ.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Session idle timeout (phút)</div>
+            <Input type="number" value={draft.session_idle_timeout_minutes || 30} onChange={(e) => setDraft((prev: any) => ({ ...prev, session_idle_timeout_minutes: Number(e.target.value || 0) }))} min={1} />
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Session max age (phút)</div>
+            <Input type="number" value={draft.session_max_age_minutes || 720} onChange={(e) => setDraft((prev: any) => ({ ...prev, session_max_age_minutes: Number(e.target.value || 0) }))} min={1} />
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex justify-end">
-        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || runtimeQuery.isLoading}>
-          {saveMutation.isPending ? "Đang lưu..." : "Lưu Runtime app"}
-        </Button>
+        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || runtimeQuery.isFetching}>Lưu Runtime app</Button>
       </div>
     </section>
   );
 }
-
-export default AdminServerAppRuntimePage;
