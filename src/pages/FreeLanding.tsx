@@ -11,7 +11,7 @@ import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory, syncFreeNextEligibleAt } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
-import { clearBundle, writeBundle } from "@/lib/freeFlow";
+import { clearBundle, readBundle, writeBundle } from "@/lib/freeFlow";
 import { FIND_DUMPS_CREDITS, FIND_DUMPS_PACKAGES, formatCredit, getFindDumpsCredit, getFindDumpsFreeFlowDefaults, getFindDumpsPackage } from "@/lib/serverAppPolicies";
 import {
   getFreeTestMode,
@@ -58,6 +58,7 @@ const LAST_FREE_KEY_STORAGE = "lastFreeKey";
 type ResetKeySnapshot = {
   ok: boolean;
   key?: string;
+  key_kind?: string;
   created_at?: string | null;
   expires_at?: string | null;
 };
@@ -270,359 +271,350 @@ export function FreeLandingPage() {
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
-  // free_outbound_url can be empty in settings; backend will fall back to default Link4M.
   const canGet = hasTypes && !loading && !missingText;
 
   return (
     <>
       <div className="min-h-svh bg-background">
         <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
-        <Card className="w-full">
-          <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
-            <div className="flex items-center gap-3">
-              <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
-              <div className="space-y-1">
-                <CardTitle className="text-xl">Get Key 🔑</CardTitle>
-                <p className="text-sm text-muted-foreground">Chào mừng mọi người đến với trang web của Sunny Mod.</p>
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Flow</div>
-                <div className="mt-1 text-sm font-semibold">4 bước rõ ràng</div>
-              </div>
-              <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thiết bị</div>
-                <div className="mt-1 text-sm font-semibold">Giữ đúng một phiên</div>
-              </div>
-              <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
-                <div className="mt-1 text-sm font-semibold">Tự chuyển bước</div>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-4">
-            <FreeFlowSteps current={1} />
-
-            <FreeNotice notice={cfg?.free_notice} />
-
-            <div className="rounded-2xl border bg-gradient-to-br from-muted/50 to-background p-4 text-sm text-muted-foreground shadow-sm">
-              <div className="font-semibold text-foreground">Cách dùng nhanh</div>
-              <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
-            </div>
-
-            {err && !isPendingSessionError ? (
-              <div className="space-y-2">
-                <div className="text-sm text-destructive">{err}</div>
-              </div>
-            ) : null}
-
-            {missingText ? (
-              <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">Cần apply migration FREE</div>
-                <div className="text-muted-foreground">
-                  Hệ thống FREE chưa đủ object trong database. Vui lòng báo owner chạy migration FREE mới nhất. ({missingText})
+          <Card className="w-full">
+            <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
+              <div className="flex items-center gap-3">
+                <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
+                <div className="space-y-1">
+                  <CardTitle className="text-xl">Get Key 🔑</CardTitle>
+                  <p className="text-sm text-muted-foreground">Chào mừng mọi người đến với trang web của Sunny Mod.</p>
                 </div>
               </div>
-            ) : null}
-
-            <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
-
-            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} lastKeyExpiresAt={lastFreeKey?.expires_at ?? null} />
-
-            <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold">Chọn loại key</div>
-                <Badge variant="outline" className="rounded-full">Bước 1</Badge>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-2xl border bg-background/80 px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Flow</div>
+                  <div className="mt-1 text-sm font-semibold">4 bước rõ ràng</div>
+                </div>
+                <div className="rounded-2xl border bg-background/80 px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thiết bị</div>
+                  <div className="mt-1 text-sm font-semibold">Giữ đúng một phiên</div>
+                </div>
+                <div className="rounded-2xl border bg-background/80 px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                  <div className="mt-1 text-sm font-semibold">Tự chuyển bước</div>
+                </div>
               </div>
-              <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || loading}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(cfg?.key_types ?? []).map((k) => (
-                    <SelectItem key={k.code} value={k.code}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            </CardHeader>
 
-            {isFindDumpsSelected ? (
-              <div className="space-y-4 rounded-2xl border bg-background/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold">Nhánh riêng cho Find Dumps</div>
-                    <div className="text-xs text-muted-foreground">Chọn gói hoặc credit trước khi bắt đầu get/gate/claim/reveal. Free Fire vẫn giữ flow cũ.</div>
+            <CardContent className="space-y-4">
+              <FreeFlowSteps current={1} />
+
+              <FreeNotice notice={cfg?.free_notice} />
+
+              <div className="rounded-2xl border bg-gradient-to-br from-muted/50 to-background p-4 text-sm text-muted-foreground shadow-sm">
+                <div className="font-semibold text-foreground">Cách dùng nhanh</div>
+                <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
+              </div>
+
+              {err && !isPendingSessionError ? (
+                <div className="space-y-2">
+                  <div className="text-sm text-destructive">{err}</div>
+                </div>
+              ) : null}
+
+              {missingText ? (
+                <div className="rounded-md border p-3 text-sm">
+                  <div className="font-medium">Cần apply migration FREE</div>
+                  <div className="text-muted-foreground">
+                    Hệ thống FREE chưa đủ object trong database. Vui lòng báo owner chạy migration FREE mới nhất. ({missingText})
                   </div>
-                  <Badge variant="secondary" className="rounded-full">App-host</Badge>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {findDumpsFlowMode === "mixed" ? (
+              ) : null}
+
+              <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
+
+              <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={cfg?.free_quota_remaining_today ?? null} lastKeyExpiresAt={lastFreeKey?.expires_at ?? null} />
+
+              <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold">Chọn loại key</div>
+                  <Badge variant="outline" className="rounded-full">Bước 1</Badge>
+                </div>
+                <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || loading}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(cfg?.key_types ?? []).map((k) => (
+                      <SelectItem key={k.code} value={k.code}>
+                        {k.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {isFindDumpsSelected ? (
+                <div className="space-y-4 rounded-2xl border bg-background/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">Nhánh riêng cho Find Dumps</div>
+                      <div className="text-xs text-muted-foreground">Chọn gói hoặc credit trước khi bắt đầu get/gate/claim/reveal. Free Fire vẫn giữ flow cũ.</div>
+                    </div>
+                    <Badge variant="secondary" className="rounded-full">App-host</Badge>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {findDumpsFlowMode === "mixed" ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Loại phần thưởng</div>
+                        <Select value={findDumpsChoiceKind} onValueChange={(v) => setFindDumpsChoiceKind(v === "credit" ? "credit" : "package")}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="package">Gói thời hạn</SelectItem>
+                            <SelectItem value="credit">Code credit</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Nhánh đã chốt từ server</div>
+                        <div className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">{findDumpsFlowMode === "credit" ? "Key này chỉ nhận code credit. Không cần chọn thêm loại gói ở đây." : "Key này chỉ nhận gói Find Dumps. Thời gian/hạn dùng đã chốt ở server key nên không cần chỉnh lại ở đây."}</div>
+                      </div>
+                    )}
                     <div className="space-y-2">
-                      <div className="text-sm font-medium">Loại phần thưởng</div>
-                      <Select value={findDumpsChoiceKind} onValueChange={(v) => setFindDumpsChoiceKind(v === "credit" ? "credit" : "package")}>
+                      <div className="text-sm font-medium">{(findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? "Loại credit" : "Gói đang nhận"}</div>
+                      <Select value={findDumpsRewardCode} onValueChange={setFindDumpsRewardCode}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="package">Gói thời hạn</SelectItem>
-                          <SelectItem value="credit">Code credit</SelectItem>
+                          {((findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
+                            <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Nhánh đã chốt từ server</div>
-                      <div className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">{findDumpsFlowMode === "credit" ? "Key này chỉ nhận code credit. Không cần chọn thêm loại gói ở đây." : "Key này chỉ nhận gói Find Dumps. Thời gian/hạn dùng đã chốt ở server key nên không cần chỉnh lại ở đây."}</div>
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">{(findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? "Loại credit" : "Gói đang nhận"}</div>
-                    <Select value={findDumpsRewardCode} onValueChange={setFindDumpsRewardCode}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {((findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
-                          <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  </div>
+                  <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-muted-foreground">
+                    {((findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit") ? (
+                      <>
+                        Credit <span className="font-medium text-foreground">{getFindDumpsCredit(findDumpsRewardCode).label}</span> dùng ví <span className="font-medium text-foreground">{effectiveFindDumpsReward?.walletKind === "vip" ? "VIP" : "thường"}</span>, giá trị mặc định <span className="font-medium text-foreground">{formatCredit(Number(effectiveFindDumpsReward?.creditAmount || 0))}</span>, tự hết hạn sau <span className="font-medium text-foreground">{effectiveFindDumpsReward?.expiresHours}</span> giờ tính từ lúc nhận.
+                      </>
+                    ) : (
+                      <>
+                        Gói <span className="font-medium text-foreground">{getFindDumpsPackage(findDumpsRewardCode).label}</span> bật reset hằng ngày <span className="font-medium text-foreground">{getFindDumpsPackage(findDumpsRewardCode).resetDaily ? "có" : "không"}</span>, discount feature <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).discountPercent)}%</span>, cấp ngày <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).dailyCredit)}</span> credit thường và <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).dailyVipCredit)}</span> credit VIP.
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {((findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit") ? (
-                    <>
-                      Credit <span className="font-medium text-foreground">{getFindDumpsCredit(findDumpsRewardCode).label}</span> dùng ví <span className="font-medium text-foreground">{effectiveFindDumpsReward?.walletKind === "vip" ? "VIP" : "thường"}</span>, giá trị mặc định <span className="font-medium text-foreground">{formatCredit(Number(effectiveFindDumpsReward?.creditAmount || 0))}</span>, tự hết hạn sau <span className="font-medium text-foreground">{effectiveFindDumpsReward?.expiresHours}</span> giờ tính từ lúc nhận.
-                    </>
-                  ) : (
-                    <>
-                      Gói <span className="font-medium text-foreground">{getFindDumpsPackage(findDumpsRewardCode).label}</span> bật reset hằng ngày <span className="font-medium text-foreground">{getFindDumpsPackage(findDumpsRewardCode).resetDaily ? "có" : "không"}</span>, discount feature <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).discountPercent)}%</span>, cấp ngày <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).dailyCredit)}</span> credit thường và <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(findDumpsRewardCode).dailyVipCredit)}</span> credit VIP.
-                    </>
-                  )}
-                </div>
-              </div>
-            ) : null}
+              ) : null}
 
-            <Button
-              className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
-              size="lg"
-              disabled={!canGet}
-              onClick={async () => {
-                if (isClosed) {
-                  setShowClosedDialog(true);
-                  return;
-                }
-
-                if (!selected) return;
-
-                // Start a new flow atomically: clear old bundle first (avoid mixing tokens across sessions)
-                clearBundle(selectedAppCode);
-                markFreeAttempt();
-                setDeviceHistory(readFreeDeviceHistory());
-
-                setLoading(true);
-                setErr(null);
-                try {
-                  const fp = getOrCreateFingerprint();
-                  // IMPORTANT: test_mode is ONLY for explicit debug flows.
-                  // If someone accidentally left it enabled in localStorage, it would bypass Link4M.
-                  const testMode = debugMode && getFreeTestMode();
-                  const session = testMode ? await supabase.auth.getSession() : null;
-                  if (testMode && !session?.data?.session?.access_token) {
-                    setErr("Test mode yêu cầu đăng nhập admin.");
+              <Button
+                className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
+                size="lg"
+                disabled={!canGet}
+                onClick={async () => {
+                  if (isClosed) {
+                    setShowClosedDialog(true);
                     return;
                   }
 
-                  const res = await postFunction<StartOk | StartErr>(
-                    "/free-start",
-                    {
-                      key_type_code: selected,
-                      app_code: selectedAppCode,
-                      package_code: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "package" ? findDumpsRewardCode : null,
-                      credit_code: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? findDumpsRewardCode : null,
-                      wallet_kind: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
-                      fingerprint: fp,
-                      // Only send when debugMode explicitly enabled
-                      test_mode: testMode,
-                    },
-                    {
-                      authToken: testMode ? session?.data?.session?.access_token ?? null : null,
-                      headers: {
-                        "x-fp": fp,
-                      },
-                    },
-                  );
+                  if (!selected) return;
 
-                  if (!res.ok) {
-                    const r = res as StartErr;
-                    if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
-                      markFreeAttemptFail(r.code);
-                      setDeviceHistory(readFreeDeviceHistory());
-                      setErr(`${r.code}: ${r.msg}`);
-                      return;
-                    }
-                    if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
-                      markFreeAttemptFail(r.code);
-                      setDeviceHistory(readFreeDeviceHistory());
-                      setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
-                    } else if (r.code === "SESSION_PENDING_LIMIT") {
-                      markFreeAttemptFail(r.code);
-                      setDeviceHistory(readFreeDeviceHistory());
-                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
-                    } else {
-                      markFreeAttemptFail(r.code || r.msg || "START_FAILED");
-                      setDeviceHistory(readFreeDeviceHistory());
-                      setErr(r.msg || "Start failed");
-                    }
-                    return;
-                  }
-
-                  setOutToken(res.out_token);
-
-                  // Persist bundle as the single source of truth for this flow (session_id + out_token)
-                  try {
-                    const sid = String((res as any).session_id ?? "").trim();
-                    if (sid) {
-                      writeBundle({ session_id: sid, out_token: String(res.out_token), trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
-                    }
-                  } catch {
-                    // ignore
-                  }
-
-                  setFreeStartMeta({
-                    startedAtMs: Date.now(),
-                    minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
-                  });
-                  try {
-                    // Keep backward compat, but ensure current key is used by FreeGate fallbacks.
-                    localStorage.setItem("free_out_token_v1", String(res.out_token));
-                    localStorage.setItem("free_out_token", String(res.out_token));
-
-                    // Persist session_id to survive Link4M/mobile flows.
-                    const sid = String((res as any).session_id ?? "").trim();
-                    if (sid) {
-                      localStorage.setItem("free_session_id_v1", sid);
-                      localStorage.setItem("free_session_id", sid);
-                    }
-
-                    localStorage.setItem("free_started_at_ms", String(Date.now()));
-                    localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
-                    localStorage.setItem("free_key_type_code", String(selected));
-                    setSelectedAppCode(selectedAppCode);
-                    if (isFindDumpsSelected) setFindDumpsFreeSelection(findDumpsChoiceKind, findDumpsRewardCode, effectiveFindDumpsReward?.walletKind ?? null);
-                    const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
-                    if (pass2Tok) localStorage.setItem("free_out_token_pass2", pass2Tok);
-                    const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
-                    if (pass2Outbound) localStorage.setItem("free_outbound_url_pass2", pass2Outbound);
-                  } catch {
-                    // ignore
-                  }
-                  try {
-                    localStorage.removeItem("free_claim_token");
-                  } catch {
-                    /* ignore */
-                  }
-                  setSelectedKeyTypeCode(selected);
-
-                  const outbound = String(res.outbound_url ?? "").trim();
-                  if (!outbound) {
-                    if (testMode) {
-                      window.location.assign(res.gate_url);
-                      return;
-                    }
-                    setErr("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M outbound đúng. Vui lòng báo admin kiểm tra free_outbound_url.");
-                    return;
-                  }
-
-                  // Redirect to Link4M outbound
-                  window.location.assign(outbound);
-                } catch (e: any) {
-                  const code = String(e?.code ?? "").trim();
-                  if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
-                    setErr(
-                      "SERVER_RATE_LIMIT_MISCONFIG: Database thiếu RPC/bảng rate-limit cho FREE. Owner cần chạy migration FREE (đặc biệt: 20260206150000_free_schema_runtime_fix.sql + các migration free_rate_limit_*).",
-                    );
-                    return;
-                  }
-                  if (code === "FREE_NOT_READY") {
-                    setErr("FREE_NOT_READY: Backend FREE chưa sẵn sàng (thiếu secrets hoặc thiếu bảng cấu hình). Owner cần kiểm tra secrets + migration.");
-                    return;
-                  }
-                  if (code === "UNAUTHORIZED") {
-                    setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
-                    return;
-                  }
-                  if (code === "SESSION_PENDING_LIMIT") {
-                    setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
-                    return;
-                  }
-                  markFreeAttemptFail(code || e?.message || "START_FAILED");
+                  clearBundle(selectedAppCode);
+                  markFreeAttempt();
                   setDeviceHistory(readFreeDeviceHistory());
-                  setErr(e?.message ?? "Start failed");
-                } finally {
-                  setLoading(false);
-                }
-              }}
-            >
-              {loading ? "Đang chuyển hướng…" : "Get Key 🔑"}
-            </Button>
 
-            {lastFreeKey ? (
-              <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold">Key 🔑 vừa nhận</div>
-                    <div className="text-xs text-muted-foreground">Lưu nhanh để bạn dễ copy lại khi cần.</div>
-                  </div>
-                  <Badge className="rounded-full">Đã nhận</Badge>
-                </div>
-                <div className="rounded-xl border bg-background px-3 py-3 font-mono text-sm break-all">{lastFreeKey.key}</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Loại key: <span className="font-medium text-foreground">{lastFreeKey.key_type || "-"}</span></div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Hết hạn: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.expires_at)}</span></div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Tạo lúc: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.created_at)}</span></div>
-                  <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Session: <span className="font-medium text-foreground">{shortHash(lastFreeKey.session_id, 12)}</span></div>
-                  {readBundle(getSelectedAppCode())?.trace_id ? (<div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Trace: <span className="font-medium text-foreground">{shortHash(readBundle(getSelectedAppCode())?.trace_id, 12)}</span></div>) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="rounded-2xl"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(lastFreeKey.key);
-                        toast({ title: "Copy thành công", description: "Key đã được copy vào clipboard." });
-                      } catch {
-                        toast({ title: "Copy thất bại", description: "Không thể copy tự động. Hãy copy thủ công.", variant: "destructive" });
+                  setLoading(true);
+                  setErr(null);
+                  try {
+                    const fp = getOrCreateFingerprint();
+                    const testMode = debugMode && getFreeTestMode();
+                    const session = testMode ? await supabase.auth.getSession() : null;
+                    if (testMode && !session?.data?.session?.access_token) {
+                      setErr("Test mode yêu cầu đăng nhập admin.");
+                      return;
+                    }
+
+                    const res = await postFunction<StartOk | StartErr>(
+                      "/free-start",
+                      {
+                        key_type_code: selected,
+                        app_code: selectedAppCode,
+                        package_code: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "package" ? findDumpsRewardCode : null,
+                        credit_code: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? findDumpsRewardCode : null,
+                        wallet_kind: isFindDumpsSelected && (findDumpsFlowMode === "mixed" ? findDumpsChoiceKind : findDumpsFlowMode) === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
+                        fingerprint: fp,
+                        test_mode: testMode,
+                      },
+                      {
+                        authToken: testMode ? session?.data?.session?.access_token ?? null : null,
+                        headers: {
+                          "x-fp": fp,
+                        },
+                      },
+                    );
+
+                    if (!res.ok) {
+                      const r = res as StartErr;
+                      if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
+                        markFreeAttemptFail(r.code);
+                        setDeviceHistory(readFreeDeviceHistory());
+                        setErr(`${r.code}: ${r.msg}`);
+                        return;
                       }
-                    }}
-                  >
-                    Copy key
-                  </Button>
-                  {lastFreeKey.allow_reset !== false ? (
+                      if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
+                        markFreeAttemptFail(r.code);
+                        setDeviceHistory(readFreeDeviceHistory());
+                        setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
+                      } else if (r.code === "SESSION_PENDING_LIMIT") {
+                        markFreeAttemptFail(r.code);
+                        setDeviceHistory(readFreeDeviceHistory());
+                        setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+                      } else {
+                        markFreeAttemptFail(r.code || r.msg || "START_FAILED");
+                        setDeviceHistory(readFreeDeviceHistory());
+                        setErr(r.msg || "Start failed");
+                      }
+                      return;
+                    }
+
+                    setOutToken(res.out_token);
+
+                    try {
+                      const sid = String((res as any).session_id ?? "").trim();
+                      if (sid) {
+                        writeBundle({ session_id: sid, out_token: String(res.out_token), trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
+                      }
+                    } catch {
+                      // ignore
+                    }
+
+                    setFreeStartMeta({
+                      startedAtMs: Date.now(),
+                      minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
+                    });
+                    try {
+                      localStorage.setItem("free_out_token_v1", String(res.out_token));
+                      localStorage.setItem("free_out_token", String(res.out_token));
+
+                      const sid = String((res as any).session_id ?? "").trim();
+                      if (sid) {
+                        localStorage.setItem("free_session_id_v1", sid);
+                        localStorage.setItem("free_session_id", sid);
+                      }
+
+                      localStorage.setItem("free_started_at_ms", String(Date.now()));
+                      localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
+                      localStorage.setItem("free_key_type_code", String(selected));
+                      setSelectedAppCode(selectedAppCode);
+                      if (isFindDumpsSelected) setFindDumpsFreeSelection(findDumpsChoiceKind, findDumpsRewardCode, effectiveFindDumpsReward?.walletKind ?? null);
+                      const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
+                      if (pass2Tok) localStorage.setItem("free_out_token_pass2", pass2Tok);
+                      const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
+                      if (pass2Outbound) localStorage.setItem("free_outbound_url_pass2", pass2Outbound);
+                    } catch {
+                      // ignore
+                    }
+                    try {
+                      localStorage.removeItem("free_claim_token");
+                    } catch {
+                      /* ignore */
+                    }
+                    setSelectedKeyTypeCode(selected);
+
+                    const outbound = String(res.outbound_url ?? "").trim();
+                    if (!outbound) {
+                      if (testMode) {
+                        window.location.assign(res.gate_url);
+                        return;
+                      }
+                      setErr("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M outbound đúng. Vui lòng báo admin kiểm tra free_outbound_url.");
+                      return;
+                    }
+
+                    window.location.assign(outbound);
+                  } catch (e: any) {
+                    const code = String(e?.code ?? "").trim();
+                    if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
+                      setErr(
+                        "SERVER_RATE_LIMIT_MISCONFIG: Database thiếu RPC/bảng rate-limit cho FREE. Owner cần chạy migration FREE (đặc biệt: 20260206150000_free_schema_runtime_fix.sql + các migration free_rate_limit_*).",
+                      );
+                      return;
+                    }
+                    if (code === "FREE_NOT_READY") {
+                      setErr("FREE_NOT_READY: Backend FREE chưa sẵn sàng (thiếu secrets hoặc thiếu bảng cấu hình). Owner cần kiểm tra secrets + migration.");
+                      return;
+                    }
+                    if (code === "UNAUTHORIZED") {
+                      setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
+                      return;
+                    }
+                    if (code === "SESSION_PENDING_LIMIT") {
+                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+                      return;
+                    }
+                    markFreeAttemptFail(code || e?.message || "START_FAILED");
+                    setDeviceHistory(readFreeDeviceHistory());
+                    setErr(e?.message ?? "Start failed");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                {loading ? "Đang chuyển hướng…" : "Get Key 🔑"}
+              </Button>
+
+              {lastFreeKey ? (
+                <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">Key 🔑 vừa nhận</div>
+                      <div className="text-xs text-muted-foreground">Lưu nhanh để bạn dễ copy lại khi cần.</div>
+                    </div>
+                    <Badge className="rounded-full">Đã nhận</Badge>
+                  </div>
+                  <div className="rounded-xl border bg-background px-3 py-3 font-mono text-sm break-all">{lastFreeKey.key}</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Loại key: <span className="font-medium text-foreground">{lastFreeKey.key_type || "-"}</span></div>
+                    <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Hết hạn: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.expires_at)}</span></div>
+                    <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Tạo lúc: <span className="font-medium text-foreground">{formatVnDateTime(lastFreeKey.created_at)}</span></div>
+                    <div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Session: <span className="font-medium text-foreground">{shortHash(lastFreeKey.session_id, 12)}</span></div>
+                    {readBundle(getSelectedAppCode())?.trace_id ? (<div className="rounded-xl border bg-background/80 px-3 py-2 text-xs text-muted-foreground">Trace: <span className="font-medium text-foreground">{shortHash(readBundle(getSelectedAppCode())?.trace_id, 12)}</span></div>) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
+                      variant="secondary"
                       className="rounded-2xl"
-                      onClick={() => {
-                        window.location.assign(`/reset-key?key=${encodeURIComponent(lastFreeKey.key)}`);
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(lastFreeKey.key);
+                          toast({ title: "Copy thành công", description: "Key đã được copy vào clipboard." });
+                        } catch {
+                          toast({ title: "Copy thất bại", description: "Không thể copy tự động. Hãy copy thủ công.", variant: "destructive" });
+                        }
                       }}
                     >
-                      Reset Key🗝
+                      Copy key
                     </Button>
-                  ) : (
-                    <Badge variant="outline" className="rounded-2xl px-3 py-2">
-                      Key này không hỗ trợ reset
-                    </Badge>
-                  )}
+                    {lastFreeKey.allow_reset !== false ? (
+                      <Button
+                        type="button"
+                        className="rounded-2xl"
+                        onClick={() => {
+                          window.location.assign(`/reset-key?key=${encodeURIComponent(lastFreeKey.key)}`);
+                        }}
+                      >
+                        Reset Key🗝
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="rounded-2xl px-3 py-2">
+                        Key này không hỗ trợ reset
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
                 </div>
-                <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
-              </div>
-            ) : null}
-            <FreeDownloadCards cfg={cfg} />
+              ) : null}
+              <FreeDownloadCards cfg={cfg} />
 
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
         </main>
       </div>
 
