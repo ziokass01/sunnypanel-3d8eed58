@@ -51,7 +51,7 @@ function getClientIp(req: Request) {
 }
 
 const BodySchema = z.object({
-  key_type_code: z.string().min(2).max(8),
+  key_type_code: z.string().min(2).max(64),
   dry_run: z.boolean().optional().default(false),
 });
 

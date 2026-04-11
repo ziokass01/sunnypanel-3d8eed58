@@ -371,8 +371,13 @@ export type Database = {
           app_code: string
           app_label: string | null
           code: string
+          default_credit_code: string | null
+          default_package_code: string | null
+          default_wallet_kind: string | null
           duration_seconds: number
           enabled: boolean
+          free_selection_expand: boolean
+          free_selection_mode: string
           key_signature: string | null
           kind: string
           label: string
@@ -387,8 +392,13 @@ export type Database = {
           app_code?: string
           app_label?: string | null
           code: string
+          default_credit_code?: string | null
+          default_package_code?: string | null
+          default_wallet_kind?: string | null
           duration_seconds: number
           enabled?: boolean
+          free_selection_expand?: boolean
+          free_selection_mode?: string
           key_signature?: string | null
           kind: string
           label: string
@@ -403,8 +413,13 @@ export type Database = {
           app_code?: string
           app_label?: string | null
           code?: string
+          default_credit_code?: string | null
+          default_package_code?: string | null
+          default_wallet_kind?: string | null
           duration_seconds?: number
           enabled?: boolean
+          free_selection_expand?: boolean
+          free_selection_mode?: string
           key_signature?: string | null
           kind?: string
           label?: string
@@ -485,6 +500,7 @@ export type Database = {
       licenses_free_settings: {
         Row: {
           free_daily_limit_per_fingerprint: number
+          free_daily_limit_per_ip: number
           free_disabled_message: string
           free_enabled: boolean
           free_gate_antibypass_enabled: boolean
@@ -508,6 +524,7 @@ export type Database = {
         }
         Insert: {
           free_daily_limit_per_fingerprint?: number
+          free_daily_limit_per_ip?: number
           free_disabled_message?: string
           free_enabled?: boolean
           free_gate_antibypass_enabled?: boolean

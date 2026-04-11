@@ -86,6 +86,34 @@ function getVietnamDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function isMissingSelectColumn(error: any) {
+  const msg = String(error?.message ?? "").toLowerCase();
+  return msg.includes("does not exist") || msg.includes("undefined column") || msg.includes("could not find");
+}
+
+async function resolveAppQuotaLimits(sb: any, appCode: string, fallbackFp: number, fallbackIp: number) {
+  const normalized = normalizeAppCode(appCode);
+  try {
+    const { data, error } = await sb
+      .from("server_app_settings")
+      .select("app_code,free_daily_limit_per_fingerprint,free_daily_limit_per_ip")
+      .eq("app_code", normalized)
+      .maybeSingle();
+    if (error) {
+      if (isMissingSelectColumn(error)) {
+        return { free_daily_limit_per_fingerprint: fallbackFp, free_daily_limit_per_ip: fallbackIp };
+      }
+      throw error;
+    }
+    return {
+      free_daily_limit_per_fingerprint: Math.max(0, Number((data as any)?.free_daily_limit_per_fingerprint ?? fallbackFp)),
+      free_daily_limit_per_ip: Math.max(0, Number((data as any)?.free_daily_limit_per_ip ?? fallbackIp)),
+    };
+  } catch {
+    return { free_daily_limit_per_fingerprint: fallbackFp, free_daily_limit_per_ip: fallbackIp };
+  }
+}
+
 function getVietnamDayRangeUtc(day: string) {
   const [year, month, date] = day.split("-").map((v) => Number(v));
   const utcOffsetMs = 7 * 60 * 60 * 1000;
@@ -683,7 +711,13 @@ Deno.serve(async (req) => {
   const dayRange = getVietnamDayRangeUtc(dayKey);
 
   const quotaAppCode = normalizeAppCode(sess.app_code ?? "free-fire");
-  const dailyLimitFp = Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
+  const quotaLimits = await resolveAppQuotaLimits(
+    sb,
+    quotaAppCode,
+    Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1)),
+    Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0)),
+  );
+  const dailyLimitFp = Math.max(0, Number(quotaLimits.free_daily_limit_per_fingerprint ?? 1));
   if (dailyLimitFp > 0) {
     const quotaFp = await sb
       .from("licenses_free_issues")
@@ -702,7 +736,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  const dailyLimitIp = Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0));
+  const dailyLimitIp = Math.max(0, Number(quotaLimits.free_daily_limit_per_ip ?? 0));
   if (dailyLimitIp > 0) {
     const quotaIp = await sb
       .from("licenses_free_issues")

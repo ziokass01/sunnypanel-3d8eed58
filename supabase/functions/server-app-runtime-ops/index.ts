@@ -69,12 +69,24 @@ async function assertOpsAdmin(req: Request): Promise<{ ok: true } | { ok: false;
     return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };
   }
 
-  const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS"));
+  const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS") ?? Deno.env.get("ADMIN_EMAIL") ?? Deno.env.get("ADMIN_MAIL") ?? Deno.env.get("ADMIN_EMAIL_SECRET"));
   const userEmail = String(user.email ?? "").toLowerCase();
   const emailAllowed = userEmail ? adminEmails.has(userEmail) : false;
   const metadataAdmin = user.user_metadata?.is_admin === true || user.app_metadata?.is_admin === true || user.app_metadata?.panel_role === "admin";
   const roleCheck = await authed.rpc("has_role", { _user_id: user.id, _role: "admin" });
-  const roleAllowed = !roleCheck.error && roleCheck.data === true;
+  let roleAllowed = !roleCheck.error && roleCheck.data === true;
+
+  if (emailAllowed && !roleAllowed && serviceRoleKey) {
+    try {
+      const adminDb = createAdminClient();
+      const seeded = await adminDb
+        .from("user_roles")
+        .upsert({ user_id: user.id, role: "admin" }, { onConflict: "user_id,role" });
+      if (!seeded.error) roleAllowed = true;
+    } catch {
+      // ignore bootstrap failures and continue
+    }
+  }
 
   if (!emailAllowed && !metadataAdmin && !roleAllowed) {
     return { ok: false, status: 401, body: { ok: false, code: "UNAUTHORIZED", msg: "Admin required" } };

@@ -36,6 +36,8 @@ type ServerAppSettingsRow = {
   gift_tab_label: string | null;
   key_persist_until_revoked: boolean | null;
   daily_reset_hour: number | null;
+  free_daily_limit_per_fingerprint: number | null;
+  free_daily_limit_per_ip: number | null;
   notes: string | null;
 };
 
@@ -304,6 +306,8 @@ export function AdminServerAppDetailPage() {
     gift_tab_label: "Quà tặng",
     key_persist_until_revoked: true,
     daily_reset_hour: 0,
+    free_daily_limit_per_fingerprint: 0,
+    free_daily_limit_per_ip: 0,
     notes: "",
   });
   const [plansDraft, setPlansDraft] = useState<ServerAppPlanRow[]>(ensurePlans(fallback.code, []));
@@ -328,6 +332,8 @@ export function AdminServerAppDetailPage() {
       gift_tab_label: data.settings?.gift_tab_label || "Quà tặng",
       key_persist_until_revoked: data.settings?.key_persist_until_revoked ?? true,
       daily_reset_hour: data.settings?.daily_reset_hour ?? 0,
+      free_daily_limit_per_fingerprint: data.settings?.free_daily_limit_per_fingerprint ?? 0,
+      free_daily_limit_per_ip: data.settings?.free_daily_limit_per_ip ?? 0,
       notes: data.settings?.notes || "",
     });
     setPlansDraft(ensurePlans(appCode, data.plans));
@@ -353,6 +359,8 @@ export function AdminServerAppDetailPage() {
         gift_tab_label: settingsDraft.gift_tab_label?.trim() || "Quà tặng",
         key_persist_until_revoked: Boolean(settingsDraft.key_persist_until_revoked ?? true),
         daily_reset_hour: Math.max(0, Math.min(23, Number(settingsDraft.daily_reset_hour ?? 0))),
+        free_daily_limit_per_fingerprint: Math.max(0, Math.floor(Number(settingsDraft.free_daily_limit_per_fingerprint ?? 0))),
+        free_daily_limit_per_ip: Math.max(0, Math.floor(Number(settingsDraft.free_daily_limit_per_ip ?? 0))),
         notes: settingsDraft.notes?.trim() || null,
       };
       const appRes = await sb.from("server_apps").upsert(appPayload, { onConflict: "code" });
@@ -681,6 +689,14 @@ export function AdminServerAppDetailPage() {
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Giờ reset credit thường</div>
                   <Input type="number" min={0} max={23} value={settingsDraft.daily_reset_hour ?? 0} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, daily_reset_hour: Number(e.target.value) }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">FREE / fingerprint / ngày</div>
+                  <Input type="number" min={0} value={settingsDraft.free_daily_limit_per_fingerprint ?? 0} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, free_daily_limit_per_fingerprint: Number(e.target.value) }))} />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">FREE / IP / ngày</div>
+                  <Input type="number" min={0} value={settingsDraft.free_daily_limit_per_ip ?? 0} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, free_daily_limit_per_ip: Number(e.target.value) }))} />
                 </div>
                 <div className="flex items-center justify-between rounded-2xl border p-3">
                   <div>

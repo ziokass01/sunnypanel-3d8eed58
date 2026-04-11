@@ -11,6 +11,11 @@ export type FreeKeyType = {
   app_label?: string | null;
   key_signature?: string | null;
   allow_reset?: boolean;
+  free_selection_mode?: "none" | "package" | "credit" | "mixed";
+  free_selection_expand?: boolean;
+  default_package_code?: string | null;
+  default_credit_code?: string | null;
+  default_wallet_kind?: string | null;
 };
 
 export type PublicLink = {
@@ -75,6 +80,15 @@ export type FreeConfig = {
   free_quota_timezone?: string;
   free_quota_day_key?: string;
   free_quota_remaining_today?: number | null;
+  free_quota_by_app?: Record<string, {
+    used_fingerprint: number;
+    used_ip: number;
+    remaining_fingerprint: number | null;
+    remaining_ip: number | null;
+    remaining_today: number | null;
+    free_daily_limit_per_fingerprint: number;
+    free_daily_limit_per_ip: number;
+  }>;
 
   free_public_note: string;
   free_public_links: PublicLink[];

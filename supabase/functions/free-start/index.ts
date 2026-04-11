@@ -33,8 +33,14 @@ function base64url(bytesLen = 32) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function normalizeFreeSelectionMode(value: unknown): "none" | "package" | "credit" | "mixed" {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "package" || raw === "credit" || raw === "mixed") return raw;
+  return "none";
+}
+
 const BodySchema = z.object({
-  key_type_code: z.string().min(2).max(16),
+  key_type_code: z.string().min(2).max(64),
   fingerprint: z.string().min(6).max(128).optional(),
   test_mode: z.boolean().optional().default(false),
   app_code: z.string().min(2).max(64).optional(),
@@ -158,6 +164,8 @@ Deno.serve(async (req) => {
     } catch {
       body = {};
     }
+
+    const trace_id = crypto.randomUUID();
 
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
@@ -375,11 +383,29 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
 
     // Key type must be enabled (keep this before session insert)
     // We'll build gate_url AFTER we have session_id.
-    const { data: kt, error: kErr } = await sb
-      .from("licenses_free_key_types")
-      .select("code,label,duration_seconds,enabled,requires_double_gate,app_code,app_label,key_signature,allow_reset")
-      .eq("code", key_type_code)
-      .maybeSingle();
+    let kt: any = null;
+    let kErr: any = null;
+    {
+      const primary = await sb
+        .from("licenses_free_key_types")
+        .select("code,label,duration_seconds,enabled,requires_double_gate,app_code,app_label,key_signature,allow_reset,free_selection_mode,free_selection_expand,default_package_code,default_credit_code,default_wallet_kind")
+        .eq("code", key_type_code)
+        .maybeSingle();
+      kt = primary.data;
+      kErr = primary.error;
+      if (kErr) {
+        const msg = String(kErr?.message ?? "").toLowerCase();
+        if (msg.includes("does not exist") || msg.includes("undefined column") || msg.includes("could not find")) {
+          const fallback = await sb
+            .from("licenses_free_key_types")
+            .select("code,label,duration_seconds,enabled,requires_double_gate,app_code,app_label,key_signature,allow_reset")
+            .eq("code", key_type_code)
+            .maybeSingle();
+          kt = fallback.data;
+          kErr = fallback.error;
+        }
+      }
+    }
 
     if (kErr) {
       return jsonResponse({ ok: false, msg: kErr.message }, 500);
@@ -393,14 +419,54 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
     if (requestedAppCode && requestedAppCode !== keyTypeAppCode) {
       return jsonResponse({ ok: false, code: "APP_KEY_TYPE_MISMATCH", msg: "APP_KEY_TYPE_MISMATCH" }, 400);
     }
+
+    const keyTypeSelectionMode = normalizeFreeSelectionMode((kt as any)?.free_selection_mode);
+    const keyTypeSelectionExpand = Boolean((kt as any)?.free_selection_expand ?? false);
+    const keyTypeDefaultPackage = String((kt as any)?.default_package_code ?? "").trim().toLowerCase();
+    const keyTypeDefaultCredit = String((kt as any)?.default_credit_code ?? "").trim().toLowerCase();
+    const keyTypeDefaultWallet = String((kt as any)?.default_wallet_kind ?? "").trim().toLowerCase();
+
+    let resolvedPackageCode = requestedPackageCode || "";
+    let resolvedCreditCode = requestedCreditCode || "";
+    let resolvedWalletKind = requestedWalletKind || "";
+
     if (sessionAppCode === "find-dumps") {
-      const hasPackage = Boolean(requestedPackageCode);
-      const hasCredit = Boolean(requestedCreditCode);
+      if (keyTypeSelectionMode === "package") {
+        if (!resolvedPackageCode) resolvedPackageCode = keyTypeDefaultPackage;
+        resolvedCreditCode = "";
+      } else if (keyTypeSelectionMode === "credit") {
+        if (!resolvedCreditCode) resolvedCreditCode = keyTypeDefaultCredit;
+        if (!resolvedWalletKind) resolvedWalletKind = keyTypeDefaultWallet;
+        resolvedPackageCode = "";
+      } else if (keyTypeSelectionMode === "mixed") {
+        if (!(Boolean(resolvedPackageCode) !== Boolean(resolvedCreditCode))) {
+          if (keyTypeDefaultPackage && !keyTypeDefaultCredit) resolvedPackageCode = keyTypeDefaultPackage;
+          else if (keyTypeDefaultCredit && !keyTypeDefaultPackage) {
+            resolvedCreditCode = keyTypeDefaultCredit;
+            if (!resolvedWalletKind) resolvedWalletKind = keyTypeDefaultWallet;
+          }
+        }
+      } else {
+        if (keyTypeDefaultCredit) {
+          resolvedCreditCode = keyTypeDefaultCredit;
+          if (!resolvedWalletKind) resolvedWalletKind = keyTypeDefaultWallet;
+          resolvedPackageCode = "";
+        } else {
+          resolvedPackageCode = keyTypeDefaultPackage;
+          resolvedCreditCode = "";
+        }
+      }
+
+      const hasPackage = Boolean(resolvedPackageCode);
+      const hasCredit = Boolean(resolvedCreditCode);
       if (hasPackage === hasCredit) {
         return jsonResponse({ ok: false, code: "FIND_DUMPS_SELECTION_REQUIRED", msg: "FIND_DUMPS_SELECTION_REQUIRED" }, 400);
       }
-      if (hasCredit && requestedWalletKind && !["normal", "vip"].includes(requestedWalletKind)) {
+      if (hasCredit && resolvedWalletKind && !["normal", "vip"].includes(resolvedWalletKind)) {
         return jsonResponse({ ok: false, code: "INVALID_WALLET_KIND", msg: "INVALID_WALLET_KIND" }, 400);
+      }
+      if (hasCredit && !resolvedWalletKind) {
+        resolvedWalletKind = keyTypeDefaultWallet || "normal";
       }
     }
 
@@ -578,16 +644,18 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       rotate_bucket_pass2,
       out_token_hash_pass2,
       app_code: sessionAppCode,
-      package_code: requestedPackageCode || null,
-      credit_code: requestedCreditCode || null,
-      wallet_kind: requestedCreditCode ? (requestedWalletKind || null) : null,
+      package_code: resolvedPackageCode || null,
+      credit_code: resolvedCreditCode || null,
+      wallet_kind: resolvedCreditCode ? (resolvedWalletKind || null) : null,
       trace_id,
       selection_meta: {
         app_code: sessionAppCode,
-        package_code: requestedPackageCode || null,
-        credit_code: requestedCreditCode || null,
-        wallet_kind: requestedCreditCode ? (requestedWalletKind || null) : null,
+        package_code: resolvedPackageCode || null,
+        credit_code: resolvedCreditCode || null,
+        wallet_kind: resolvedCreditCode ? (resolvedWalletKind || null) : null,
         key_signature: String((kt as any)?.key_signature ?? (sessionAppCode === "find-dumps" ? "FD" : "FF")),
+        free_selection_mode: keyTypeSelectionMode,
+        free_selection_expand: keyTypeSelectionExpand,
         trace_id,
       },
     }).select("session_id").single();
@@ -601,9 +669,9 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
       session_id,
       key_type_code,
       app_code: sessionAppCode,
-      package_code: requestedPackageCode || null,
-      credit_code: requestedCreditCode || null,
-      wallet_kind: requestedCreditCode ? (requestedWalletKind || null) : null,
+      package_code: resolvedPackageCode || null,
+      credit_code: resolvedCreditCode || null,
+      wallet_kind: resolvedCreditCode ? (resolvedWalletKind || null) : null,
       test_mode: test_mode,
     }, ipHash, fpHash || null, session_id, trace_id);
 

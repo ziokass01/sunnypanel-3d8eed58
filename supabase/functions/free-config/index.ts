@@ -82,6 +82,40 @@ function getVietnamDayRangeUtc(day: string) {
   };
 }
 
+function normalizeFreeSelectionMode(value: unknown): "none" | "package" | "credit" | "mixed" {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "package" || raw === "credit" || raw === "mixed") return raw;
+  return "none";
+}
+
+async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackFp: number, fallbackIp: number) {
+  const uniqueCodes = [...new Set(appCodes.map((v) => String(v || "").trim().toLowerCase()).filter(Boolean))];
+  if (!uniqueCodes.length) return {} as Record<string, { free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number }>;
+
+  const { data, error } = await sb
+    .from("server_app_settings")
+    .select("app_code,free_daily_limit_per_fingerprint,free_daily_limit_per_ip")
+    .in("app_code", uniqueCodes);
+
+  if (error) {
+    const msg = String(error?.message ?? "").toLowerCase();
+    if (!(msg.includes("does not exist") || msg.includes("undefined column") || msg.includes("could not find"))) {
+      throw error;
+    }
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const map: Record<string, { free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number }> = {};
+  for (const code of uniqueCodes) {
+    const hit = rows.find((row: any) => String(row?.app_code ?? "").trim().toLowerCase() === code);
+    map[code] = {
+      free_daily_limit_per_fingerprint: Math.max(0, Number(hit?.free_daily_limit_per_fingerprint ?? fallbackFp)),
+      free_daily_limit_per_ip: Math.max(0, Number(hit?.free_daily_limit_per_ip ?? fallbackIp)),
+    };
+  }
+  return map;
+}
+
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
@@ -221,6 +255,9 @@ if (!free_download_cards.length) {
     return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: kErr.message }, 503);
   }
 
+  const appCodes = [...new Set((keyTypes ?? []).map((k: any) => String(k?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire"))];
+  const appQuotaSettings = await resolvePerAppQuotaSettings(sb, requestedAppCode ? [requestedAppCode] : appCodes, free_daily_limit_per_fingerprint, free_daily_limit_per_ip);
+
   // FREE flow no longer uses Turnstile. Reset-key keeps its own Turnstile flow.
   const turnstile_enabled = false;
   const TURNSTILE_SITE_KEY_RAW = "";
@@ -240,35 +277,88 @@ if (!free_download_cards.length) {
   const dayRange = getVietnamDayRangeUtc(dayKey);
   const fpHash = fpRaw ? await sha256Hex(fpRaw) : "";
 
-  let fpUsedToday = 0;
-  if (fpHash) {
-    let fpQuota = sb
+  const quotaRows: any[] = [];
+  if (requestedAppCode) {
+    let fpUsedToday = 0;
+    if (fpHash) {
+      const fpQuotaRes = await sb
+        .from("licenses_free_issues")
+        .select("issue_id", { count: "exact", head: true })
+        .gte("created_at", dayRange.startUtcIso)
+        .lt("created_at", dayRange.nextStartUtcIso)
+        .eq("fingerprint_hash", fpHash)
+        .eq("app_code", requestedAppCode);
+      fpUsedToday = Number(fpQuotaRes.count ?? 0);
+    }
+
+    const ipQuotaRes = await sb
       .from("licenses_free_issues")
       .select("issue_id", { count: "exact", head: true })
       .gte("created_at", dayRange.startUtcIso)
       .lt("created_at", dayRange.nextStartUtcIso)
-      .eq("fingerprint_hash", fpHash);
-    if (requestedAppCode) fpQuota = fpQuota.eq("app_code", requestedAppCode);
-    const fpQuotaRes = await fpQuota;
-    fpUsedToday = Number(fpQuotaRes.count ?? 0);
+      .eq("ip_hash", ipHash)
+      .eq("app_code", requestedAppCode);
+
+    quotaRows.push({ app_code: requestedAppCode, fp_used: fpUsedToday, ip_used: Number(ipQuotaRes.count ?? 0) });
+  } else {
+    let issueQuery = sb
+      .from("licenses_free_issues")
+      .select("app_code")
+      .gte("created_at", dayRange.startUtcIso)
+      .lt("created_at", dayRange.nextStartUtcIso)
+      .eq("ip_hash", ipHash);
+    const { data: ipRows } = await issueQuery;
+    const ipCountByApp: Record<string, number> = {};
+    for (const row of ipRows ?? []) {
+      const appCode = String((row as any)?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire";
+      ipCountByApp[appCode] = Number(ipCountByApp[appCode] ?? 0) + 1;
+    }
+
+    const fpCountByApp: Record<string, number> = {};
+    if (fpHash) {
+      const { data: fpRows } = await sb
+        .from("licenses_free_issues")
+        .select("app_code")
+        .gte("created_at", dayRange.startUtcIso)
+        .lt("created_at", dayRange.nextStartUtcIso)
+        .eq("fingerprint_hash", fpHash);
+      for (const row of fpRows ?? []) {
+        const appCode = String((row as any)?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire";
+        fpCountByApp[appCode] = Number(fpCountByApp[appCode] ?? 0) + 1;
+      }
+    }
+
+    for (const appCode of appCodes) {
+      quotaRows.push({ app_code: appCode, fp_used: Number(fpCountByApp[appCode] ?? 0), ip_used: Number(ipCountByApp[appCode] ?? 0) });
+    }
   }
 
-  let ipQuota = sb
-    .from("licenses_free_issues")
-    .select("issue_id", { count: "exact", head: true })
-    .gte("created_at", dayRange.startUtcIso)
-    .lt("created_at", dayRange.nextStartUtcIso)
-    .eq("ip_hash", ipHash);
-  if (requestedAppCode) ipQuota = ipQuota.eq("app_code", requestedAppCode);
-  const ipUsedToday = Number(ipQuota.count ?? 0);
+  const quotaByApp: Record<string, { used_fingerprint: number; used_ip: number; remaining_fingerprint: number | null; remaining_ip: number | null; remaining_today: number | null; free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number; }> = {};
+  for (const row of quotaRows) {
+    const appCode = String(row.app_code ?? "free-fire").trim().toLowerCase() || "free-fire";
+    const limits = appQuotaSettings[appCode] ?? {
+      free_daily_limit_per_fingerprint,
+      free_daily_limit_per_ip,
+    };
+    const fpRemaining = limits.free_daily_limit_per_fingerprint <= 0
+      ? null
+      : Math.max(0, limits.free_daily_limit_per_fingerprint - Number(row.fp_used ?? 0));
+    const ipRemaining = limits.free_daily_limit_per_ip <= 0
+      ? null
+      : Math.max(0, limits.free_daily_limit_per_ip - Number(row.ip_used ?? 0));
+    const remainingToday = [fpRemaining, ipRemaining].filter((v) => v !== null).reduce((m, v) => Math.min(m, Number(v)), Number.POSITIVE_INFINITY);
+    quotaByApp[appCode] = {
+      used_fingerprint: Number(row.fp_used ?? 0),
+      used_ip: Number(row.ip_used ?? 0),
+      remaining_fingerprint: fpRemaining,
+      remaining_ip: ipRemaining,
+      remaining_today: Number.isFinite(remainingToday) ? remainingToday : null,
+      free_daily_limit_per_fingerprint: limits.free_daily_limit_per_fingerprint,
+      free_daily_limit_per_ip: limits.free_daily_limit_per_ip,
+    };
+  }
 
-  const fpRemaining = free_daily_limit_per_fingerprint <= 0
-    ? null
-    : Math.max(0, free_daily_limit_per_fingerprint - fpUsedToday);
-  const ipRemaining = free_daily_limit_per_ip <= 0
-    ? null
-    : Math.max(0, free_daily_limit_per_ip - ipUsedToday);
-  const remainingToday = [fpRemaining, ipRemaining].filter((v) => v !== null).reduce((m, v) => Math.min(m, Number(v)), Number.POSITIVE_INFINITY);
+  const requestedQuota = requestedAppCode ? quotaByApp[requestedAppCode] ?? null : null;
 
   const body = {
     ok: true,
@@ -293,14 +383,15 @@ if (!free_download_cards.length) {
     free_gate_antibypass_enabled,
     free_gate_antibypass_seconds,
     free_return_seconds,
-    free_daily_limit_per_fingerprint,
-    free_daily_limit_per_ip,
+    free_daily_limit_per_fingerprint: requestedQuota?.free_daily_limit_per_fingerprint ?? free_daily_limit_per_fingerprint,
+    free_daily_limit_per_ip: requestedQuota?.free_daily_limit_per_ip ?? free_daily_limit_per_ip,
     free_gate_require_ip_match,
     free_gate_require_ua_match,
     free_require_link4m_referrer,
     free_quota_timezone: "Asia/Ho_Chi_Minh",
     free_quota_day_key: dayKey,
-    free_quota_remaining_today: Number.isFinite(remainingToday) ? remainingToday : null,
+    free_quota_remaining_today: requestedQuota?.remaining_today ?? null,
+    free_quota_by_app: quotaByApp,
 
     free_public_note,
     free_public_links,
@@ -339,6 +430,11 @@ if (!free_download_cards.length) {
       app_label: k?.app_label ?? "Free Fire",
       key_signature: k?.key_signature ?? "FF",
       allow_reset: Boolean(k?.allow_reset ?? true),
+      free_selection_mode: normalizeFreeSelectionMode(k?.free_selection_mode),
+      free_selection_expand: Boolean(k?.free_selection_expand ?? false),
+      default_package_code: String(k?.default_package_code ?? "").trim() || null,
+      default_credit_code: String(k?.default_credit_code ?? "").trim() || null,
+      default_wallet_kind: String(k?.default_wallet_kind ?? "").trim() || null,
     })),
 
     turnstile_enabled,

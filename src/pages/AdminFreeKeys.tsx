@@ -83,6 +83,11 @@ type KeyTypeRow = {
   app_label?: string | null;
   key_signature?: string | null;
   allow_reset?: boolean;
+  free_selection_mode?: "none" | "package" | "credit" | "mixed" | null;
+  free_selection_expand?: boolean;
+  default_package_code?: string | null;
+  default_credit_code?: string | null;
+  default_wallet_kind?: string | null;
   updated_at: string;
 };
 
@@ -692,6 +697,23 @@ export function AdminFreeKeysPage() {
     },
   });
 
+  const updateFindDumpsMeta = useMutation({
+    mutationFn: async (args: { code: string; patch: Record<string, any> }) => {
+      const { error } = await (supabase as any)
+        .from("licenses_free_key_types")
+        .update(args.patch)
+        .eq("code", args.code);
+      if (error) throw error;
+      return true;
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+    onSuccess: async () => {
+      await keyTypesQuery.refetch();
+    },
+  });
+
   const toggleAllowReset = useMutation({
     mutationFn: async (args: { code: string; allow_reset: boolean }) => {
       const { error } = await supabase
@@ -748,6 +770,7 @@ export function AdminFreeKeysPage() {
   const [newAppCode, setNewAppCode] = useState<string>(initialAppCode);
   const [newFindDumpsFlow, setNewFindDumpsFlow] = useState<"package" | "credit">("package");
   const [newFindDumpsRewardCode, setNewFindDumpsRewardCode] = useState<string>("classic");
+  const [newFindDumpsExpand, setNewFindDumpsExpand] = useState<boolean>(false);
   const [newKeySignature, setNewKeySignature] = useState<string>(getAppMeta(initialAppCode).signature);
   const [newAllowReset, setNewAllowReset] = useState<boolean>(true);
 
@@ -793,7 +816,7 @@ export function AdminFreeKeysPage() {
         sort_order = newKind === "hour" ? value : 100 + value;
       }
 
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from("licenses_free_key_types")
         .upsert(
           {
@@ -808,6 +831,11 @@ export function AdminFreeKeysPage() {
             app_label: appMeta.label,
             key_signature: signature,
             allow_reset: newAppCode === "find-dumps" ? false : newAllowReset,
+            free_selection_mode: newAppCode === "find-dumps" ? newFindDumpsFlow : "none",
+            free_selection_expand: newAppCode === "find-dumps" ? Boolean(newFindDumpsExpand) : false,
+            default_package_code: newAppCode === "find-dumps" && newFindDumpsFlow === "package" ? newFindDumpsRewardCode : null,
+            default_credit_code: newAppCode === "find-dumps" && newFindDumpsFlow === "credit" ? newFindDumpsRewardCode : null,
+            default_wallet_kind: newAppCode === "find-dumps" && newFindDumpsFlow === "credit" ? (newFindDumpsRewardCode === "credit-vip" ? "vip" : "normal") : null,
           },
           { onConflict: "code" },
         );
@@ -817,6 +845,7 @@ export function AdminFreeKeysPage() {
     onSuccess: async () => {
       toast({ title: "Created", description: "Key type enabled." });
       setNewLabel("");
+      setNewFindDumpsExpand(false);
       await keyTypesQuery.refetch();
     },
     onError: (e: any) => {
@@ -1656,7 +1685,7 @@ export function AdminFreeKeysPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">Mục bung thêm ở /free</div>
+                    <div className="text-sm font-medium">Mặc định khi user vượt</div>
                     <Select value={newFindDumpsRewardCode} onValueChange={setNewFindDumpsRewardCode}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -1732,6 +1761,16 @@ export function AdminFreeKeysPage() {
               )}
             </div>
 
+            {newAppCode === "find-dumps" ? (
+              <div className="mt-3 flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <div className="font-medium">Cho user chọn thêm ở /free</div>
+                  <div className="text-xs text-muted-foreground">Bật thì trang /free sẽ bung danh sách đúng nhánh này. Tắt thì user chỉ vượt key, phần thưởng lấy mặc định đã chốt ở đây.</div>
+                </div>
+                <Switch checked={newFindDumpsExpand} onCheckedChange={setNewFindDumpsExpand} />
+              </div>
+            ) : null}
+
             <div className="mt-3 flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="font-medium">Cho reset key</div>
@@ -1761,6 +1800,8 @@ export function AdminFreeKeysPage() {
                   <TableHead>Seconds</TableHead>
                   <TableHead>Reset</TableHead>
                   <TableHead>VIP 2-pass</TableHead>
+                  <TableHead>Cấu hình /free</TableHead>
+                  <TableHead>Mặc định</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1792,6 +1833,62 @@ export function AdminFreeKeysPage() {
                         onCheckedChange={(v) => toggleVipKeyType.mutate({ code: k.code, requires_double_gate: Boolean(v) })}
                       />
                     </TableCell>
+                    <TableCell className="min-w-[220px] align-top">
+                      {String(k.app_code || "") === "find-dumps" ? (
+                        <div className="space-y-2">
+                          <Select
+                            value={String(k.free_selection_mode || "none")}
+                            onValueChange={(value) => updateFindDumpsMeta.mutate({
+                              code: k.code,
+                              patch: {
+                                free_selection_mode: value,
+                                default_package_code: value === "package" ? (k.default_package_code || "classic") : null,
+                                default_credit_code: value === "credit" ? (k.default_credit_code || "credit-normal") : null,
+                                default_wallet_kind: value === "credit" ? (k.default_wallet_kind || ((k.default_credit_code || "") === "credit-vip" ? "vip" : "normal")) : null,
+                              },
+                            })}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Khóa cứng</SelectItem>
+                              <SelectItem value="package">Chỉ gói</SelectItem>
+                              <SelectItem value="credit">Chỉ credit</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <div className="flex items-center justify-between rounded-md border px-2 py-2">
+                            <span className="text-xs text-muted-foreground">Bung chọn ở /free</span>
+                            <Switch
+                              checked={Boolean(k.free_selection_expand ?? false)}
+                              onCheckedChange={(value) => updateFindDumpsMeta.mutate({ code: k.code, patch: { free_selection_expand: Boolean(value) } })}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Dùng flow thường</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="min-w-[220px] align-top">
+                      {String(k.app_code || "") === "find-dumps" ? (
+                        <Select
+                          value={String((k.free_selection_mode === "credit" ? (k.default_credit_code || "credit-normal") : (k.default_package_code || "classic")))}
+                          onValueChange={(value) => updateFindDumpsMeta.mutate({
+                            code: k.code,
+                            patch: k.free_selection_mode === "credit"
+                              ? { default_credit_code: value, default_wallet_kind: value === "credit-vip" ? "vip" : "normal" }
+                              : { default_package_code: value },
+                          })}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {(k.free_selection_mode === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
+                              <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Không áp dụng</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button
                         variant="ghost"
@@ -1809,7 +1906,7 @@ export function AdminFreeKeysPage() {
                 ))}
                 {!keyTypesQuery.data?.length ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={13} className="text-center text-sm text-muted-foreground">
                       No rows
                     </TableCell>
                   </TableRow>
@@ -2083,7 +2180,7 @@ export function AdminFreeKeysPage() {
                 ))}
                 {!sessionsQuery.data?.length ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={13} className="text-center text-sm text-muted-foreground">
                       No rows
                     </TableCell>
                   </TableRow>
@@ -2159,7 +2256,7 @@ export function AdminFreeKeysPage() {
                 ))}
                 {!gateLogsQuery.data?.length ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={13} className="text-center text-sm text-muted-foreground">
                       No rows
                     </TableCell>
                   </TableRow>
