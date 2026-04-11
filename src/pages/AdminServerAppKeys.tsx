@@ -97,6 +97,8 @@ export function AdminServerAppKeysPage() {
           enabled: Boolean(item.enabled),
           reward_mode: "plan",
           plan_code: item.code,
+          soft_credit_amount: 0,
+          premium_credit_amount: 0,
           entitlement_days: Number(item.durationDays || 0),
           entitlement_seconds: Number(item.durationDays || 0) * 86400,
           sort_order: (index + 1) * 10,
