@@ -117,6 +117,7 @@ Deno.serve(async (req) => {
   }
 
   const now = new Date();
+  const traceId = crypto.randomUUID();
   const expiresAt = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
   const sessionInsert = await sb
     .from("licenses_free_sessions")
@@ -133,6 +134,7 @@ Deno.serve(async (req) => {
       revealed_at: dryRun ? null : now.toISOString(),
       expires_at: expiresAt,
       last_error: dryRun ? "ADMIN_DRY_RUN" : null,
+      trace_id: traceId,
     })
     .select("session_id")
     .single();

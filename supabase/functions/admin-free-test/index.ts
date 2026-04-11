@@ -121,6 +121,7 @@ Deno.serve(async (req) => {
   if (!keyType || !keyType.enabled) return json({ ok: false, message: "KEY_TYPE_DISABLED" });
 
   const now = new Date();
+  const traceId = crypto.randomUUID();
   const sessionExp = new Date(now.getTime() + 20 * 60 * 1000).toISOString();
   const insSess = await sb
     .from("licenses_free_sessions")
@@ -135,6 +136,7 @@ Deno.serve(async (req) => {
       started_at: now.toISOString(),
       gate_ok_at: now.toISOString(),
       expires_at: sessionExp,
+      trace_id: traceId,
     })
     .select("session_id")
     .single();

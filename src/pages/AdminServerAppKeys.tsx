@@ -29,7 +29,7 @@ function packageSeedRows(rows: any[] | null | undefined) {
       durationDays: Number(hit?.entitlement_days ?? item.defaultDays),
       oneTimeUse: item.oneTimeUse,
       resetDaily: item.resetDaily,
-      maxRedemptions: Number(hit?.max_redemptions ?? 1),
+      maxRedemptions: 1,
       note: String(hit?.description || "Nhận xong là đồng hồ chạy ngay, hết hạn thì key cũng mất."),
     };
   });
@@ -45,7 +45,7 @@ function creditSeedRows(rows: any[] | null | undefined) {
       enabled: hit?.enabled ?? true,
       amount: Number(item.walletKind === "vip" ? (hit?.premium_credit_amount ?? item.defaultAmount) : (hit?.soft_credit_amount ?? item.defaultAmount)),
       expiresHours: Number((hit?.entitlement_seconds ?? item.expiresHours * 3600) / 3600),
-      maxRedemptions: Number(hit?.max_redemptions ?? 1),
+      maxRedemptions: 1,
       note: String(hit?.description || "Code nhận được chỉ dùng 1 lần và tự mất hiệu lực sau khi hết hạn."),
       walletKind: item.walletKind,
     };
@@ -64,7 +64,7 @@ export function AdminServerAppKeysPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("server_app_reward_packages")
-        .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,max_redemptions")
+        .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds")
         .eq("app_code", appCode)
         .order("sort_order", { ascending: true });
       if (error) throw error;
@@ -99,7 +99,6 @@ export function AdminServerAppKeysPage() {
           plan_code: item.code,
           entitlement_days: Number(item.durationDays || 0),
           entitlement_seconds: Number(item.durationDays || 0) * 86400,
-          max_redemptions: Number(item.maxRedemptions || 1),
           sort_order: (index + 1) * 10,
         })),
         ...creditDrafts.map((item, index) => ({
@@ -114,7 +113,6 @@ export function AdminServerAppKeysPage() {
           premium_credit_amount: item.walletKind === "vip" ? Number(item.amount || 0) : 0,
           entitlement_days: 0,
           entitlement_seconds: Number(item.expiresHours || 0) * 3600,
-          max_redemptions: Number(item.maxRedemptions || 1),
           sort_order: 100 + (index + 1) * 10,
         })),
       ];

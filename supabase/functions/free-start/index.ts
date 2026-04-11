@@ -72,6 +72,7 @@ async function safeInsertStartErrorSession(
     fpHash: string;
     keyTypeCode: string;
     lastError: string;
+    traceId?: string | null;
   },
 ) {
   try {
@@ -84,7 +85,7 @@ const now = new Date();
       fingerprint_hash: payload.fpHash,
       key_type_code: payload.keyTypeCode,
       duration_seconds: 0,
-      trace_id: String((payload as any).traceId ?? "").trim() || null,
+      trace_id: String((payload as any).traceId ?? crypto.randomUUID()).trim(),
       started_at: now.toISOString(),
       expires_at: new Date(now.getTime() + 3 * 60 * 1000).toISOString(),
       last_error: payload.lastError,
@@ -508,6 +509,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
           fpHash,
           keyTypeCode: key_type_code,
           lastError: "SERVER_RATE_LIMIT_MISCONFIG",
+          traceId: trace_id,
         });
          return jsonResponse(
            {
@@ -525,6 +527,7 @@ async function resolveStableLink4mUrl(sb: any, passNo: 1 | 2, rotateBucket: stri
         fpHash,
         keyTypeCode: key_type_code,
         lastError: "RATE_LIMIT_CHECK_FAILED",
+        traceId: trace_id,
       });
       return jsonResponse({ ok: false, msg: "RATE_LIMIT_CHECK_FAILED", detail: "Kiểm tra RPC check_free_ip_rate_limit/check_free_fp_rate_limit và bảng licenses_free_*" }, 500);
     }
