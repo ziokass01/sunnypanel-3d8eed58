@@ -427,7 +427,23 @@ async function getAppConfig(appCode: string) {
     .eq("code", appCode)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_apps") || isMissingRelationError(error, "server_app_settings")) {
+      return {
+        code: appCode,
+        label: appCode,
+        description: null,
+        public_enabled: true,
+        settings: {
+          guest_plan: "classic",
+          gift_tab_label: "Quà tặng",
+          key_persist_until_revoked: true,
+          daily_reset_hour: 0,
+        },
+      };
+    }
+    throw error;
+  }
   return data;
 }
 
@@ -440,7 +456,10 @@ async function getPlans(appCode: string): Promise<RuntimePlan[]> {
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_app_plans")) return [];
+    throw error;
+  }
   return (data ?? []).map((row: any) => ({
     plan_code: asString(row.plan_code),
     label: asString(row.label),
@@ -462,7 +481,10 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
     .eq("enabled", true)
     .order("sort_order", { ascending: true });
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_app_features")) return [];
+    throw error;
+  }
   return (data ?? []).map((row: any) => ({
     feature_code: asString(row.feature_code),
     title: asString(row.title),
@@ -680,7 +702,24 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
     .eq("app_code", appCode)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_app_wallet_rules")) {
+      return {
+        soft_daily_reset_enabled: false,
+        premium_daily_reset_enabled: false,
+        soft_daily_reset_amount: 0,
+        premium_daily_reset_amount: 0,
+        consume_priority: 'soft_first',
+        soft_daily_reset_mode: 'debt_floor',
+        premium_daily_reset_mode: 'debt_floor',
+        soft_floor_credit: 5,
+        premium_floor_credit: 5,
+        soft_allow_negative: true,
+        premium_allow_negative: true,
+      };
+    }
+    throw error;
+  }
   return {
     soft_daily_reset_enabled: Boolean(data?.soft_daily_reset_enabled ?? false),
     premium_daily_reset_enabled: Boolean(data?.premium_daily_reset_enabled ?? false),
@@ -704,7 +743,29 @@ export async function getRuntimeControls(appCode: string): Promise<RuntimeContro
     .eq("app_code", appCode)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error, "server_app_runtime_controls")) {
+      return {
+        runtime_enabled: true,
+        catalog_enabled: true,
+        redeem_enabled: true,
+        consume_enabled: true,
+        heartbeat_enabled: true,
+        maintenance_notice: null,
+        min_client_version: null,
+        blocked_client_versions: [],
+        blocked_accounts: [],
+        blocked_devices: [],
+        blocked_ip_hashes: [],
+        max_daily_redeems_per_account: 0,
+        max_daily_redeems_per_device: 0,
+        session_idle_timeout_minutes: 1440,
+        session_max_age_minutes: 43200,
+        event_retention_days: 30,
+      };
+    }
+    throw error;
+  }
   return {
     runtime_enabled: Boolean(data?.runtime_enabled ?? true),
     catalog_enabled: Boolean(data?.catalog_enabled ?? true),

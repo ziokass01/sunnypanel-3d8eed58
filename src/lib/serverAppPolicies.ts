@@ -57,6 +57,8 @@ export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
   { code: "export_json", title: "Export JSON", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo lượt xuất" },
   { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 1.5, vipCredit: 0.8, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
   { code: "binary_scan_full", title: "Full scan", baseCredit: 2.0, vipCredit: 1.0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt quét" },
+  { code: "game_profiles", title: "Game Profiles", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "runtime_redeem", title: "Nhập mã / kích hoạt", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tiện ích free" },
   { code: "convert_image", title: "Convert image", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
   { code: "encode_decode", title: "Encode / Decode", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
   { code: "hex_edit", title: "Hex edit", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
@@ -129,6 +131,19 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
     freePlans: ["go", "plus", "pro"],
     renewable: true,
     enabled: true,
+  },
+  {
+    accessCode: "migration_tools",
+    title: "Migration tools",
+    description: "Placeholder cho Diff 2 dump, remap query, batch migrate, compare và validation. Mở khóa chỉ mở quyền vào cửa, chạy thật vẫn trừ credit theo feature tương ứng.",
+    unlockFeatureCode: "unlock_migration_tools",
+    guardedFeatureCodes: ["diff_two_dumps", "query_remap", "batch_migrate", "batch_compare", "batch_validate", "export_report"],
+    defaultDurationHours: 24,
+    softUnlockCost: 2,
+    premiumUnlockCost: 1,
+    freePlans: ["pro"],
+    renewable: true,
+    enabled: false,
   },
 ];
 

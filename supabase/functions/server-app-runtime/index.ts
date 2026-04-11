@@ -43,6 +43,24 @@ function asBodyString(value: unknown, fallback = "") {
   return v || fallback;
 }
 
+function toRuntimeErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const anyError = error as Record<string, unknown>;
+    const direct = [anyError.msg, anyError.message, anyError.details, anyError.hint]
+      .map((item) => String(item ?? "").trim())
+      .find(Boolean);
+    if (direct) return direct;
+    try {
+      return JSON.stringify(anyError);
+    } catch (_err) {
+      return String(anyError);
+    }
+  }
+  return String(error);
+}
+
 function compareVersionText(left: string | null | undefined, right: string | null | undefined) {
   const a = String(left ?? "").trim();
   const b = String(right ?? "").trim();
@@ -351,7 +369,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     const status = Number((error as any)?.status ?? 500);
     const code = String((error as any)?.code ?? "SERVER_ERROR");
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = toRuntimeErrorMessage(error);
 
     try {
       const body = parsedBody;
