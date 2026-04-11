@@ -225,6 +225,19 @@ function normalizeDecimal(value: string | number | null | undefined) {
   return Number.isFinite(num) ? Number(num.toFixed(2)) : 0;
 }
 
+const DECIMAL_INPUT_PROPS = {
+  inputMode: "decimal" as const,
+  enterKeyHint: "done" as const,
+  autoComplete: "off" as const,
+};
+
+function normalizeDecimalDraftInput(value: string) {
+  const raw = String(value ?? "").replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const firstDot = raw.indexOf(".");
+  if (firstDot === -1) return raw;
+  return `${raw.slice(0, firstDot + 1)}${raw.slice(firstDot + 1).replace(/\./g, "")}`;
+}
+
 function normalizeInteger(value: string | number | null | undefined, fallback = 1) {
   const num = Number(value ?? fallback);
   return Number.isFinite(num) ? Math.max(1, Math.trunc(num)) : fallback;
@@ -746,12 +759,12 @@ export function AdminServerAppDetailPage() {
                     </div>
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường / ngày</div><Input value={numericInput(plan.daily_soft_credit)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, daily_soft_credit: e.target.value } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương / ngày</div><Input value={numericInput(plan.daily_premium_credit)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, daily_premium_credit: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường / ngày</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(plan.daily_soft_credit)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, daily_soft_credit: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương / ngày</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(plan.daily_premium_credit)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, daily_premium_credit: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
                     <div className="space-y-2"><div className="text-sm font-medium">Thiết bị tối đa</div><Input type="number" value={plan.device_limit} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, device_limit: Number(e.target.value) } : item))} /></div>
                     <div className="space-y-2"><div className="text-sm font-medium">Tài khoản tối đa</div><Input type="number" value={plan.account_limit} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, account_limit: Number(e.target.value) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Hệ số hao credit thường</div><Input value={numericInput(plan.soft_cost_multiplier)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_cost_multiplier: e.target.value } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Hệ số hao credit kim cương</div><Input value={numericInput(plan.premium_cost_multiplier)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_cost_multiplier: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Hệ số hao credit thường</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(plan.soft_cost_multiplier)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_cost_multiplier: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Hệ số hao credit kim cương</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(plan.premium_cost_multiplier)} onChange={(e) => setPlansDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_cost_multiplier: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
                   </div>
                 </div>
               ))}
@@ -798,8 +811,8 @@ export function AdminServerAppDetailPage() {
                   </div>
                   <Textarea rows={2} value={feature.description || ""} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} placeholder="Mô tả ngắn cho admin và app manifest" />
                   <div className="grid gap-3 md:grid-cols-4">
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường</div><Input value={numericInput(feature.soft_cost)} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_cost: e.target.value } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương</div><Input value={numericInput(feature.premium_cost)} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_cost: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(feature.soft_cost)} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_cost: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(feature.premium_cost)} onChange={(e) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_cost: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
                     <div className="space-y-2"><div className="text-sm font-medium">Chu kỳ reset</div><Select value={feature.reset_period || "daily"} onValueChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, reset_period: value } : item))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">Daily</SelectItem><SelectItem value="weekly">Weekly</SelectItem><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="none">None</SelectItem></SelectContent></Select></div>
                     <div className="flex items-center justify-between rounded-2xl border p-3"><div><div className="font-medium">Cần credit</div><div className="text-xs text-muted-foreground">Tắt nếu chỉ cần đúng plan là dùng được.</div></div><Switch checked={feature.requires_credit} onCheckedChange={(value) => setFeaturesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, requires_credit: value } : item))} /></div>
                   </div>
@@ -870,11 +883,11 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Mức reset credit thường</div>
-                  <Input value={numericInput(walletDraft.soft_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_amount: e.target.value }))} />
+                  <Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(walletDraft.soft_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_daily_reset_amount: normalizeDecimalDraftInput(e.target.value) }))} />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Floor credit thường</div>
-                  <Input value={numericInput(walletDraft.soft_floor_credit)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_floor_credit: e.target.value }))} />
+                  <Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(walletDraft.soft_floor_credit)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, soft_floor_credit: normalizeDecimalDraftInput(e.target.value) }))} />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Reset mode thường</div>
@@ -902,11 +915,11 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Mức reset credit kim cương</div>
-                  <Input value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: e.target.value }))} />
+                  <Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(walletDraft.premium_daily_reset_amount)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_daily_reset_amount: normalizeDecimalDraftInput(e.target.value) }))} />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Floor credit kim cương</div>
-                  <Input value={numericInput(walletDraft.premium_floor_credit)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_floor_credit: e.target.value }))} />
+                  <Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(walletDraft.premium_floor_credit)} onChange={(e) => setWalletDraft((prev) => ({ ...prev, premium_floor_credit: normalizeDecimalDraftInput(e.target.value) }))} />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Reset mode kim cương</div>
@@ -986,8 +999,8 @@ export function AdminServerAppDetailPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường cộng thêm</div><Input value={numericInput(pkg.soft_credit_amount)} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_credit_amount: e.target.value } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương cộng thêm</div><Input value={numericInput(pkg.premium_credit_amount)} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_credit_amount: e.target.value } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit thường cộng thêm</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(pkg.soft_credit_amount)} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, soft_credit_amount: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Credit kim cương cộng thêm</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={numericInput(pkg.premium_credit_amount)} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premium_credit_amount: normalizeDecimalDraftInput(e.target.value) } : item))} /></div>
                     <div className="space-y-2"><div className="text-sm font-medium">Thời hạn entitlement (ngày)</div><Input type="number" min={0} value={pkg.entitlement_days} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, entitlement_days: Number(e.target.value) } : item))} /></div>
                     <div className="space-y-2"><div className="text-sm font-medium">Override số thiết bị</div><Input type="number" min={0} value={pkg.device_limit_override ?? 0} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, device_limit_override: Number(e.target.value) || null } : item))} /></div>
                     <div className="space-y-2"><div className="text-sm font-medium">Override số tài khoản</div><Input type="number" min={0} value={pkg.account_limit_override ?? 0} onChange={(e) => setPackagesDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, account_limit_override: Number(e.target.value) || null } : item))} /></div>

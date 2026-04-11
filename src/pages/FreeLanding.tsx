@@ -5,14 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
+import { fetchFreeConfig, type FreeConfig, type FreeKeyType } from "@/features/free/free-config";
 import { FreeNotice } from "@/features/free/FreeNotice";
 import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory, syncFreeNextEligibleAt } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, readBundle, writeBundle } from "@/lib/freeFlow";
-import { FIND_DUMPS_CREDITS, FIND_DUMPS_PACKAGES, formatCredit, getFindDumpsCredit, getFindDumpsFreeFlowDefaults, getFindDumpsPackage } from "@/lib/serverAppPolicies";
+import { getFindDumpsFreeFlowDefaults } from "@/lib/serverAppPolicies";
 import {
   getFreeTestMode,
   getOrCreateFingerprint,
@@ -21,7 +21,6 @@ import {
   setSelectedAppCode,
   setSelectedKeyTypeCode,
   getSelectedAppCode,
-  getFindDumpsFreeSelection,
   setFindDumpsFreeSelection,
 } from "@/features/free/fingerprint";
 import { supabase } from "@/integrations/supabase/client";
@@ -55,6 +54,28 @@ type LastFreeKey = {
 };
 
 const LAST_FREE_KEY_STORAGE = "lastFreeKey";
+
+type FreeKeySummaryMeta = {
+  label: string;
+  badge: string;
+};
+
+const FREE_KEY_SUMMARY_META: Record<string, FreeKeySummaryMeta> = {
+  "free-fire": { label: "Key Free Fire", badge: "Free Fire" },
+  "find-dumps": { label: "Key Find Dumps", badge: "Find Dumps" },
+};
+
+function getFreeKeySummaryMeta(appCode?: string | null, keyType?: FreeKeyType | null) {
+  const code = String(appCode || "").trim().toLowerCase();
+  const direct = FREE_KEY_SUMMARY_META[code];
+  if (direct) return direct;
+
+  const appLabel = String(keyType?.app_label || code || "Key").trim();
+  return {
+    label: appLabel ? `Key ${appLabel}` : "Key đang chọn",
+    badge: appLabel || "Khác",
+  };
+}
 
 type ResetKeySnapshot = {
   ok: boolean;
@@ -104,9 +125,6 @@ export function FreeLandingPage() {
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
   const [showClosedDialog, setShowClosedDialog] = useState(false);
-  const storedFindDumpsSelection = getFindDumpsFreeSelection();
-  const [findDumpsChoiceKind, setFindDumpsChoiceKind] = useState<"package" | "credit">(storedFindDumpsSelection.mode === "credit" ? "credit" : "package");
-  const [findDumpsRewardCode, setFindDumpsRewardCode] = useState<string>(storedFindDumpsSelection.rewardCode || "classic");
 
   const isPendingSessionError = useMemo(() => {
     const message = String(err ?? "").toLowerCase();
@@ -237,23 +255,11 @@ export function FreeLandingPage() {
   const selectedKeyMeta = useMemo(() => (cfg?.key_types ?? []).find((item) => item.code === selected) ?? null, [cfg?.key_types, selected]);
   const selectedAppCode = useMemo(() => String(selectedKeyMeta?.app_code || getSelectedAppCode() || "free-fire").trim() || "free-fire", [selectedKeyMeta]);
   const isFindDumpsSelected = selectedAppCode === "find-dumps";
-  const findDumpsSelectionMode = useMemo(() => {
-    const rawMode = String(selectedKeyMeta?.free_selection_mode || "").trim().toLowerCase();
-    if (rawMode === "package" || rawMode === "credit" || rawMode === "mixed") return rawMode as "package" | "credit" | "mixed";
-    return "none" as const;
-  }, [selectedKeyMeta?.free_selection_mode]);
-  const showFindDumpsSelection = isFindDumpsSelected && Boolean(selectedKeyMeta?.free_selection_expand ?? false) && findDumpsSelectionMode !== "none";
-  const fixedFindDumpsKind = useMemo(() => {
-    if (findDumpsSelectionMode === "package" || findDumpsSelectionMode === "credit") return findDumpsSelectionMode;
-    if (selectedKeyMeta?.default_credit_code) return "credit" as const;
+  const effectiveFindDumpsKind = useMemo(() => {
+    if (String(selectedKeyMeta?.default_credit_code || "").trim()) return "credit" as const;
     return "package" as const;
-  }, [findDumpsSelectionMode, selectedKeyMeta?.default_credit_code]);
-  const effectiveFindDumpsKind = showFindDumpsSelection
-    ? (findDumpsSelectionMode === "mixed" ? findDumpsChoiceKind : findDumpsSelectionMode)
-    : fixedFindDumpsKind;
-  const effectiveFindDumpsCode = showFindDumpsSelection
-    ? findDumpsRewardCode
-    : String((effectiveFindDumpsKind === "credit" ? selectedKeyMeta?.default_credit_code : selectedKeyMeta?.default_package_code) || (effectiveFindDumpsKind === "credit" ? "credit-normal" : "classic"));
+  }, [selectedKeyMeta?.default_credit_code]);
+  const effectiveFindDumpsCode = useMemo(() => String((effectiveFindDumpsKind === "credit" ? selectedKeyMeta?.default_credit_code : selectedKeyMeta?.default_package_code) || (effectiveFindDumpsKind === "credit" ? "credit-normal" : "classic")).trim(), [effectiveFindDumpsKind, selectedKeyMeta?.default_credit_code, selectedKeyMeta?.default_package_code]);
   const effectiveFindDumpsReward = useMemo(() => {
     if (!isFindDumpsSelected) return null;
     return effectiveFindDumpsKind === "credit"
@@ -261,6 +267,7 @@ export function FreeLandingPage() {
       : getFindDumpsFreeFlowDefaults("package", effectiveFindDumpsCode);
   }, [effectiveFindDumpsCode, effectiveFindDumpsKind, isFindDumpsSelected]);
   const selectedQuotaMeta = useMemo(() => cfg?.free_quota_by_app?.[selectedAppCode] ?? null, [cfg?.free_quota_by_app, selectedAppCode]);
+  const selectedKeySummaryMeta = useMemo(() => getFreeKeySummaryMeta(selectedAppCode, selectedKeyMeta), [selectedAppCode, selectedKeyMeta]);
 
   const missingText = useMemo(() => {
     const m = cfg?.missing ?? [];
@@ -269,16 +276,6 @@ export function FreeLandingPage() {
 
   const debugMode = useMemo(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "1", []);
 
-  useEffect(() => {
-    if (!isFindDumpsSelected) return;
-    if (findDumpsSelectionMode === "credit") setFindDumpsChoiceKind("credit");
-    else if (findDumpsSelectionMode === "package") setFindDumpsChoiceKind("package");
-
-    const defaultRewardCode = String((findDumpsSelectionMode === "credit"
-      ? selectedKeyMeta?.default_credit_code
-      : selectedKeyMeta?.default_package_code) || "").trim();
-    if (defaultRewardCode) setFindDumpsRewardCode(defaultRewardCode);
-  }, [findDumpsSelectionMode, isFindDumpsSelected, selectedKeyMeta?.default_credit_code, selectedKeyMeta?.default_package_code]);
 
   const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
@@ -342,6 +339,33 @@ export function FreeLandingPage() {
 
               <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null} lastKeyExpiresAt={lastFreeKey?.expires_at ?? null} />
 
+              <div className="rounded-2xl border bg-background/70 p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Thông tin key đang chọn</div>
+                    <div className="text-xs text-muted-foreground">Hiển thị theo app của key hiện tại để sau này thêm app mới vẫn mở rộng được, không gãy flow.</div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">{selectedKeySummaryMeta.badge}</Badge>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-2xl border bg-background/80 p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên key</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{selectedKeySummaryMeta.label}</div>
+                    <div className="text-xs text-muted-foreground">Đổi theo loại key đang chọn</div>
+                  </div>
+                  <div className="rounded-2xl border bg-background/80 p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Giới hạn thiết bị</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0} / ngày</div>
+                    <div className="text-xs text-muted-foreground">Tính theo fingerprint thiết bị</div>
+                  </div>
+                  <div className="rounded-2xl border bg-background/80 p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Giới hạn IP key</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0} / ngày</div>
+                    <div className="text-xs text-muted-foreground">Tính theo IP hiện tại</div>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold">Chọn loại key</div>
@@ -361,68 +385,6 @@ export function FreeLandingPage() {
                 </Select>
               </div>
 
-              {isFindDumpsSelected ? (
-                <div className="space-y-4 rounded-2xl border bg-background/70 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">Nhánh riêng cho Find Dumps</div>
-                      <div className="text-xs text-muted-foreground">Trang /free chỉ hiện đúng key và phần lựa chọn mà admin đã bật sẵn cho key này.</div>
-                    </div>
-                    <Badge variant="secondary" className="rounded-full">App-host</Badge>
-                  </div>
-
-                  {showFindDumpsSelection ? (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      {findDumpsSelectionMode === "mixed" ? (
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Loại phần thưởng</div>
-                          <Select value={findDumpsChoiceKind} onValueChange={(v) => setFindDumpsChoiceKind(v === "credit" ? "credit" : "package")}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="package">Gói Find Dumps</SelectItem>
-                              <SelectItem value="credit">Credit Find Dumps</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Chế độ chọn</div>
-                          <div className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-                            Admin đã bật chế độ cho user chọn {findDumpsSelectionMode === "credit" ? "credit" : "gói"} khi vượt key này.
-                          </div>
-                        </div>
-                      )}
-                      <div className="space-y-2">
-                        <div className="text-sm font-medium">{effectiveFindDumpsKind === "credit" ? "Loại credit" : "Gói đang nhận"}</div>
-                        <Select value={findDumpsRewardCode} onValueChange={setFindDumpsRewardCode}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {(effectiveFindDumpsKind === "credit" ? FIND_DUMPS_CREDITS : FIND_DUMPS_PACKAGES).map((item) => (
-                              <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-                      Key này dùng cấu hình mặc định đã chốt sẵn ở trang admin Free Key. User không cần chọn thêm ở đây.
-                    </div>
-                  )}
-
-                  <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-muted-foreground">
-                    {effectiveFindDumpsKind === "credit" ? (
-                      <>
-                        Credit <span className="font-medium text-foreground">{getFindDumpsCredit(effectiveFindDumpsCode).label}</span> dùng ví <span className="font-medium text-foreground">{effectiveFindDumpsReward?.walletKind === "vip" ? "VIP" : "thường"}</span>, giá trị mặc định <span className="font-medium text-foreground">{formatCredit(Number(effectiveFindDumpsReward?.creditAmount || 0))}</span>, tự hết hạn sau <span className="font-medium text-foreground">{effectiveFindDumpsReward?.expiresHours}</span> giờ tính từ lúc nhận.
-                      </>
-                    ) : (
-                      <>
-                        Gói <span className="font-medium text-foreground">{getFindDumpsPackage(effectiveFindDumpsCode).label}</span> bật reset hằng ngày <span className="font-medium text-foreground">{getFindDumpsPackage(effectiveFindDumpsCode).resetDaily ? "có" : "không"}</span>, discount feature <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(effectiveFindDumpsCode).discountPercent)}%</span>, cấp ngày <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(effectiveFindDumpsCode).dailyCredit)}</span> credit thường và <span className="font-medium text-foreground">{formatCredit(getFindDumpsPackage(effectiveFindDumpsCode).dailyVipCredit)}</span> credit VIP.
-                      </>
-                    )}
-                  </div>
-                </div>
-              ) : null}
 
               <Button
                 className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
