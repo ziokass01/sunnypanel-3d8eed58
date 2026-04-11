@@ -15,8 +15,6 @@ import {
   getOrCreateFingerprint,
   getOutToken,
   getSelectedKeyTypeCode,
-  getSelectedAppCode,
-  getFindDumpsFreeSelection,
 } from "@/features/free/fingerprint";
 
 type RevealOk = {
@@ -29,7 +27,6 @@ type RevealOk = {
   session_id?: string | null;
   ip_hash?: string | null;
   allow_reset?: boolean | null;
-  trace_id?: string | null;
 };
 type RevealErr = { ok: false; msg: string; code?: string };
 
@@ -64,12 +61,11 @@ function friendlyRevealError(msg: string) {
   return `Xác thực không thành công (${m}).`;
 }
 
-type RevealedState = { key: string; expiresAt: string; label: string; traceId?: string | null };
+type RevealedState = { key: string; expiresAt: string; label: string };
 const LAST_FREE_KEY_STORAGE = "lastFreeKey";
 
 export function FreeClaimPage() {
   const nav = useNavigate();
-  const findDumpsSelection = getFindDumpsFreeSelection();
   const [sp] = useSearchParams();
 
   // NOTE: do NOT rely solely on router parsing; some redirect/shortener flows can produce malformed URLs with multiple '?'.
@@ -119,8 +115,7 @@ export function FreeClaimPage() {
   // Primary: URL. If URL is incomplete, we may do HYBRID recovery for missing pieces from *fresh* storage.
   // Fallback: Storage bundle (fresh + complete).
 
-  const activeAppCode = getSelectedAppCode();
-  const bundle = useMemo(() => readBundle(activeAppCode), [activeAppCode]);
+  const bundle = useMemo(() => readBundle(), []);
   const bundleFresh = useMemo(() => (bundle ? isFresh(bundle) : false), [bundle]);
 
   const startMeta = useMemo(() => getFreeStartMeta(), []);
@@ -242,7 +237,7 @@ export function FreeClaimPage() {
   }
 
   const clearAllFreeStorage = useCallback(() => {
-    clearBundle(activeAppCode);
+    clearBundle();
     clearFreeFlowStorage();
     clearLegacyFreeKeys();
   }, []);
@@ -317,10 +312,7 @@ export function FreeClaimPage() {
 
     // If we have a sid (either from URL or a verified matching bundle), we can write the full bundle.
     if (effectiveSessionId) {
-      writeBundle({ session_id: effectiveSessionId,
-        app_code: activeAppCode, out_token: outToken,
-        claim_token: claimToken,
-        trace_id: bundle?.trace_id });
+      writeBundle({ session_id: effectiveSessionId, out_token: outToken, claim_token: claimToken });
     }
 
     // Backward-compat storage (does not affect token selection logic)
@@ -386,7 +378,7 @@ export function FreeClaimPage() {
     void (async () => {
       try {
         const fp = getOrCreateFingerprint();
-        const cfg = await fetchFreeConfig({ fingerprint: fp, appCode: activeAppCode });
+        const cfg = await fetchFreeConfig({ fingerprint: fp });
         setCfg(cfg);
         setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
       } catch {
@@ -434,10 +426,6 @@ export function FreeClaimPage() {
 
       const res = await postFunction<RevealOk | RevealErr>("/free-reveal", {
         claim_token: claimToken,
-        app_code: activeAppCode,
-        package_code: activeAppCode === "find-dumps" && findDumpsSelection.mode !== "credit" ? findDumpsSelection.rewardCode : null,
-        credit_code: activeAppCode === "find-dumps" && findDumpsSelection.mode === "credit" ? findDumpsSelection.rewardCode : null,
-        wallet_kind: activeAppCode === "find-dumps" && findDumpsSelection.mode === "credit" ? findDumpsSelection.walletKind : null,
         out_token: outToken,
         session_id: sid || undefined,
         fingerprint: fp,
@@ -531,7 +519,7 @@ export function FreeClaimPage() {
       // ignore
     } finally {
       clearFreeFlowStorage();
-      clearBundle(activeAppCode);
+      clearBundle();
       try {
         localStorage.removeItem("free_claim_token");
       } catch {
@@ -618,7 +606,6 @@ export function FreeClaimPage() {
                 <div>effective_sid_mask: {effectiveSessionId ? `${effectiveSessionId.slice(0, 6)}…${effectiveSessionId.slice(-4)}` : ""}</div>
                 <div>t_len: {outToken ? outToken.length : 0}</div>
                 <div>t_mask: {outToken ? `${outToken.slice(0, 6)}…${outToken.slice(-4)}` : ""}</div>
-                <div>trace_mask: {bundle?.trace_id ? `${bundle.trace_id.slice(0, 6)}…${bundle.trace_id.slice(-4)}` : ""}</div>
                 {serverDebug ? (
                   <div className="pt-2">
                     <div className="text-foreground font-medium">backend debug</div>
@@ -656,7 +643,6 @@ export function FreeClaimPage() {
                   <div>
                     <div className="text-sm font-semibold">{revealed.label}</div>
                     <div className="text-xs text-muted-foreground">Key đã sẵn sàng. Bạn nên copy ngay để lưu lại.</div>
-                  {(revealed as any)?.traceId ? <div className="text-[11px] text-muted-foreground">Trace: <span className="font-medium text-foreground">{String((revealed as any).traceId).slice(0, 12)}…</span></div> : null}
                   </div>
                   <Badge className="rounded-full">Thành công</Badge>
                 </div>
