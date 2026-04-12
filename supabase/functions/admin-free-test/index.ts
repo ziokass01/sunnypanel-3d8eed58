@@ -37,194 +37,6 @@ function maskKey(key: string) {
   return `${key.slice(0, 9)}…${key.slice(-4)}`;
 }
 
-
-function normalizeFindDumpsRewardMode(value: unknown) {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (raw === "credit") return "credit";
-  if (raw === "mixed") return "mixed";
-  if (raw === "plan") return "plan";
-  return "mixed";
-}
-
-function normalizeWalletKind(value: unknown): "normal" | "vip" | null {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (raw === "normal" || raw === "soft") return "normal";
-  if (raw === "vip" || raw === "premium") return "vip";
-  return null;
-}
-
-async function issueFindDumpsAdminRedeemKey(sb: any, params: {
-  keyType: any;
-  sessionId: string;
-  traceId: string;
-  nowIso: string;
-  expiresAt: string;
-  ipHash: string;
-  fpHash: string;
-}) {
-  const keyType = params.keyType ?? {};
-  const appCode = "find-dumps";
-  const rewardMode = normalizeFindDumpsRewardMode(keyType.free_selection_mode);
-  const packageCode = String(keyType.default_package_code ?? "").trim().toLowerCase() || null;
-  const creditCode = String(keyType.default_credit_code ?? "").trim().toLowerCase() || null;
-  const walletKind = normalizeWalletKind(keyType.default_wallet_kind);
-
-  if (rewardMode === "plan" || rewardMode === "mixed") {
-    if (!packageCode) {
-      throw new Error("FIND_DUMPS_DEFAULT_PACKAGE_REQUIRED");
-    }
-  }
-  if (rewardMode === "credit") {
-    if (!creditCode) {
-      throw new Error("FIND_DUMPS_DEFAULT_CREDIT_REQUIRED");
-    }
-  }
-  if (rewardMode === "mixed" && !packageCode && !creditCode) {
-    throw new Error("FIND_DUMPS_DEFAULT_SELECTION_REQUIRED");
-  }
-
-  let rewardPackageId: string | null = null;
-  let planCode: string | null = null;
-  let softCredit = 0;
-  let premiumCredit = 0;
-  let entitlementDays = 0;
-  let entitlementSeconds = 0;
-  let deviceLimitOverride: number | null = null;
-  let accountLimitOverride: number | null = null;
-  let title = String(keyType.label ?? "Find Dumps key").trim() || "Find Dumps key";
-  let description = "Admin test key for Find Dumps";
-
-  if (packageCode) {
-    const pkgRes = await sb
-      .from("server_app_reward_packages")
-      .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
-      .eq("app_code", appCode)
-      .eq("package_code", packageCode)
-      .maybeSingle();
-    if (pkgRes.error || !pkgRes.data || !pkgRes.data.enabled) {
-      throw new Error("FIND_DUMPS_PACKAGE_NOT_FOUND");
-    }
-    rewardPackageId = String(pkgRes.data.id);
-    title = String(pkgRes.data.title ?? title).trim() || title;
-    description = String(pkgRes.data.description ?? description).trim() || description;
-    planCode = String(pkgRes.data.plan_code ?? "").trim() || null;
-    softCredit = Number(pkgRes.data.soft_credit_amount ?? 0) || 0;
-    premiumCredit = Number(pkgRes.data.premium_credit_amount ?? 0) || 0;
-    entitlementDays = Math.max(0, Number(pkgRes.data.entitlement_days ?? 0) || 0);
-    entitlementSeconds = Math.max(0, Number(pkgRes.data.entitlement_seconds ?? 0) || 0);
-    deviceLimitOverride = pkgRes.data.device_limit_override == null ? null : Number(pkgRes.data.device_limit_override);
-    accountLimitOverride = pkgRes.data.account_limit_override == null ? null : Number(pkgRes.data.account_limit_override);
-  }
-
-  if (creditCode) {
-    // Credit-only admin test keys do not need a reward package row, but still issue through runtime redeem keys.
-    title = `${title} Credit`.trim();
-    description = `${description} • ${creditCode}`;
-    if (!packageCode) {
-      planCode = null;
-      entitlementDays = 0;
-      entitlementSeconds = 0;
-    }
-  }
-
-  let inserted: { id: string; redeem_key: string } | null = null;
-  let lastError = "";
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const redeemKey = makeKey();
-    const ins = await sb
-      .from("server_app_redeem_keys")
-      .insert({
-        app_code: appCode,
-        reward_package_id: rewardPackageId,
-        redeem_key: redeemKey,
-        title,
-        description,
-        enabled: true,
-        starts_at: params.nowIso,
-        expires_at: params.expiresAt,
-        max_redemptions: 1,
-        redeemed_count: 0,
-        reward_mode: rewardMode,
-        plan_code: planCode,
-        soft_credit_amount: softCredit,
-        premium_credit_amount: premiumCredit,
-        entitlement_days: entitlementDays,
-        entitlement_seconds: entitlementSeconds,
-        device_limit_override: deviceLimitOverride,
-        account_limit_override: accountLimitOverride,
-        trace_id: params.traceId,
-        source_free_session_id: params.sessionId,
-        metadata: {
-          source: "admin-free-test",
-          app_code: appCode,
-          key_type_code: String(keyType.code ?? "").trim() || null,
-          package_code: packageCode,
-          credit_code: creditCode,
-          wallet_kind: walletKind,
-          key_signature: "FD",
-          admin_test: true,
-        },
-      })
-      .select("id,redeem_key")
-      .single();
-    if (!ins.error && ins.data?.id) {
-      inserted = { id: String(ins.data.id), redeem_key: String(ins.data.redeem_key) };
-      break;
-    }
-    lastError = extractErrorMessage(ins.error);
-  }
-
-  if (!inserted) {
-    throw new Error(lastError || "SERVER_REDEEM_KEY_INSERT_FAILED");
-  }
-
-  await sb.from("licenses_free_sessions").update({
-    status: "revealed",
-    reveal_count: 1,
-    revealed_at: params.nowIso,
-    app_code: appCode,
-    package_code: packageCode,
-    credit_code: creditCode,
-    wallet_kind: walletKind,
-    issued_server_redeem_key_id: inserted.id,
-    issued_server_reward_mode: rewardMode,
-    selection_meta: {
-      app_code: appCode,
-      package_code: packageCode,
-      credit_code: creditCode,
-      wallet_kind: walletKind,
-      reward_mode: rewardMode,
-      trace_id: params.traceId,
-      source: "admin-free-test",
-    },
-  }).eq("session_id", params.sessionId);
-
-  await sb.from("licenses_free_issues").insert({
-    license_id: null,
-    key_mask: inserted.redeem_key,
-    created_at: params.nowIso,
-    expires_at: params.expiresAt,
-    session_id: params.sessionId,
-    ip_hash: params.ipHash,
-    fingerprint_hash: params.fpHash,
-    app_code: appCode,
-    key_signature: "FD",
-    server_redeem_key_id: inserted.id,
-  });
-
-  return {
-    key: inserted.redeem_key,
-    expires_at: params.expiresAt,
-    app_code: appCode,
-    key_signature: "FD",
-    reward_mode: rewardMode,
-    package_code: packageCode,
-    credit_code: creditCode,
-    wallet_kind: walletKind,
-    server_redeem_key_id: inserted.id,
-  };
-}
-
 function isFreeSchemaMissing(err: unknown) {
   const txt = extractErrorMessage(err).toLowerCase();
   return txt.includes("does not exist") || txt.includes("undefined column") || txt.includes("could not find");
@@ -245,6 +57,64 @@ const BodySchema = z.object({
   key_type_code: z.string().min(2).max(64),
   dry_run: z.boolean().optional().default(false),
 });
+
+
+
+async function loadFindDumpsRewardPackage(sb: any, packageCode: string) {
+  const { data, error } = await sb
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("app_code", "find-dumps")
+    .eq("package_code", packageCode)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+async function mintFindDumpsRuntimeKey(sb: any, sessionId: string, traceId: string, keyType: any, nowIso: string) {
+  const selectionMode = String((keyType as any).free_selection_mode ?? "").trim().toLowerCase();
+  const packageCode = selectionMode === "credit"
+    ? String((keyType as any).default_credit_code ?? "credit-normal").trim() || "credit-normal"
+    : String((keyType as any).default_package_code ?? "classic").trim() || "classic";
+  const rewardPkg = await loadFindDumpsRewardPackage(sb, packageCode);
+  if (!rewardPkg || rewardPkg.enabled === false) {
+    throw new Error(`FIND_DUMPS_REWARD_PACKAGE_NOT_FOUND:${packageCode}`);
+  }
+  const redeemKey = makeKey();
+  const durationSeconds = Number((keyType as any).duration_seconds ?? 0) || 0;
+  const expiresAt = durationSeconds > 0 ? new Date(Date.now() + durationSeconds * 1000).toISOString() : null;
+  const rewardMode = String((rewardPkg as any).reward_mode ?? (selectionMode === "credit" ? "soft_credit" : "plan")).trim() || "plan";
+  const { data, error } = await sb
+    .from("server_app_redeem_keys")
+    .insert({
+      app_code: "find-dumps",
+      reward_package_id: rewardPkg.id,
+      redeem_key: redeemKey,
+      title: String((rewardPkg as any).title ?? (keyType as any).label ?? "Find Dumps key"),
+      description: String((rewardPkg as any).description ?? "Admin test key for Find Dumps"),
+      enabled: true,
+      starts_at: nowIso,
+      expires_at: expiresAt,
+      max_redemptions: 1,
+      redeemed_count: 0,
+      reward_mode: rewardMode,
+      plan_code: (rewardPkg as any).plan_code ?? null,
+      soft_credit_amount: Number((rewardPkg as any).soft_credit_amount ?? 0) || 0,
+      premium_credit_amount: Number((rewardPkg as any).premium_credit_amount ?? 0) || 0,
+      entitlement_days: Number((rewardPkg as any).entitlement_days ?? 0) || 0,
+      entitlement_seconds: Number((rewardPkg as any).entitlement_seconds ?? durationSeconds) || 0,
+      device_limit_override: (rewardPkg as any).device_limit_override ?? null,
+      account_limit_override: (rewardPkg as any).account_limit_override ?? null,
+      trace_id: traceId,
+      source_free_session_id: sessionId,
+      metadata: { source: "admin-test", free_session_id: sessionId, trace_id: traceId, key_type_code: keyType.code, package_code: packageCode },
+      notes: `ADMIN_TEST_FIND_DUMPS:${String(keyType.code || '').toUpperCase()}`
+    })
+    .select("id,redeem_key")
+    .single();
+  if (error || !data?.id) throw error ?? new Error("SERVER_REDEEM_KEY_INSERT_FAILED");
+  return { id: String(data.id), redeem_key: String(data.redeem_key), expires_at: expiresAt };
+}
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
@@ -361,31 +231,13 @@ Deno.serve(async (req) => {
   }
 
   const expiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
-  const normalizedAppCode = String((keyType as any)?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire";
-
-  if (normalizedAppCode === "find-dumps") {
-    try {
-      const issued = await issueFindDumpsAdminRedeemKey(sb, {
-        keyType,
-        sessionId,
-        traceId,
-        nowIso: now.toISOString(),
-        expiresAt,
-        ipHash,
-        fpHash,
-      });
-      return json({ ok: true, message: "ADMIN_TEST_OK", key: issued.key, expires_at: issued.expires_at, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, app_code: issued.app_code, key_signature: issued.key_signature, reward_mode: issued.reward_mode, package_code: issued.package_code, credit_code: issued.credit_code, wallet_kind: issued.wallet_kind, server_redeem_key_id: issued.server_redeem_key_id });
-    } catch (error) {
-      await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: extractErrorMessage(error) || "ADMIN_TEST_INSERT_FAILED" }).eq("session_id", sessionId);
-      return json({ ok: false, message: "SERVER_REDEEM_KEY_INSERT_FAILED", detail: extractErrorMessage(error), session_id: sessionId }, 500);
-    }
-  }
-
   let key = "";
   let licenseId = "";
   let lastLicenseInsertError = "";
   for (let attempt = 0; attempt < 12; attempt++) {
     key = makeKey();
+    // licenses table schema in this project is minimal: (id, key, created_at, expires_at, max_devices, is_active, note)
+    // Keep insert payload compatible to avoid ADMIN_TEST_INSERT_FAILED due to missing columns.
     const insLic = await sb
       .from("licenses")
       .insert({

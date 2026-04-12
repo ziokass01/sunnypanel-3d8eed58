@@ -36,9 +36,6 @@ export type RuntimeFeature = {
   unlock_feature_code?: string | null;
   unlock_soft_cost?: number;
   unlock_premium_cost?: number;
-  usage_count_7d?: number;
-  is_hot?: boolean;
-  is_new?: boolean;
 };
 
 export type RuntimeAppState = {
@@ -840,39 +837,6 @@ export async function logRuntimeEvent(payload: Record<string, unknown>) {
   if (error) throw error;
 }
 
-
-
-async function getFeatureUsageSummary7d(appCode: string) {
-  const admin = createAdminClient();
-  const sinceIso = daysAgoIso(7);
-  const { data, error } = await admin
-    .from("server_app_runtime_events")
-    .select("feature_code,event_type,ok,created_at")
-    .eq("app_code", appCode)
-    .eq("ok", true)
-    .gte("created_at", sinceIso)
-    .in("event_type", ["consume", "unlock_feature"]);
-  if (error) throw error;
-  const counts = new Map<string, number>();
-  for (const row of data ?? []) {
-    const code = asString((row as any)?.feature_code).toLowerCase();
-    if (!code) continue;
-    counts.set(code, Number(counts.get(code) ?? 0) + 1);
-  }
-  const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-  const hotSet = new Set<string>();
-  const minHotCount = ranked.length > 0 ? Math.max(5, ranked[Math.min(2, ranked.length - 1)][1]) : 999999;
-  for (const [code, count] of ranked) {
-    if (count >= minHotCount) hotSet.add(code);
-  }
-  return { counts, hotSet };
-}
-
-function isServerMarkedNew(feature: RuntimeFeature) {
-  const badge = asString(feature?.badge_label).toLowerCase();
-  return badge === "new" || badge.startsWith("new ") || badge.startsWith("new-") || badge.includes(" mới") || badge.includes("mới");
-}
-
 function getPlanRank(planCode: string) {
   const normalized = asString(planCode, "classic").toLowerCase();
   switch (normalized) {
@@ -1112,37 +1076,6 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
-    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
-    device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
-    account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
-  };
-}
-
-async function getRewardPackageByCode(appCode: string, packageCode: string): Promise<RuntimeRewardPackage | null> {
-  const normalized = asString(packageCode).trim().toLowerCase();
-  if (!normalized) return null;
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_reward_packages")
-    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
-    .eq("app_code", appCode)
-    .ilike("package_code", normalized)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
-  return {
-    id: asString((data as any).id),
-    package_code: asString((data as any).package_code),
-    title: asString((data as any).title),
-    description: asNullableString((data as any).description),
-    enabled: Boolean((data as any).enabled ?? true),
-    reward_mode: asString((data as any).reward_mode, "plan"),
-    plan_code: asNullableString((data as any).plan_code),
-    soft_credit_amount: asNumber((data as any).soft_credit_amount),
-    premium_credit_amount: asNumber((data as any).premium_credit_amount),
-    entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
-    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
   };
@@ -1351,7 +1284,7 @@ async function upsertRuntimeEntitlement(params: {
   existing: RuntimeEntitlement | null;
   reward: RuntimeResolvedReward;
   planDefaults: RuntimePlan | null;
-  redeemKeyId: string | null;
+  redeemKeyId: string;
   rewardPackageId: string | null;
   settings: RuntimeSettings;
 }) {
@@ -1454,7 +1387,7 @@ async function applyWalletTopup(params: {
   accountRef: string;
   deviceId: string;
   entitlementId: string | null;
-  redeemKeyId: string | null;
+  redeemKeyId: string;
   rewardPackageId: string | null;
   softAmount: number;
   premiumAmount: number;
@@ -1566,8 +1499,6 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     last_premium_reset_at: asNullableString(walletRow?.last_premium_reset_at),
   };
 
-  const usageSummary = await getFeatureUsageSummary7d(appCode);
-
   const unlockStates = session?.account_ref
     ? await getLatestFeatureUnlockStates(appCode, asString(session.account_ref), asNullableString(session.device_id))
     : [];
@@ -1579,17 +1510,11 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
     const guestVisible = session?.account_ref ? true : feature.visible_to_guest;
     const unlockMeta = resolveFeatureUnlockMeta(feature.feature_code, currentPlan, activePlan, unlockRules, unlockMap);
-    const usageCount7d = Number(usageSummary.counts.get(asString(feature.feature_code).toLowerCase()) ?? 0);
-    const isNew = isServerMarkedNew(feature);
-    const isHot = !isNew && usageSummary.hotSet.has(asString(feature.feature_code).toLowerCase());
     return {
       ...feature,
       allowed: guestVisible && currentPlanRank >= minRank,
       effective_soft_cost: round2(feature.soft_cost * softMultiplier),
       effective_premium_cost: round2(feature.premium_cost * premiumMultiplier),
-      usage_count_7d: usageCount7d,
-      is_hot: isHot,
-      is_new: isNew,
       ...unlockMeta,
     };
   });
@@ -1697,53 +1622,25 @@ export async function redeemRuntimeKey(params: {
   if (!deviceId) throw Object.assign(new Error("MISSING_DEVICE_ID"), { status: 400, code: "MISSING_DEVICE_ID" });
 
   const { settings, planMap } = await getRuntimeContext(appCode);
-  let keyRow = await getRedeemKeyByValue(appCode, redeemKey);
-  let rewardPackage = keyRow ? await getRewardPackageById(keyRow.reward_package_id) : null;
-  let reward: RuntimeResolvedReward | null = null;
-  let redeemKeyId: string | null = keyRow?.id ?? null;
-
-  if (keyRow) {
-    if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
-    if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });
-    if (keyRow.starts_at && new Date(keyRow.starts_at).getTime() > Date.now()) {
-      throw Object.assign(new Error("REDEEM_KEY_NOT_STARTED"), { status: 409, code: "REDEEM_KEY_NOT_STARTED" });
-    }
-    if (keyRow.expires_at && !isFutureIso(keyRow.expires_at)) {
-      throw Object.assign(new Error("REDEEM_KEY_EXPIRED"), { status: 409, code: "REDEEM_KEY_EXPIRED" });
-    }
-    if (keyRow.redeemed_count >= keyRow.max_redemptions) {
-      throw Object.assign(new Error("REDEEM_KEY_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_LIMIT_REACHED" });
-    }
-    if (keyRow.reward_package_id && (!rewardPackage || !rewardPackage.enabled)) {
-      throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
-    }
-    reward = resolveRewardPackage(keyRow, rewardPackage);
-  } else if (appCode === "find-dumps") {
-    rewardPackage = await getRewardPackageByCode(appCode, redeemKey);
-    if (rewardPackage && !rewardPackage.enabled) {
-      throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
-    }
-    if (rewardPackage) {
-      reward = {
-        reward_mode: asString(rewardPackage.reward_mode, "mixed"),
-        package_code: rewardPackage.package_code,
-        title: rewardPackage.title,
-        plan_code: rewardPackage.plan_code,
-        soft_credit_amount: round2(rewardPackage.soft_credit_amount),
-        premium_credit_amount: round2(rewardPackage.premium_credit_amount),
-        entitlement_days: Math.max(0, rewardPackage.entitlement_days),
-        entitlement_seconds: Math.max(0, rewardPackage.entitlement_seconds),
-        claim_bound_expires_at: null,
-        device_limit_override: rewardPackage.device_limit_override,
-        account_limit_override: rewardPackage.account_limit_override,
-      };
-    }
+  const keyRow = await getRedeemKeyByValue(appCode, redeemKey);
+  if (!keyRow) throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
+  if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
+  if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });
+  if (keyRow.starts_at && new Date(keyRow.starts_at).getTime() > Date.now()) {
+    throw Object.assign(new Error("REDEEM_KEY_NOT_STARTED"), { status: 409, code: "REDEEM_KEY_NOT_STARTED" });
+  }
+  if (keyRow.expires_at && !isFutureIso(keyRow.expires_at)) {
+    throw Object.assign(new Error("REDEEM_KEY_EXPIRED"), { status: 409, code: "REDEEM_KEY_EXPIRED" });
+  }
+  if (keyRow.redeemed_count >= keyRow.max_redemptions) {
+    throw Object.assign(new Error("REDEEM_KEY_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_LIMIT_REACHED" });
   }
 
-  if (!reward) {
-    throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
+  const rewardPackage = await getRewardPackageById(keyRow.reward_package_id);
+  if (keyRow.reward_package_id && (!rewardPackage || !rewardPackage.enabled)) {
+    throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
   }
-
+  const reward = resolveRewardPackage(keyRow, rewardPackage);
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
 
   const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
@@ -1756,9 +1653,7 @@ export async function redeemRuntimeKey(params: {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
   }
 
-  if (keyRow) {
-    await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
-  }
+  await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
 
   const entitlement = await upsertRuntimeEntitlement({
     appCode,
@@ -1767,7 +1662,7 @@ export async function redeemRuntimeKey(params: {
     existing: existingEntitlement,
     reward,
     planDefaults,
-    redeemKeyId,
+    redeemKeyId: keyRow.id,
     rewardPackageId: rewardPackage?.id ?? null,
     settings,
   });
@@ -1780,7 +1675,7 @@ export async function redeemRuntimeKey(params: {
     accountRef,
     deviceId,
     entitlementId: entitlement?.id ?? null,
-    redeemKeyId,
+    redeemKeyId: keyRow.id,
     rewardPackageId: rewardPackage?.id ?? null,
     softAmount: reward.soft_credit_amount,
     premiumAmount: reward.premium_credit_amount,
@@ -1798,7 +1693,7 @@ export async function redeemRuntimeKey(params: {
     accountRef,
     deviceId,
     entitlementId: entitlement?.id ?? null,
-    redeemKeyId,
+    redeemKeyId: keyRow.id,
     clientVersion: params.clientVersion,
     ipHash: params.ipHash,
   });
@@ -1809,8 +1704,6 @@ export async function redeemRuntimeKey(params: {
       last_device_id: deviceId,
       last_account_ref: accountRef,
       last_session_started_at: created.session.started_at,
-      last_redeem_input: redeemKey,
-      last_redeem_mode: keyRow ? "redeem_key" : (rewardPackage ? "package_code" : "unknown"),
     },
   });
 
@@ -1830,7 +1723,6 @@ export async function redeemRuntimeKey(params: {
     },
     wallet,
     state,
-    redeem_mode: keyRow ? "redeem_key" : (rewardPackage ? "package_code" : "unknown"),
   };
 }
 
@@ -1883,7 +1775,7 @@ export async function consumeRuntimeFeature(params: {
     ? round2(asNumber(params.overrideCost?.premiumCost, 0) * quantity)
     : round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1) * quantity);
 
-  let chargeKind: "none" | "soft" | "premium" | "mixed" = "none";
+  let chargeKind: "none" | "soft" | "premium" = "none";
   let softDelta = 0;
   let premiumDelta = 0;
 
@@ -1893,47 +1785,14 @@ export async function consumeRuntimeFeature(params: {
     const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
     const softCanGoDebt = Boolean(settings.wallet_rules.soft_allow_negative) && effectiveSoftCost > 0;
     const premiumCanGoDebt = Boolean(settings.wallet_rules.premium_allow_negative) && effectivePremiumCost > 0;
-    const preferredWallet = requestedWalletKind === "soft"
-      ? "soft"
-      : requestedWalletKind === "premium"
-        ? "premium"
-        : priority === "premium_first"
-          ? "premium"
-          : "soft";
 
-    const tryCompensatedCharge = (prefer: "soft" | "premium") => {
-      if (!(effectiveSoftCost > 0 && effectivePremiumCost > 0)) return false;
-      if (prefer === "soft") {
-        const softPaid = round2(Math.max(0, Math.min(wallet.soft_balance, effectiveSoftCost)));
-        const remainingRatio = effectiveSoftCost <= 0 ? 0 : Math.max(0, Math.min(1, (effectiveSoftCost - softPaid) / effectiveSoftCost));
-        const premiumNeeded = round2(effectivePremiumCost * remainingRatio);
-        if (softPaid <= 0 || remainingRatio <= 0) return false;
-        if (wallet.premium_balance >= premiumNeeded && premiumNeeded > 0) {
-          softDelta = round2(-softPaid);
-          premiumDelta = round2(-premiumNeeded);
-          chargeKind = "mixed";
-          return true;
-        }
-      } else {
-        const premiumPaid = round2(Math.max(0, Math.min(wallet.premium_balance, effectivePremiumCost)));
-        const remainingRatio = effectivePremiumCost <= 0 ? 0 : Math.max(0, Math.min(1, (effectivePremiumCost - premiumPaid) / effectivePremiumCost));
-        const softNeeded = round2(effectiveSoftCost * remainingRatio);
-        if (premiumPaid <= 0 || remainingRatio <= 0) return false;
-        if (wallet.soft_balance >= softNeeded && softNeeded > 0) {
-          premiumDelta = round2(-premiumPaid);
-          softDelta = round2(-softNeeded);
-          chargeKind = "mixed";
-          return true;
-        }
-      }
-      return false;
-    };
-
-    if (preferredWallet === "premium") {
+    if (requestedWalletKind === "soft") {
+      chargeKind = "soft";
+    } else if (requestedWalletKind === "premium") {
+      chargeKind = "premium";
+    } else if (priority === "premium_first") {
       if (premiumAvailable || premiumCanGoDebt) {
         chargeKind = "premium";
-      } else if (tryCompensatedCharge("premium")) {
-        chargeKind = "mixed";
       } else if (softAvailable || softCanGoDebt) {
         chargeKind = "soft";
       } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
@@ -1944,8 +1803,6 @@ export async function consumeRuntimeFeature(params: {
     } else {
       if (softAvailable || softCanGoDebt) {
         chargeKind = "soft";
-      } else if (tryCompensatedCharge("soft")) {
-        chargeKind = "mixed";
       } else if (premiumAvailable || premiumCanGoDebt) {
         chargeKind = "premium";
       } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
@@ -1963,7 +1820,7 @@ export async function consumeRuntimeFeature(params: {
         throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
       }
       premiumDelta = round2(-effectivePremiumCost);
-    } else if (chargeKind == "soft") {
+    } else {
       if (effectiveSoftCost <= 0) {
         throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
       }
@@ -1972,17 +1829,13 @@ export async function consumeRuntimeFeature(params: {
       }
       softDelta = round2(-effectiveSoftCost);
       chargeKind = "soft";
-    } else if (chargeKind === "mixed") {
-      if (softDelta == 0 && premiumDelta == 0) {
-        throw Object.assign(new Error("MIXED_COST_NOT_AVAILABLE"), { status: 409, code: "MIXED_COST_NOT_AVAILABLE" });
-      }
     }
   }
 
   let nextSoft = wallet.soft_balance;
   let nextPremium = wallet.premium_balance;
-  if (chargeKind === "soft" || chargeKind === "mixed") nextSoft = round2(wallet.soft_balance + softDelta);
-  if (chargeKind === "premium" || chargeKind === "mixed") nextPremium = round2(wallet.premium_balance + premiumDelta);
+  if (chargeKind === "soft") nextSoft = round2(wallet.soft_balance + softDelta);
+  if (chargeKind === "premium") nextPremium = round2(wallet.premium_balance + premiumDelta);
 
   if (chargeKind !== "none") {
     const admin = createAdminClient();
@@ -2029,7 +1882,6 @@ export async function consumeRuntimeFeature(params: {
       plan_code: currentPlanCode,
       quantity,
       charge_unit: feature.charge_unit,
-      charge_strategy: chargeKind,
     },
   });
 
