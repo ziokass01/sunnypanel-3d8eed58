@@ -36,6 +36,9 @@ export type RuntimeFeature = {
   unlock_feature_code?: string | null;
   unlock_soft_cost?: number;
   unlock_premium_cost?: number;
+  usage_count_7d?: number;
+  is_hot?: boolean;
+  is_new?: boolean;
 };
 
 export type RuntimeAppState = {
@@ -115,50 +118,6 @@ type RuntimeControls = {
   session_max_age_minutes: number;
   event_retention_days: number;
 };
-
-const DEFAULT_FIND_DUMPS_RUNTIME_PLANS: RuntimePlan[] = [
-  { plan_code: "classic", label: "Classic", daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 1, account_limit: 1 },
-  { plan_code: "go", label: "Go", daily_soft_credit: 3, daily_premium_credit: 0, soft_cost_multiplier: 0.95, premium_cost_multiplier: 0.8, device_limit: 1, account_limit: 1 },
-  { plan_code: "plus", label: "Plus", daily_soft_credit: 5, daily_premium_credit: 1, soft_cost_multiplier: 0.8, premium_cost_multiplier: 0.6, device_limit: 2, account_limit: 1 },
-  { plan_code: "pro", label: "Pro", daily_soft_credit: 8, daily_premium_credit: 2, soft_cost_multiplier: 0.65, premium_cost_multiplier: 0.45, device_limit: 3, account_limit: 1 },
-];
-
-const DEFAULT_FIND_DUMPS_RUNTIME_FEATURES: RuntimeFeature[] = [
-  { feature_code: "search_basic", title: "Search cơ bản", description: "Tìm class, method, offset cơ bản", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "search", group_key: "find", icon_key: "search", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "batch_search", title: "Batch search", description: "Tìm nhiều dòng trong 1 file truy vấn", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 20, category: "search", group_key: "batch", icon_key: "batch", badge_label: "Thường", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
-  { feature_code: "export_plain", title: "Export text", description: "Xuất kết quả hiện tại ra file text thường", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 25, category: "export", group_key: "result", icon_key: "export", badge_label: "Text", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "export_json", title: "Export JSON", description: "Xuất kết quả dạng JSON", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 30, category: "export", group_key: "result", icon_key: "json", badge_label: "JSON", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "game_profiles", title: "Game Profiles", description: "Lưu, import, export và quét nhiều offset theo profile", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 45, category: "tools", group_key: "profile", icon_key: "profile", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "runtime_redeem", title: "Nhập mã / kích hoạt", description: "Mở Runtime Center để nhập mã quà và đồng bộ session", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 47, category: "runtime", group_key: "redeem", icon_key: "gift", badge_label: "Tiện ích", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "convert_image", title: "Convert image", description: "Đổi ảnh sang header .h", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 50, category: "tools", group_key: "image", icon_key: "image", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "encode_decode", title: "Encode / Decode", description: "Bộ codec kiểu toolbox", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 60, category: "tools", group_key: "codec", icon_key: "codec", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "hex_edit", title: "Hex edit", description: "Mở file và sửa hex rồi lưu", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 70, category: "tools", group_key: "hex", icon_key: "hex", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "binary_scan_quick", title: "Binary scan quick", description: "Quét nhanh ELF/.so để lấy header, section, symbol và string cơ bản", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 80, category: "binary", group_key: "scan", icon_key: "binary", badge_label: "Binary", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "binary_scan_full", title: "Binary scan full", description: "Quét sâu Binary Workspace và dựng function intelligence", min_plan: "go", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 90, category: "binary", group_key: "scan", icon_key: "binary", badge_label: "Binary", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "ida_export_import", title: "Import IDA / artifact", description: "Nạp artifact từ IDA, r2 hoặc disassembly ngoài", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 100, category: "binary", group_key: "artifact", icon_key: "import", badge_label: "Artifact", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "ida_workspace_save", title: "Save workspace", description: "Lưu snapshot workspace để mở lại lần sau", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 110, category: "binary", group_key: "workspace", icon_key: "save", badge_label: "Workspace", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "ida_workspace_export", title: "Export workspace", description: "Xuất workspace hoặc bundle ra file ngoài", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 120, category: "binary", group_key: "workspace", icon_key: "export", badge_label: "Export", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "ida_workspace_restore", title: "Restore workspace", description: "Khôi phục workspace đã lưu từ storage hoặc import file", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 130, category: "binary", group_key: "workspace", icon_key: "restore", badge_label: "Workspace", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "workspace_batch", title: "Workspace batch", description: "Chạy batch query trên Binary Workspace", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 140, category: "binary", group_key: "workspace", icon_key: "batch", badge_label: "Batch", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
-  { feature_code: "workspace_note", title: "Workspace note", description: "Gắn note hoặc tag cho entry trong workspace", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 150, category: "binary", group_key: "workspace", icon_key: "note", badge_label: "Workspace", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "workspace_export_result", title: "Workspace export result", description: "Xuất current view hoặc current result từ Binary Workspace", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 160, category: "binary", group_key: "workspace", icon_key: "export", badge_label: "Export", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "workspace_browser", title: "Workspace browser", description: "Mở browser/xref/pseudo trong Binary Workspace", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 170, category: "binary", group_key: "workspace", icon_key: "browser", badge_label: "Browser", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "workspace_diff", title: "Workspace diff", description: "So sánh 2 workspace hoặc 2 phiên dump", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 180, category: "binary", group_key: "workspace", icon_key: "diff", badge_label: "Diff", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "profile_search", title: "Profile search", description: "Tìm profile, trạng thái entitlement và dữ liệu mở rộng theo account", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 185, category: "search", group_key: "profile", icon_key: "search", badge_label: "Profile", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "diff_two_dumps", title: "Diff 2 dump", description: "So sánh dump cũ và dump mới theo phase 2 của app", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 190, category: "migration", group_key: "diff", icon_key: "diff", badge_label: "Phase 2", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "query_remap", title: "Query remap", description: "Remap query từ dump cũ sang dump mới theo phase 2 của app", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 200, category: "migration", group_key: "remap", icon_key: "remap", badge_label: "Phase 2", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "batch_migrate", title: "Batch migrate", description: "Batch migrate nhiều query và anchor", min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 210, category: "migration", group_key: "batch", icon_key: "batch", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "batch_compare", title: "Batch compare", description: "Compare nhiều query hoặc nhiều bản dump", min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 220, category: "migration", group_key: "batch", icon_key: "batch", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "batch_validate", title: "Batch validate", description: "Validate anchor và rule sau migrate", min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 230, category: "migration", group_key: "batch", icon_key: "batch", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-  { feature_code: "export_report", title: "Export report", description: "Xuất báo cáo migration/diff ra ngoài", min_plan: "pro", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 240, category: "migration", group_key: "export", icon_key: "report", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-];
-
-const DEFAULT_FIND_DUMPS_UNLOCK_RULES: RuntimeFeatureUnlockRule[] = [
-  { access_code: "binary_workspace", title: "Binary Workspace", description: "Mở quyền vào Binary Workspace để dùng scan, browser, diff, save/restore và export sâu.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 2, premium_unlock_cost: 1, free_for_plans: ["pro"], guarded_feature_codes: ["binary_scan_quick","binary_scan_full","ida_export_import","ida_workspace_save","ida_workspace_export","ida_workspace_restore","workspace_batch","workspace_note","workspace_export_result","workspace_browser","workspace_diff"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 1" },
-  { access_code: "batch_tools", title: "Batch Search & diện rộng", description: "Mở quyền cho batch search, profile search và background queue.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 1, premium_unlock_cost: 1, free_for_plans: ["plus","pro"], guarded_feature_codes: ["batch_search","background_queue","profile_search"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 1" },
-  { access_code: "export_tools", title: "Export ra ngoài", description: "Mở quyền export TXT/JSON/workspace/result/report.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 1, premium_unlock_cost: 1, free_for_plans: ["go","plus","pro"], guarded_feature_codes: ["export_plain","export_text","export_json","workspace_export_result","ida_workspace_export","export_report"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 1-2" },
-  { access_code: "migration_tools", title: "Migration tools", description: "Mở quyền Diff, Remap, Migrate, Compare và Validate theo phase 2.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 2, premium_unlock_cost: 1, free_for_plans: ["pro"], guarded_feature_codes: ["diff_two_dumps","query_remap","batch_migrate","batch_compare","batch_validate","export_report"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 2" },
-];
 
 type RuntimeEntitlement = {
   id: string;
@@ -501,10 +460,9 @@ async function getPlans(appCode: string): Promise<RuntimePlan[]> {
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (isMissingRelationError(error, "server_app_plans")) return appCode === "find-dumps" ? DEFAULT_FIND_DUMPS_RUNTIME_PLANS : [];
+    if (isMissingRelationError(error, "server_app_plans")) return [];
     throw error;
   }
-  if (!(data ?? []).length && appCode === "find-dumps") return DEFAULT_FIND_DUMPS_RUNTIME_PLANS;
   return (data ?? []).map((row: any) => ({
     plan_code: asString(row.plan_code),
     label: asString(row.label),
@@ -527,10 +485,9 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (isMissingRelationError(error, "server_app_features")) return appCode === "find-dumps" ? DEFAULT_FIND_DUMPS_RUNTIME_FEATURES : [];
+    if (isMissingRelationError(error, "server_app_features")) return [];
     throw error;
   }
-  if (!(data ?? []).length && appCode === "find-dumps") return DEFAULT_FIND_DUMPS_RUNTIME_FEATURES;
   return (data ?? []).map((row: any) => ({
     feature_code: asString(row.feature_code),
     title: asString(row.title),
@@ -562,10 +519,9 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (isMissingRelationError(error, "server_app_feature_unlock_rules")) return appCode === "find-dumps" ? DEFAULT_FIND_DUMPS_UNLOCK_RULES : [];
+    if (isMissingRelationError(error, "server_app_feature_unlock_rules")) return [];
     throw error;
   }
-  if (!(data ?? []).length && appCode === "find-dumps") return DEFAULT_FIND_DUMPS_UNLOCK_RULES;
   return (data ?? []).map((row: any) => ({
     access_code: asString(row.access_code),
     title: asString(row.title, asString(row.access_code)),
@@ -884,6 +840,39 @@ export async function logRuntimeEvent(payload: Record<string, unknown>) {
   if (error) throw error;
 }
 
+
+
+async function getFeatureUsageSummary7d(appCode: string) {
+  const admin = createAdminClient();
+  const sinceIso = daysAgoIso(7);
+  const { data, error } = await admin
+    .from("server_app_runtime_events")
+    .select("feature_code,event_type,ok,created_at")
+    .eq("app_code", appCode)
+    .eq("ok", true)
+    .gte("created_at", sinceIso)
+    .in("event_type", ["consume", "unlock_feature"]);
+  if (error) throw error;
+  const counts = new Map<string, number>();
+  for (const row of data ?? []) {
+    const code = asString((row as any)?.feature_code).toLowerCase();
+    if (!code) continue;
+    counts.set(code, Number(counts.get(code) ?? 0) + 1);
+  }
+  const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  const hotSet = new Set<string>();
+  const minHotCount = ranked.length > 0 ? Math.max(5, ranked[Math.min(2, ranked.length - 1)][1]) : 999999;
+  for (const [code, count] of ranked) {
+    if (count >= minHotCount) hotSet.add(code);
+  }
+  return { counts, hotSet };
+}
+
+function isServerMarkedNew(feature: RuntimeFeature) {
+  const badge = asString(feature?.badge_label).toLowerCase();
+  return badge === "new" || badge.startsWith("new ") || badge.startsWith("new-") || badge.includes(" mới") || badge.includes("mới");
+}
+
 function getPlanRank(planCode: string) {
   const normalized = asString(planCode, "classic").toLowerCase();
   switch (normalized) {
@@ -1123,6 +1112,37 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
+    device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
+    account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
+  };
+}
+
+async function getRewardPackageByCode(appCode: string, packageCode: string): Promise<RuntimeRewardPackage | null> {
+  const normalized = asString(packageCode).trim().toLowerCase();
+  if (!normalized) return null;
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("app_code", appCode)
+    .ilike("package_code", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: asString((data as any).id),
+    package_code: asString((data as any).package_code),
+    title: asString((data as any).title),
+    description: asNullableString((data as any).description),
+    enabled: Boolean((data as any).enabled ?? true),
+    reward_mode: asString((data as any).reward_mode, "plan"),
+    plan_code: asNullableString((data as any).plan_code),
+    soft_credit_amount: asNumber((data as any).soft_credit_amount),
+    premium_credit_amount: asNumber((data as any).premium_credit_amount),
+    entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
   };
@@ -1331,7 +1351,7 @@ async function upsertRuntimeEntitlement(params: {
   existing: RuntimeEntitlement | null;
   reward: RuntimeResolvedReward;
   planDefaults: RuntimePlan | null;
-  redeemKeyId: string;
+  redeemKeyId: string | null;
   rewardPackageId: string | null;
   settings: RuntimeSettings;
 }) {
@@ -1434,7 +1454,7 @@ async function applyWalletTopup(params: {
   accountRef: string;
   deviceId: string;
   entitlementId: string | null;
-  redeemKeyId: string;
+  redeemKeyId: string | null;
   rewardPackageId: string | null;
   softAmount: number;
   premiumAmount: number;
@@ -1546,6 +1566,8 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     last_premium_reset_at: asNullableString(walletRow?.last_premium_reset_at),
   };
 
+  const usageSummary = await getFeatureUsageSummary7d(appCode);
+
   const unlockStates = session?.account_ref
     ? await getLatestFeatureUnlockStates(appCode, asString(session.account_ref), asNullableString(session.device_id))
     : [];
@@ -1557,11 +1579,17 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
     const guestVisible = session?.account_ref ? true : feature.visible_to_guest;
     const unlockMeta = resolveFeatureUnlockMeta(feature.feature_code, currentPlan, activePlan, unlockRules, unlockMap);
+    const usageCount7d = Number(usageSummary.counts.get(asString(feature.feature_code).toLowerCase()) ?? 0);
+    const isNew = isServerMarkedNew(feature);
+    const isHot = !isNew && usageSummary.hotSet.has(asString(feature.feature_code).toLowerCase());
     return {
       ...feature,
       allowed: guestVisible && currentPlanRank >= minRank,
       effective_soft_cost: round2(feature.soft_cost * softMultiplier),
       effective_premium_cost: round2(feature.premium_cost * premiumMultiplier),
+      usage_count_7d: usageCount7d,
+      is_hot: isHot,
+      is_new: isNew,
       ...unlockMeta,
     };
   });
@@ -1669,25 +1697,53 @@ export async function redeemRuntimeKey(params: {
   if (!deviceId) throw Object.assign(new Error("MISSING_DEVICE_ID"), { status: 400, code: "MISSING_DEVICE_ID" });
 
   const { settings, planMap } = await getRuntimeContext(appCode);
-  const keyRow = await getRedeemKeyByValue(appCode, redeemKey);
-  if (!keyRow) throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
-  if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
-  if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });
-  if (keyRow.starts_at && new Date(keyRow.starts_at).getTime() > Date.now()) {
-    throw Object.assign(new Error("REDEEM_KEY_NOT_STARTED"), { status: 409, code: "REDEEM_KEY_NOT_STARTED" });
-  }
-  if (keyRow.expires_at && !isFutureIso(keyRow.expires_at)) {
-    throw Object.assign(new Error("REDEEM_KEY_EXPIRED"), { status: 409, code: "REDEEM_KEY_EXPIRED" });
-  }
-  if (keyRow.redeemed_count >= keyRow.max_redemptions) {
-    throw Object.assign(new Error("REDEEM_KEY_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_LIMIT_REACHED" });
+  let keyRow = await getRedeemKeyByValue(appCode, redeemKey);
+  let rewardPackage = keyRow ? await getRewardPackageById(keyRow.reward_package_id) : null;
+  let reward: RuntimeResolvedReward | null = null;
+  let redeemKeyId: string | null = keyRow?.id ?? null;
+
+  if (keyRow) {
+    if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
+    if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });
+    if (keyRow.starts_at && new Date(keyRow.starts_at).getTime() > Date.now()) {
+      throw Object.assign(new Error("REDEEM_KEY_NOT_STARTED"), { status: 409, code: "REDEEM_KEY_NOT_STARTED" });
+    }
+    if (keyRow.expires_at && !isFutureIso(keyRow.expires_at)) {
+      throw Object.assign(new Error("REDEEM_KEY_EXPIRED"), { status: 409, code: "REDEEM_KEY_EXPIRED" });
+    }
+    if (keyRow.redeemed_count >= keyRow.max_redemptions) {
+      throw Object.assign(new Error("REDEEM_KEY_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_LIMIT_REACHED" });
+    }
+    if (keyRow.reward_package_id && (!rewardPackage || !rewardPackage.enabled)) {
+      throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
+    }
+    reward = resolveRewardPackage(keyRow, rewardPackage);
+  } else if (appCode === "find-dumps") {
+    rewardPackage = await getRewardPackageByCode(appCode, redeemKey);
+    if (rewardPackage && !rewardPackage.enabled) {
+      throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
+    }
+    if (rewardPackage) {
+      reward = {
+        reward_mode: asString(rewardPackage.reward_mode, "mixed"),
+        package_code: rewardPackage.package_code,
+        title: rewardPackage.title,
+        plan_code: rewardPackage.plan_code,
+        soft_credit_amount: round2(rewardPackage.soft_credit_amount),
+        premium_credit_amount: round2(rewardPackage.premium_credit_amount),
+        entitlement_days: Math.max(0, rewardPackage.entitlement_days),
+        entitlement_seconds: Math.max(0, rewardPackage.entitlement_seconds),
+        claim_bound_expires_at: null,
+        device_limit_override: rewardPackage.device_limit_override,
+        account_limit_override: rewardPackage.account_limit_override,
+      };
+    }
   }
 
-  const rewardPackage = await getRewardPackageById(keyRow.reward_package_id);
-  if (keyRow.reward_package_id && (!rewardPackage || !rewardPackage.enabled)) {
-    throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
+  if (!reward) {
+    throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
   }
-  const reward = resolveRewardPackage(keyRow, rewardPackage);
+
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
 
   const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
@@ -1700,7 +1756,9 @@ export async function redeemRuntimeKey(params: {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
   }
 
-  await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  if (keyRow) {
+    await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  }
 
   const entitlement = await upsertRuntimeEntitlement({
     appCode,
@@ -1709,7 +1767,7 @@ export async function redeemRuntimeKey(params: {
     existing: existingEntitlement,
     reward,
     planDefaults,
-    redeemKeyId: keyRow.id,
+    redeemKeyId,
     rewardPackageId: rewardPackage?.id ?? null,
     settings,
   });
@@ -1722,7 +1780,7 @@ export async function redeemRuntimeKey(params: {
     accountRef,
     deviceId,
     entitlementId: entitlement?.id ?? null,
-    redeemKeyId: keyRow.id,
+    redeemKeyId,
     rewardPackageId: rewardPackage?.id ?? null,
     softAmount: reward.soft_credit_amount,
     premiumAmount: reward.premium_credit_amount,
@@ -1740,7 +1798,7 @@ export async function redeemRuntimeKey(params: {
     accountRef,
     deviceId,
     entitlementId: entitlement?.id ?? null,
-    redeemKeyId: keyRow.id,
+    redeemKeyId,
     clientVersion: params.clientVersion,
     ipHash: params.ipHash,
   });
@@ -1751,6 +1809,8 @@ export async function redeemRuntimeKey(params: {
       last_device_id: deviceId,
       last_account_ref: accountRef,
       last_session_started_at: created.session.started_at,
+      last_redeem_input: redeemKey,
+      last_redeem_mode: keyRow ? "redeem_key" : (rewardPackage ? "package_code" : "unknown"),
     },
   });
 
@@ -1770,6 +1830,7 @@ export async function redeemRuntimeKey(params: {
     },
     wallet,
     state,
+    redeem_mode: keyRow ? "redeem_key" : (rewardPackage ? "package_code" : "unknown"),
   };
 }
 
@@ -1822,7 +1883,7 @@ export async function consumeRuntimeFeature(params: {
     ? round2(asNumber(params.overrideCost?.premiumCost, 0) * quantity)
     : round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1) * quantity);
 
-  let chargeKind: "none" | "soft" | "premium" = "none";
+  let chargeKind: "none" | "soft" | "premium" | "mixed" = "none";
   let softDelta = 0;
   let premiumDelta = 0;
 
@@ -1832,14 +1893,47 @@ export async function consumeRuntimeFeature(params: {
     const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
     const softCanGoDebt = Boolean(settings.wallet_rules.soft_allow_negative) && effectiveSoftCost > 0;
     const premiumCanGoDebt = Boolean(settings.wallet_rules.premium_allow_negative) && effectivePremiumCost > 0;
+    const preferredWallet = requestedWalletKind === "soft"
+      ? "soft"
+      : requestedWalletKind === "premium"
+        ? "premium"
+        : priority === "premium_first"
+          ? "premium"
+          : "soft";
 
-    if (requestedWalletKind === "soft") {
-      chargeKind = "soft";
-    } else if (requestedWalletKind === "premium") {
-      chargeKind = "premium";
-    } else if (priority === "premium_first") {
+    const tryCompensatedCharge = (prefer: "soft" | "premium") => {
+      if (!(effectiveSoftCost > 0 && effectivePremiumCost > 0)) return false;
+      if (prefer === "soft") {
+        const softPaid = round2(Math.max(0, Math.min(wallet.soft_balance, effectiveSoftCost)));
+        const remainingRatio = effectiveSoftCost <= 0 ? 0 : Math.max(0, Math.min(1, (effectiveSoftCost - softPaid) / effectiveSoftCost));
+        const premiumNeeded = round2(effectivePremiumCost * remainingRatio);
+        if (softPaid <= 0 || remainingRatio <= 0) return false;
+        if (wallet.premium_balance >= premiumNeeded && premiumNeeded > 0) {
+          softDelta = round2(-softPaid);
+          premiumDelta = round2(-premiumNeeded);
+          chargeKind = "mixed";
+          return true;
+        }
+      } else {
+        const premiumPaid = round2(Math.max(0, Math.min(wallet.premium_balance, effectivePremiumCost)));
+        const remainingRatio = effectivePremiumCost <= 0 ? 0 : Math.max(0, Math.min(1, (effectivePremiumCost - premiumPaid) / effectivePremiumCost));
+        const softNeeded = round2(effectiveSoftCost * remainingRatio);
+        if (premiumPaid <= 0 || remainingRatio <= 0) return false;
+        if (wallet.soft_balance >= softNeeded && softNeeded > 0) {
+          premiumDelta = round2(-premiumPaid);
+          softDelta = round2(-softNeeded);
+          chargeKind = "mixed";
+          return true;
+        }
+      }
+      return false;
+    };
+
+    if (preferredWallet === "premium") {
       if (premiumAvailable || premiumCanGoDebt) {
         chargeKind = "premium";
+      } else if (tryCompensatedCharge("premium")) {
+        chargeKind = "mixed";
       } else if (softAvailable || softCanGoDebt) {
         chargeKind = "soft";
       } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
@@ -1850,6 +1944,8 @@ export async function consumeRuntimeFeature(params: {
     } else {
       if (softAvailable || softCanGoDebt) {
         chargeKind = "soft";
+      } else if (tryCompensatedCharge("soft")) {
+        chargeKind = "mixed";
       } else if (premiumAvailable || premiumCanGoDebt) {
         chargeKind = "premium";
       } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
@@ -1867,7 +1963,7 @@ export async function consumeRuntimeFeature(params: {
         throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
       }
       premiumDelta = round2(-effectivePremiumCost);
-    } else {
+    } else if (chargeKind == "soft") {
       if (effectiveSoftCost <= 0) {
         throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
       }
@@ -1876,13 +1972,17 @@ export async function consumeRuntimeFeature(params: {
       }
       softDelta = round2(-effectiveSoftCost);
       chargeKind = "soft";
+    } else if (chargeKind === "mixed") {
+      if (softDelta == 0 && premiumDelta == 0) {
+        throw Object.assign(new Error("MIXED_COST_NOT_AVAILABLE"), { status: 409, code: "MIXED_COST_NOT_AVAILABLE" });
+      }
     }
   }
 
   let nextSoft = wallet.soft_balance;
   let nextPremium = wallet.premium_balance;
-  if (chargeKind === "soft") nextSoft = round2(wallet.soft_balance + softDelta);
-  if (chargeKind === "premium") nextPremium = round2(wallet.premium_balance + premiumDelta);
+  if (chargeKind === "soft" || chargeKind === "mixed") nextSoft = round2(wallet.soft_balance + softDelta);
+  if (chargeKind === "premium" || chargeKind === "mixed") nextPremium = round2(wallet.premium_balance + premiumDelta);
 
   if (chargeKind !== "none") {
     const admin = createAdminClient();
@@ -1929,6 +2029,7 @@ export async function consumeRuntimeFeature(params: {
       plan_code: currentPlanCode,
       quantity,
       charge_unit: feature.charge_unit,
+      charge_strategy: chargeKind,
     },
   });
 

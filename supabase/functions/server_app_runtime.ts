@@ -658,7 +658,7 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_reward_packages")
-    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,device_limit_override,account_limit_override")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
     .eq("id", packageId)
     .maybeSingle();
 
@@ -675,6 +675,37 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
+    device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
+    account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
+  };
+}
+
+async function getRewardPackageByCode(appCode: string, packageCode: string): Promise<RuntimeRewardPackage | null> {
+  const normalized = asString(packageCode).trim().toLowerCase();
+  if (!normalized) return null;
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("app_code", appCode)
+    .ilike("package_code", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: asString((data as any).id),
+    package_code: asString((data as any).package_code),
+    title: asString((data as any).title),
+    description: asNullableString((data as any).description),
+    enabled: Boolean((data as any).enabled ?? true),
+    reward_mode: asString((data as any).reward_mode, "plan"),
+    plan_code: asNullableString((data as any).plan_code),
+    soft_credit_amount: asNumber((data as any).soft_credit_amount),
+    premium_credit_amount: asNumber((data as any).premium_credit_amount),
+    entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
   };
@@ -875,7 +906,7 @@ async function upsertRuntimeEntitlement(params: {
   existing: RuntimeEntitlement | null;
   reward: RuntimeResolvedReward;
   planDefaults: RuntimePlan | null;
-  redeemKeyId: string;
+  redeemKeyId: string | null;
   rewardPackageId: string | null;
   traceId?: string | null;
   settings: RuntimeSettings;
@@ -978,7 +1009,7 @@ async function applyWalletTopup(params: {
   accountRef: string;
   deviceId: string;
   entitlementId: string | null;
-  redeemKeyId: string;
+  redeemKeyId: string | null;
   rewardPackageId: string | null;
   softAmount: number;
   premiumAmount: number;
@@ -1199,27 +1230,54 @@ export async function redeemRuntimeKey(params: {
 
   const { settings, planMap } = await getRuntimeContext(appCode);
   const requestedTraceId = asNullableString(params.traceId);
-  const keyRow = await getRedeemKeyByValue(appCode, redeemKey);
-  if (!keyRow) throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
-  if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
-  if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });
-  if (keyRow.starts_at && new Date(keyRow.starts_at).getTime() > Date.now()) {
-    throw Object.assign(new Error("REDEEM_KEY_NOT_STARTED"), { status: 409, code: "REDEEM_KEY_NOT_STARTED" });
-  }
-  if (keyRow.expires_at && !isFutureIso(keyRow.expires_at)) {
-    throw Object.assign(new Error("REDEEM_KEY_EXPIRED"), { status: 409, code: "REDEEM_KEY_EXPIRED" });
-  }
-  if (keyRow.redeemed_count >= keyRow.max_redemptions) {
-    throw Object.assign(new Error("REDEEM_KEY_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_LIMIT_REACHED" });
+  let keyRow = await getRedeemKeyByValue(appCode, redeemKey);
+  let rewardPackage = keyRow ? await getRewardPackageById(keyRow.reward_package_id) : null;
+  let reward: RuntimeResolvedReward | null = null;
+  let redeemKeyId: string | null = keyRow?.id ?? null;
+
+  if (keyRow) {
+    if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
+    if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });
+    if (keyRow.starts_at && new Date(keyRow.starts_at).getTime() > Date.now()) {
+      throw Object.assign(new Error("REDEEM_KEY_NOT_STARTED"), { status: 409, code: "REDEEM_KEY_NOT_STARTED" });
+    }
+    if (keyRow.expires_at && !isFutureIso(keyRow.expires_at)) {
+      throw Object.assign(new Error("REDEEM_KEY_EXPIRED"), { status: 409, code: "REDEEM_KEY_EXPIRED" });
+    }
+    if (keyRow.redeemed_count >= keyRow.max_redemptions) {
+      throw Object.assign(new Error("REDEEM_KEY_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_LIMIT_REACHED" });
+    }
+    if (keyRow.reward_package_id && (!rewardPackage || !rewardPackage.enabled)) {
+      throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
+    }
+    reward = resolveRewardPackage(keyRow, rewardPackage);
+  } else if (appCode === "find-dumps") {
+    rewardPackage = await getRewardPackageByCode(appCode, redeemKey);
+    if (rewardPackage && !rewardPackage.enabled) {
+      throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
+    }
+    if (rewardPackage) {
+      reward = {
+        reward_mode: asString(rewardPackage.reward_mode, "mixed"),
+        package_code: rewardPackage.package_code,
+        title: rewardPackage.title,
+        plan_code: rewardPackage.plan_code,
+        soft_credit_amount: round2(rewardPackage.soft_credit_amount),
+        premium_credit_amount: round2(rewardPackage.premium_credit_amount),
+        entitlement_days: Math.max(0, rewardPackage.entitlement_days),
+        entitlement_seconds: Math.max(0, rewardPackage.entitlement_seconds),
+        claim_bound_expires_at: null,
+        device_limit_override: rewardPackage.device_limit_override,
+        account_limit_override: rewardPackage.account_limit_override,
+      };
+    }
   }
 
-  const rewardPackage = await getRewardPackageById(keyRow.reward_package_id);
-  if (keyRow.reward_package_id && (!rewardPackage || !rewardPackage.enabled)) {
-    throw Object.assign(new Error("REWARD_PACKAGE_DISABLED"), { status: 409, code: "REWARD_PACKAGE_DISABLED" });
+  if (!reward) {
+    throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
   }
-  const reward = resolveRewardPackage(keyRow, rewardPackage);
+
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
-
   const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
   const predictedDeviceLimit = reward.device_limit_override
     ?? planDefaults?.device_limit
@@ -1230,7 +1288,9 @@ export async function redeemRuntimeKey(params: {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
   }
 
-  await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  if (keyRow) {
+    await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  }
 
   const entitlement = await upsertRuntimeEntitlement({
     appCode,
@@ -1239,9 +1299,9 @@ export async function redeemRuntimeKey(params: {
     existing: existingEntitlement,
     reward,
     planDefaults,
-    redeemKeyId: keyRow.id,
+    redeemKeyId,
     rewardPackageId: rewardPackage?.id ?? null,
-    traceId: keyRow.trace_id ?? requestedTraceId,
+    traceId: keyRow?.trace_id ?? requestedTraceId,
     settings,
   });
 
@@ -1253,9 +1313,9 @@ export async function redeemRuntimeKey(params: {
     accountRef,
     deviceId,
     entitlementId: entitlement?.id ?? null,
-    redeemKeyId: keyRow.id,
+    redeemKeyId,
     rewardPackageId: rewardPackage?.id ?? null,
-    traceId: keyRow.trace_id ?? requestedTraceId,
+    traceId: keyRow?.trace_id ?? requestedTraceId,
     softAmount: reward.soft_credit_amount,
     premiumAmount: reward.premium_credit_amount,
   });
@@ -1272,8 +1332,8 @@ export async function redeemRuntimeKey(params: {
     accountRef,
     deviceId,
     entitlementId: entitlement?.id ?? null,
-    redeemKeyId: keyRow.id,
-    traceId: keyRow.trace_id ?? requestedTraceId,
+    redeemKeyId,
+    traceId: keyRow?.trace_id ?? requestedTraceId,
     clientVersion: params.clientVersion,
     ipHash: params.ipHash,
   });
@@ -1284,6 +1344,8 @@ export async function redeemRuntimeKey(params: {
       last_device_id: deviceId,
       last_account_ref: accountRef,
       last_session_started_at: created.session.started_at,
+      last_redeem_input: redeemKey,
+      last_redeem_mode: keyRow ? "redeem_key" : (rewardPackage ? "package_code" : "unknown"),
     },
   });
 
@@ -1299,11 +1361,12 @@ export async function redeemRuntimeKey(params: {
       soft_credit_amount: reward.soft_credit_amount,
       premium_credit_amount: reward.premium_credit_amount,
       entitlement_days: reward.entitlement_days,
+      entitlement_seconds: reward.entitlement_seconds,
     },
     wallet,
     state,
-    trace_id: keyRow.trace_id ?? requestedTraceId,
-    source_free_session_id: keyRow.source_free_session_id,
+    trace_id: keyRow?.trace_id ?? requestedTraceId ?? null,
+    redeem_mode: keyRow ? "redeem_key" : (rewardPackage ? "package_code" : "unknown"),
   };
 }
 
