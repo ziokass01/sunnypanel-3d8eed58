@@ -862,6 +862,30 @@ async function findSession(appCode: string, sessionToken: string) {
   return data;
 }
 
+async function findLatestReusableSession(appCode: string, accountRef: string, deviceId?: string | null) {
+  if (!accountRef) return null;
+  const admin = createAdminClient();
+  let query = admin
+    .from("server_app_sessions")
+    .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version")
+    .eq("app_code", appCode)
+    .eq("account_ref", accountRef)
+    .eq("status", "active")
+    .is("revoked_at", null)
+    .order("last_seen_at", { ascending: false })
+    .limit(20);
+  if (deviceId) query = query.eq("device_id", deviceId);
+  const { data, error } = await query;
+  if (error) throw error;
+  const now = Date.now();
+  for (const row of data ?? []) {
+    const expiresAt = asNullableString((row as any).expires_at);
+    if (expiresAt && new Date(expiresAt).getTime() <= now) continue;
+    return row;
+  }
+  return null;
+}
+
 async function getEntitlementById(entitlementId: string | null): Promise<RuntimeEntitlement | null> {
   if (!entitlementId) return null;
   const admin = createAdminClient();
@@ -1454,11 +1478,16 @@ async function getRuntimeContext(appCode: string) {
   return { config, settings: { ...settings, wallet_rules: walletRules }, plans, planMap, features, unlockRules };
 }
 
-export async function buildRuntimeState(appCode: string, opts?: { sessionToken?: string | null }) : Promise<RuntimeAppState> {
+export async function buildRuntimeState(appCode: string, opts?: { sessionToken?: string | null; accountRef?: string | null; deviceId?: string | null }) : Promise<RuntimeAppState> {
   const { config, settings, planMap, features, unlockRules } = await getRuntimeContext(appCode);
 
   const sessionToken = asNullableString(opts?.sessionToken);
+  const hintedAccountRef = asNullableString(opts?.accountRef)?.toLowerCase() ?? null;
+  const hintedDeviceId = asNullableString(opts?.deviceId);
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
+  if (!session && hintedAccountRef) {
+    session = await findLatestReusableSession(appCode, hintedAccountRef, hintedDeviceId ?? null);
+  }
   if (session) {
     if (asString(session.status) !== "active") {
       session = null;
@@ -1474,10 +1503,13 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     }
   }
 
+  const effectiveAccountRef = session?.account_ref ? asString(session.account_ref) : (hintedAccountRef ?? null);
+  const effectiveDeviceId = session?.device_id ? asString(session.device_id) : (hintedDeviceId ?? null);
+
   let entitlement = session?.entitlement_id
     ? await getEntitlementById(asString(session.entitlement_id))
-    : session?.account_ref
-      ? await getLatestActiveEntitlement(appCode, asString(session.account_ref))
+    : effectiveAccountRef
+      ? await getLatestActiveEntitlement(appCode, effectiveAccountRef)
       : null;
 
   if (!isEntitlementUsable(entitlement)) {
@@ -1489,8 +1521,8 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
   const activePlan = planMap.get(currentPlan) ?? null;
   const currentPlanRank = getPlanRank(currentPlan);
 
-  const walletRow = session?.account_ref
-    ? await ensureWalletFresh(appCode, asString(session.account_ref), activePlan, settings, asNullableString(session.device_id))
+  const walletRow = effectiveAccountRef
+    ? await ensureWalletFresh(appCode, effectiveAccountRef, activePlan, settings, effectiveDeviceId)
     : null;
   const wallet = {
     soft_balance: asNumber(walletRow?.soft_balance),
@@ -1499,8 +1531,8 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     last_premium_reset_at: asNullableString(walletRow?.last_premium_reset_at),
   };
 
-  const unlockStates = session?.account_ref
-    ? await getLatestFeatureUnlockStates(appCode, asString(session.account_ref), asNullableString(session.device_id))
+  const unlockStates = effectiveAccountRef
+    ? await getLatestFeatureUnlockStates(appCode, effectiveAccountRef, effectiveDeviceId)
     : [];
   const unlockMap = new Map(unlockStates.map((item) => [item.access_code.toLowerCase(), item]));
 
@@ -1508,7 +1540,7 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     const minRank = getPlanRank(feature.min_plan);
     const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
-    const guestVisible = session?.account_ref ? true : feature.visible_to_guest;
+    const guestVisible = effectiveAccountRef ? true : feature.visible_to_guest;
     const unlockMeta = resolveFeatureUnlockMeta(feature.feature_code, currentPlan, activePlan, unlockRules, unlockMap);
     return {
       ...feature,
@@ -1539,8 +1571,50 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
       device_limit: entitlement.device_limit == null ? null : Math.trunc(asNumber(entitlement.device_limit)),
       account_limit: entitlement.account_limit == null ? null : Math.trunc(asNumber(entitlement.account_limit)),
     } : null,
+    account: effectiveAccountRef ? { account_ref: effectiveAccountRef } : null,
+    device_id: effectiveDeviceId,
     wallet,
     features: decoratedFeatures,
+  } as RuntimeAppState;
+}
+
+export async function bootstrapRuntimeState(appCode: string, opts?: { sessionToken?: string | null; accountRef?: string | null; deviceId?: string | null; clientVersion?: string | null; ipHash?: string | null }) {
+  const hintedAccountRef = asNullableString(opts?.accountRef)?.toLowerCase() ?? null;
+  const hintedDeviceId = asNullableString(opts?.deviceId);
+  let sessionToken = asNullableString(opts?.sessionToken) ?? null;
+  let session = sessionToken ? await findSession(appCode, sessionToken) : null;
+
+  if (!session && hintedAccountRef) {
+    session = await findLatestReusableSession(appCode, hintedAccountRef, hintedDeviceId ?? null);
+  }
+
+  if (!session && hintedAccountRef && hintedDeviceId) {
+    const entitlement = await getLatestActiveEntitlement(appCode, hintedAccountRef);
+    if (isEntitlementUsable(entitlement)) {
+      const created = await createRuntimeSession({
+        appCode,
+        accountRef: hintedAccountRef,
+        deviceId: hintedDeviceId,
+        entitlementId: asString((entitlement as any).id),
+        redeemKeyId: null,
+        clientVersion: asNullableString(opts?.clientVersion),
+        ipHash: asNullableString(opts?.ipHash),
+      });
+      sessionToken = created.session_token;
+      session = await findSession(appCode, sessionToken);
+    }
+  }
+
+  const state = await buildRuntimeState(appCode, {
+    sessionToken,
+    accountRef: hintedAccountRef,
+    deviceId: hintedDeviceId,
+  });
+
+  return {
+    state,
+    sessionToken: sessionToken ?? null,
+    sessionBound: Boolean(sessionToken),
   };
 }
 

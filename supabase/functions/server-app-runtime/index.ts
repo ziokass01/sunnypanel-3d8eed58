@@ -1,5 +1,6 @@
 import {
   buildRuntimeState,
+  bootstrapRuntimeState,
   consumeRuntimeFeature,
   countRuntimeSuccessEvents,
   getRuntimeControls,
@@ -250,13 +251,20 @@ Deno.serve(async (req) => {
     });
 
     if (action === "catalog" || action === "me") {
-      const state = await buildRuntimeState(appCode, { sessionToken: sessionToken || null });
-      await logSafe({ ok: true, code: "OK", meta: { session_bound: Boolean(sessionToken) } });
+      const boot = await bootstrapRuntimeState(appCode, {
+        sessionToken: sessionToken || null,
+        accountRef: accountRef || null,
+        deviceId: deviceId || req.headers.get("x-fp") || null,
+        clientVersion,
+        ipHash,
+      });
+      await logSafe({ ok: true, code: "OK", meta: { session_bound: boot.sessionBound, bootstrap_account: accountRef || null } });
       return runtimeJson(200, {
         ok: true,
         action,
-        state,
-        session_bound: Boolean(sessionToken),
+        state: boot.state,
+        session_token: boot.sessionToken,
+        session_bound: boot.sessionBound,
       }, origin);
     }
 

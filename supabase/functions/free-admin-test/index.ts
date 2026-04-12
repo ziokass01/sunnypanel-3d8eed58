@@ -55,64 +55,6 @@ const BodySchema = z.object({
   dry_run: z.boolean().optional().default(false),
 });
 
-
-
-async function loadFindDumpsRewardPackage(sb: any, packageCode: string) {
-  const { data, error } = await sb
-    .from("server_app_reward_packages")
-    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
-    .eq("app_code", "find-dumps")
-    .eq("package_code", packageCode)
-    .maybeSingle();
-  if (error) throw error;
-  return data ?? null;
-}
-
-async function mintFindDumpsRuntimeKey(sb: any, sessionId: string, traceId: string, keyType: any, nowIso: string) {
-  const selectionMode = String((keyType as any).free_selection_mode ?? "").trim().toLowerCase();
-  const packageCode = selectionMode === "credit"
-    ? String((keyType as any).default_credit_code ?? "credit-normal").trim() || "credit-normal"
-    : String((keyType as any).default_package_code ?? "classic").trim() || "classic";
-  const rewardPkg = await loadFindDumpsRewardPackage(sb, packageCode);
-  if (!rewardPkg || rewardPkg.enabled === false) {
-    throw new Error(`FIND_DUMPS_REWARD_PACKAGE_NOT_FOUND:${packageCode}`);
-  }
-  const redeemKey = makeKey();
-  const durationSeconds = Number((keyType as any).duration_seconds ?? 0) || 0;
-  const expiresAt = durationSeconds > 0 ? new Date(Date.now() + durationSeconds * 1000).toISOString() : null;
-  const rewardMode = String((rewardPkg as any).reward_mode ?? (selectionMode === "credit" ? "soft_credit" : "plan")).trim() || "plan";
-  const { data, error } = await sb
-    .from("server_app_redeem_keys")
-    .insert({
-      app_code: "find-dumps",
-      reward_package_id: rewardPkg.id,
-      redeem_key: redeemKey,
-      title: String((rewardPkg as any).title ?? (keyType as any).label ?? "Find Dumps key"),
-      description: String((rewardPkg as any).description ?? "Admin test key for Find Dumps"),
-      enabled: true,
-      starts_at: nowIso,
-      expires_at: expiresAt,
-      max_redemptions: 1,
-      redeemed_count: 0,
-      reward_mode: rewardMode,
-      plan_code: (rewardPkg as any).plan_code ?? null,
-      soft_credit_amount: Number((rewardPkg as any).soft_credit_amount ?? 0) || 0,
-      premium_credit_amount: Number((rewardPkg as any).premium_credit_amount ?? 0) || 0,
-      entitlement_days: Number((rewardPkg as any).entitlement_days ?? 0) || 0,
-      entitlement_seconds: Number((rewardPkg as any).entitlement_seconds ?? durationSeconds) || 0,
-      device_limit_override: (rewardPkg as any).device_limit_override ?? null,
-      account_limit_override: (rewardPkg as any).account_limit_override ?? null,
-      trace_id: traceId,
-      source_free_session_id: sessionId,
-      metadata: { source: "admin-test", free_session_id: sessionId, trace_id: traceId, key_type_code: keyType.code, package_code: packageCode },
-      notes: `ADMIN_TEST_FIND_DUMPS:${String(keyType.code || '').toUpperCase()}`
-    })
-    .select("id,redeem_key")
-    .single();
-  if (error || !data?.id) throw error ?? new Error("SERVER_REDEEM_KEY_INSERT_FAILED");
-  return { id: String(data.id), redeem_key: String(data.redeem_key), expires_at: expiresAt };
-}
-
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const cors = buildCorsHeaders(req, PUBLIC_BASE_URL, "POST,OPTIONS");
@@ -157,7 +99,7 @@ Deno.serve(async (req) => {
 
   const { data: keyType, error: ktErr } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,duration_seconds,enabled,app_code,free_selection_mode,default_package_code,default_credit_code,default_wallet_kind")
+    .select("code,label,duration_seconds,enabled")
     .eq("code", keyTypeCode)
     .maybeSingle();
   if (ktErr || !keyType || !keyType.enabled) {
@@ -213,45 +155,6 @@ Deno.serve(async (req) => {
       fp_hash: fpHash,
       session_id: sessionId,
     });
-  }
-
-  const isFindDumpsRuntime = String((keyType as any).app_code ?? "").trim().toLowerCase() === "find-dumps";
-  if (isFindDumpsRuntime) {
-    try {
-      const minted = await mintFindDumpsRuntimeKey(sb, sessionId, traceId, keyType, now.toISOString());
-      await sb.from("licenses_free_sessions").update({
-        status: "revealed",
-        reveal_count: 1,
-        revealed_at: now.toISOString(),
-        app_code: "find-dumps",
-        issued_server_redeem_key_id: minted.id,
-      }).eq("session_id", sessionId);
-      await sb.from("licenses_free_issues").insert({
-        license_id: null,
-        key_mask: minted.redeem_key,
-        created_at: now.toISOString(),
-        expires_at: minted.expires_at,
-        session_id: sessionId,
-        ip_hash: ipHash,
-        fingerprint_hash: fpHash,
-        ua_hash: uaHash,
-        app_code: "find-dumps",
-        key_signature: "FD",
-        server_redeem_key_id: minted.id,
-      });
-      return json({
-        ok: true,
-        key: minted.redeem_key,
-        expires_at: minted.expires_at,
-        ip_hash: ipHash,
-        fp_hash: fpHash,
-        session_id: sessionId,
-        message: "ADMIN_TEST_OK",
-      });
-    } catch (e) {
-      await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "SERVER_REDEEM_KEY_INSERT_FAILED" }).eq("session_id", sessionId);
-      return json({ ok: false, message: "SERVER_REDEEM_KEY_INSERT_FAILED", session_id: sessionId, detail: extractErrorMessage(e) }, 500);
-    }
   }
 
   const key = makeKey();

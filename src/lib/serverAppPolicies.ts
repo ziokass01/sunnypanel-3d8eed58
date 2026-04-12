@@ -39,29 +39,29 @@ export type FeaturePolicy = {
 };
 
 export const FIND_DUMPS_PACKAGES: PackagePolicy[] = [
-  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 5, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
-  { code: "go", label: "Go", enabled: true, discountPercent: 12, dailyCredit: 12, dailyVipCredit: 1, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
-  { code: "plus", label: "Plus", enabled: true, discountPercent: 45, dailyCredit: 60, dailyVipCredit: 8, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
-  { code: "pro", label: "Pro", enabled: true, discountPercent: 70, dailyCredit: 200, dailyVipCredit: 30, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 0, dailyVipCredit: 0, resetDaily: false, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
+  { code: "go", label: "Go", enabled: true, discountPercent: 8, dailyCredit: 3, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 7 },
+  { code: "plus", label: "Plus", enabled: true, discountPercent: 20, dailyCredit: 5, dailyVipCredit: 1, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "pro", label: "Pro", enabled: true, discountPercent: 35, dailyCredit: 8, dailyVipCredit: 2, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
 ];
 
 export const FIND_DUMPS_CREDITS: CreditPolicy[] = [
-  { code: "credit-normal", label: "Credit thường", defaultAmount: 5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "normal" },
-  { code: "credit-vip", label: "Credit VIP", defaultAmount: 5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "vip" },
+  { code: "credit-normal", label: "Credit thường", defaultAmount: 1.5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "normal" },
+  { code: "credit-vip", label: "Credit VIP", defaultAmount: 0.5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "vip" },
 ];
 
 export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
-  { code: "search_basic", title: "Tra cứu / kiểm tra dump", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Miễn phí" },
-  { code: "batch_search", title: "Batch search", baseCredit: 0.1, vipCredit: 0.05, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "10 lượt / 1 credit" },
+  { code: "search_basic", title: "Search cơ bản", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Không giới hạn" },
+  { code: "batch_search", title: "Batch search", baseCredit: 1.0, vipCredit: 0.5, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Quota theo ngày" },
   { code: "export_plain", title: "Export text", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
-  { code: "export_json", title: "Export JSON", baseCredit: 0.3, vipCredit: 0.15, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
-  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 0.5, vipCredit: 0.25, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt mở" },
-  { code: "binary_scan_full", title: "Full scan", baseCredit: 0.5, vipCredit: 0.25, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Tra cứu rộng" },
-  { code: "game_profiles", title: "Game Profiles", baseCredit: 0.25, vipCredit: 0.12, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt dùng" },
+  { code: "export_json", title: "Export JSON", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo lượt xuất" },
+  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 1.5, vipCredit: 0.8, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
+  { code: "binary_scan_full", title: "Full scan", baseCredit: 2.0, vipCredit: 1.0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt quét" },
+  { code: "game_profiles", title: "Game Profiles", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
   { code: "runtime_redeem", title: "Nhập mã / kích hoạt", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tiện ích free" },
-  { code: "convert_image", title: "Convert image", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "5 lượt / 1 credit" },
-  { code: "encode_decode", title: "Encode / Decode", baseCredit: 0.1, vipCredit: 0.05, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "10 lượt / 1 credit" },
-  { code: "hex_edit", title: "Hex edit", baseCredit: 0.3, vipCredit: 0.15, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt sửa" },
+  { code: "convert_image", title: "Convert image", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "encode_decode", title: "Encode / Decode", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "hex_edit", title: "Hex edit", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
 ];
 
 
