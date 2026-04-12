@@ -194,7 +194,6 @@ export function FreeDeviceHistoryCard({
       ? "Đồng bộ theo key gần nhất"
       : `${history.attemptsToday} lượt đã bắt đầu hôm nay`;
   const keyLabel = String(selectedKeyLabel || "Key đang chọn").trim() || "Key đang chọn";
-  const quotaHint = `Thiết bị ${selectedQuotaFingerprint ?? 0}/ngày · IP ${selectedQuotaIp ?? 0}/ngày`;
 
   return (
     <Card className="overflow-hidden border-dashed bg-gradient-to-br from-background to-muted/30">
@@ -211,7 +210,6 @@ export function FreeDeviceHistoryCard({
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên key</div>
             <div className="mt-1 text-sm font-semibold text-foreground">{keyLabel}</div>
-            <div className="line-clamp-2 text-xs text-muted-foreground">{quotaHint}</div>
           </div>
 
           <div className="rounded-2xl border bg-background/80 p-3">
