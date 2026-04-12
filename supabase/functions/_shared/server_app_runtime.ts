@@ -116,6 +116,50 @@ type RuntimeControls = {
   event_retention_days: number;
 };
 
+const DEFAULT_FIND_DUMPS_RUNTIME_PLANS: RuntimePlan[] = [
+  { plan_code: "classic", label: "Classic", daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 1, account_limit: 1 },
+  { plan_code: "go", label: "Go", daily_soft_credit: 3, daily_premium_credit: 0, soft_cost_multiplier: 0.95, premium_cost_multiplier: 0.8, device_limit: 1, account_limit: 1 },
+  { plan_code: "plus", label: "Plus", daily_soft_credit: 5, daily_premium_credit: 1, soft_cost_multiplier: 0.8, premium_cost_multiplier: 0.6, device_limit: 2, account_limit: 1 },
+  { plan_code: "pro", label: "Pro", daily_soft_credit: 8, daily_premium_credit: 2, soft_cost_multiplier: 0.65, premium_cost_multiplier: 0.45, device_limit: 3, account_limit: 1 },
+];
+
+const DEFAULT_FIND_DUMPS_RUNTIME_FEATURES: RuntimeFeature[] = [
+  { feature_code: "search_basic", title: "Search cơ bản", description: "Tìm class, method, offset cơ bản", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "search", group_key: "find", icon_key: "search", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "batch_search", title: "Batch search", description: "Tìm nhiều dòng trong 1 file truy vấn", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 20, category: "search", group_key: "batch", icon_key: "batch", badge_label: "Thường", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
+  { feature_code: "export_plain", title: "Export text", description: "Xuất kết quả hiện tại ra file text thường", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 25, category: "export", group_key: "result", icon_key: "export", badge_label: "Text", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "export_json", title: "Export JSON", description: "Xuất kết quả dạng JSON", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 30, category: "export", group_key: "result", icon_key: "json", badge_label: "JSON", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "game_profiles", title: "Game Profiles", description: "Lưu, import, export và quét nhiều offset theo profile", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 45, category: "tools", group_key: "profile", icon_key: "profile", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "runtime_redeem", title: "Nhập mã / kích hoạt", description: "Mở Runtime Center để nhập mã quà và đồng bộ session", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 47, category: "runtime", group_key: "redeem", icon_key: "gift", badge_label: "Tiện ích", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "convert_image", title: "Convert image", description: "Đổi ảnh sang header .h", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 50, category: "tools", group_key: "image", icon_key: "image", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "encode_decode", title: "Encode / Decode", description: "Bộ codec kiểu toolbox", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 60, category: "tools", group_key: "codec", icon_key: "codec", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "hex_edit", title: "Hex edit", description: "Mở file và sửa hex rồi lưu", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 70, category: "tools", group_key: "hex", icon_key: "hex", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "binary_scan_quick", title: "Binary scan quick", description: "Quét nhanh ELF/.so để lấy header, section, symbol và string cơ bản", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 80, category: "binary", group_key: "scan", icon_key: "binary", badge_label: "Binary", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "binary_scan_full", title: "Binary scan full", description: "Quét sâu Binary Workspace và dựng function intelligence", min_plan: "go", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 90, category: "binary", group_key: "scan", icon_key: "binary", badge_label: "Binary", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "ida_export_import", title: "Import IDA / artifact", description: "Nạp artifact từ IDA, r2 hoặc disassembly ngoài", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 100, category: "binary", group_key: "artifact", icon_key: "import", badge_label: "Artifact", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "ida_workspace_save", title: "Save workspace", description: "Lưu snapshot workspace để mở lại lần sau", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 110, category: "binary", group_key: "workspace", icon_key: "save", badge_label: "Workspace", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "ida_workspace_export", title: "Export workspace", description: "Xuất workspace hoặc bundle ra file ngoài", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 120, category: "binary", group_key: "workspace", icon_key: "export", badge_label: "Export", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "ida_workspace_restore", title: "Restore workspace", description: "Khôi phục workspace đã lưu từ storage hoặc import file", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 130, category: "binary", group_key: "workspace", icon_key: "restore", badge_label: "Workspace", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "workspace_batch", title: "Workspace batch", description: "Chạy batch query trên Binary Workspace", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 140, category: "binary", group_key: "workspace", icon_key: "batch", badge_label: "Batch", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
+  { feature_code: "workspace_note", title: "Workspace note", description: "Gắn note hoặc tag cho entry trong workspace", min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 150, category: "binary", group_key: "workspace", icon_key: "note", badge_label: "Workspace", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "workspace_export_result", title: "Workspace export result", description: "Xuất current view hoặc current result từ Binary Workspace", min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 160, category: "binary", group_key: "workspace", icon_key: "export", badge_label: "Export", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "workspace_browser", title: "Workspace browser", description: "Mở browser/xref/pseudo trong Binary Workspace", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 170, category: "binary", group_key: "workspace", icon_key: "browser", badge_label: "Browser", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "workspace_diff", title: "Workspace diff", description: "So sánh 2 workspace hoặc 2 phiên dump", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 180, category: "binary", group_key: "workspace", icon_key: "diff", badge_label: "Diff", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "profile_search", title: "Profile search", description: "Tìm profile, trạng thái entitlement và dữ liệu mở rộng theo account", min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 185, category: "search", group_key: "profile", icon_key: "search", badge_label: "Profile", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "diff_two_dumps", title: "Diff 2 dump", description: "So sánh dump cũ và dump mới theo phase 2 của app", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 190, category: "migration", group_key: "diff", icon_key: "diff", badge_label: "Phase 2", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "query_remap", title: "Query remap", description: "Remap query từ dump cũ sang dump mới theo phase 2 của app", min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 200, category: "migration", group_key: "remap", icon_key: "remap", badge_label: "Phase 2", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "batch_migrate", title: "Batch migrate", description: "Batch migrate nhiều query và anchor", min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 210, category: "migration", group_key: "batch", icon_key: "batch", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "batch_compare", title: "Batch compare", description: "Compare nhiều query hoặc nhiều bản dump", min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 220, category: "migration", group_key: "batch", icon_key: "batch", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "batch_validate", title: "Batch validate", description: "Validate anchor và rule sau migrate", min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 230, category: "migration", group_key: "batch", icon_key: "batch", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  { feature_code: "export_report", title: "Export report", description: "Xuất báo cáo migration/diff ra ngoài", min_plan: "pro", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 240, category: "migration", group_key: "export", icon_key: "report", badge_label: "Phase 2+", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+];
+
+const DEFAULT_FIND_DUMPS_UNLOCK_RULES: RuntimeFeatureUnlockRule[] = [
+  { access_code: "binary_workspace", title: "Binary Workspace", description: "Mở quyền vào Binary Workspace để dùng scan, browser, diff, save/restore và export sâu.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 2, premium_unlock_cost: 1, free_for_plans: ["pro"], guarded_feature_codes: ["binary_scan_quick","binary_scan_full","ida_export_import","ida_workspace_save","ida_workspace_export","ida_workspace_restore","workspace_batch","workspace_note","workspace_export_result","workspace_browser","workspace_diff"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 1" },
+  { access_code: "batch_tools", title: "Batch Search & diện rộng", description: "Mở quyền cho batch search, profile search và background queue.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 1, premium_unlock_cost: 1, free_for_plans: ["plus","pro"], guarded_feature_codes: ["batch_search","background_queue","profile_search"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 1" },
+  { access_code: "export_tools", title: "Export ra ngoài", description: "Mở quyền export TXT/JSON/workspace/result/report.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 1, premium_unlock_cost: 1, free_for_plans: ["go","plus","pro"], guarded_feature_codes: ["export_plain","export_text","export_json","workspace_export_result","ida_workspace_export","export_report"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 1-2" },
+  { access_code: "migration_tools", title: "Migration tools", description: "Mở quyền Diff, Remap, Migrate, Compare và Validate theo phase 2.", enabled: true, unlock_required: true, unlock_duration_seconds: 86400, soft_unlock_cost: 2, premium_unlock_cost: 1, free_for_plans: ["pro"], guarded_feature_codes: ["diff_two_dumps","query_remap","batch_migrate","batch_compare","batch_validate","export_report"], renewable: true, revalidate_online: true, notes: "Fallback sync phase 2" },
+];
+
 type RuntimeEntitlement = {
   id: string;
   plan_code: string;
@@ -457,9 +501,10 @@ async function getPlans(appCode: string): Promise<RuntimePlan[]> {
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (isMissingRelationError(error, "server_app_plans")) return [];
+    if (isMissingRelationError(error, "server_app_plans")) return appCode === "find-dumps" ? DEFAULT_FIND_DUMPS_RUNTIME_PLANS : [];
     throw error;
   }
+  if (!(data ?? []).length && appCode === "find-dumps") return DEFAULT_FIND_DUMPS_RUNTIME_PLANS;
   return (data ?? []).map((row: any) => ({
     plan_code: asString(row.plan_code),
     label: asString(row.label),
@@ -482,9 +527,10 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (isMissingRelationError(error, "server_app_features")) return [];
+    if (isMissingRelationError(error, "server_app_features")) return appCode === "find-dumps" ? DEFAULT_FIND_DUMPS_RUNTIME_FEATURES : [];
     throw error;
   }
+  if (!(data ?? []).length && appCode === "find-dumps") return DEFAULT_FIND_DUMPS_RUNTIME_FEATURES;
   return (data ?? []).map((row: any) => ({
     feature_code: asString(row.feature_code),
     title: asString(row.title),
@@ -516,9 +562,10 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
     .order("sort_order", { ascending: true });
 
   if (error) {
-    if (isMissingRelationError(error, "server_app_feature_unlock_rules")) return [];
+    if (isMissingRelationError(error, "server_app_feature_unlock_rules")) return appCode === "find-dumps" ? DEFAULT_FIND_DUMPS_UNLOCK_RULES : [];
     throw error;
   }
+  if (!(data ?? []).length && appCode === "find-dumps") return DEFAULT_FIND_DUMPS_UNLOCK_RULES;
   return (data ?? []).map((row: any) => ({
     access_code: asString(row.access_code),
     title: asString(row.title, asString(row.access_code)),

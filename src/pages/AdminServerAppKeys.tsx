@@ -18,6 +18,38 @@ function rewardModeForCredit(code: string) {
   return code === "credit-vip" ? "premium_credit" : "soft_credit";
 }
 
+const DECIMAL_INPUT_PROPS = {
+  inputMode: "decimal" as const,
+  autoComplete: "off",
+  spellCheck: false,
+  pattern: "^[0-9]*[.,]?[0-9]*$",
+};
+
+function normalizeDecimalDraftInput(value: string) {
+  let normalized = String(value || "").replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const firstDot = normalized.indexOf(".");
+  if (firstDot >= 0) {
+    normalized = normalized.slice(0, firstDot + 1) + normalized.slice(firstDot + 1).replace(/\./g, "");
+  }
+  if (normalized.startsWith(".")) normalized = `0${normalized}`;
+  return normalized;
+}
+
+function decimalDraftInputValue(value: string | number | null | undefined) {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(value) : "";
+}
+
+function parseDecimalDraftInput(value: string | number | null | undefined, fallback = 0) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  const normalized = normalizeDecimalDraftInput(String(value || ""));
+  if (!normalized || normalized === "." || normalized === "0.") return fallback;
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function packageSeedRows(rows: any[] | null | undefined) {
   const map = new Map((rows || []).map((row: any) => [String(row.package_code || "").trim().toLowerCase(), row]));
   return FIND_DUMPS_PACKAGES.map((item) => {
@@ -111,8 +143,8 @@ export function AdminServerAppKeysPage() {
           enabled: Boolean(item.enabled),
           reward_mode: rewardModeForCredit(item.code),
           plan_code: null,
-          soft_credit_amount: item.walletKind === "normal" ? Number(item.amount || 0) : 0,
-          premium_credit_amount: item.walletKind === "vip" ? Number(item.amount || 0) : 0,
+          soft_credit_amount: item.walletKind === "normal" ? parseDecimalDraftInput(item.amount, 0) : 0,
+          premium_credit_amount: item.walletKind === "vip" ? parseDecimalDraftInput(item.amount, 0) : 0,
           entitlement_days: 0,
           entitlement_seconds: Number(item.expiresHours || 0) * 3600,
           sort_order: 100 + (index + 1) * 10,
@@ -198,7 +230,7 @@ export function AdminServerAppKeysPage() {
               </>
             ) : (
               <>
-                User chỉ cần chọn <span className="font-medium text-foreground">{selectedCredit?.label}</span>. Hệ thống tự hiểu đây là code cho <span className="font-medium text-foreground">{selectedCredit?.walletKind === "vip" ? "ví VIP" : "ví thường"}</span>, amount <span className="font-medium text-foreground">{formatCredit(selectedCredit?.amount || 0)}</span> và hết hạn sau <span className="font-medium text-foreground">{selectedCredit?.expiresHours} giờ</span>.
+                User chỉ cần chọn <span className="font-medium text-foreground">{selectedCredit?.label}</span>. Hệ thống tự hiểu đây là code cho <span className="font-medium text-foreground">{selectedCredit?.walletKind === "vip" ? "ví VIP" : "ví thường"}</span>, amount <span className="font-medium text-foreground">{formatCredit(parseDecimalDraftInput(selectedCredit?.amount, 0))}</span> và hết hạn sau <span className="font-medium text-foreground">{selectedCredit?.expiresHours} giờ</span>.
               </>
             )}
           </div>
@@ -244,7 +276,7 @@ export function AdminServerAppKeysPage() {
                 </div>
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div className="space-y-2"><div className="text-sm font-medium">Tên hiển thị</div><Input value={item.label} onChange={(e) => setCreditDrafts((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, label: e.target.value } : row))} /></div>
-                  <div className="space-y-2"><div className="text-sm font-medium">Số credit</div><Input type="number" step="0.1" value={item.amount} onChange={(e) => setCreditDrafts((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, amount: Number(e.target.value || 0) } : row))} /></div>
+                  <div className="space-y-2"><div className="text-sm font-medium">Số credit</div><Input type="text" {...DECIMAL_INPUT_PROPS} value={decimalDraftInputValue(item.amount)} onChange={(e) => setCreditDrafts((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, amount: normalizeDecimalDraftInput(e.target.value) } : row))} /></div>
                   <div className="space-y-2"><div className="text-sm font-medium">Hết hạn sau (giờ)</div><Input type="number" value={item.expiresHours} onChange={(e) => setCreditDrafts((prev) => prev.map((row, rowIndex) => rowIndex === index ? { ...row, expiresHours: Number(e.target.value || 0) } : row))} min={1} /></div>
                   <div className="space-y-2"><div className="text-sm font-medium">Ví áp dụng</div><Input value={item.walletKind === "vip" ? "VIP" : "Thường"} readOnly /></div>
                 </div>
