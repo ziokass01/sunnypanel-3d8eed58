@@ -337,34 +337,14 @@ export function FreeLandingPage() {
 
               <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
-              <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null} lastKeyExpiresAt={lastFreeKey?.expires_at ?? null} />
-
-              <div className="rounded-2xl border bg-background/70 p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold">Thông tin key đang chọn</div>
-                    <div className="text-xs text-muted-foreground">Hiển thị theo app của key hiện tại để sau này thêm app mới vẫn mở rộng được, không gãy flow.</div>
-                  </div>
-                  <Badge variant="secondary" className="rounded-full">{selectedKeySummaryMeta.badge}</Badge>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-2xl border bg-background/80 p-3">
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên key</div>
-                    <div className="mt-1 text-sm font-semibold text-foreground">{selectedKeySummaryMeta.label}</div>
-                    <div className="text-xs text-muted-foreground">Đổi theo loại key đang chọn</div>
-                  </div>
-                  <div className="rounded-2xl border bg-background/80 p-3">
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Giới hạn thiết bị</div>
-                    <div className="mt-1 text-sm font-semibold text-foreground">{selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0} / ngày</div>
-                    <div className="text-xs text-muted-foreground">Tính theo fingerprint thiết bị</div>
-                  </div>
-                  <div className="rounded-2xl border bg-background/80 p-3">
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Giới hạn IP key</div>
-                    <div className="mt-1 text-sm font-semibold text-foreground">{selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0} / ngày</div>
-                    <div className="text-xs text-muted-foreground">Tính theo IP hiện tại</div>
-                  </div>
-                </div>
-              </div>
+              <FreeDeviceHistoryCard
+                history={deviceHistory}
+                remainingTodayServer={selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null}
+                lastKeyExpiresAt={lastFreeKey?.expires_at ?? null}
+                selectedKeyLabel={selectedKeySummaryMeta.label}
+                selectedQuotaFingerprint={selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0}
+                selectedQuotaIp={selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0}
+              />
 
               <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
                 <div className="flex items-center justify-between gap-3">
