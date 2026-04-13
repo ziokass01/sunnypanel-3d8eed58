@@ -39,32 +39,30 @@ export type FeaturePolicy = {
 };
 
 export const FIND_DUMPS_PACKAGES: PackagePolicy[] = [
-  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 0, dailyVipCredit: 0, resetDaily: false, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
-  { code: "go", label: "Go", enabled: true, discountPercent: 8, dailyCredit: 3, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 7 },
-  { code: "plus", label: "Plus", enabled: true, discountPercent: 20, dailyCredit: 5, dailyVipCredit: 1, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
-  { code: "pro", label: "Pro", enabled: true, discountPercent: 35, dailyCredit: 8, dailyVipCredit: 2, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 5, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
+  { code: "go", label: "Go", enabled: true, discountPercent: 25, dailyCredit: 15, dailyVipCredit: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
+  { code: "plus", label: "Plus", enabled: true, discountPercent: 75, dailyCredit: 80, dailyVipCredit: 8, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "pro", label: "Pro", enabled: true, discountPercent: 92, dailyCredit: 250, dailyVipCredit: 25, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
 ];
 
 export const FIND_DUMPS_CREDITS: CreditPolicy[] = [
-  { code: "credit-normal", label: "Credit thường", defaultAmount: 1.5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "normal" },
-  { code: "credit-vip", label: "Credit VIP", defaultAmount: 0.5, allowDecimal: true, expiresHours: 24, oneTimeUse: true, walletKind: "vip" },
+  { code: "credit-normal", label: "Credit thường", defaultAmount: 5, allowDecimal: true, expiresHours: 72, oneTimeUse: true, walletKind: "normal" },
+  { code: "credit-vip", label: "Credit VIP", defaultAmount: 5, allowDecimal: true, expiresHours: 72, oneTimeUse: true, walletKind: "vip" },
 ];
 
 export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
-  { code: "search_basic", title: "Search cơ bản", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Không giới hạn" },
-  { code: "batch_search", title: "Batch search", baseCredit: 1.0, vipCredit: 0.5, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Quota theo ngày" },
-  { code: "export_plain", title: "Export text", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
-  { code: "export_json", title: "Export JSON", baseCredit: 0.2, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo lượt xuất" },
-  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 1.5, vipCredit: 0.8, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
-  { code: "binary_scan_full", title: "Full scan", baseCredit: 2.0, vipCredit: 1.0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt quét" },
-  { code: "game_profiles", title: "Game Profiles", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "search_basic", title: "Tra cứu / kiểm tra dump", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Free" },
+  { code: "batch_search", title: "Batch search", baseCredit: 1.0, vipCredit: 0.5, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "10 dòng / 1 lượt" },
+  { code: "export_plain", title: "Export text", baseCredit: 0.5, vipCredit: 0.2, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt" },
+  { code: "export_json", title: "Export JSON", baseCredit: 1.0, vipCredit: 0.4, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt" },
+  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 1.2, vipCredit: 0.5, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt" },
+  { code: "binary_scan_full", title: "Full scan", baseCredit: 1.5, vipCredit: 0.6, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt" },
+  { code: "game_profiles", title: "Game Profiles", baseCredit: 1.0, vipCredit: 0.35, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt" },
   { code: "runtime_redeem", title: "Nhập mã / kích hoạt", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tiện ích free" },
-  { code: "convert_image", title: "Convert image", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
-  { code: "encode_decode", title: "Encode / Decode", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
-  { code: "hex_edit", title: "Hex edit", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
+  { code: "convert_image", title: "Convert image", baseCredit: 1.0, vipCredit: 0.4, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "5 lượt / 1 credit" },
+  { code: "encode_decode", title: "Encode / Decode", baseCredit: 1.0, vipCredit: 0.35, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "10 lượt / 1 credit" },
+  { code: "hex_edit", title: "Hex edit", baseCredit: 0.5, vipCredit: 0.2, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "3 lần lưu / 1 credit" },
 ];
-
-
 
 export type FeatureUnlockPolicy = {
   accessCode: string;

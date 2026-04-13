@@ -1089,17 +1089,7 @@ async function ensureWalletFresh(appCode: string, accountRef: string, currentPla
   return await getWalletRecord(appCode, accountRef) ?? wallet;
 }
 
-async function getRewardPackageById(packageId: string | null): Promise<RuntimeRewardPackage | null> {
-  if (!packageId) return null;
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_reward_packages")
-    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
-    .eq("id", packageId)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
+function mapRewardPackageRowToRuntimeRewardPackage(data: any): RuntimeRewardPackage {
   return {
     id: asString((data as any).id),
     package_code: asString((data as any).package_code),
@@ -1111,22 +1101,43 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
   };
 }
 
-async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
+async function getRewardPackageById(packageId: string | null): Promise<RuntimeRewardPackage | null> {
+  if (!packageId) return null;
   const admin = createAdminClient();
   const { data, error } = await admin
-    .from("server_app_redeem_keys")
-    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
-    .eq("app_code", appCode)
-    .eq("redeem_key", redeemKey)
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("id", packageId)
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
+  return mapRewardPackageRowToRuntimeRewardPackage(data);
+}
+
+async function getRewardPackageByCode(appCode: string, packageCode: string): Promise<RuntimeRewardPackage | null> {
+  const normalized = asString(packageCode).trim().toLowerCase();
+  if (!normalized) return null;
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("app_code", appCode)
+    .eq("package_code", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return mapRewardPackageRowToRuntimeRewardPackage(data);
+}
+
+function mapRedeemRowToRuntimeRedeemKey(data: any): RuntimeRedeemKey {
   return {
     id: asString((data as any).id),
     reward_package_id: asNullableString((data as any).reward_package_id),
@@ -1147,6 +1158,50 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
     blocked_at: asNullableString((data as any).blocked_at),
     blocked_reason: asNullableString((data as any).blocked_reason),
     metadata: typeof (data as any).metadata === "object" && (data as any).metadata != null ? (data as any).metadata : {},
+  };
+}
+
+async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
+  const normalized = asString(redeemKey).replace(/​|﻿/g, "").replace(/"/g, "").trim();
+  if (!normalized) return null;
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_redeem_keys")
+    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
+    .eq("app_code", appCode)
+    .eq("redeem_key", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (data) return mapRedeemRowToRuntimeRedeemKey(data);
+
+  const aliasPackage = await getRewardPackageByCode(appCode, normalized);
+  if (!aliasPackage) return null;
+  return {
+    id: `alias:${aliasPackage.id}`,
+    reward_package_id: aliasPackage.id,
+    redeem_key: normalized,
+    enabled: aliasPackage.enabled,
+    starts_at: null,
+    expires_at: null,
+    max_redemptions: Number.MAX_SAFE_INTEGER,
+    redeemed_count: 0,
+    reward_mode: aliasPackage.reward_mode,
+    plan_code: aliasPackage.plan_code,
+    soft_credit_amount: aliasPackage.soft_credit_amount,
+    premium_credit_amount: aliasPackage.premium_credit_amount,
+    entitlement_days: aliasPackage.entitlement_days,
+    entitlement_seconds: aliasPackage.entitlement_seconds,
+    device_limit_override: aliasPackage.device_limit_override,
+    account_limit_override: aliasPackage.account_limit_override,
+    blocked_at: null,
+    blocked_reason: null,
+    metadata: {
+      source: "package_code_alias",
+      package_code: aliasPackage.package_code,
+      alias_package_code: true,
+      note: "Package code used directly as redeem alias",
+    },
   };
 }
 
@@ -1749,7 +1804,10 @@ export async function redeemRuntimeKey(params: {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
   }
 
-  await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  const aliasPackageCode = Boolean((keyRow.metadata as any)?.alias_package_code);
+  if (!aliasPackageCode) {
+    await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  }
 
   const entitlement = await upsertRuntimeEntitlement({
     appCode,
