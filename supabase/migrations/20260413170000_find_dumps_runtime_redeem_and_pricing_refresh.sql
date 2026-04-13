@@ -1,10 +1,74 @@
 -- Refresh Find Dumps pricing + reward aliases + free-key defaults
+-- Defensive self-heal: re-add columns/rows in case legacy markers were repaired but old migrations were missing remotely.
+
+insert into public.server_apps (code, label, description, public_enabled, notes)
+values ('find-dumps', 'Find Dumps', 'App SunnyMod Find Dumps để cấu hình gói, credit và feature flags riêng.', true, '2026-04-13 self-heal bootstrap before pricing refresh.')
+on conflict (code) do update
+set label = excluded.label,
+    description = excluded.description,
+    public_enabled = excluded.public_enabled,
+    notes = excluded.notes,
+    updated_at = now();
+
+alter table public.server_app_settings
+  add column if not exists gift_tab_label text not null default 'Quà tặng';
+
+alter table public.server_app_wallet_rules
+  add column if not exists consume_priority text not null default 'soft_first',
+  add column if not exists soft_daily_reset_mode text not null default 'debt_floor',
+  add column if not exists premium_daily_reset_mode text not null default 'debt_floor',
+  add column if not exists soft_floor_credit numeric(12,2) not null default 5,
+  add column if not exists premium_floor_credit numeric(12,2) not null default 5,
+  add column if not exists soft_allow_negative boolean not null default true,
+  add column if not exists premium_allow_negative boolean not null default true;
+
+alter table public.server_app_features
+  add column if not exists category text not null default 'tools',
+  add column if not exists group_key text not null default 'general',
+  add column if not exists icon_key text,
+  add column if not exists badge_label text,
+  add column if not exists visible_to_guest boolean not null default true,
+  add column if not exists charge_unit integer not null default 1,
+  add column if not exists charge_on_success_only boolean not null default true,
+  add column if not exists client_accumulate_units boolean not null default false;
+
+alter table public.server_app_reward_packages
+  add column if not exists entitlement_seconds bigint not null default 0;
+
+alter table public.licenses_free_key_types
+  add column if not exists app_code text not null default 'free-fire',
+  add column if not exists app_label text,
+  add column if not exists key_signature text,
+  add column if not exists allow_reset boolean not null default true,
+  add column if not exists free_selection_mode text not null default 'none',
+  add column if not exists free_selection_expand boolean not null default false,
+  add column if not exists default_package_code text,
+  add column if not exists default_credit_code text,
+  add column if not exists default_wallet_kind text;
+
+insert into public.server_app_settings (app_code, guest_plan, gift_tab_label, key_persist_until_revoked, daily_reset_hour, notes)
+values ('find-dumps', 'classic', 'Mã quà', true, 0, '2026-04-13 self-heal row for pricing refresh.')
+on conflict (app_code) do update
+set guest_plan = excluded.guest_plan,
+    gift_tab_label = excluded.gift_tab_label,
+    key_persist_until_revoked = excluded.key_persist_until_revoked,
+    daily_reset_hour = excluded.daily_reset_hour,
+    notes = concat_ws(E'\n', nullif(public.server_app_settings.notes, ''), excluded.notes),
+    updated_at = now();
+
+insert into public.server_app_wallet_rules (
+  app_code, soft_wallet_label, premium_wallet_label, allow_decimal,
+  soft_daily_reset_enabled, premium_daily_reset_enabled,
+  soft_daily_reset_amount, premium_daily_reset_amount, notes
+)
+values ('find-dumps', 'Credit thường', 'Credit VIP', true, true, true, 5, 0, '2026-04-13 self-heal wallet row before pricing refresh.')
+on conflict (app_code) do nothing;
+
 
 update public.server_app_settings
 set guest_plan = 'classic',
     gift_tab_label = 'Mã quà',
-    notes = concat_ws(E'
-', nullif(notes, ''), '2026-04-13: pricing refresh for Find Dumps, redeem alias enabled, classic reset 5/day.')
+    notes = concat_ws(E'\n', nullif(notes, ''), '2026-04-13: pricing refresh for Find Dumps, redeem alias enabled, classic reset 5/day.')
 where app_code = 'find-dumps';
 
 insert into public.server_app_plans (
@@ -40,8 +104,7 @@ set soft_daily_reset_enabled = true,
     premium_floor_credit = 0,
     soft_allow_negative = true,
     premium_allow_negative = true,
-    notes = concat_ws(E'
-', nullif(notes, ''), '2026-04-13: classic reset 5/day; plan table controls higher quotas.')
+    notes = concat_ws(E'\n', nullif(notes, ''), '2026-04-13: classic reset 5/day; plan table controls higher quotas.')
 where app_code = 'find-dumps';
 
 insert into public.server_app_features (
@@ -111,8 +174,7 @@ set title = excluded.title,
 
 update public.server_app_reward_packages
 set enabled = false,
-    notes = concat_ws(E'
-', nullif(notes, ''), '2026-04-13: disabled in favor of classic/go/plus/pro aliases.')
+    notes = concat_ws(E'\n', nullif(notes, ''), '2026-04-13: disabled in favor of classic/go/plus/pro aliases.')
 where app_code = 'find-dumps'
   and package_code in ('fd_go_7d','fd_plus_30d','fd_pro_30d');
 
