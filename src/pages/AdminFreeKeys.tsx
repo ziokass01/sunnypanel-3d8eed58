@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -382,12 +382,17 @@ function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
 
-  const initialSearchParams = useMemo(() => (typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search)), []);
   const initialAppCode = useMemo(() => {
-    const raw = initialSearchParams.get("app");
+    if (typeof window === "undefined") return "free-fire";
+    const raw = new URLSearchParams(window.location.search).get("app");
     return APP_OPTIONS.some((item) => item.code === raw) ? String(raw) : "free-fire";
-  }, [initialSearchParams]);
-  const initialFocus = useMemo(() => String(initialSearchParams.get("focus") || "").trim().toLowerCase(), [initialSearchParams]);
+  }, []);
+  const initialFocus = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return String(new URLSearchParams(window.location.search).get("focus") || "").trim().toLowerCase();
+  }, []);
+  const createSectionRef = useRef<HTMLDivElement | null>(null);
+  const testSectionRef = useRef<HTMLDivElement | null>(null);
 
   const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
   const getKeyUrl = baseUrl ? `${baseUrl}/free` : "/free";
@@ -858,28 +863,29 @@ export function AdminFreeKeysPage() {
   const [testDryRun, setTestDryRun] = useState(false);
   const [adminTestResult, setAdminTestResult] = useState<AdminTestResult | null>(null);
   const [adminTestDebug, setAdminTestDebug] = useState<{ payload: any; response?: any; error?: string } | null>(null);
-  const createKeyCardRef = useRef<HTMLDivElement | null>(null);
-  const adminTestCardRef = useRef<HTMLDivElement | null>(null);
 
   const [pingResult, setPingResult] = useState<any>(null);
   const [pingError, setPingError] = useState<string | null>(null);
   const [showMonitorFilters, setShowMonitorFilters] = useState(false);
 
   useEffect(() => {
+    if (!initialFocus) return;
+    const target = initialFocus === "test" ? testSectionRef.current : createSectionRef.current;
+    if (!target) return;
+    setTimeout(() => {
+      try {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch {
+        target.scrollIntoView();
+      }
+    }, 120);
+  }, [initialFocus]);
+
+  useEffect(() => {
     if (!keyTypesQuery.data?.length) return;
     if (keyTypesQuery.data.some((x) => x.code === testKeyTypeCode)) return;
     setTestKeyTypeCode(keyTypesQuery.data[0].code);
   }, [keyTypesQuery.data, testKeyTypeCode]);
-
-  useEffect(() => {
-    if (!initialFocus) return;
-    const target = initialFocus === "test" ? adminTestCardRef.current : createKeyCardRef.current;
-    if (!target) return;
-    const id = window.setTimeout(() => {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 180);
-    return () => window.clearTimeout(id);
-  }, [initialFocus]);
 
   const adminTestGetKey = useMutation({
     mutationFn: async () => {
@@ -1646,20 +1652,6 @@ export function AdminFreeKeysPage() {
           </div>
         </CardContent>
       </Card>
-      </div>
-
-      {initialAppCode === "find-dumps" ? (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardHeader>
-            <CardTitle>Tạo key trực tiếp cho app Find Dumps</CardTitle>
-            <CardDescription>Đây là luồng tạo loại key và test phát key cho ô Quà tặng trong app. Server key bên app-host chỉ để setup rule/quota, còn trang này là chỗ tạo key thật để nhập vào app.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => createKeyCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>Cuộn tới tạo loại key</Button>
-            <Button type="button" variant="outline" onClick={() => adminTestCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>Cuộn tới test phát key</Button>
-          </CardContent>
-        </Card>
-      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
@@ -1681,9 +1673,19 @@ export function AdminFreeKeysPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3 text-xs md:text-sm">
-          <div ref={createKeyCardRef} className="mb-4 rounded-md border p-3">
+          <div ref={createSectionRef} className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
+            {initialAppCode === "find-dumps" ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button type="button" variant={initialFocus === "create" ? "default" : "secondary"} onClick={() => createSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                  Tạo key quà trực tiếp
+                </Button>
+                <Button type="button" variant={initialFocus === "test" ? "default" : "outline"} onClick={() => testSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                  Sang Test phát key
+                </Button>
+              </div>
+            ) : null}
 
             <div className="mt-3 grid gap-3 md:grid-cols-5">
               <div className="space-y-2">
@@ -2010,8 +2012,7 @@ export function AdminFreeKeysPage() {
         </CardContent>
       </Card>
 
-      <div ref={adminTestCardRef}>
-      <Card>
+      <Card ref={testSectionRef as any}>
         <CardHeader>
           <CardTitle>🧪 Admin Test GetKey</CardTitle>
           <CardDescription>
@@ -2105,7 +2106,6 @@ export function AdminFreeKeysPage() {
           ) : null}
         </CardContent>
       </Card>
-      </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">

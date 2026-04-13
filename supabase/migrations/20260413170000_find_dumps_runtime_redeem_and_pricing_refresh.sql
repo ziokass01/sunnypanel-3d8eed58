@@ -186,7 +186,7 @@ set free_selection_mode = case when code in ('fd_credit') then 'credit' else 'pa
     app_code = 'find-dumps',
     label = case when code in ('fdh1','fdd1','fd_package') then 'Find Dumps Go 3 ngày' else label end,
     duration_seconds = case when code in ('fdh1','fdd1','fd_package') then 259200 else duration_seconds end,
-    duration_unit = case when code in ('fdh1','fdd1','fd_package') then 'day' else duration_unit end,
-    duration_value = case when code in ('fdh1','fdd1','fd_package') then 3 else duration_value end
+    kind = case when code in ('fdh1','fdd1','fd_package') then 'day' else kind end,
+    value = case when code in ('fdh1','fdd1','fd_package') then 3 else value end
 where app_code = 'find-dumps'
   and code in ('fdh1','fdd1','fd_package','fdd7','fdd30','fd_credit');

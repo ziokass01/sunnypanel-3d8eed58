@@ -36,10 +36,6 @@ export type RuntimeFeature = {
   unlock_feature_code?: string | null;
   unlock_soft_cost?: number;
   unlock_premium_cost?: number;
-  unlock_soft_cost_7d?: number;
-  unlock_premium_cost_7d?: number;
-  unlock_soft_cost_30d?: number;
-  unlock_premium_cost_30d?: number;
 };
 
 export type RuntimeAppState = {
@@ -547,10 +543,10 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
     unlock_duration_seconds: Math.max(3600, Math.trunc(asNumber(row.unlock_duration_seconds, 86400))),
     soft_unlock_cost: asNumber(row.soft_unlock_cost, 0),
     premium_unlock_cost: asNumber(row.premium_unlock_cost, 0),
-    soft_unlock_cost_7d: asNumber(row.soft_unlock_cost_7d, asNumber(row.soft_unlock_cost, 0)),
-    premium_unlock_cost_7d: asNumber(row.premium_unlock_cost_7d, asNumber(row.premium_unlock_cost, 0)),
-    soft_unlock_cost_30d: asNumber(row.soft_unlock_cost_30d, asNumber(row.soft_unlock_cost, 0)),
-    premium_unlock_cost_30d: asNumber(row.premium_unlock_cost_30d, asNumber(row.premium_unlock_cost, 0)),
+    soft_unlock_cost_7d: asNumber(row.soft_unlock_cost_7d, row.soft_unlock_cost),
+    premium_unlock_cost_7d: asNumber(row.premium_unlock_cost_7d, row.premium_unlock_cost),
+    soft_unlock_cost_30d: asNumber(row.soft_unlock_cost_30d, row.soft_unlock_cost),
+    premium_unlock_cost_30d: asNumber(row.premium_unlock_cost_30d, row.premium_unlock_cost),
     free_for_plans: asStringArray(row.free_for_plans).map((item) => item.toLowerCase()),
     guarded_feature_codes: asStringArray(row.guarded_feature_codes).map((item) => item.toLowerCase()),
     renewable: Boolean(row.renewable ?? true),
@@ -669,12 +665,21 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
     const walletKind = asString(params.walletKind, "auto") === "vip" ? "vip" : "normal";
     const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
-    const durationSeconds = Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds)));
-    const days = Math.max(1, Math.round(durationSeconds / 86400));
-    const rawSoftCost = days >= 30 ? (rule.soft_unlock_cost_30d || rule.soft_unlock_cost) : (days >= 7 ? (rule.soft_unlock_cost_7d || rule.soft_unlock_cost) : rule.soft_unlock_cost);
-    const rawPremiumCost = days >= 30 ? (rule.premium_unlock_cost_30d || rule.premium_unlock_cost) : (days >= 7 ? (rule.premium_unlock_cost_7d || rule.premium_unlock_cost) : rule.premium_unlock_cost);
-    const softCost = round2(rawSoftCost * softMultiplier);
-    const premiumCost = round2(rawPremiumCost * premiumMultiplier);
+    const requestedDuration = Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds)));
+    const sevenDays = 7 * 86400;
+    const thirtyDays = 30 * 86400;
+    const softBase = requestedDuration >= thirtyDays
+      ? (rule.soft_unlock_cost_30d || rule.soft_unlock_cost)
+      : requestedDuration >= sevenDays
+        ? (rule.soft_unlock_cost_7d || rule.soft_unlock_cost)
+        : rule.soft_unlock_cost;
+    const premiumBase = requestedDuration >= thirtyDays
+      ? (rule.premium_unlock_cost_30d || rule.premium_unlock_cost)
+      : requestedDuration >= sevenDays
+        ? (rule.premium_unlock_cost_7d || rule.premium_unlock_cost)
+        : rule.premium_unlock_cost;
+    const softCost = round2(softBase * softMultiplier);
+    const premiumCost = round2(premiumBase * premiumMultiplier);
     if (softCost > 0 || premiumCost > 0) {
       await consumeRuntimeFeature({
         appCode: params.appCode,
@@ -1113,17 +1118,7 @@ async function ensureWalletFresh(appCode: string, accountRef: string, currentPla
   return await getWalletRecord(appCode, accountRef) ?? wallet;
 }
 
-async function getRewardPackageById(packageId: string | null): Promise<RuntimeRewardPackage | null> {
-  if (!packageId) return null;
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_reward_packages")
-    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
-    .eq("id", packageId)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
+function mapRewardPackageRowToRuntimeRewardPackage(data: any): RuntimeRewardPackage {
   return {
     id: asString((data as any).id),
     package_code: asString((data as any).package_code),
@@ -1135,22 +1130,43 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
+    entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
   };
 }
 
-async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
+async function getRewardPackageById(packageId: string | null): Promise<RuntimeRewardPackage | null> {
+  if (!packageId) return null;
   const admin = createAdminClient();
   const { data, error } = await admin
-    .from("server_app_redeem_keys")
-    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
-    .eq("app_code", appCode)
-    .eq("redeem_key", redeemKey)
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("id", packageId)
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
+  return mapRewardPackageRowToRuntimeRewardPackage(data);
+}
+
+async function getRewardPackageByCode(appCode: string, packageCode: string): Promise<RuntimeRewardPackage | null> {
+  const normalized = asString(packageCode).trim().toLowerCase();
+  if (!normalized) return null;
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override")
+    .eq("app_code", appCode)
+    .eq("package_code", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return mapRewardPackageRowToRuntimeRewardPackage(data);
+}
+
+function mapRedeemRowToRuntimeRedeemKey(data: any): RuntimeRedeemKey {
   return {
     id: asString((data as any).id),
     reward_package_id: asNullableString((data as any).reward_package_id),
@@ -1171,6 +1187,50 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
     blocked_at: asNullableString((data as any).blocked_at),
     blocked_reason: asNullableString((data as any).blocked_reason),
     metadata: typeof (data as any).metadata === "object" && (data as any).metadata != null ? (data as any).metadata : {},
+  };
+}
+
+async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
+  const normalized = asString(redeemKey).replace(/​|﻿/g, "").replace(/"/g, "").trim();
+  if (!normalized) return null;
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_redeem_keys")
+    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
+    .eq("app_code", appCode)
+    .eq("redeem_key", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (data) return mapRedeemRowToRuntimeRedeemKey(data);
+
+  const aliasPackage = await getRewardPackageByCode(appCode, normalized);
+  if (!aliasPackage) return null;
+  return {
+    id: `alias:${aliasPackage.id}`,
+    reward_package_id: aliasPackage.id,
+    redeem_key: normalized,
+    enabled: aliasPackage.enabled,
+    starts_at: null,
+    expires_at: null,
+    max_redemptions: Number.MAX_SAFE_INTEGER,
+    redeemed_count: 0,
+    reward_mode: aliasPackage.reward_mode,
+    plan_code: aliasPackage.plan_code,
+    soft_credit_amount: aliasPackage.soft_credit_amount,
+    premium_credit_amount: aliasPackage.premium_credit_amount,
+    entitlement_days: aliasPackage.entitlement_days,
+    entitlement_seconds: aliasPackage.entitlement_seconds,
+    device_limit_override: aliasPackage.device_limit_override,
+    account_limit_override: aliasPackage.account_limit_override,
+    blocked_at: null,
+    blocked_reason: null,
+    metadata: {
+      source: "package_code_alias",
+      package_code: aliasPackage.package_code,
+      alias_package_code: true,
+      note: "Package code used directly as redeem alias",
+    },
   };
 }
 
@@ -1773,7 +1833,10 @@ export async function redeemRuntimeKey(params: {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
   }
 
-  await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  const aliasPackageCode = Boolean((keyRow.metadata as any)?.alias_package_code);
+  if (!aliasPackageCode) {
+    await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  }
 
   const entitlement = await upsertRuntimeEntitlement({
     appCode,

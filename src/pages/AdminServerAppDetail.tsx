@@ -131,9 +131,9 @@ const APP_FALLBACKS = [
 const PLAN_TEMPLATES: Record<string, ServerAppPlanRow[]> = {
   "find-dumps": [
     { app_code: "find-dumps", plan_code: "classic", label: "Classic", enabled: true, daily_soft_credit: 5, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 1, account_limit: 1, sort_order: 10 },
-    { app_code: "find-dumps", plan_code: "go", label: "Go", enabled: true, daily_soft_credit: 12, daily_premium_credit: 0, soft_cost_multiplier: 0.9, premium_cost_multiplier: 0.9, device_limit: 1, account_limit: 1, sort_order: 20 },
-    { app_code: "find-dumps", plan_code: "plus", label: "Plus", enabled: true, daily_soft_credit: 300, daily_premium_credit: 10, soft_cost_multiplier: 0.55, premium_cost_multiplier: 0.5, device_limit: 2, account_limit: 1, sort_order: 30 },
-    { app_code: "find-dumps", plan_code: "pro", label: "Pro", enabled: true, daily_soft_credit: 1000, daily_premium_credit: 30, soft_cost_multiplier: 0.3, premium_cost_multiplier: 0.25, device_limit: 3, account_limit: 1, sort_order: 40 },
+    { app_code: "find-dumps", plan_code: "go", label: "Go", enabled: true, daily_soft_credit: 15, daily_premium_credit: 0, soft_cost_multiplier: 0.75, premium_cost_multiplier: 0.65, device_limit: 1, account_limit: 1, sort_order: 20 },
+    { app_code: "find-dumps", plan_code: "plus", label: "Plus", enabled: true, daily_soft_credit: 80, daily_premium_credit: 8, soft_cost_multiplier: 0.25, premium_cost_multiplier: 0.18, device_limit: 2, account_limit: 1, sort_order: 30 },
+    { app_code: "find-dumps", plan_code: "pro", label: "Pro", enabled: true, daily_soft_credit: 250, daily_premium_credit: 25, soft_cost_multiplier: 0.08, premium_cost_multiplier: 0.05, device_limit: 3, account_limit: 1, sort_order: 40 },
   ],
   "free-fire": [
     { app_code: "free-fire", plan_code: "classic", label: "Classic", enabled: true, daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 1, account_limit: 1, sort_order: 10 },
@@ -145,17 +145,16 @@ const PLAN_TEMPLATES: Record<string, ServerAppPlanRow[]> = {
 
 const FEATURE_TEMPLATES: Record<string, ServerAppFeatureRow[]> = {
   "find-dumps": [
-    { app_code: "find-dumps", feature_code: "search_basic", title: "Search cơ bản", description: "Tìm class, method, offset cơ bản", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "search", group_key: "find", icon_key: "search", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "batch_search", title: "Batch search", description: "Tìm nhiều dòng trong 1 file truy vấn", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 20, category: "search", group_key: "batch", icon_key: "batch", badge_label: "10 dòng = 1", visible_to_guest: true, charge_unit: 10, charge_on_success_only: true, client_accumulate_units: true },
-    { app_code: "find-dumps", feature_code: "export_plain", title: "Export text", description: "Xuất kết quả hiện tại ra file text thường", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 0.2, premium_cost: 0.1, reset_period: "daily", sort_order: 25, category: "export", group_key: "result", icon_key: "export", badge_label: "Text", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "export_json", title: "Export JSON", description: "Xuất kết quả dạng JSON", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 30, category: "export", group_key: "result", icon_key: "json", badge_label: "JSON", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "background_queue", title: "Background queue", description: "Xử lý batch nền và ưu tiên hàng đợi", enabled: true, min_plan: "pro", requires_credit: true, soft_cost: 2, premium_cost: 1, reset_period: "daily", sort_order: 40, category: "search", group_key: "batch", icon_key: "queue", badge_label: "VIP", visible_to_guest: false, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "game_profiles", title: "Game Profiles", description: "Lưu, import, export và quét nhiều offset theo profile", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 45, category: "tools", group_key: "profile", icon_key: "profile", badge_label: "Tính credit", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "runtime_redeem", title: "Nhập mã / kích hoạt", description: "Mở Runtime Center để nhập mã quà và đồng bộ session", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 47, category: "runtime", group_key: "redeem", icon_key: "gift", badge_label: "Tiện ích", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
-    { app_code: "find-dumps", feature_code: "convert_image", title: "Convert image", description: "Đổi ảnh sang header .h", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 50, category: "tools", group_key: "image", icon_key: "image", badge_label: "5 lượt = 1", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
-    { app_code: "find-dumps", feature_code: "encode_decode", title: "Encode / Decode", description: "Bộ codec kiểu toolbox", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 60, category: "tools", group_key: "codec", icon_key: "codec", badge_label: "10 lượt = 1", visible_to_guest: true, charge_unit: 10, charge_on_success_only: true, client_accumulate_units: true },
-    { app_code: "find-dumps", feature_code: "hex_edit", title: "Hex edit", description: "Mở file và sửa hex rồi lưu", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 70, category: "tools", group_key: "hex", icon_key: "hex", badge_label: "3 lượt = 1", visible_to_guest: true, charge_unit: 3, charge_on_success_only: true, client_accumulate_units: true },
-    { app_code: "find-dumps", feature_code: "dumps_soc_analyzer", title: "Dumps so.c", description: "Phân tích file decompile so.c bằng rule engine tách riêng", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 75, category: "tools", group_key: "soc", icon_key: "soc", badge_label: "Tính credit", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "search_basic", title: "Tra cứu / kiểm tra dump", description: "Tra cứu nhanh và soi dump cơ bản. Đây là mục free duy nhất để user thử app.", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "search", group_key: "find", icon_key: "search", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "batch_search", title: "Batch search", description: "Tìm kiếm diện rộng. Cứ đủ 10 dòng hợp lệ mới tính 1 lượt charge để tránh gọi server quá dày.", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 0.5, reset_period: "daily", sort_order: 20, category: "search", group_key: "batch", icon_key: "batch", badge_label: "10 dòng / 1 lượt", visible_to_guest: true, charge_unit: 10, charge_on_success_only: true, client_accumulate_units: true },
+    { app_code: "find-dumps", feature_code: "export_plain", title: "Export text", description: "Xuất kết quả hiện tại ra file text thường.", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 0.5, premium_cost: 0.2, reset_period: "daily", sort_order: 25, category: "export", group_key: "result", icon_key: "export", badge_label: "Trả phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "export_json", title: "Export JSON", description: "Xuất kết quả dạng JSON có cấu trúc.", enabled: true, min_plan: "go", requires_credit: true, soft_cost: 1, premium_cost: 0.4, reset_period: "daily", sort_order: 30, category: "export", group_key: "result", icon_key: "json", badge_label: "Trả phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "background_queue", title: "Background queue", description: "Xử lý batch nền và ưu tiên hàng đợi.", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 5, premium_cost: 2, reset_period: "daily", sort_order: 40, category: "search", group_key: "batch", icon_key: "queue", badge_label: "Nặng", visible_to_guest: false, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "game_profiles", title: "Game Profiles", description: "Lưu, import, export và quét nhiều offset theo profile. Tính phí nhẹ mỗi lần mở khu tool để tránh free toàn bộ.", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 0.35, reset_period: "daily", sort_order: 45, category: "tools", group_key: "profile", icon_key: "profile", badge_label: "Theo lượt", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "runtime_redeem", title: "Nhập mã / kích hoạt", description: "Mở Runtime Center để nhập mã quà và đồng bộ session.", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 47, category: "runtime", group_key: "redeem", icon_key: "gift", badge_label: "Tiện ích", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "find-dumps", feature_code: "convert_image", title: "Convert image", description: "Đổi ảnh sang header .h. Cứ đủ 5 lượt thành công mới tính 1 lần charge.", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 0.4, reset_period: "daily", sort_order: 50, category: "tools", group_key: "image", icon_key: "image", badge_label: "5 lượt / 1 credit", visible_to_guest: true, charge_unit: 5, charge_on_success_only: true, client_accumulate_units: true },
+    { app_code: "find-dumps", feature_code: "encode_decode", title: "Encode / Decode", description: "Bộ codec kiểu toolbox. Cứ đủ 10 lượt xử lý thành công mới tính 1 lần charge.", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 1, premium_cost: 0.35, reset_period: "daily", sort_order: 60, category: "tools", group_key: "codec", icon_key: "codec", badge_label: "10 lượt / 1 credit", visible_to_guest: true, charge_unit: 10, charge_on_success_only: true, client_accumulate_units: true },
+    { app_code: "find-dumps", feature_code: "hex_edit", title: "Hex edit", description: "Mở file và sửa hex rồi lưu. Tính phí nhẹ khi lưu để tránh tool bị free hoàn toàn.", enabled: true, min_plan: "classic", requires_credit: true, soft_cost: 0.5, premium_cost: 0.2, reset_period: "daily", sort_order: 70, category: "tools", group_key: "hex", icon_key: "hex", badge_label: "Lưu file có tính phí", visible_to_guest: true, charge_unit: 3, charge_on_success_only: true, client_accumulate_units: true },
   ],
   "free-fire": [
     { app_code: "free-fire", feature_code: "free_key", title: "Free key", description: "Luồng vượt free nhận key", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "key", group_key: "free", icon_key: "key", badge_label: "Miễn phí", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
@@ -166,9 +165,10 @@ const FEATURE_TEMPLATES: Record<string, ServerAppFeatureRow[]> = {
 
 const PACKAGE_TEMPLATES: Record<string, ServerAppRewardPackageRow[]> = {
   "find-dumps": [
-    { app_code: "find-dumps", package_code: "fd_go_3d", title: "Find Dumps Go 3 ngày", description: "Mở plan Go trong 3 ngày, mỗi ngày nhận credit cao hơn Classic.", enabled: true, reward_mode: "mixed", plan_code: "go", soft_credit_amount: 5, premium_credit_amount: 0, entitlement_days: 3, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Gói quà mặc định cho flow Find Dumps." },
-    { app_code: "find-dumps", package_code: "fd_plus_30d", title: "Find Dumps Plus 30 ngày", description: "Mở plan Plus, kèm một ít credit kim cương để test feature nặng.", enabled: true, reward_mode: "mixed", plan_code: "plus", soft_credit_amount: 5, premium_credit_amount: 1.5, entitlement_days: 30, device_limit_override: 2, account_limit_override: 1, sort_order: 20, notes: "Phù hợp user dùng thường xuyên." },
-    { app_code: "find-dumps", package_code: "fd_pro_30d", title: "Find Dumps Pro 30 ngày", description: "Mở full plan Pro trong 30 ngày, credit hao rẻ hơn nhờ multiplier plan.", enabled: true, reward_mode: "plan", plan_code: "pro", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 30, device_limit_override: 3, account_limit_override: 1, sort_order: 30, notes: "Không tặng quá nhiều credit để tránh lạm dụng." },
+    { app_code: "find-dumps", package_code: "go", title: "Find Dumps Go 3 ngày", description: "Mở plan Go trong 3 ngày, reset 15 credit/ngày và giảm giá nhẹ khi dùng chức năng.", enabled: true, reward_mode: "mixed", plan_code: "go", soft_credit_amount: 5, premium_credit_amount: 0, entitlement_days: 3, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Gói dùng cho redeem key và flow quà tặng." },
+    { app_code: "find-dumps", package_code: "plus", title: "Find Dumps Plus 30 ngày", description: "Mở plan Plus với quota lớn mỗi ngày, hợp người dùng thường xuyên.", enabled: true, reward_mode: "mixed", plan_code: "plus", soft_credit_amount: 20, premium_credit_amount: 2, entitlement_days: 30, device_limit_override: 2, account_limit_override: 1, sort_order: 20, notes: "Gói vài trăm lượt/ngày nếu dùng tool đúng loại." },
+    { app_code: "find-dumps", package_code: "pro", title: "Find Dumps Pro 30 ngày", description: "Mở full plan Pro, quota rất lớn mỗi ngày và giá hao rẻ mạnh.", enabled: true, reward_mode: "mixed", plan_code: "pro", soft_credit_amount: 50, premium_credit_amount: 5, entitlement_days: 30, device_limit_override: 3, account_limit_override: 1, sort_order: 30, notes: "Gói dùng nhiều, mục tiêu lên tới hàng nghìn lượt/ngày ở các tool charge theo mốc." },
+    { app_code: "find-dumps", package_code: "classic", title: "Find Dumps Classic 3 ngày", description: "Gói cơ bản để test app với 5 credit/ngày và chỉ giảm giá nhẹ ở các mục đơn giản.", enabled: true, reward_mode: "plan", plan_code: "classic", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 3, device_limit_override: 1, account_limit_override: 1, sort_order: 40, notes: "Giữ để alias package_code đồng bộ với flow free key mới." },
   ],
   "free-fire": [
     { app_code: "free-fire", package_code: "ff_go_7d", title: "Free Fire Go 7 ngày", description: "Mở plan Go cho app Free Fire.", enabled: true, reward_mode: "plan", plan_code: "go", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 7, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Có thể map với key mua bên admin." },
@@ -186,15 +186,15 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     soft_daily_reset_enabled: true,
     premium_daily_reset_enabled: true,
     soft_daily_reset_amount: 5,
-    premium_daily_reset_amount: 5,
+    premium_daily_reset_amount: 0,
     consume_priority: 'soft_first',
     soft_daily_reset_mode: 'debt_floor',
     premium_daily_reset_mode: 'debt_floor',
     soft_floor_credit: 5,
-    premium_floor_credit: 5,
+    premium_floor_credit: 0,
     soft_allow_negative: true,
     premium_allow_negative: true,
-    notes: "Credit âm được trừ nợ ở kỳ reset kế tiếp. Ưu tiên hao credit thường trước, credit kim cương sau.",
+    notes: "Class reset mặc định 5 credit/ngày. Các plan cao hơn lấy quota trực tiếp từ bảng plan và giảm giá qua multiplier để batch/codec/image không phải gọi server quá dày.",
   },
   "free-fire": {
     app_code: "free-fire",
@@ -609,7 +609,9 @@ export function AdminServerAppDetailPage() {
   const activeTab = normalizeConfigTab(searchParams.get("tab"));
   const workspaceScope = detectWorkspaceScope(location.pathname);
   const runtimePath = buildWorkspacePath(appCode, "runtime", workspaceScope);
-  const freeKeysCreatePath = `/admin/free-keys?app=${encodeURIComponent(appCode)}&focus=create`;
+  const keysPath = appCode === "find-dumps"
+    ? `/admin/free-keys?app=find-dumps&focus=create`
+    : buildWorkspacePath(appCode, "keys", workspaceScope);
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">Đang tải cấu hình app...</div>;
@@ -633,11 +635,9 @@ export function AdminServerAppDetailPage() {
           <Button asChild variant="outline">
             <Link to={runtimePath}>Mở runtime</Link>
           </Button>
-          {appCode === "find-dumps" ? (
-            <Button asChild variant="outline">
-              <Link to={freeKeysCreatePath}>Mở key / redeem</Link>
-            </Button>
-          ) : null}
+          <Button asChild variant="outline">
+            <Link to={keysPath}>Mở key / redeem</Link>
+          </Button>
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>
         </div>
       </div>

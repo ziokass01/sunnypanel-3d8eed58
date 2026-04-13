@@ -86,10 +86,10 @@ function normalizeUnlockRows(rows: any[] | null | undefined) {
       durationHours: asNumber((hit?.unlock_duration_seconds ?? rule.defaultDurationHours * 3600) / 3600, rule.defaultDurationHours),
       softUnlockCost: asNumber(hit?.soft_unlock_cost, rule.softUnlockCost),
       premiumUnlockCost: asNumber(hit?.premium_unlock_cost, rule.premiumUnlockCost),
-      softUnlockCost7d: asNumber(hit?.soft_unlock_cost_7d, Math.max(0, Math.round(asNumber(hit?.soft_unlock_cost, rule.softUnlockCost) * 4))),
-      premiumUnlockCost7d: asNumber(hit?.premium_unlock_cost_7d, Math.max(0, Math.round(asNumber(hit?.premium_unlock_cost, rule.premiumUnlockCost) * 4))),
-      softUnlockCost30d: asNumber(hit?.soft_unlock_cost_30d, Math.max(0, Math.round(asNumber(hit?.soft_unlock_cost, rule.softUnlockCost) * 12))),
-      premiumUnlockCost30d: asNumber(hit?.premium_unlock_cost_30d, Math.max(0, Math.round(asNumber(hit?.premium_unlock_cost, rule.premiumUnlockCost) * 12))),
+      softUnlockCost7d: asNumber(hit?.soft_unlock_cost_7d, hit?.soft_unlock_cost ?? rule.softUnlockCost),
+      premiumUnlockCost7d: asNumber(hit?.premium_unlock_cost_7d, hit?.premium_unlock_cost ?? rule.premiumUnlockCost),
+      softUnlockCost30d: asNumber(hit?.soft_unlock_cost_30d, hit?.soft_unlock_cost ?? rule.softUnlockCost),
+      premiumUnlockCost30d: asNumber(hit?.premium_unlock_cost_30d, hit?.premium_unlock_cost ?? rule.premiumUnlockCost),
       freePlans: Array.isArray(freePlans) ? freePlans.map((item: any) => String(item || "").trim()).filter(Boolean) : rule.freePlans,
       guardedFeatureCodes: Array.isArray(featureCodes) ? featureCodes.map((item: any) => String(item || "").trim()).filter(Boolean) : rule.guardedFeatureCodes,
       renewable: hit?.renewable ?? rule.renewable,
@@ -131,7 +131,7 @@ export function AdminServerAppChargePage() {
         supabase.from("server_app_plans").select("app_code,plan_code,label,enabled,daily_soft_credit,daily_premium_credit,soft_cost_multiplier,premium_cost_multiplier").eq("app_code", appCode).order("sort_order", { ascending: true }),
         supabase.from("server_app_features").select("app_code,feature_code,title,enabled,requires_credit,soft_cost,premium_cost,min_plan,badge_label").eq("app_code", appCode).order("sort_order", { ascending: true }),
         supabase.from("server_app_wallet_rules").select("app_code,soft_wallet_label,premium_wallet_label,allow_decimal,soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,notes").eq("app_code", appCode).maybeSingle(),
-        (supabase as any).from("server_app_feature_unlock_rules").select("app_code,access_code,title,description,enabled,unlock_required,unlock_duration_seconds,soft_unlock_cost,premium_unlock_cost,soft_unlock_cost_7d,premium_unlock_cost_7d,soft_unlock_cost_30d,premium_unlock_cost_30d,free_for_plans,guarded_feature_codes,renewable,revalidate_online,notes").eq("app_code", appCode).order("sort_order", { ascending: true }),
+        supabase.from("server_app_feature_unlock_rules").select("app_code,access_code,title,description,enabled,unlock_required,unlock_duration_seconds,soft_unlock_cost,premium_unlock_cost,soft_unlock_cost_7d,premium_unlock_cost_7d,soft_unlock_cost_30d,premium_unlock_cost_30d,free_for_plans,guarded_feature_codes,renewable,revalidate_online,notes").eq("app_code", appCode).order("sort_order", { ascending: true }),
       ]);
       if (plansRes.error) throw plansRes.error;
       if (featuresRes.error) throw featuresRes.error;
@@ -222,7 +222,7 @@ export function AdminServerAppChargePage() {
         supabase.from("server_app_plans").upsert(planPayload, { onConflict: "app_code,plan_code" }),
         supabase.from("server_app_features").upsert(featurePayload, { onConflict: "app_code,feature_code" }),
         supabase.from("server_app_wallet_rules").upsert(walletPayload, { onConflict: "app_code" }),
-        (supabase as any).from("server_app_feature_unlock_rules").upsert(unlockPayload as any, { onConflict: "app_code,access_code" }),
+        supabase.from("server_app_feature_unlock_rules").upsert(unlockPayload, { onConflict: "app_code,access_code" }),
       ]);
       if (plansWrite.error) throw plansWrite.error;
       if (featuresWrite.error) throw featuresWrite.error;
@@ -394,7 +394,7 @@ export function AdminServerAppChargePage() {
                   <div className="flex flex-1 flex-wrap items-center justify-between gap-2 pr-4 text-left">
                     <div>
                       <div className="font-medium">{rule.title}</div>
-                      <div className="text-xs text-muted-foreground">{rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · 1 ngày: thường {formatCredit(asNumber(rule.softUnlockCost))} • VIP {formatCredit(asNumber(rule.premiumUnlockCost))} · 7 ngày: thường {formatCredit(asNumber(rule.softUnlockCost7d))} • VIP {formatCredit(asNumber(rule.premiumUnlockCost7d))} · 30 ngày: thường {formatCredit(asNumber(rule.softUnlockCost30d))} • VIP {formatCredit(asNumber(rule.premiumUnlockCost30d))}</div>
+                      <div className="text-xs text-muted-foreground">{rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · giá 1 ngày / 7 ngày / 30 ngày chỉnh riêng</div>
                     </div>
                     <Badge variant={rule.enabled ? "outline" : "secondary"}>{rule.enabled ? "Đang bật" : "Tắt"}</Badge>
                   </div>

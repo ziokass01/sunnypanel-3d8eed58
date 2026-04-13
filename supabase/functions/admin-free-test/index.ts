@@ -26,6 +26,94 @@ function makeKey() {
   return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
+
+type RewardSeed = {
+  reward_mode: string;
+  plan_code: string | null;
+  soft_credit_amount: number;
+  premium_credit_amount: number;
+  entitlement_seconds: number;
+  reward_package_id: string | null;
+  title: string;
+  description: string;
+  metadata: Record<string, unknown>;
+};
+
+async function buildFindDumpsRewardSeed(sb: any, keyType: any): Promise<RewardSeed> {
+  const selectionMode = String(keyType?.free_selection_mode || "package").trim().toLowerCase();
+  const durationSeconds = Math.max(60, Number(keyType?.duration_seconds ?? 259200));
+  if (selectionMode === "credit") {
+    const creditCode = String(keyType?.default_credit_code || "credit-normal").trim().toLowerCase();
+    const walletKind = String(keyType?.default_wallet_kind || (creditCode === "credit-vip" ? "vip" : "normal")).trim().toLowerCase();
+    const amount = 5;
+    return {
+      reward_mode: walletKind === "vip" ? "premium_credit" : "soft_credit",
+      plan_code: null,
+      soft_credit_amount: walletKind === "vip" ? 0 : amount,
+      premium_credit_amount: walletKind === "vip" ? amount : 0,
+      entitlement_seconds: 0,
+      reward_package_id: null,
+      title: `Find Dumps ${walletKind === "vip" ? "VIP" : "thường"} +5 credit`,
+      description: `Admin test credit flow (${creditCode})`,
+      metadata: {
+        source: "admin-free-test",
+        credit_code: creditCode,
+        wallet_kind: walletKind,
+        one_time_use: true,
+      },
+    };
+  }
+
+  const packageCode = String(keyType?.default_package_code || "go").trim().toLowerCase() || "go";
+  const rewardPkg = await sb
+    .from("server_app_reward_packages")
+    .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds")
+    .eq("app_code", "find-dumps")
+    .eq("package_code", packageCode)
+    .maybeSingle();
+
+  if (rewardPkg.error) throw rewardPkg.error;
+  const pkg = rewardPkg.data;
+  if (!pkg) {
+    const planCode = packageCode === "classic" ? "classic" : packageCode === "plus" ? "plus" : packageCode === "pro" ? "pro" : "go";
+    return {
+      reward_mode: "mixed",
+      plan_code: planCode,
+      soft_credit_amount: planCode === "go" ? 5 : planCode === "plus" ? 20 : planCode === "pro" ? 50 : 5,
+      premium_credit_amount: 0,
+      entitlement_seconds: durationSeconds,
+      reward_package_id: null,
+      title: `Find Dumps ${planCode.toUpperCase()} admin test`,
+      description: `Fallback package ${packageCode}`,
+      metadata: {
+        source: "admin-free-test",
+        package_code: packageCode,
+        claim_starts_entitlement: true,
+        expires_from_claim: true,
+        one_time_use: true,
+      },
+    };
+  }
+
+  return {
+    reward_mode: String(pkg.reward_mode || "plan"),
+    plan_code: pkg.plan_code == null ? null : String(pkg.plan_code),
+    soft_credit_amount: Number(pkg.soft_credit_amount || 0),
+    premium_credit_amount: Number(pkg.premium_credit_amount || 0),
+    entitlement_seconds: Math.max(0, Number(pkg.entitlement_seconds || (Number(pkg.entitlement_days || 0) * 86400) || durationSeconds)),
+    reward_package_id: String(pkg.id),
+    title: String(pkg.title || `Find Dumps ${packageCode}`),
+    description: String(pkg.description || `Admin test package ${packageCode}`),
+    metadata: {
+      source: "admin-free-test",
+      package_code: String(pkg.package_code || packageCode),
+      claim_starts_entitlement: true,
+      expires_from_claim: true,
+      one_time_use: true,
+    },
+  };
+}
+
 function extractErrorMessage(err: unknown) {
   if (!err || typeof err !== "object") return "unknown";
   const anyErr = err as Record<string, unknown>;
@@ -114,7 +202,7 @@ Deno.serve(async (req) => {
 
   const { data: keyType } = await sb
     .from("licenses_free_key_types")
-    .select("code,duration_seconds,enabled")
+    .select("code,label,app_code,duration_seconds,enabled,free_selection_mode,default_package_code,default_credit_code,default_wallet_kind")
     .eq("code", parsed.data.key_type_code)
     .maybeSingle();
 
@@ -172,14 +260,96 @@ Deno.serve(async (req) => {
     });
   }
 
+  const keyTypeAppCode = String(keyType.app_code || "free-fire").trim().toLowerCase();
   const expiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
+
+  if (keyTypeAppCode === "find-dumps") {
+    const rewardSeed = await buildFindDumpsRewardSeed(sb, keyType);
+    let key = "";
+    let redeemId = "";
+    let lastRedeemInsertError = "";
+    for (let attempt = 0; attempt < 12; attempt++) {
+      key = makeKey();
+      const insRedeem = await sb
+        .from("server_app_redeem_keys")
+        .insert({
+          app_code: "find-dumps",
+          redeem_key: key,
+          title: rewardSeed.title,
+          description: rewardSeed.description,
+          enabled: true,
+          starts_at: now.toISOString(),
+          expires_at: expiresAt,
+          max_redemptions: 1,
+          redeemed_count: 0,
+          reward_package_id: rewardSeed.reward_package_id,
+          reward_mode: rewardSeed.reward_mode,
+          plan_code: rewardSeed.plan_code,
+          soft_credit_amount: rewardSeed.soft_credit_amount,
+          premium_credit_amount: rewardSeed.premium_credit_amount,
+          entitlement_days: 0,
+          entitlement_seconds: rewardSeed.entitlement_seconds,
+          trace_id: traceId,
+          source_free_session_id: sessionId,
+          metadata: {
+            ...rewardSeed.metadata,
+            trace_id: traceId,
+            free_session_id: sessionId,
+            key_type_code: keyType.code,
+            key_signature: "FD",
+            issued_at: now.toISOString(),
+          },
+          notes: `ADMIN_FREE_TEST;TRACE=${traceId};SESSION=${sessionId};KEY_TYPE=${String(keyType.code).toUpperCase()};APP=find-dumps`,
+        })
+        .select("id")
+        .single();
+      if (!insRedeem.error && insRedeem.data?.id) {
+        redeemId = insRedeem.data.id;
+        break;
+      }
+      lastRedeemInsertError = extractErrorMessage(insRedeem.error);
+    }
+
+    if (!redeemId) {
+      await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "ADMIN_TEST_REDEEM_INSERT_FAILED" }).eq("session_id", sessionId);
+      await sb.from("licenses_free_security_logs").insert({
+        event_type: "admin_test_error",
+        route: "admin-free-test",
+        ip_hash: ipHash,
+        fingerprint_hash: fpHash,
+        details: { reason: "RUNTIME_REDEEM_INSERT_FAILED", message: lastRedeemInsertError || "unknown" },
+      });
+      return json({ ok: false, message: "RUNTIME_REDEEM_INSERT_FAILED", session_id: sessionId, detail: lastRedeemInsertError || "unknown" }, 500);
+    }
+
+    await sb.from("licenses_free_issues").insert({
+      license_id: null,
+      key_mask: maskKey(key),
+      created_at: now.toISOString(),
+      expires_at: expiresAt,
+      session_id: sessionId,
+      ip_hash: ipHash,
+      fingerprint_hash: fpHash,
+      ua_hash: uaHash,
+    });
+
+    await sb.from("licenses_free_sessions").update({
+      status: "revealed",
+      reveal_count: 1,
+      revealed_at: now.toISOString(),
+      app_code: "find-dumps",
+      issued_server_redeem_key_id: redeemId,
+      issued_server_reward_mode: rewardSeed.reward_mode,
+    }).eq("session_id", sessionId);
+
+    return json({ ok: true, message: "ADMIN_TEST_OK", key, expires_at: expiresAt, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, app_code: "find-dumps", key_signature: "FD" });
+  }
+
   let key = "";
   let licenseId = "";
   let lastLicenseInsertError = "";
   for (let attempt = 0; attempt < 12; attempt++) {
     key = makeKey();
-    // licenses table schema in this project is minimal: (id, key, created_at, expires_at, max_devices, is_active, note)
-    // Keep insert payload compatible to avoid ADMIN_TEST_INSERT_FAILED due to missing columns.
     const insLic = await sb
       .from("licenses")
       .insert({
