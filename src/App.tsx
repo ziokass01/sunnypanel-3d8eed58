@@ -31,6 +31,8 @@ import { AdminServerAppChargePage } from "@/pages/AdminServerAppCharge";
 import { AdminServerAppTrashPage } from "@/pages/AdminServerAppTrash";
 import { AdminServerAppKeysPage } from "@/pages/AdminServerAppKeys";
 import { AdminServerAppAuditPage } from "@/pages/AdminServerAppAudit";
+import { AdminServerAppControlPage } from "@/pages/AdminServerAppControl";
+import { AdminServerAppRedeemPage } from "@/pages/AdminServerAppRedeem";
 import { RentPortalPage } from "@/pages/RentPortal";
 import { RentAdminCustomerSetupPage } from "@/pages/RentAdminCustomerSetup";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
@@ -127,6 +129,8 @@ const App = () => {
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
                     <Route path="keys" element={<AdminServerAppKeysPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
+                    <Route path="control" element={<AdminServerAppControlPage />} />
+                    <Route path="redeem" element={<AdminServerAppRedeemPage />} />
                     <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>
@@ -141,6 +145,8 @@ const App = () => {
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
                     <Route path="keys" element={<AdminServerAppKeysPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
+                    <Route path="control" element={<AdminServerAppControlPage />} />
+                    <Route path="redeem" element={<AdminServerAppRedeemPage />} />
                     <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>
@@ -183,6 +189,8 @@ const App = () => {
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
                     <Route path="keys" element={<AdminServerAppKeysPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
+                    <Route path="control" element={<AdminServerAppControlPage />} />
+                    <Route path="redeem" element={<AdminServerAppRedeemPage />} />
                     <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>

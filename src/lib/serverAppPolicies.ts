@@ -1,7 +1,7 @@
 import { buildAppWorkspaceUrl, getAdminOrigin } from "@/lib/appWorkspace";
 
 export type ServerAppCode = "free-fire" | "find-dumps";
-export type WorkspaceSection = "config" | "runtime" | "keys" | "charge" | "audit" | "trash";
+export type WorkspaceSection = "config" | "runtime" | "keys" | "charge" | "control" | "redeem" | "audit" | "trash";
 export type FindDumpsFreeChoiceKind = "package" | "credit";
 export type FindDumpsWalletKind = "normal" | "vip";
 
@@ -290,9 +290,9 @@ export function getServerAppMeta(appCode: string) {
     code: "find-dumps",
     label: "Find Dumps",
     mode: "app-host" as const,
-    description: "Nhánh app-host mới với 6 tab tách riêng cấu hình, runtime, server key, charge rules, audit log và trash.",
+    description: "Nhánh app-host mới tách riêng cấu hình, runtime, server key, charge rules, trung tâm điều khiển, create redeem, audit log và trash.",
     serverUrl: buildAppWorkspaceUrl("find-dumps", "keys"),
-    tabs: ["config", "runtime", "keys", "charge", "audit", "trash"] as const,
-    note: "Server key, credit và audit tách riêng để dễ quản lý.",
+    tabs: ["config", "runtime", "keys", "charge", "control", "redeem", "audit", "trash"] as const,
+    note: "Create Redeem và Trung tâm điều khiển được tách riêng khỏi free admin cũ.",
   };
 }

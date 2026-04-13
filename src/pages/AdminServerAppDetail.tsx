@@ -633,12 +633,12 @@ export function AdminServerAppDetailPage() {
           </Button>
           {appCode === "find-dumps" ? (
             <Button asChild variant="outline">
-              <Link to="/admin/free-keys?app=find-dumps&focus=create">Mở key / redeem</Link>
+              <Link to={buildWorkspacePath(appCode, "control", workspaceScope)}>Mở trung tâm điều khiển</Link>
             </Button>
           ) : null}
           {appCode === "find-dumps" ? (
             <Button asChild variant="outline">
-              <Link to="/admin/free-keys?app=find-dumps&focus=test">Mở test phát key</Link>
+              <Link to={buildWorkspacePath(appCode, "redeem", workspaceScope)}>Mở Create Redeem</Link>
             </Button>
           ) : null}
           <Button onClick={openExternal} disabled={!appDraft.admin_url}>Mở server web</Button>

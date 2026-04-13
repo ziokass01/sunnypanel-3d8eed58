@@ -1646,7 +1646,7 @@ export function AdminFreeKeysPage() {
             Updated: {formatVnDateTime(settingsQuery.data?.updated_at ?? "")}
           </div>
         </CardContent>
-      </Card></div>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
@@ -1929,7 +1929,7 @@ export function AdminFreeKeysPage() {
             </Table>
           </div>
         </CardContent>
-      </Card></div>
+      </Card>
 
       <Card>
         <CardHeader className="space-y-3 pb-4">
@@ -2090,7 +2090,7 @@ export function AdminFreeKeysPage() {
             </div>
           ) : null}
         </CardContent>
-      </Card></div>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
@@ -2357,6 +2357,7 @@ export function AdminFreeKeysPage() {
           </div>
         </CardContent>
       </Card>
+    </div>
     </div>
   );
 }

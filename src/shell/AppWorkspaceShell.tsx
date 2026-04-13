@@ -1,19 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
-import { AppWindow, ChevronRight, Cog, Coins, KeyRound, Logs, Menu, Trash2, X } from "lucide-react";
+import { AppWindow, ChevronRight, Cog, Coins, KeyRound, Logs, Menu, ShieldCheck, Ticket, Trash2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buildAppWorkspaceUrl, buildWorkspacePath, detectWorkspaceScope, getAdminAppsUrl, getWorkspaceListPath, isAdminHostName } from "@/lib/appWorkspace";
 import { getServerAppMeta, type WorkspaceSection } from "@/lib/serverAppPolicies";
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { key: "config", label: "Cấu hình app", icon: Cog },
   { key: "runtime", label: "Runtime app", icon: AppWindow },
   { key: "keys", label: "Server key", icon: KeyRound },
   { key: "charge", label: "Charge / Credit Rules", icon: Coins },
   { key: "audit", label: "Audit Log", icon: Logs },
   { key: "trash", label: "Trash", icon: Trash2 },
+] as const;
+
+const FIND_DUMPS_EXTRA_NAV_ITEMS = [
+  { key: "control", label: "Trung tâm điều khiển", icon: ShieldCheck },
+  { key: "redeem", label: "Create Redeem", icon: Ticket },
 ] as const;
 
 function navButtonClass(isActive: boolean) {
@@ -28,6 +33,8 @@ function navButtonClass(isActive: boolean) {
 function resolveActiveKey(pathname: string): WorkspaceSection {
   if (pathname.includes("/trash")) return "trash";
   if (pathname.includes("/audit")) return "audit";
+  if (pathname.includes("/redeem")) return "redeem";
+  if (pathname.includes("/control")) return "control";
   if (pathname.includes("/charge")) return "charge";
   if (pathname.includes("/keys")) return "keys";
   if (pathname.includes("/config")) return "config";
@@ -42,7 +49,8 @@ export function AppWorkspaceShell() {
   const scope = detectWorkspaceScope(location.pathname);
   const listPath = useMemo(() => getWorkspaceListPath(scope, location.pathname), [scope, location.pathname]);
   const activeKey = resolveActiveKey(location.pathname);
-  const activeLabel = NAV_ITEMS.find((item) => item.key === activeKey)?.label ?? "Runtime app";
+  const navItems = useMemo(() => meta.code === "find-dumps" ? [...BASE_NAV_ITEMS.slice(0, 4), ...FIND_DUMPS_EXTRA_NAV_ITEMS, ...BASE_NAV_ITEMS.slice(4)] : BASE_NAV_ITEMS, [meta.code]);
+  const activeLabel = navItems.find((item) => item.key === activeKey)?.label ?? "Runtime app";
 
   useEffect(() => {
     if (typeof window === "undefined" || !appCode) return;
@@ -110,7 +118,7 @@ export function AppWorkspaceShell() {
               </div>
               <div className="flex-1 overflow-y-auto px-4 py-4">
                 <div className="space-y-2">
-                  {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+                  {navItems.map(({ key, label, icon: Icon }) => (
                     <NavLink key={key} to={buildNavPath(key)} className={({ isActive }) => navButtonClass(isActive)} onClick={() => setMobileNavOpen(false)}>
                       <Icon className="mr-3 h-4 w-4" />
                       {label}
@@ -144,7 +152,7 @@ export function AppWorkspaceShell() {
               </div>
             </div>
             <nav className="space-y-2 px-4 py-4">
-              {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+              {navItems.map(({ key, label, icon: Icon }) => (
                 <NavLink key={key} to={buildNavPath(key)} className={({ isActive }) => navButtonClass(isActive)}>
                   <Icon className="mr-3 h-4 w-4" />
                   {label}
