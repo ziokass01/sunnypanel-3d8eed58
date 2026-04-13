@@ -86,10 +86,10 @@ function normalizeUnlockRows(rows: any[] | null | undefined) {
       durationHours: asNumber((hit?.unlock_duration_seconds ?? rule.defaultDurationHours * 3600) / 3600, rule.defaultDurationHours),
       softUnlockCost: asNumber(hit?.soft_unlock_cost, rule.softUnlockCost),
       premiumUnlockCost: asNumber(hit?.premium_unlock_cost, rule.premiumUnlockCost),
-      softUnlockCost7d: asNumber(hit?.soft_unlock_cost_7d, hit?.soft_unlock_cost ?? rule.softUnlockCost),
-      premiumUnlockCost7d: asNumber(hit?.premium_unlock_cost_7d, hit?.premium_unlock_cost ?? rule.premiumUnlockCost),
-      softUnlockCost30d: asNumber(hit?.soft_unlock_cost_30d, hit?.soft_unlock_cost ?? rule.softUnlockCost),
-      premiumUnlockCost30d: asNumber(hit?.premium_unlock_cost_30d, hit?.premium_unlock_cost ?? rule.premiumUnlockCost),
+      softUnlockCost7d: asNumber(hit?.soft_unlock_cost_7d, rule.softUnlockCost7d ?? (rule.softUnlockCost * 3)),
+      premiumUnlockCost7d: asNumber(hit?.premium_unlock_cost_7d, rule.premiumUnlockCost7d ?? (rule.premiumUnlockCost * 3)),
+      softUnlockCost30d: asNumber(hit?.soft_unlock_cost_30d, rule.softUnlockCost30d ?? (rule.softUnlockCost * 9)),
+      premiumUnlockCost30d: asNumber(hit?.premium_unlock_cost_30d, rule.premiumUnlockCost30d ?? (rule.premiumUnlockCost * 9)),
       freePlans: Array.isArray(freePlans) ? freePlans.map((item: any) => String(item || "").trim()).filter(Boolean) : rule.freePlans,
       guardedFeatureCodes: Array.isArray(featureCodes) ? featureCodes.map((item: any) => String(item || "").trim()).filter(Boolean) : rule.guardedFeatureCodes,
       renewable: hit?.renewable ?? rule.renewable,
@@ -394,7 +394,7 @@ export function AdminServerAppChargePage() {
                   <div className="flex flex-1 flex-wrap items-center justify-between gap-2 pr-4 text-left">
                     <div>
                       <div className="font-medium">{rule.title}</div>
-                      <div className="text-xs text-muted-foreground">{rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · giá 1 ngày / 7 ngày / 30 ngày chỉnh riêng</div>
+                      <div className="text-xs text-muted-foreground">{rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · hết hạn sau {formatCredit(rule.durationHours)} giờ · 1d {formatCredit(rule.softUnlockCost)}/{formatCredit(rule.premiumUnlockCost)} · 7d {formatCredit(rule.softUnlockCost7d)}/{formatCredit(rule.premiumUnlockCost7d)} · 30d {formatCredit(rule.softUnlockCost30d)}/{formatCredit(rule.premiumUnlockCost30d)}</div>
                     </div>
                     <Badge variant={rule.enabled ? "outline" : "secondary"}>{rule.enabled ? "Đang bật" : "Tắt"}</Badge>
                   </div>
@@ -402,13 +402,9 @@ export function AdminServerAppChargePage() {
                 <AccordionContent className="space-y-4 pb-4">
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <div className="space-y-2"><div className="text-sm font-medium">Tên hiển thị</div><Input value={rule.title} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: e.target.value } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Thời hạn mặc định (giờ)</div><Input type="number" step="1" value={rule.durationHours} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, durationHours: Number(e.target.value || 0) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Giá 1 ngày · thường</div><Input type="number" step="0.1" value={rule.softUnlockCost} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, softUnlockCost: Number(e.target.value || 0) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Giá 1 ngày · VIP</div><Input type="number" step="0.1" value={rule.premiumUnlockCost} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premiumUnlockCost: Number(e.target.value || 0) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Giá 7 ngày · thường</div><Input type="number" step="0.1" value={rule.softUnlockCost7d} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, softUnlockCost7d: Number(e.target.value || 0) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Giá 7 ngày · VIP</div><Input type="number" step="0.1" value={rule.premiumUnlockCost7d} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premiumUnlockCost7d: Number(e.target.value || 0) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Giá 30 ngày · thường</div><Input type="number" step="0.1" value={rule.softUnlockCost30d} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, softUnlockCost30d: Number(e.target.value || 0) } : item))} /></div>
-                    <div className="space-y-2"><div className="text-sm font-medium">Giá 30 ngày · VIP</div><Input type="number" step="0.1" value={rule.premiumUnlockCost30d} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premiumUnlockCost30d: Number(e.target.value || 0) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Thời hạn mở (giờ)</div><Input type="number" step="1" value={rule.durationHours} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, durationHours: Number(e.target.value || 0) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Giá mở khóa thường</div><Input type="number" step="0.1" value={rule.softUnlockCost} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, softUnlockCost: Number(e.target.value || 0) } : item))} /></div>
+                    <div className="space-y-2"><div className="text-sm font-medium">Giá mở khóa VIP</div><Input type="number" step="0.1" value={rule.premiumUnlockCost} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premiumUnlockCost: Number(e.target.value || 0) } : item))} /></div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2"><div className="text-sm font-medium">Mô tả</div><Input value={rule.description} onChange={(e) => setUnlockDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} /></div>
