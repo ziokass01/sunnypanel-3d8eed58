@@ -53,7 +53,7 @@ export type RuntimeAppState = {
   };
   current_plan: string;
   current_plan_label: string | null;
-  plan_meta?: {
+  plan_meta: {
     label: string | null;
     hint: string | null;
     benefits_text: string | null;
@@ -1489,29 +1489,6 @@ async function getRuntimeContext(appCode: string) {
   return { config, settings: { ...settings, wallet_rules: walletRules }, plans, planMap, features, unlockRules };
 }
 
-function buildPlanHint(plan: RuntimePlan | null) {
-  if (!plan) return null;
-  const perks: string[] = [];
-  if (plan.daily_soft_credit > 0) perks.push(`+${plan.daily_soft_credit} credit thường / ngày`);
-  if (plan.daily_premium_credit > 0) perks.push(`+${plan.daily_premium_credit} credit VIP / ngày`);
-  if (plan.soft_cost_multiplier > 0 && plan.soft_cost_multiplier < 1) perks.push(`giảm giá thường x${plan.soft_cost_multiplier}`);
-  if (plan.premium_cost_multiplier > 0 && plan.premium_cost_multiplier < 1) perks.push(`giảm giá VIP x${plan.premium_cost_multiplier}`);
-  if (plan.device_limit > 1) perks.push(`${plan.device_limit} thiết bị`);
-  if (plan.account_limit > 1) perks.push(`${plan.account_limit} tài khoản`);
-  return perks.length ? `Nâng cấp gói để nhận nhiều ưu đãi hơn. Hiện tại: ${perks.join(' • ')}` : 'Nâng cấp gói để nhận nhiều ưu đãi hơn.';
-}
-
-function buildPlanBenefitsText(plan: RuntimePlan | null) {
-  if (!plan) return null;
-  const lines: string[] = [];
-  if (plan.daily_soft_credit > 0 || plan.daily_premium_credit > 0) {
-    lines.push(`Credit mỗi ngày: thường ${plan.daily_soft_credit} • VIP ${plan.daily_premium_credit}`);
-  }
-  lines.push(`Hệ số giá: thường x${plan.soft_cost_multiplier} • VIP x${plan.premium_cost_multiplier}`);
-  lines.push(`Giới hạn: ${plan.device_limit} thiết bị • ${plan.account_limit} tài khoản`);
-  return lines.join(' • ');
-}
-
 export async function buildRuntimeState(appCode: string, opts?: { sessionToken?: string | null; accountRef?: string | null; deviceId?: string | null }) : Promise<RuntimeAppState> {
   const { config, settings, planMap, features, unlockRules } = await getRuntimeContext(appCode);
 
@@ -1597,8 +1574,8 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     current_plan_label: activePlan?.label ?? null,
     plan_meta: activePlan ? {
       label: activePlan.label ?? null,
-      hint: buildPlanHint(activePlan),
-      benefits_text: buildPlanBenefitsText(activePlan),
+      hint: `Gói ${activePlan.label ?? currentPlan} đang hoạt động trên tài khoản hiện tại.`,
+      benefits_text: `• Credit thường mỗi ngày: ${activePlan.daily_soft_credit}\n• Credit VIP mỗi ngày: ${activePlan.daily_premium_credit}\n• Hệ số soft: x${activePlan.soft_cost_multiplier} • VIP: x${activePlan.premium_cost_multiplier}`,
       daily_soft_credit: activePlan.daily_soft_credit,
       daily_premium_credit: activePlan.daily_premium_credit,
       soft_cost_multiplier: activePlan.soft_cost_multiplier,
