@@ -28,6 +28,63 @@ function makeKey() {
   return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
+function asText(value: unknown, fallback = "") {
+  const v = String(value ?? fallback).trim();
+  return v || fallback;
+}
+
+function asNullableText(value: unknown) {
+  const v = String(value ?? "").trim();
+  return v || null;
+}
+
+function resolveFindDumpsAdminReward(keyType: any) {
+  const packageCode = asText(keyType?.default_package_code).toLowerCase();
+  const creditCode = asText(keyType?.default_credit_code).toLowerCase();
+  const durationSeconds = Math.max(60, Number(keyType?.duration_seconds ?? 3600));
+  const walletKind = asText(keyType?.default_wallet_kind || (creditCode === "credit-vip" ? "vip" : "normal"), "normal").toLowerCase();
+
+  if (packageCode) {
+    const titleMap: Record<string, string> = {
+      classic: "Find Dumps Classic",
+      go: "Find Dumps Go",
+      plus: "Find Dumps Plus",
+      pro: "Find Dumps Pro",
+    };
+    return {
+      reward_mode: "plan",
+      plan_code: packageCode,
+      soft_credit_amount: 0,
+      premium_credit_amount: 0,
+      entitlement_seconds: durationSeconds,
+      package_code: packageCode,
+      credit_code: null,
+      wallet_kind: null,
+      title: `${titleMap[packageCode] ?? "Find Dumps"} ${asText(keyType?.label)}`.trim(),
+      description: `FREE_ADMIN_TEST package ${packageCode}`,
+      key_signature: "FD",
+    };
+  }
+
+  if (creditCode) {
+    return {
+      reward_mode: creditCode === "credit-vip" ? "premium_credit" : "soft_credit",
+      plan_code: null,
+      soft_credit_amount: creditCode === "credit-normal" ? 1.5 : 0,
+      premium_credit_amount: creditCode === "credit-vip" ? 0.5 : 0,
+      entitlement_seconds: 0,
+      package_code: null,
+      credit_code: creditCode,
+      wallet_kind: walletKind,
+      title: `${creditCode === "credit-vip" ? "Find Dumps Credit VIP" : "Find Dumps Credit thường"} ${asText(keyType?.label)}`.trim(),
+      description: `FREE_ADMIN_TEST credit ${creditCode}`,
+      key_signature: "FD",
+    };
+  }
+
+  return null;
+}
+
 function extractErrorMessage(err: unknown) {
   if (!err || typeof err !== "object") return "unknown";
   const anyErr = err as Record<string, unknown>;
@@ -99,7 +156,7 @@ Deno.serve(async (req) => {
 
   const { data: keyType, error: ktErr } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,duration_seconds,enabled")
+    .select("code,label,duration_seconds,enabled,app_code,free_selection_mode,default_package_code,default_credit_code,default_wallet_kind,key_signature")
     .eq("code", keyTypeCode)
     .maybeSingle();
   if (ktErr || !keyType || !keyType.enabled) {
@@ -159,6 +216,100 @@ Deno.serve(async (req) => {
 
   const key = makeKey();
   const keyExpiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
+  const appCode = asText((keyType as any)?.app_code).toLowerCase();
+
+  if (appCode === "find-dumps") {
+    const reward = resolveFindDumpsAdminReward(keyType);
+    if (!reward) {
+      await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "ADMIN_TEST_FIND_DUMPS_REWARD_MISSING" }).eq("session_id", sessionId);
+      return json({ ok: false, message: "FIND_DUMPS_REWARD_MISSING", ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId }, 409);
+    }
+
+    const redeemIns = await sb
+      .from("server_app_redeem_keys")
+      .insert({
+        app_code: "find-dumps",
+        redeem_key: key,
+        title: reward.title,
+        description: reward.description,
+        enabled: true,
+        starts_at: now.toISOString(),
+        expires_at: keyExpiresAt,
+        max_redemptions: 1,
+        redeemed_count: 0,
+        reward_mode: reward.reward_mode,
+        plan_code: reward.plan_code,
+        soft_credit_amount: reward.soft_credit_amount,
+        premium_credit_amount: reward.premium_credit_amount,
+        entitlement_days: 0,
+        entitlement_seconds: reward.entitlement_seconds,
+        source_free_session_id: sessionId,
+        notes: `FREE_ADMIN_TEST;KEY_TYPE=${String(keyType.code).toUpperCase()};APP=find-dumps`,
+        metadata: {
+          source: "free-admin-test",
+          free_session_id: sessionId,
+          key_type_code: keyType.code,
+          package_code: reward.package_code,
+          credit_code: reward.credit_code,
+          wallet_kind: reward.wallet_kind,
+          claim_starts_entitlement: Boolean(reward.package_code),
+          expires_from_claim: true,
+          admin_test: true,
+        },
+      })
+      .select("id")
+      .single();
+
+    if (redeemIns.error || !redeemIns.data?.id) {
+      await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "ADMIN_TEST_REDEEM_INSERT_FAILED" }).eq("session_id", sessionId);
+      return json({ ok: false, message: "SERVER_REDEEM_INSERT_FAILED", ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, detail: extractErrorMessage(redeemIns.error) }, 500);
+    }
+
+    await sb.from("licenses_free_issues").insert({
+      license_id: null,
+      key_mask: key,
+      created_at: now.toISOString(),
+      expires_at: keyExpiresAt,
+      session_id: sessionId,
+      ip_hash: ipHash,
+      fingerprint_hash: fpHash,
+      ua_hash: uaHash,
+      app_code: "find-dumps",
+      key_signature: reward.key_signature,
+      server_redeem_key_id: redeemIns.data.id,
+    });
+
+    await sb.from("licenses_free_sessions").update({
+      status: "revealed",
+      reveal_count: 1,
+      revealed_at: now.toISOString(),
+      app_code: "find-dumps",
+      package_code: reward.package_code,
+      credit_code: reward.credit_code,
+      wallet_kind: reward.wallet_kind,
+      issued_server_redeem_key_id: redeemIns.data.id,
+      issued_server_reward_mode: reward.reward_mode,
+      selection_meta: {
+        app_code: "find-dumps",
+        package_code: reward.package_code,
+        credit_code: reward.credit_code,
+        wallet_kind: reward.wallet_kind,
+        reward_mode: reward.reward_mode,
+      },
+    }).eq("session_id", sessionId);
+
+    return json({
+      ok: true,
+      key,
+      expires_at: keyExpiresAt,
+      ip_hash: ipHash,
+      fp_hash: fpHash,
+      session_id: sessionId,
+      app_code: "find-dumps",
+      key_signature: reward.key_signature,
+      message: "ADMIN_TEST_OK",
+    });
+  }
 
   const licenseIns = await sb
     .from("licenses")
@@ -192,9 +343,11 @@ Deno.serve(async (req) => {
     ip_hash: ipHash,
     fingerprint_hash: fpHash,
     ua_hash: uaHash,
+    app_code: asNullableText((keyType as any)?.app_code),
+    key_signature: asNullableText((keyType as any)?.key_signature),
   });
 
-  await sb.from("licenses_free_sessions").update({ status: "revealed", reveal_count: 1, revealed_at: now.toISOString() }).eq("session_id", sessionId);
+  await sb.from("licenses_free_sessions").update({ status: "revealed", reveal_count: 1, revealed_at: now.toISOString(), app_code: asNullableText((keyType as any)?.app_code) }).eq("session_id", sessionId);
 
   return json({
     ok: true,
@@ -203,6 +356,8 @@ Deno.serve(async (req) => {
     ip_hash: ipHash,
     fp_hash: fpHash,
     session_id: sessionId,
+    app_code: asNullableText((keyType as any)?.app_code),
+    key_signature: asNullableText((keyType as any)?.key_signature),
     message: "ADMIN_TEST_OK",
   });
 });

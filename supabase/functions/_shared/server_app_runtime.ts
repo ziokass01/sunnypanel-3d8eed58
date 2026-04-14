@@ -638,7 +638,7 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
   const controls = await enforceSessionActiveOrThrow(params.appCode, session);
   void controls;
   const { settings, planMap } = await getRuntimeContext(params.appCode);
-  const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : await getLatestActiveEntitlement(params.appCode, accountRef);
+  const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : await getLatestActiveEntitlement(params.appCode, accountRef, asNullableString(session.device_id));
   const currentPlan = entitlement?.plan_code ? asString(entitlement.plan_code, settings.guest_plan) : settings.guest_plan;
   const activePlan = planMap.get(currentPlan) ?? null;
   const rules = await getFeatureUnlockRules(params.appCode);
@@ -938,24 +938,48 @@ async function getEntitlementById(entitlementId: string | null): Promise<Runtime
   };
 }
 
-async function getLatestActiveEntitlement(appCode: string, accountRef: string): Promise<RuntimeEntitlement | null> {
+async function getLatestActiveEntitlement(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeEntitlement | null> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_entitlements")
-    .select("id,plan_code,status,starts_at,expires_at,revoked_at,device_limit,account_limit")
+    .select("id,plan_code,status,starts_at,expires_at,revoked_at,device_limit,account_limit,device_id,updated_at")
     .eq("app_code", appCode)
     .eq("account_ref", accountRef)
-    .eq("status", "active")
-    .order("starts_at", { ascending: false });
+    .eq("status", "active");
 
   if (error) throw error;
   const now = Date.now();
-  const row = (data ?? []).find((item: any) => {
+  const hintedDeviceId = asNullableString(deviceId);
+  const usable = (data ?? []).filter((item: any) => {
     if (item?.revoked_at) return false;
     if (!item?.expires_at) return true;
     return new Date(String(item.expires_at)).getTime() > now;
-  }) ?? null;
-  if (!row) return null;
+  });
+  if (!usable.length) return null;
+
+  usable.sort((left: any, right: any) => {
+    const leftPlanRank = getPlanRank(asString(left?.plan_code, "classic"));
+    const rightPlanRank = getPlanRank(asString(right?.plan_code, "classic"));
+    if (rightPlanRank !== leftPlanRank) return rightPlanRank - leftPlanRank;
+
+    const leftDeviceMatch = hintedDeviceId && asString(left?.device_id) === hintedDeviceId ? 1 : 0;
+    const rightDeviceMatch = hintedDeviceId && asString(right?.device_id) === hintedDeviceId ? 1 : 0;
+    if (rightDeviceMatch !== leftDeviceMatch) return rightDeviceMatch - leftDeviceMatch;
+
+    const leftExpiry = left?.expires_at ? new Date(String(left.expires_at)).getTime() : Number.MAX_SAFE_INTEGER;
+    const rightExpiry = right?.expires_at ? new Date(String(right.expires_at)).getTime() : Number.MAX_SAFE_INTEGER;
+    if (rightExpiry !== leftExpiry) return rightExpiry > leftExpiry ? 1 : -1;
+
+    const leftUpdated = left?.updated_at ? new Date(String(left.updated_at)).getTime() : 0;
+    const rightUpdated = right?.updated_at ? new Date(String(right.updated_at)).getTime() : 0;
+    if (rightUpdated !== leftUpdated) return rightUpdated - leftUpdated;
+
+    const leftStarts = left?.starts_at ? new Date(String(left.starts_at)).getTime() : 0;
+    const rightStarts = right?.starts_at ? new Date(String(right.starts_at)).getTime() : 0;
+    return rightStarts - leftStarts;
+  });
+
+  const row = usable[0];
   return {
     id: asString(row.id),
     plan_code: asString(row.plan_code),
@@ -966,6 +990,17 @@ async function getLatestActiveEntitlement(appCode: string, accountRef: string): 
     device_limit: row.device_limit == null ? null : Math.trunc(asNumber(row.device_limit)),
     account_limit: row.account_limit == null ? null : Math.trunc(asNumber(row.account_limit)),
   };
+}
+
+async function syncSessionEntitlement(sessionId: string | null, entitlementId: string | null) {
+  if (!sessionId || !entitlementId) return;
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("server_app_sessions")
+    .update({ entitlement_id: entitlementId, updated_at: getNowIso() })
+    .eq("id", sessionId)
+    .neq("entitlement_id", entitlementId);
+  if (error) throw error;
 }
 
 async function getWalletRecord(appCode: string, accountRef: string): Promise<RuntimeWallet | null> {
@@ -1538,8 +1573,27 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
   let entitlement = session?.entitlement_id
     ? await getEntitlementById(asString(session.entitlement_id))
     : effectiveAccountRef
-      ? await getLatestActiveEntitlement(appCode, effectiveAccountRef)
+      ? await getLatestActiveEntitlement(appCode, effectiveAccountRef, effectiveDeviceId)
       : null;
+
+  const bestEntitlement = effectiveAccountRef
+    ? await getLatestActiveEntitlement(appCode, effectiveAccountRef, effectiveDeviceId)
+    : null;
+
+  if (isEntitlementUsable(bestEntitlement)) {
+    const currentRank = isEntitlementUsable(entitlement) ? getPlanRank(asString(entitlement?.plan_code, settings.guest_plan)) : 0;
+    const bestRank = getPlanRank(asString(bestEntitlement?.plan_code, settings.guest_plan));
+    const shouldPromoteSessionEntitlement = !isEntitlementUsable(entitlement)
+      || asString(entitlement?.id) !== asString(bestEntitlement?.id)
+      || bestRank > currentRank;
+    if (shouldPromoteSessionEntitlement) {
+      entitlement = bestEntitlement;
+      if (session?.id) {
+        await syncSessionEntitlement(asString(session.id), asString(bestEntitlement.id));
+        session = { ...session, entitlement_id: asString(bestEntitlement.id) };
+      }
+    }
+  }
 
   if (!isEntitlementUsable(entitlement)) {
     entitlement = null;
@@ -1628,8 +1682,18 @@ export async function bootstrapRuntimeState(appCode: string, opts?: { sessionTok
     session = await findLatestReusableSession(appCode, hintedAccountRef, hintedDeviceId ?? null);
   }
 
+  const bestEntitlement = hintedAccountRef
+    ? await getLatestActiveEntitlement(appCode, hintedAccountRef, hintedDeviceId ?? null)
+    : null;
+
+  if (session && isEntitlementUsable(bestEntitlement) && asString((session as any).entitlement_id) !== asString((bestEntitlement as any).id)) {
+    await syncSessionEntitlement(asString((session as any).id), asString((bestEntitlement as any).id));
+    session = { ...session, entitlement_id: asString((bestEntitlement as any).id) };
+    sessionToken = sessionToken || asNullableString(opts?.sessionToken) || null;
+  }
+
   if (!session && hintedAccountRef && hintedDeviceId) {
-    const entitlement = await getLatestActiveEntitlement(appCode, hintedAccountRef);
+    const entitlement = bestEntitlement;
     if (isEntitlementUsable(entitlement)) {
       const created = await createRuntimeSession({
         appCode,
@@ -1757,7 +1821,7 @@ export async function redeemRuntimeKey(params: {
   const reward = resolveRewardPackage(keyRow, rewardPackage);
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
 
-  const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
+  const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef, deviceId);
   const predictedDeviceLimit = reward.device_limit_override
     ?? planDefaults?.device_limit
     ?? existingEntitlement?.device_limit
@@ -1865,7 +1929,7 @@ export async function consumeRuntimeFeature(params: {
   const { settings, planMap, features } = await getRuntimeContext(appCode);
   const entitlement = session.entitlement_id
     ? await getEntitlementById(asString(session.entitlement_id))
-    : await getLatestActiveEntitlement(appCode, asString(session.account_ref));
+    : await getLatestActiveEntitlement(appCode, asString(session.account_ref), asNullableString(session.device_id));
   if (session.entitlement_id && !isEntitlementUsable(entitlement)) {
     throw Object.assign(new Error("ENTITLEMENT_INACTIVE"), { status: 409, code: "ENTITLEMENT_INACTIVE" });
   }
