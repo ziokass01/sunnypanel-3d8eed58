@@ -269,16 +269,57 @@ Deno.serve(async (req) => {
     }
 
     if (action === "heartbeat") {
-      if (!sessionToken) return runtimeJson(400, { ok: false, code: "MISSING_SESSION_TOKEN" }, origin);
-      const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
-      const state = await buildRuntimeState(appCode, { sessionToken });
-      await logSafe({ ok: true, code: "OK", session_id: (touched as any)?.id ?? null });
-      return runtimeJson(200, {
-        ok: true,
-        action,
-        active: true,
-        state,
-      }, origin);
+      if (!sessionToken) {
+        const boot = await bootstrapRuntimeState(appCode, {
+          sessionToken: null,
+          accountRef: accountRef || null,
+          deviceId: deviceId || req.headers.get("x-fp") || null,
+          clientVersion,
+          ipHash,
+        });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          active: Boolean(boot.sessionToken),
+          rebound: true,
+          state: boot.state,
+          session_token: boot.sessionToken,
+          session_bound: boot.sessionBound,
+        }, origin);
+      }
+      try {
+        const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
+        const state = await buildRuntimeState(appCode, { sessionToken, accountRef: accountRef || null, deviceId: deviceId || req.headers.get("x-fp") || null });
+        await logSafe({ ok: true, code: "OK", session_id: (touched as any)?.id ?? null });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          active: true,
+          state,
+        }, origin);
+      } catch (error) {
+        const code = String((error as any)?.code ?? "").trim().toUpperCase();
+        if (code === "SESSION_NOT_FOUND" || code === "SESSION_EXPIRED" || code === "SESSION_INACTIVE" || code === "ENTITLEMENT_EXPIRED" || code === "ENTITLEMENT_REVOKED") {
+          const boot = await bootstrapRuntimeState(appCode, {
+            sessionToken: null,
+            accountRef: accountRef || null,
+            deviceId: deviceId || req.headers.get("x-fp") || null,
+            clientVersion,
+            ipHash,
+          });
+          await logSafe({ ok: true, code: "OK", meta: { rebound_from: code, session_bound: boot.sessionBound } });
+          return runtimeJson(200, {
+            ok: true,
+            action,
+            active: Boolean(boot.sessionToken),
+            rebound: true,
+            state: boot.state,
+            session_token: boot.sessionToken,
+            session_bound: boot.sessionBound,
+          }, origin);
+        }
+        throw error;
+      }
     }
 
     if (action === "logout") {
