@@ -238,6 +238,12 @@ function asNullableString(value: unknown): string | null {
 }
 
 
+function normalizePlanCode(value: unknown, fallback = "classic") {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return raw || fallback;
+}
+
+
 function isMissingRelationError(error: any, relationName: string) {
   const code = String(error?.code ?? "");
   const msg = String(error?.message ?? error?.details ?? "").toLowerCase();
@@ -408,7 +414,7 @@ function makeSessionToken() {
 function normalizeSettings(config: any): RuntimeSettings {
   const settings = Array.isArray(config?.settings) ? config.settings[0] : config?.settings;
   return {
-    guest_plan: asString(settings?.guest_plan, "classic"),
+    guest_plan: normalizePlanCode(settings?.guest_plan, "classic"),
     gift_tab_label: asString(settings?.gift_tab_label, "Quà tặng"),
     key_persist_until_revoked: Boolean(settings?.key_persist_until_revoked ?? true),
     daily_reset_hour: Math.max(0, Math.min(23, Math.trunc(asNumber(settings?.daily_reset_hour, 0)))),
@@ -476,7 +482,7 @@ async function getPlans(appCode: string): Promise<RuntimePlan[]> {
     throw error;
   }
   return (data ?? []).map((row: any) => ({
-    plan_code: asString(row.plan_code),
+    plan_code: normalizePlanCode(row.plan_code),
     label: asString(row.label),
     daily_soft_credit: asNumber(row.daily_soft_credit),
     daily_premium_credit: asNumber(row.daily_premium_credit),
@@ -504,7 +510,7 @@ async function getFeatures(appCode: string): Promise<RuntimeFeature[]> {
     feature_code: asString(row.feature_code),
     title: asString(row.title),
     description: asNullableString(row.description),
-    min_plan: asString(row.min_plan, "classic"),
+    min_plan: normalizePlanCode(row.min_plan, "classic"),
     requires_credit: Boolean(row.requires_credit),
     soft_cost: asNumber(row.soft_cost),
     premium_cost: asNumber(row.premium_cost),
@@ -928,7 +934,7 @@ async function getEntitlementById(entitlementId: string | null): Promise<Runtime
   if (!data) return null;
   return {
     id: asString((data as any).id),
-    plan_code: asString((data as any).plan_code),
+    plan_code: normalizePlanCode((data as any).plan_code),
     status: asString((data as any).status, "active"),
     starts_at: asString((data as any).starts_at),
     expires_at: asNullableString((data as any).expires_at),
@@ -982,7 +988,7 @@ async function getLatestActiveEntitlement(appCode: string, accountRef: string, d
   const row = usable[0];
   return {
     id: asString(row.id),
-    plan_code: asString(row.plan_code),
+    plan_code: normalizePlanCode(row.plan_code),
     status: asString(row.status, "active"),
     starts_at: asString(row.starts_at),
     expires_at: asNullableString(row.expires_at),
@@ -1160,7 +1166,7 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
     description: asNullableString((data as any).description),
     enabled: Boolean((data as any).enabled ?? true),
     reward_mode: asString((data as any).reward_mode, "plan"),
-    plan_code: asNullableString((data as any).plan_code),
+    plan_code: asNullableString(normalizePlanCode((data as any).plan_code, "")) || null,
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
@@ -1190,7 +1196,7 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
     max_redemptions: Math.max(1, Math.trunc(asNumber((data as any).max_redemptions, 1))),
     redeemed_count: Math.max(0, Math.trunc(asNumber((data as any).redeemed_count, 0))),
     reward_mode: asString((data as any).reward_mode, "package"),
-    plan_code: asNullableString((data as any).plan_code),
+    plan_code: asNullableString(normalizePlanCode((data as any).plan_code, "")) || null,
     soft_credit_amount: asNumber((data as any).soft_credit_amount),
     premium_credit_amount: asNumber((data as any).premium_credit_amount),
     entitlement_days: Math.max(0, Math.trunc(asNumber((data as any).entitlement_days))),
@@ -1215,7 +1221,7 @@ function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackag
       reward_mode: asString(pkg.reward_mode, keyRow.reward_mode),
       package_code: pkg.package_code,
       title: pkg.title,
-      plan_code: pkg.plan_code,
+      plan_code: pkg.plan_code ? normalizePlanCode(pkg.plan_code, "") : null,
       soft_credit_amount: round2(pkg.soft_credit_amount),
       premium_credit_amount: round2(pkg.premium_credit_amount),
       entitlement_days: Math.max(0, pkg.entitlement_days),
@@ -1230,7 +1236,7 @@ function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackag
     reward_mode: asString(keyRow.reward_mode, "mixed"),
     package_code: null,
     title: null,
-    plan_code: keyRow.plan_code,
+    plan_code: keyRow.plan_code ? normalizePlanCode(keyRow.plan_code, "") : null,
     soft_credit_amount: round2(keyRow.soft_credit_amount),
     premium_credit_amount: round2(keyRow.premium_credit_amount),
     entitlement_days: Math.max(0, keyRow.entitlement_days),
@@ -1387,7 +1393,7 @@ async function upsertRuntimeEntitlement(params: {
   const admin = createAdminClient();
   const nowIso = getNowIso();
   const usableExisting = isEntitlementUsable(params.existing) ? params.existing : null;
-  const planCode = asString(
+  const planCode = normalizePlanCode(
     params.reward.plan_code ?? usableExisting?.plan_code ?? params.settings.guest_plan,
     params.settings.guest_plan,
   );
@@ -1442,7 +1448,7 @@ async function upsertRuntimeEntitlement(params: {
     if (error) throw error;
     return {
       id: asString((data as any).id),
-      plan_code: asString((data as any).plan_code),
+      plan_code: normalizePlanCode((data as any).plan_code),
       status: asString((data as any).status, "active"),
       starts_at: asString((data as any).starts_at),
       expires_at: asNullableString((data as any).expires_at),
@@ -1460,7 +1466,7 @@ async function upsertRuntimeEntitlement(params: {
   if (error) throw error;
   return {
     id: asString((data as any).id),
-    plan_code: asString((data as any).plan_code),
+    plan_code: normalizePlanCode((data as any).plan_code),
     status: asString((data as any).status, "active"),
     starts_at: asString((data as any).starts_at),
     expires_at: asNullableString((data as any).expires_at),
@@ -1599,7 +1605,7 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     entitlement = null;
   }
 
-  let currentPlan = entitlement?.plan_code ? asString(entitlement.plan_code) : settings.guest_plan;
+  let currentPlan = entitlement?.plan_code ? normalizePlanCode(entitlement.plan_code, settings.guest_plan) : settings.guest_plan;
   if (!planMap.has(currentPlan)) currentPlan = settings.guest_plan;
   const activePlan = planMap.get(currentPlan) ?? null;
   const currentPlanRank = getPlanRank(currentPlan);
@@ -1657,7 +1663,7 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     } : null,
     entitlement: entitlement ? {
       id: asString(entitlement.id),
-      plan_code: asString(entitlement.plan_code),
+      plan_code: normalizePlanCode(entitlement.plan_code),
       status: asString(entitlement.status),
       starts_at: asString(entitlement.starts_at),
       expires_at: asNullableString(entitlement.expires_at),
@@ -1678,6 +1684,10 @@ export async function bootstrapRuntimeState(appCode: string, opts?: { sessionTok
   let sessionToken = asNullableString(opts?.sessionToken) ?? null;
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
 
+  if (sessionToken && !session) {
+    sessionToken = null;
+  }
+
   if (!session && hintedAccountRef) {
     session = await findLatestReusableSession(appCode, hintedAccountRef, hintedDeviceId ?? null);
   }
@@ -1689,24 +1699,29 @@ export async function bootstrapRuntimeState(appCode: string, opts?: { sessionTok
   if (session && isEntitlementUsable(bestEntitlement) && asString((session as any).entitlement_id) !== asString((bestEntitlement as any).id)) {
     await syncSessionEntitlement(asString((session as any).id), asString((bestEntitlement as any).id));
     session = { ...session, entitlement_id: asString((bestEntitlement as any).id) };
-    sessionToken = sessionToken || asNullableString(opts?.sessionToken) || null;
   }
 
-  if (!session && hintedAccountRef && hintedDeviceId) {
-    const entitlement = bestEntitlement;
-    if (isEntitlementUsable(entitlement)) {
-      const created = await createRuntimeSession({
-        appCode,
-        accountRef: hintedAccountRef,
-        deviceId: hintedDeviceId,
-        entitlementId: asString((entitlement as any).id),
-        redeemKeyId: null,
-        clientVersion: asNullableString(opts?.clientVersion),
-        ipHash: asNullableString(opts?.ipHash),
-      });
-      sessionToken = created.session_token;
-      session = await findSession(appCode, sessionToken);
-    }
+  if (!sessionToken && hintedAccountRef && hintedDeviceId) {
+    const reusableEntitlement = session?.entitlement_id
+      ? await getEntitlementById(asString((session as any).entitlement_id))
+      : null;
+    const chosenEntitlement = isEntitlementUsable(bestEntitlement)
+      ? bestEntitlement
+      : (isEntitlementUsable(reusableEntitlement) ? reusableEntitlement : null);
+
+    await revokeActiveDeviceSessions(appCode, hintedAccountRef, hintedDeviceId, "bootstrap_rotate");
+
+    const created = await createRuntimeSession({
+      appCode,
+      accountRef: hintedAccountRef,
+      deviceId: hintedDeviceId,
+      entitlementId: chosenEntitlement ? asString((chosenEntitlement as any).id) : null,
+      redeemKeyId: session?.redeem_key_id ? asString((session as any).redeem_key_id) : null,
+      clientVersion: asNullableString(opts?.clientVersion),
+      ipHash: asNullableString(opts?.ipHash),
+    });
+    sessionToken = created.session_token;
+    session = await findSession(appCode, sessionToken);
   }
 
   const state = await buildRuntimeState(appCode, {
@@ -1845,7 +1860,7 @@ export async function redeemRuntimeKey(params: {
     settings,
   });
 
-  const effectivePlan = entitlement?.plan_code ?? settings.guest_plan;
+  const effectivePlan = normalizePlanCode(entitlement?.plan_code ?? settings.guest_plan, settings.guest_plan);
   const effectivePlanRow = planMap.get(effectivePlan) ?? null;
   await ensureWalletFresh(appCode, accountRef, effectivePlanRow, settings, deviceId);
   const wallet = await applyWalletTopup({
@@ -1934,7 +1949,7 @@ export async function consumeRuntimeFeature(params: {
     throw Object.assign(new Error("ENTITLEMENT_INACTIVE"), { status: 409, code: "ENTITLEMENT_INACTIVE" });
   }
 
-  const currentPlanCode = isEntitlementUsable(entitlement) ? asString(entitlement?.plan_code, settings.guest_plan) : settings.guest_plan;
+  const currentPlanCode = isEntitlementUsable(entitlement) ? normalizePlanCode(entitlement?.plan_code, settings.guest_plan) : settings.guest_plan;
   const currentPlan = planMap.get(currentPlanCode) ?? null;
   const feature = features.find((item) => item.feature_code === featureCode);
   if (!feature) throw Object.assign(new Error("FEATURE_NOT_FOUND"), { status: 404, code: "FEATURE_NOT_FOUND" });
