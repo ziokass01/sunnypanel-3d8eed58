@@ -1134,14 +1134,17 @@ async function getRewardPackageById(packageId: string | null): Promise<RuntimeRe
   };
 }
 
-function normalizeRedeemKey(value: string | null | undefined) {
-  return String(value ?? "")
-    .replace(/[​﻿"'\s]+/g, "")
-    .trim()
-    .toUpperCase();
-}
+async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_redeem_keys")
+    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
+    .eq("app_code", appCode)
+    .eq("redeem_key", redeemKey)
+    .maybeSingle();
 
-function mapRuntimeRedeemKeyRow(data: any): RuntimeRedeemKey {
+  if (error) throw error;
+  if (!data) return null;
   return {
     id: asString((data as any).id),
     reward_package_id: asNullableString((data as any).reward_package_id),
@@ -1163,45 +1166,6 @@ function mapRuntimeRedeemKeyRow(data: any): RuntimeRedeemKey {
     blocked_reason: asNullableString((data as any).blocked_reason),
     metadata: typeof (data as any).metadata === "object" && (data as any).metadata != null ? (data as any).metadata : {},
   };
-}
-
-async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
-  const admin = createAdminClient();
-  const normalizedKey = normalizeRedeemKey(redeemKey);
-  if (!normalizedKey) return null;
-
-  const direct = await admin
-    .from("server_app_redeem_keys")
-    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
-    .eq("app_code", appCode)
-    .eq("redeem_key", normalizedKey)
-    .maybeSingle();
-  if (direct.error) throw direct.error;
-  if (direct.data) return mapRuntimeRedeemKeyRow(direct.data);
-
-  const legacyIssue = await admin
-    .from("licenses_free_issues")
-    .select("server_redeem_key_id,app_code,expires_at,key_mask,session_id")
-    .eq("app_code", appCode)
-    .eq("key_mask", normalizedKey)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (legacyIssue.error) throw legacyIssue.error;
-
-  const bridgeId = asNullableString((legacyIssue.data as any)?.server_redeem_key_id);
-  if (bridgeId) {
-    const bridged = await admin
-      .from("server_app_redeem_keys")
-      .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
-      .eq("app_code", appCode)
-      .eq("id", bridgeId)
-      .maybeSingle();
-    if (bridged.error) throw bridged.error;
-    if (bridged.data) return mapRuntimeRedeemKeyRow(bridged.data);
-  }
-
-  return null;
 }
 
 function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackage | null): RuntimeResolvedReward {
