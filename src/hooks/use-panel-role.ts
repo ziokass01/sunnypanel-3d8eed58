@@ -12,21 +12,27 @@ function normalizePanelRole(value: unknown): PanelRole {
   return null;
 }
 
-function readCachedRole(userId: string | null | undefined): PanelRole {
-  if (!userId || typeof window === "undefined") return null;
+const PANEL_ROLE_CACHE_KEY = "sunny:panel-role-cache:v1";
+
+function readCachedPanelRole(userId?: string | null): PanelRole {
+  if (typeof window === "undefined" || !userId) return null;
   try {
-    return normalizePanelRole(window.localStorage.getItem(`panel_role:${userId}`));
-  } catch (_err) {
+    const raw = window.localStorage.getItem(PANEL_ROLE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { userId?: string; role?: unknown };
+    if (!parsed || parsed.userId !== userId) return null;
+    return normalizePanelRole(parsed.role);
+  } catch {
     return null;
   }
 }
 
-function writeCachedRole(userId: string | null | undefined, role: PanelRole) {
-  if (!userId || !role || typeof window === "undefined") return;
+function writeCachedPanelRole(userId?: string | null, role?: PanelRole) {
+  if (typeof window === "undefined" || !userId || !role) return;
   try {
-    window.localStorage.setItem(`panel_role:${userId}`, role);
-  } catch (_err) {
-    // ignore cache write failures
+    window.localStorage.setItem(PANEL_ROLE_CACHE_KEY, JSON.stringify({ userId, role }));
+  } catch {
+    // ignore cache write errors
   }
 }
 
@@ -36,7 +42,7 @@ export function usePanelRole() {
     () => normalizePanelRole(user?.app_metadata?.panel_role ?? user?.app_metadata?.role),
     [user?.app_metadata],
   );
-  const cachedRole = useMemo(() => readCachedRole(user?.id), [user?.id]);
+  const cachedRole = useMemo(() => readCachedPanelRole(user?.id), [user?.id]);
   const [role, setRole] = useState<PanelRole>(metadataRole ?? cachedRole);
   const [loading, setLoading] = useState(true);
 
@@ -52,19 +58,19 @@ export function usePanelRole() {
         return;
       }
 
-      const optimisticRole = metadataRole ?? cachedRole;
-      if (optimisticRole && !cancelled) {
+      const optimisticRole = metadataRole ?? cachedRole ?? null;
+      if (optimisticRole) {
         setRole(optimisticRole);
       }
       setLoading(true);
-
       const { data, error } = await supabase.rpc("get_my_panel_role");
+
       if (cancelled) return;
 
       const dbRole = error ? null : normalizePanelRole(data);
-      const finalRole = dbRole ?? metadataRole ?? cachedRole ?? null;
-      setRole(finalRole);
-      if (finalRole) writeCachedRole(user.id, finalRole);
+      const resolved = dbRole ?? metadataRole ?? cachedRole ?? null;
+      if (resolved) writeCachedPanelRole(user.id, resolved);
+      setRole(resolved);
       setLoading(false);
     }
 

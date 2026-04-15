@@ -30,6 +30,8 @@ function normalizePlanRows(rows: any[] | null | undefined) {
       discountPercentVip: Math.max(0, Math.round((1 - asNumber(hit?.premium_cost_multiplier, 1)) * 10000) / 100),
       dailyCredit: asNumber(hit?.daily_soft_credit, item.dailyCredit),
       dailyVipCredit: asNumber(hit?.daily_premium_credit, item.dailyVipCredit),
+      softBalanceCap: asNumber(hit?.soft_balance_cap, item.softBalanceCap),
+      premiumBalanceCap: asNumber(hit?.premium_balance_cap, item.premiumBalanceCap),
       resetDaily: item.resetDaily,
     };
   });
@@ -128,7 +130,7 @@ export function AdminServerAppChargePage() {
     queryKey: ["server-app-charge-lite", appCode],
     queryFn: async () => {
       const [plansRes, featuresRes, walletRes, unlockRes] = await Promise.all([
-        supabase.from("server_app_plans").select("app_code,plan_code,label,enabled,daily_soft_credit,daily_premium_credit,soft_cost_multiplier,premium_cost_multiplier").eq("app_code", appCode).order("sort_order", { ascending: true }),
+        supabase.from("server_app_plans").select("app_code,plan_code,label,enabled,daily_soft_credit,daily_premium_credit,soft_balance_cap,premium_balance_cap,soft_cost_multiplier,premium_cost_multiplier").eq("app_code", appCode).order("sort_order", { ascending: true }),
         supabase.from("server_app_features").select("app_code,feature_code,title,enabled,requires_credit,soft_cost,premium_cost,min_plan,badge_label").eq("app_code", appCode).order("sort_order", { ascending: true }),
         supabase.from("server_app_wallet_rules").select("app_code,soft_wallet_label,premium_wallet_label,allow_decimal,soft_daily_reset_enabled,premium_daily_reset_enabled,soft_daily_reset_amount,premium_daily_reset_amount,notes").eq("app_code", appCode).maybeSingle(),
         supabase.from("server_app_feature_unlock_rules").select("app_code,access_code,title,description,enabled,unlock_required,unlock_duration_seconds,soft_unlock_cost,premium_unlock_cost,soft_unlock_cost_7d,premium_unlock_cost_7d,soft_unlock_cost_30d,premium_unlock_cost_30d,free_for_plans,guarded_feature_codes,renewable,revalidate_online,notes").eq("app_code", appCode).order("sort_order", { ascending: true }),
@@ -171,6 +173,8 @@ export function AdminServerAppChargePage() {
         enabled: Boolean(plan.enabled),
         daily_soft_credit: asNumber(plan.dailyCredit),
         daily_premium_credit: asNumber(plan.dailyVipCredit),
+        soft_balance_cap: asNumber(plan.softBalanceCap),
+        premium_balance_cap: asNumber(plan.premiumBalanceCap),
         soft_cost_multiplier: Math.max(0, 1 - asNumber(plan.discountPercent) / 100),
         premium_cost_multiplier: Math.max(0, 1 - asNumber(plan.discountPercentVip) / 100),
       }));
@@ -282,11 +286,13 @@ export function AdminServerAppChargePage() {
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="space-y-4 pb-4">
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <div className="space-y-2"><div className="text-sm font-medium">Discount % thường</div><Input type="number" step="0.1" value={plan.discountPercent} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, discountPercent: Number(e.target.value || 0) } : item))} /></div>
                       <div className="space-y-2"><div className="text-sm font-medium">Discount % VIP</div><Input type="number" step="0.1" value={plan.discountPercentVip} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, discountPercentVip: Number(e.target.value || 0) } : item))} /></div>
-                      <div className="space-y-2"><div className="text-sm font-medium">Daily credit</div><Input type="number" step="0.1" value={plan.dailyCredit} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, dailyCredit: Number(e.target.value || 0) } : item))} /></div>
-                      <div className="space-y-2"><div className="text-sm font-medium">Daily credit VIP</div><Input type="number" step="0.1" value={plan.dailyVipCredit} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, dailyVipCredit: Number(e.target.value || 0) } : item))} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Credit thường / ngày</div><Input type="number" step="0.1" value={plan.dailyCredit} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, dailyCredit: Number(e.target.value || 0) } : item))} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Credit VIP / ngày</div><Input type="number" step="0.1" value={plan.dailyVipCredit} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, dailyVipCredit: Number(e.target.value || 0) } : item))} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Tích lũy soft tối đa</div><Input type="number" step="0.1" value={plan.softBalanceCap} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, softBalanceCap: Number(e.target.value || 0) } : item))} /></div>
+                      <div className="space-y-2"><div className="text-sm font-medium">Tích lũy VIP tối đa</div><Input type="number" step="0.1" value={plan.premiumBalanceCap} onChange={(e) => setPlanDrafts((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, premiumBalanceCap: Number(e.target.value || 0) } : item))} /></div>
                     </div>
                     <div className="flex items-center justify-between rounded-2xl border px-4 py-3">
                       <div>

@@ -57,18 +57,30 @@ export function AdminServerAppKeysPage() {
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
   const { toast } = useToast();
   const [issueKind, setIssueKind] = useState<"package" | "credit">("package");
-  const [selectedCode, setSelectedCode] = useState<string>(FIND_DUMPS_PACKAGES[0].code);
+  const [selectedPackageCode, setSelectedPackageCode] = useState<string>(FIND_DUMPS_PACKAGES[0].code);
+  const [selectedCreditCode, setSelectedCreditCode] = useState<string>(FIND_DUMPS_CREDITS[0].code);
 
   const rewardsQuery = useQuery({
     queryKey: ["server-app-keys-lite", appCode],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("server_app_reward_packages")
-        .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds")
-        .eq("app_code", appCode)
-        .order("sort_order", { ascending: true });
-      if (error) throw error;
-      return data as any[];
+      const [rewardsRes, keyTypesRes] = await Promise.all([
+        supabase
+          .from("server_app_reward_packages")
+          .select("id,package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds")
+          .eq("app_code", appCode)
+          .order("sort_order", { ascending: true }),
+        supabase
+          .from("licenses_free_key_types")
+          .select("code,free_selection_mode,default_package_code,default_credit_code,default_wallet_kind")
+          .eq("app_code", appCode)
+          .order("sort_order", { ascending: true }),
+      ]);
+      if (rewardsRes.error) throw rewardsRes.error;
+      if (keyTypesRes.error) throw keyTypesRes.error;
+      return {
+        rewards: rewardsRes.data as any[],
+        keyTypes: keyTypesRes.data as any[],
+      };
     },
     retry: false,
   });
@@ -78,13 +90,13 @@ export function AdminServerAppKeysPage() {
 
   useEffect(() => {
     if (!rewardsQuery.data) return;
-    setPackageDrafts(packageSeedRows(rewardsQuery.data));
-    setCreditDrafts(creditSeedRows(rewardsQuery.data));
+    setPackageDrafts(packageSeedRows(rewardsQuery.data.rewards));
+    setCreditDrafts(creditSeedRows(rewardsQuery.data.rewards));
+    const packageDefault = rewardsQuery.data.keyTypes?.find((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "package" && String(row.default_package_code || "").trim())?.default_package_code;
+    const creditDefault = rewardsQuery.data.keyTypes?.find((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "credit" && String(row.default_credit_code || "").trim())?.default_credit_code;
+    if (packageDefault) setSelectedPackageCode(String(packageDefault).trim().toLowerCase());
+    if (creditDefault) setSelectedCreditCode(String(creditDefault).trim().toLowerCase());
   }, [rewardsQuery.data]);
-
-  useEffect(() => {
-    setSelectedCode(issueKind === "package" ? packageDrafts[0]?.code || FIND_DUMPS_PACKAGES[0].code : creditDrafts[0]?.code || FIND_DUMPS_CREDITS[0].code);
-  }, [issueKind, packageDrafts, creditDrafts]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -120,6 +132,32 @@ export function AdminServerAppKeysPage() {
       ];
       const { error } = await supabase.from("server_app_reward_packages").upsert(payload, { onConflict: "app_code,package_code" });
       if (error) throw error;
+
+      const selectedCredit = creditDrafts.find((item) => item.code === selectedCreditCode) || creditDrafts[0];
+      const selectedPackage = packageDrafts.find((item) => item.code === selectedPackageCode) || packageDrafts[0];
+      const creditRows = (rewardsQuery.data?.keyTypes || []).filter((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "credit");
+      const packageRows = (rewardsQuery.data?.keyTypes || []).filter((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "package");
+
+      if (creditRows.length && selectedCredit) {
+        const creditUpdate = creditRows.map((row: any) => ({
+          code: row.code,
+          app_code: appCode,
+          default_credit_code: selectedCredit.code,
+          default_wallet_kind: selectedCredit.walletKind === "vip" ? "vip" : "normal",
+        }));
+        const creditWrite = await supabase.from("licenses_free_key_types").upsert(creditUpdate, { onConflict: "code" });
+        if (creditWrite.error) throw creditWrite.error;
+      }
+
+      if (packageRows.length && selectedPackage) {
+        const packageUpdate = packageRows.map((row: any) => ({
+          code: row.code,
+          app_code: appCode,
+          default_package_code: selectedPackage.code,
+        }));
+        const packageWrite = await supabase.from("licenses_free_key_types").upsert(packageUpdate, { onConflict: "code" });
+        if (packageWrite.error) throw packageWrite.error;
+      }
     },
     onSuccess: async () => {
       await rewardsQuery.refetch();
@@ -149,8 +187,9 @@ export function AdminServerAppKeysPage() {
     );
   }
 
-  const selectedPackage = packageDrafts.find((item) => item.code === selectedCode) || packageDrafts[0];
-  const selectedCredit = creditDrafts.find((item) => item.code === selectedCode) || creditDrafts[0];
+  const selectedPackage = packageDrafts.find((item) => item.code === selectedPackageCode) || packageDrafts[0];
+  const selectedCredit = creditDrafts.find((item) => item.code === selectedCreditCode) || creditDrafts[0];
+  const selectedCode = issueKind === "credit" ? selectedCreditCode : selectedPackageCode;
 
   return (
     <section className="space-y-5">
@@ -184,7 +223,7 @@ export function AdminServerAppKeysPage() {
           </div>
           <div className="space-y-2">
             <div className="text-sm font-medium">Mục bung thêm ở /free</div>
-            <Select value={selectedCode} onValueChange={setSelectedCode}>
+            <Select value={selectedCode} onValueChange={(value) => issueKind === "credit" ? setSelectedCreditCode(value) : setSelectedPackageCode(value)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(issueKind === "package" ? packageDrafts : creditDrafts).map((item) => <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>)}
