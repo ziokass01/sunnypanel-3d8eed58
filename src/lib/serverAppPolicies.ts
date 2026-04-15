@@ -226,7 +226,9 @@ export function computeFindDumpsFeatureCost(featureCode: string, opts?: { planCo
   const baseCost = roundCredit(rawBase);
   const eligibleForDiscount = feature.discountablePlans.includes(plan.code);
   const free = baseCost <= 0 || (plan.code === "classic" && feature.freeForClassic);
-  const rawDiscount = walletKind === "vip" ? Number(plan.discountPercentVip ?? plan.discountPercent || 0) : Number(plan.discountPercent || 0);
+  const rawDiscount = walletKind === "vip"
+    ? Number(plan.discountPercentVip ?? plan.discountPercent ?? 0)
+    : Number(plan.discountPercent ?? 0);
   const discountPercent = free || !eligibleForDiscount ? 0 : Math.max(0, rawDiscount);
   const effectiveCost = free ? 0 : roundCredit(baseCost * (1 - discountPercent / 100));
 
