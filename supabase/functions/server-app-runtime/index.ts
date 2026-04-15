@@ -371,16 +371,46 @@ Deno.serve(async (req) => {
     }
 
     if (action === "unlock_feature") {
-      if (!sessionToken) return runtimeJson(400, { ok: false, code: "MISSING_SESSION_TOKEN" }, origin);
       if (!featureCode) return runtimeJson(400, { ok: false, code: "MISSING_FEATURE_CODE" }, origin);
-      const unlocked = await unlockRuntimeFeatureAccess({
-        appCode,
-        sessionToken,
-        accessCode: featureCode,
-        walletKind,
-        durationSeconds: durationSeconds > 0 ? durationSeconds : null,
-        traceId,
-      });
+      let effectiveSessionToken = sessionToken || "";
+      const tryBootstrapSession = async () => {
+        if (!accountRef || !deviceId) return null;
+        const boot = await bootstrapRuntimeState(appCode, {
+          sessionToken: null,
+          accountRef: accountRef || null,
+          deviceId: deviceId || req.headers.get("x-fp") || null,
+          clientVersion,
+          ipHash,
+        });
+        if (boot.sessionToken) effectiveSessionToken = boot.sessionToken;
+        return boot;
+      };
+      if (!effectiveSessionToken) await tryBootstrapSession();
+      if (!effectiveSessionToken) return runtimeJson(409, { ok: false, code: "SESSION_BOOTSTRAP_REQUIRED" }, origin);
+      let unlocked: any;
+      try {
+        unlocked = await unlockRuntimeFeatureAccess({
+          appCode,
+          sessionToken: effectiveSessionToken,
+          accessCode: featureCode,
+          walletKind,
+          durationSeconds: durationSeconds > 0 ? durationSeconds : null,
+          traceId,
+        });
+      } catch (error) {
+        const retryable = ["SESSION_NOT_FOUND", "SESSION_INACTIVE", "ENTITLEMENT_INACTIVE", "ENTITLEMENT_EXPIRED", "ENTITLEMENT_REVOKED"].includes(String((error as any)?.code ?? ""));
+        if (!retryable || !accountRef || !deviceId) throw error;
+        await tryBootstrapSession();
+        if (!effectiveSessionToken) throw error;
+        unlocked = await unlockRuntimeFeatureAccess({
+          appCode,
+          sessionToken: effectiveSessionToken,
+          accessCode: featureCode,
+          walletKind,
+          durationSeconds: durationSeconds > 0 ? durationSeconds : null,
+          traceId,
+        });
+      }
       await logSafe({
         ok: true,
         code: "OK",
@@ -391,6 +421,8 @@ Deno.serve(async (req) => {
         ok: true,
         action,
         unlock_feature_code: featureCode,
+        session_token: effectiveSessionToken,
+        session_bound: Boolean(effectiveSessionToken),
         ...unlocked,
       }, origin);
     }
