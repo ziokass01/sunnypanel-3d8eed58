@@ -314,6 +314,107 @@ function round2(value: number) {
   return Number(value.toFixed(2));
 }
 
+const RUNTIME_CONSUME_MAX_DEBT_OVERAGE = 2;
+
+type WalletChargePlan = {
+  wallet_kind: "none" | "soft" | "premium" | "mixed";
+  soft_delta: number;
+  premium_delta: number;
+  charged_soft: number;
+  charged_premium: number;
+  next_soft: number;
+  next_premium: number;
+  used_debt: boolean;
+};
+
+function buildWalletChargeCandidates(params: {
+  softBalance: number;
+  premiumBalance: number;
+  softCost: number;
+  premiumCost: number;
+  allowDebt: boolean;
+  maxDebtOverage?: number;
+}) {
+  const softBalance = round2(asNumber(params.softBalance, 0));
+  const premiumBalance = round2(asNumber(params.premiumBalance, 0));
+  const softCost = round2(Math.max(0, asNumber(params.softCost, 0)));
+  const premiumCost = round2(Math.max(0, asNumber(params.premiumCost, 0)));
+  const allowDebt = Boolean(params.allowDebt);
+  const maxDebtOverage = round2(Math.max(0, asNumber(params.maxDebtOverage, 0)));
+  const plans = new Map<string, WalletChargePlan>();
+
+  const add = (plan: WalletChargePlan | null) => {
+    if (!plan) return;
+    const key = [plan.wallet_kind, plan.soft_delta, plan.premium_delta, plan.next_soft, plan.next_premium, plan.used_debt].join("|");
+    if (!plans.has(key)) plans.set(key, plan);
+  };
+
+  if (softCost <= 0 && premiumCost <= 0) {
+    add({ wallet_kind: "none", soft_delta: 0, premium_delta: 0, charged_soft: 0, charged_premium: 0, next_soft: softBalance, next_premium: premiumBalance, used_debt: false });
+    return Array.from(plans.values());
+  }
+
+  if (softCost > 0 && softBalance >= softCost) {
+    add({ wallet_kind: "soft", soft_delta: round2(-softCost), premium_delta: 0, charged_soft: softCost, charged_premium: 0, next_soft: round2(softBalance - softCost), next_premium: premiumBalance, used_debt: false });
+  }
+  if (premiumCost > 0 && premiumBalance >= premiumCost) {
+    add({ wallet_kind: "premium", soft_delta: 0, premium_delta: round2(-premiumCost), charged_soft: 0, charged_premium: premiumCost, next_soft: softBalance, next_premium: round2(premiumBalance - premiumCost), used_debt: false });
+  }
+
+  if (softCost > 0 && premiumCost > 0 && softBalance > 0 && softBalance < softCost) {
+    const softUsed = round2(Math.min(softBalance, softCost));
+    const remainingRatio = round2((softCost - softUsed) / softCost);
+    const premiumNeeded = round2(premiumCost * remainingRatio);
+    if (premiumNeeded > 0 && premiumBalance >= premiumNeeded) {
+      add({ wallet_kind: "mixed", soft_delta: round2(-softUsed), premium_delta: round2(-premiumNeeded), charged_soft: softUsed, charged_premium: premiumNeeded, next_soft: round2(softBalance - softUsed), next_premium: round2(premiumBalance - premiumNeeded), used_debt: false });
+    } else if (allowDebt) {
+      const shortfall = round2(softCost - softUsed);
+      if (shortfall > 0 && shortfall <= maxDebtOverage) {
+        add({ wallet_kind: "soft", soft_delta: round2(-softCost), premium_delta: 0, charged_soft: softCost, charged_premium: 0, next_soft: round2(softBalance - softCost), next_premium: premiumBalance, used_debt: true });
+      }
+    }
+  }
+
+  if (premiumCost > 0 && softCost > 0 && premiumBalance > 0 && premiumBalance < premiumCost) {
+    const premiumUsed = round2(Math.min(premiumBalance, premiumCost));
+    const remainingRatio = round2((premiumCost - premiumUsed) / premiumCost);
+    const softNeeded = round2(softCost * remainingRatio);
+    if (softNeeded > 0 && softBalance >= softNeeded) {
+      add({ wallet_kind: "mixed", soft_delta: round2(-softNeeded), premium_delta: round2(-premiumUsed), charged_soft: softNeeded, charged_premium: premiumUsed, next_soft: round2(softBalance - softNeeded), next_premium: round2(premiumBalance - premiumUsed), used_debt: false });
+    } else if (allowDebt) {
+      const shortfall = round2(premiumCost - premiumUsed);
+      if (shortfall > 0 && shortfall <= maxDebtOverage) {
+        add({ wallet_kind: "premium", soft_delta: 0, premium_delta: round2(-premiumCost), charged_soft: 0, charged_premium: premiumCost, next_soft: softBalance, next_premium: round2(premiumBalance - premiumCost), used_debt: true });
+      }
+    }
+  }
+
+  return Array.from(plans.values());
+}
+
+function pickWalletChargePlan(params: {
+  requestedWalletKind: "auto" | "soft" | "premium";
+  consumePriority: "soft_first" | "premium_first";
+  candidates: WalletChargePlan[];
+}) {
+  const order = params.requestedWalletKind === "soft"
+    ? ["soft", "mixed", "premium"]
+    : params.requestedWalletKind === "premium"
+      ? ["premium", "mixed", "soft"]
+      : params.consumePriority === "premium_first"
+        ? ["premium", "mixed", "soft"]
+        : ["soft", "mixed", "premium"];
+  for (const kind of order) {
+    const plan = params.candidates.find((item) => item.wallet_kind === kind && !item.used_debt);
+    if (plan) return plan;
+  }
+  for (const kind of order) {
+    const plan = params.candidates.find((item) => item.wallet_kind === kind && item.used_debt);
+    if (plan) return plan;
+  }
+  return null;
+}
+
 function applyResetFloorWithDebt(prevBalance: number, target: number, mode: "legacy_floor" | "debt_floor") {
   const safeTarget = round2(Math.max(0, target));
   const prev = round2(prevBalance);
@@ -737,55 +838,28 @@ async function chargeWalletForUnlockAccess(params: {
       ? "soft"
       : "auto";
 
-  let chargeKind: "none" | "soft" | "premium" = "none";
-  let softDelta = 0;
-  let premiumDelta = 0;
-
-  const priority = params.settings.wallet_rules.consume_priority;
-  const softAvailable = softCost > 0 && wallet.soft_balance >= softCost;
-  const premiumAvailable = premiumCost > 0 && wallet.premium_balance >= premiumCost;
-  const softCanGoDebt = Boolean(params.settings.wallet_rules.soft_allow_negative) && softCost > 0;
-  const premiumCanGoDebt = Boolean(params.settings.wallet_rules.premium_allow_negative) && premiumCost > 0;
-
-  if (requestedWalletKind === "soft") {
-    chargeKind = "soft";
-  } else if (requestedWalletKind === "premium") {
-    chargeKind = "premium";
-  } else if (priority === "premium_first") {
-    if (premiumAvailable || premiumCanGoDebt) chargeKind = "premium";
-    else if (softAvailable || softCanGoDebt) chargeKind = "soft";
-    else if (premiumCost > 0 && softCost <= 0) chargeKind = "premium";
-    else chargeKind = "soft";
-  } else {
-    if (softAvailable || softCanGoDebt) chargeKind = "soft";
-    else if (premiumAvailable || premiumCanGoDebt) chargeKind = "premium";
-    else if (softCost > 0 && premiumCost <= 0) chargeKind = "soft";
-    else chargeKind = "premium";
+  const plan = pickWalletChargePlan({
+    requestedWalletKind,
+    consumePriority: params.settings.wallet_rules.consume_priority,
+    candidates: buildWalletChargeCandidates({
+      softBalance: wallet.soft_balance,
+      premiumBalance: wallet.premium_balance,
+      softCost,
+      premiumCost,
+      allowDebt: false,
+      maxDebtOverage: 0,
+    }),
+  });
+  if (!plan) {
+    throw Object.assign(new Error("INSUFFICIENT_BALANCE"), { status: 409, code: "INSUFFICIENT_BALANCE" });
   }
 
-  if (chargeKind === "premium") {
-    if (premiumCost <= 0) throw Object.assign(new Error("PREMIUM_COST_NOT_CONFIGURED"), { status: 409, code: "PREMIUM_COST_NOT_CONFIGURED" });
-    if (!params.settings.wallet_rules.premium_allow_negative && wallet.premium_balance < premiumCost) {
-      throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
-    }
-    premiumDelta = round2(-premiumCost);
-  } else {
-    if (softCost <= 0) throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
-    if (!params.settings.wallet_rules.soft_allow_negative && wallet.soft_balance < softCost) {
-      throw Object.assign(new Error("INSUFFICIENT_SOFT_BALANCE"), { status: 409, code: "INSUFFICIENT_SOFT_BALANCE" });
-    }
-    softDelta = round2(-softCost);
-    chargeKind = "soft";
-  }
-
-  const nextSoft = chargeKind === "soft" ? round2(wallet.soft_balance + softDelta) : wallet.soft_balance;
-  const nextPremium = chargeKind === "premium" ? round2(wallet.premium_balance + premiumDelta) : wallet.premium_balance;
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_wallet_balances")
     .update({
-      soft_balance: nextSoft,
-      premium_balance: nextPremium,
+      soft_balance: plan.next_soft,
+      premium_balance: plan.next_premium,
       updated_by_source: "runtime_unlock",
       updated_at: getNowIso(),
     })
@@ -808,12 +882,12 @@ async function chargeWalletForUnlockAccess(params: {
     device_id: normalizeDeviceId(params.session.device_id),
     feature_code: params.accessCode,
     transaction_type: "consume",
-    wallet_kind: chargeKind,
+    wallet_kind: plan.wallet_kind,
     consume_quantity: 1,
-    soft_delta: softDelta,
-    premium_delta: premiumDelta,
-    soft_balance_after: nextSoft,
-    premium_balance_after: nextPremium,
+    soft_delta: plan.soft_delta,
+    premium_delta: plan.premium_delta,
+    soft_balance_after: plan.next_soft,
+    premium_balance_after: plan.next_premium,
     note: `Unlock access: ${params.ruleTitle}`,
     metadata: {
       requested_wallet_kind: requestedWalletKind,
@@ -822,14 +896,15 @@ async function chargeWalletForUnlockAccess(params: {
       plan_code: params.currentPlanCode,
       unlock_access: true,
       access_code: params.accessCode,
+      mixed_wallet_charge: plan.wallet_kind === "mixed",
       trace_id: asNullableString(params.traceId),
     },
   });
 
   return {
-    wallet_kind: chargeKind,
-    charged_soft: Math.abs(softDelta),
-    charged_premium: Math.abs(premiumDelta),
+    wallet_kind: plan.wallet_kind,
+    charged_soft: plan.charged_soft,
+    charged_premium: plan.charged_premium,
   };
 }
 
@@ -2413,67 +2488,39 @@ export async function consumeRuntimeFeature(params: {
     ? round2(asNumber(params.overrideCost?.premiumCost, 0) * quantity)
     : round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1) * quantity);
 
-  let chargeKind: "none" | "soft" | "premium" = "none";
+  let chargeKind: "none" | "soft" | "premium" | "mixed" = "none";
   let softDelta = 0;
   let premiumDelta = 0;
-
-  if (feature.requires_credit) {
-    const priority = settings.wallet_rules.consume_priority;
-    const softAvailable = effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost;
-    const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
-    const softCanGoDebt = Boolean(settings.wallet_rules.soft_allow_negative) && effectiveSoftCost > 0;
-    const premiumCanGoDebt = Boolean(settings.wallet_rules.premium_allow_negative) && effectivePremiumCost > 0;
-
-    if (requestedWalletKind === "soft") {
-      chargeKind = "soft";
-    } else if (requestedWalletKind === "premium") {
-      chargeKind = "premium";
-    } else if (priority === "premium_first") {
-      if (premiumAvailable || premiumCanGoDebt) {
-        chargeKind = "premium";
-      } else if (softAvailable || softCanGoDebt) {
-        chargeKind = "soft";
-      } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
-        chargeKind = "premium";
-      } else {
-        chargeKind = "soft";
-      }
-    } else {
-      if (softAvailable || softCanGoDebt) {
-        chargeKind = "soft";
-      } else if (premiumAvailable || premiumCanGoDebt) {
-        chargeKind = "premium";
-      } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
-        chargeKind = "soft";
-      } else {
-        chargeKind = "premium";
-      }
-    }
-
-    if (chargeKind === "premium") {
-      if (effectivePremiumCost <= 0) {
-        throw Object.assign(new Error("PREMIUM_COST_NOT_CONFIGURED"), { status: 409, code: "PREMIUM_COST_NOT_CONFIGURED" });
-      }
-      if (!settings.wallet_rules.premium_allow_negative && wallet.premium_balance < effectivePremiumCost) {
-        throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
-      }
-      premiumDelta = round2(-effectivePremiumCost);
-    } else {
-      if (effectiveSoftCost <= 0) {
-        throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
-      }
-      if (!settings.wallet_rules.soft_allow_negative && wallet.soft_balance < effectiveSoftCost) {
-        throw Object.assign(new Error("INSUFFICIENT_SOFT_BALANCE"), { status: 409, code: "INSUFFICIENT_SOFT_BALANCE" });
-      }
-      softDelta = round2(-effectiveSoftCost);
-      chargeKind = "soft";
-    }
-  }
+  let chargedSoft = 0;
+  let chargedPremium = 0;
 
   let nextSoft = wallet.soft_balance;
   let nextPremium = wallet.premium_balance;
-  if (chargeKind === "soft") nextSoft = round2(wallet.soft_balance + softDelta);
-  if (chargeKind === "premium") nextPremium = round2(wallet.premium_balance + premiumDelta);
+
+  if (feature.requires_credit) {
+    const plan = pickWalletChargePlan({
+      requestedWalletKind: requestedWalletKind === "premium" ? "premium" : requestedWalletKind === "soft" ? "soft" : "auto",
+      consumePriority: settings.wallet_rules.consume_priority,
+      candidates: buildWalletChargeCandidates({
+        softBalance: wallet.soft_balance,
+        premiumBalance: wallet.premium_balance,
+        softCost: effectiveSoftCost,
+        premiumCost: effectivePremiumCost,
+        allowDebt: true,
+        maxDebtOverage: RUNTIME_CONSUME_MAX_DEBT_OVERAGE,
+      }),
+    });
+    if (!plan) {
+      throw Object.assign(new Error("INSUFFICIENT_BALANCE"), { status: 409, code: "INSUFFICIENT_BALANCE" });
+    }
+    chargeKind = plan.wallet_kind;
+    softDelta = plan.soft_delta;
+    premiumDelta = plan.premium_delta;
+    chargedSoft = plan.charged_soft;
+    chargedPremium = plan.charged_premium;
+    nextSoft = plan.next_soft;
+    nextPremium = plan.next_premium;
+  }
 
   if (chargeKind !== "none") {
     const admin = createAdminClient();
@@ -2538,8 +2585,8 @@ export async function consumeRuntimeFeature(params: {
     },
     wallet_kind: chargeKind,
     quantity,
-    charged_soft: Math.abs(softDelta),
-    charged_premium: Math.abs(premiumDelta),
+    charged_soft: chargedSoft,
+    charged_premium: chargedPremium,
     state,
   };
 }
