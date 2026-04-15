@@ -246,6 +246,27 @@ function asNullableString(value: unknown): string | null {
 }
 
 
+function normalizeAccountRef(value: unknown, fallback = "") {
+  return asString(value, fallback).trim().toLowerCase();
+}
+
+function getAccountRefAliases(value: unknown, fallback = "") {
+  const normalized = normalizeAccountRef(value, fallback);
+  if (!normalized) return [] as string[];
+  const aliases = new Set<string>();
+  aliases.add(normalized);
+  const at = normalized.indexOf("@");
+  if (at > 0) aliases.add(normalized.slice(0, at));
+  return Array.from(aliases.values());
+}
+
+function normalizeDeviceId(value: unknown): string | null {
+  const normalized = asNullableString(value);
+  if (!normalized) return null;
+  const trimmed = normalized.trim();
+  return trimmed.length ? trimmed : null;
+}
+
 function isMissingRelationError(error: any, relationName: string) {
   const code = String(error?.code ?? "");
   const msg = String(error?.message ?? error?.details ?? "").toLowerCase();
@@ -906,22 +927,34 @@ async function findSession(appCode: string, sessionToken: string) {
 }
 
 async function findLatestReusableSession(appCode: string, accountRef: string, deviceId?: string | null) {
-  if (!accountRef) return null;
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return null;
   const admin = createAdminClient();
-  let query = admin
-    .from("server_app_sessions")
-    .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version")
-    .eq("app_code", appCode)
-    .eq("account_ref", accountRef)
-    .eq("status", "active")
-    .is("revoked_at", null)
-    .order("last_seen_at", { ascending: false })
-    .limit(20);
-  if (deviceId) query = query.eq("device_id", deviceId);
-  const { data, error } = await query;
-  if (error) throw error;
+  const normalizedDeviceId = normalizeDeviceId(deviceId);
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    let query = admin
+      .from("server_app_sessions")
+      .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active")
+      .is("revoked_at", null)
+      .order("last_seen_at", { ascending: false })
+      .limit(20);
+    if (normalizedDeviceId) query = query.eq("device_id", normalizedDeviceId);
+    const { data, error } = await query;
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = asString((row as any)?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  }
   const now = Date.now();
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const expiresAt = asNullableString((row as any).expires_at);
     if (expiresAt && new Date(expiresAt).getTime() <= now) continue;
     return row;
@@ -952,24 +985,58 @@ async function getEntitlementById(entitlementId: string | null): Promise<Runtime
   };
 }
 
-async function getLatestActiveEntitlement(appCode: string, accountRef: string): Promise<RuntimeEntitlement | null> {
+async function getLatestActiveEntitlement(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeEntitlement | null> {
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return null;
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_entitlements")
-    .select("id,plan_code,status,starts_at,expires_at,revoked_at,device_limit,account_limit")
-    .eq("app_code", appCode)
-    .eq("account_ref", accountRef)
-    .eq("status", "active")
-    .order("starts_at", { ascending: false });
-
-  if (error) throw error;
+  const normalizedDeviceId = normalizeDeviceId(deviceId);
+  const allRows: any[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    const { data, error } = await admin
+      .from("server_app_entitlements")
+      .select("id,plan_code,status,starts_at,expires_at,revoked_at,device_limit,account_limit,device_id,updated_at")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active");
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = asString((row as any)?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      allRows.push(row);
+    }
+  }
   const now = Date.now();
-  const row = (data ?? []).find((item: any) => {
+  const usable = allRows.filter((item: any) => {
     if (item?.revoked_at) return false;
     if (!item?.expires_at) return true;
     return new Date(String(item.expires_at)).getTime() > now;
-  }) ?? null;
-  if (!row) return null;
+  });
+  if (!usable.length) return null;
+  usable.sort((left: any, right: any) => {
+    const leftPlanRank = getPlanRank(asString(left?.plan_code, "classic"));
+    const rightPlanRank = getPlanRank(asString(right?.plan_code, "classic"));
+    if (rightPlanRank !== leftPlanRank) return rightPlanRank - leftPlanRank;
+
+    const leftDeviceMatch = normalizedDeviceId && asString(left?.device_id) === normalizedDeviceId ? 1 : 0;
+    const rightDeviceMatch = normalizedDeviceId && asString(right?.device_id) === normalizedDeviceId ? 1 : 0;
+    if (rightDeviceMatch !== leftDeviceMatch) return rightDeviceMatch - leftDeviceMatch;
+
+    const leftExpiry = left?.expires_at ? new Date(String(left.expires_at)).getTime() : Number.MAX_SAFE_INTEGER;
+    const rightExpiry = right?.expires_at ? new Date(String(right.expires_at)).getTime() : Number.MAX_SAFE_INTEGER;
+    if (rightExpiry !== leftExpiry) return rightExpiry > leftExpiry ? 1 : -1;
+
+    const leftUpdated = left?.updated_at ? new Date(String(left.updated_at)).getTime() : 0;
+    const rightUpdated = right?.updated_at ? new Date(String(right.updated_at)).getTime() : 0;
+    if (rightUpdated !== leftUpdated) return rightUpdated - leftUpdated;
+
+    const leftStarts = left?.starts_at ? new Date(String(left.starts_at)).getTime() : 0;
+    const rightStarts = right?.starts_at ? new Date(String(right.starts_at)).getTime() : 0;
+    return rightStarts - leftStarts;
+  });
+
+  const row = usable[0];
   return {
     id: asString(row.id),
     plan_code: asString(row.plan_code),
@@ -980,6 +1047,17 @@ async function getLatestActiveEntitlement(appCode: string, accountRef: string): 
     device_limit: row.device_limit == null ? null : Math.trunc(asNumber(row.device_limit)),
     account_limit: row.account_limit == null ? null : Math.trunc(asNumber(row.account_limit)),
   };
+}
+
+async function syncSessionEntitlement(sessionId: string | null, entitlementId: string | null) {
+  if (!sessionId || !entitlementId) return;
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("server_app_sessions")
+    .update({ entitlement_id: entitlementId, updated_at: getNowIso() })
+    .eq("id", sessionId)
+    .neq("entitlement_id", entitlementId);
+  if (error) throw error;
 }
 
 async function getWalletRecord(appCode: string, accountRef: string): Promise<RuntimeWallet | null> {
@@ -1567,8 +1645,27 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
   let entitlement = session?.entitlement_id
     ? await getEntitlementById(asString(session.entitlement_id))
     : effectiveAccountRef
-      ? await getLatestActiveEntitlement(appCode, effectiveAccountRef)
+      ? await getLatestActiveEntitlement(appCode, effectiveAccountRef, effectiveDeviceId)
       : null;
+
+  const bestEntitlement = effectiveAccountRef
+    ? await getLatestActiveEntitlement(appCode, effectiveAccountRef, effectiveDeviceId)
+    : null;
+
+  if (isEntitlementUsable(bestEntitlement)) {
+    const currentRank = isEntitlementUsable(entitlement) ? getPlanRank(asString(entitlement?.plan_code, settings.guest_plan)) : 0;
+    const bestRank = getPlanRank(asString(bestEntitlement?.plan_code, settings.guest_plan));
+    const shouldPromoteSessionEntitlement = !isEntitlementUsable(entitlement)
+      || asString(entitlement?.id) !== asString(bestEntitlement?.id)
+      || bestRank > currentRank;
+    if (shouldPromoteSessionEntitlement) {
+      entitlement = bestEntitlement;
+      if (session?.id) {
+        await syncSessionEntitlement(asString(session.id), asString(bestEntitlement.id));
+        session = { ...session, entitlement_id: asString(bestEntitlement.id) };
+      }
+    }
+  }
 
   if (!isEntitlementUsable(entitlement)) {
     entitlement = null;
@@ -1678,30 +1775,49 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
 }
 
 export async function bootstrapRuntimeState(appCode: string, opts?: { sessionToken?: string | null; accountRef?: string | null; deviceId?: string | null; clientVersion?: string | null; ipHash?: string | null }) {
-  const hintedAccountRef = asNullableString(opts?.accountRef)?.toLowerCase() ?? null;
-  const hintedDeviceId = asNullableString(opts?.deviceId);
+  const hintedAccountRef = normalizeAccountRef(opts?.accountRef) || null;
+  const hintedDeviceId = normalizeDeviceId(opts?.deviceId);
   let sessionToken = asNullableString(opts?.sessionToken) ?? null;
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
+
+  if (sessionToken && !session) {
+    sessionToken = null;
+  }
 
   if (!session && hintedAccountRef) {
     session = await findLatestReusableSession(appCode, hintedAccountRef, hintedDeviceId ?? null);
   }
 
-  if (!session && hintedAccountRef && hintedDeviceId) {
-    const entitlement = await getLatestActiveEntitlement(appCode, hintedAccountRef);
-    if (isEntitlementUsable(entitlement)) {
-      const created = await createRuntimeSession({
-        appCode,
-        accountRef: hintedAccountRef,
-        deviceId: hintedDeviceId,
-        entitlementId: asString((entitlement as any).id),
-        redeemKeyId: null,
-        clientVersion: asNullableString(opts?.clientVersion),
-        ipHash: asNullableString(opts?.ipHash),
-      });
-      sessionToken = created.session_token;
-      session = await findSession(appCode, sessionToken);
-    }
+  const bestEntitlement = hintedAccountRef
+    ? await getLatestActiveEntitlement(appCode, hintedAccountRef, hintedDeviceId ?? null)
+    : null;
+
+  if (session && isEntitlementUsable(bestEntitlement) && asString((session as any).entitlement_id) !== asString((bestEntitlement as any).id)) {
+    await syncSessionEntitlement(asString((session as any).id), asString((bestEntitlement as any).id));
+    session = { ...session, entitlement_id: asString((bestEntitlement as any).id) };
+  }
+
+  if (!sessionToken && hintedAccountRef && hintedDeviceId) {
+    const reusableEntitlement = session?.entitlement_id
+      ? await getEntitlementById(asString((session as any).entitlement_id))
+      : null;
+    const chosenEntitlement = isEntitlementUsable(bestEntitlement)
+      ? bestEntitlement
+      : (isEntitlementUsable(reusableEntitlement) ? reusableEntitlement : null);
+
+    await revokeActiveDeviceSessions(appCode, hintedAccountRef, hintedDeviceId, "bootstrap_rotate");
+
+    const created = await createRuntimeSession({
+      appCode,
+      accountRef: hintedAccountRef,
+      deviceId: hintedDeviceId,
+      entitlementId: chosenEntitlement ? asString((chosenEntitlement as any).id) : null,
+      redeemKeyId: session?.redeem_key_id ? asString((session as any).redeem_key_id) : null,
+      clientVersion: asNullableString(opts?.clientVersion),
+      ipHash: asNullableString(opts?.ipHash),
+    });
+    sessionToken = created.session_token;
+    session = await findSession(appCode, sessionToken);
   }
 
   const state = await buildRuntimeState(appCode, {
@@ -1924,7 +2040,7 @@ export async function consumeRuntimeFeature(params: {
   const { settings, planMap, features } = await getRuntimeContext(appCode);
   const entitlement = session.entitlement_id
     ? await getEntitlementById(asString(session.entitlement_id))
-    : await getLatestActiveEntitlement(appCode, asString(session.account_ref));
+    : await getLatestActiveEntitlement(appCode, asString(session.account_ref), asNullableString(session.device_id));
   if (session.entitlement_id && !isEntitlementUsable(entitlement)) {
     throw Object.assign(new Error("ENTITLEMENT_INACTIVE"), { status: 409, code: "ENTITLEMENT_INACTIVE" });
   }
