@@ -66,6 +66,12 @@ function WorkspaceRoutes() {
   );
 }
 
+function LegacyFreeKeysRedirect() {
+  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const app = String(params.get("app") || "find-dumps").trim() || "find-dumps";
+  return <Navigate to={`/apps/${encodeURIComponent(app)}/keys`} replace />;
+}
+
 const App = () => {
   const host = typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
   const isAdminHost = isAdminHostName(host);
@@ -93,6 +99,8 @@ const App = () => {
               <Route path="/clam" element={<Navigate to="/free/claim" replace />} />
 
               {!isControlHost && <Route path="/rent" element={<RentPortalPage />} />}
+              {isAppHost && <Route path="/admin/free-keys" element={<LegacyFreeKeysRedirect />} />}
+              {isAppHost && <Route path="/admin/free" element={<LegacyFreeKeysRedirect />} />}
               {!isControlHost && <Route path="/reset-key" element={<ResetKeyPage />} />}
 
               {isAdminHost && (

@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { buildWorkspacePath, detectWorkspaceScope } from "@/lib/appWorkspace";
+import { buildAppWorkspaceUrl, buildWorkspacePath, detectWorkspaceScope, getAdminOrigin } from "@/lib/appWorkspace";
 
 const CONFIG_TABS = ["settings", "plans", "features", "wallet", "rewards"] as const;
 
@@ -118,13 +118,13 @@ const APP_FALLBACKS = [
     code: "free-fire",
     label: "Free Fire",
     description: "App hiện tại đang dùng web free key chung.",
-    admin_url: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || "/admin/free-keys?app=free-fire",
+    admin_url: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || buildAppWorkspaceUrl("free-fire", "keys"),
   },
   {
     code: "find-dumps",
     label: "Find Dumps",
     description: "App SunnyMod Find Dumps. Dùng màn này để chuẩn bị cấu hình go/plus/pro, credit và entitlement riêng.",
-    admin_url: (import.meta.env.VITE_SERVER_APP_FIND_DUMPS_URL as string | undefined)?.trim() || "/admin/free-keys?app=find-dumps",
+    admin_url: (import.meta.env.VITE_SERVER_APP_FIND_DUMPS_URL as string | undefined)?.trim() || buildAppWorkspaceUrl("find-dumps", "keys"),
   },
 ] as const;
 
@@ -597,8 +597,41 @@ export function AdminServerAppDetailPage() {
   const openExternal = () => {
     const url = appDraft.admin_url?.trim();
     if (!url) return;
+    const legacyTarget = () => {
+      if (/^\/admin\/free-keys/i.test(url)) {
+        return buildWorkspacePath(appCode || "find-dumps", "keys", workspaceScope);
+      }
+      if (/^https?:\/\//i.test(url)) {
+        try {
+          const parsed = new URL(url);
+          if (/^\/admin\/free-keys/i.test(parsed.pathname)) {
+            return buildAppWorkspaceUrl(appCode || "find-dumps", "keys");
+          }
+        } catch (_error) {
+          return null;
+        }
+      }
+      return null;
+    };
+    const fallback = legacyTarget();
+    if (fallback) {
+      window.location.assign(fallback);
+      return;
+    }
     if (/^https?:\/\//i.test(url)) {
+      try {
+        const parsed = new URL(url);
+        if (parsed.origin === window.location.origin && parsed.pathname.startsWith("/admin/")) {
+          window.location.assign(`${getAdminOrigin()}${parsed.pathname}${parsed.search}${parsed.hash}`);
+          return;
+        }
+      } catch (_error) {
+      }
       window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (url.startsWith("/admin/")) {
+      window.location.assign(`${getAdminOrigin()}${url}`);
       return;
     }
     window.location.assign(url);
