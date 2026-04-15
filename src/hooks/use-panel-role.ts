@@ -12,13 +12,32 @@ function normalizePanelRole(value: unknown): PanelRole {
   return null;
 }
 
+function readCachedRole(userId: string | null | undefined): PanelRole {
+  if (!userId || typeof window === "undefined") return null;
+  try {
+    return normalizePanelRole(window.localStorage.getItem(`panel_role:${userId}`));
+  } catch (_err) {
+    return null;
+  }
+}
+
+function writeCachedRole(userId: string | null | undefined, role: PanelRole) {
+  if (!userId || !role || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`panel_role:${userId}`, role);
+  } catch (_err) {
+    // ignore cache write failures
+  }
+}
+
 export function usePanelRole() {
   const { user } = useAuth();
   const metadataRole = useMemo(
     () => normalizePanelRole(user?.app_metadata?.panel_role ?? user?.app_metadata?.role),
     [user?.app_metadata],
   );
-  const [role, setRole] = useState<PanelRole>(metadataRole);
+  const cachedRole = useMemo(() => readCachedRole(user?.id), [user?.id]);
+  const [role, setRole] = useState<PanelRole>(metadataRole ?? cachedRole);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,13 +52,19 @@ export function usePanelRole() {
         return;
       }
 
+      const optimisticRole = metadataRole ?? cachedRole;
+      if (optimisticRole && !cancelled) {
+        setRole(optimisticRole);
+      }
       setLoading(true);
-      const { data, error } = await supabase.rpc("get_my_panel_role");
 
+      const { data, error } = await supabase.rpc("get_my_panel_role");
       if (cancelled) return;
 
       const dbRole = error ? null : normalizePanelRole(data);
-      setRole(dbRole ?? metadataRole ?? null);
+      const finalRole = dbRole ?? metadataRole ?? cachedRole ?? null;
+      setRole(finalRole);
+      if (finalRole) writeCachedRole(user.id, finalRole);
       setLoading(false);
     }
 
@@ -47,7 +72,7 @@ export function usePanelRole() {
     return () => {
       cancelled = true;
     };
-  }, [metadataRole, user]);
+  }, [cachedRole, metadataRole, user]);
 
   return {
     role,

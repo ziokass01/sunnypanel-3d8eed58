@@ -247,6 +247,16 @@ function normalizeAccountRef(value: unknown, fallback = "") {
   return asString(value, fallback).trim().toLowerCase();
 }
 
+function getAccountRefAliases(value: unknown, fallback = "") {
+  const normalized = normalizeAccountRef(value, fallback);
+  if (!normalized) return [] as string[];
+  const aliases = new Set<string>();
+  aliases.add(normalized);
+  const at = normalized.indexOf("@");
+  if (at > 0) aliases.add(normalized.slice(0, at));
+  return Array.from(aliases.values());
+}
+
 function normalizeDeviceId(value: unknown): string | null {
   const normalized = asNullableString(value);
   if (!normalized) return null;
@@ -572,42 +582,93 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
   }));
 }
 
-async function getLatestFeatureUnlockStates(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeFeatureUnlockState[]> {
+async function getLatestFeatureUnlockStates(appCode: string, accountRef: string, deviceId?: string | null) {
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return [];
   const admin = createAdminClient();
-  const normalizedAccountRef = normalizeAccountRef(accountRef);
   const normalizedDeviceId = normalizeDeviceId(deviceId);
-  const { data, error } = await admin
-    .from("server_app_feature_unlocks")
-    .select("id,access_code,status,started_at,expires_at,revoked_at,device_id")
-    .eq("app_code", appCode)
-    .ilike("account_ref", normalizedAccountRef)
-    .eq("status", "active")
-    .order("started_at", { ascending: false });
-  if (error) {
-    if (isMissingRelationError(error, "server_app_feature_unlocks")) return [];
-    throw error;
+  const allRows: any[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    let query = admin
+      .from("server_app_feature_unlocks")
+      .select("id,access_code,status,started_at,expires_at,revoked_at,device_id")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active")
+      .is("revoked_at", null)
+      .order("started_at", { ascending: false })
+      .limit(200);
+    const { data, error } = await query;
+    if (error) {
+      if (isMissingRelationError(error, "server_app_feature_unlocks")) return [];
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const id = asString((row as any)?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      allRows.push(row);
+    }
   }
-  const now = Date.now();
   const chosen = new Map<string, RuntimeFeatureUnlockState>();
-  for (const row of (data ?? []) as any[]) {
-    const rowDeviceId = normalizeDeviceId(row.device_id);
-    const deviceMatches = !normalizedDeviceId || !rowDeviceId || rowDeviceId === normalizedDeviceId;
-    if (!deviceMatches) continue;
-    const accessCode = asString(row.access_code).toLowerCase();
+  const now = Date.now();
+  for (const row of allRows) {
+    const accessCode = asString((row as any).access_code).toLowerCase();
     if (!accessCode || chosen.has(accessCode)) continue;
-    const expiresAt = asNullableString(row.expires_at);
-    if (row.revoked_at) continue;
+    const rowDeviceId = normalizeDeviceId((row as any).device_id);
+    if (normalizedDeviceId && rowDeviceId && rowDeviceId != normalizedDeviceId) continue;
+    const expiresAt = asNullableString((row as any).expires_at);
     if (expiresAt && new Date(expiresAt).getTime() <= now) continue;
     chosen.set(accessCode, {
-      id: asString(row.id),
+      id: asString((row as any).id),
       access_code: accessCode,
-      status: asString(row.status, "active"),
-      started_at: asString(row.started_at),
+      status: asString((row as any).status, "active"),
+      started_at: asString((row as any).started_at),
       expires_at: expiresAt,
-      revoked_at: asNullableString(row.revoked_at),
+      revoked_at: asNullableString((row as any).revoked_at),
     });
   }
   return Array.from(chosen.values());
+}
+
+async function findExistingFeatureUnlockRecord(appCode: string, accountRef: string, accessCode: string, deviceId?: string | null) {
+  const admin = createAdminClient();
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return null;
+  const normalizedAccessCode = asString(accessCode).toLowerCase();
+  const normalizedDeviceId = normalizeDeviceId(deviceId);
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    const { data, error } = await admin
+      .from("server_app_feature_unlocks")
+      .select("id,access_code,status,started_at,expires_at,revoked_at,device_id")
+      .eq("app_code", appCode)
+      .eq("access_code", normalizedAccessCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active")
+      .is("revoked_at", null)
+      .order("started_at", { ascending: false })
+      .limit(20);
+    if (error) {
+      if (isMissingRelationError(error, "server_app_feature_unlocks")) return null;
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const id = asString((row as any)?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  }
+  for (const row of rows) {
+    const rowDeviceId = normalizeDeviceId((row as any).device_id);
+    const deviceMatches = !normalizedDeviceId || !rowDeviceId || rowDeviceId === normalizedDeviceId;
+    if (!deviceMatches) continue;
+    return row;
+  }
+  return null;
 }
 
 function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan: RuntimePlan | null, unlockRules: RuntimeFeatureUnlockRule[], unlockMap: Map<string, RuntimeFeatureUnlockState>) {
@@ -640,34 +701,6 @@ function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan
     unlock_soft_cost: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost * softMultiplier),
     unlock_premium_cost: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost * premiumMultiplier),
   };
-}
-
-async function findExistingFeatureUnlockRecord(appCode: string, accountRef: string, accessCode: string, deviceId?: string | null) {
-  const admin = createAdminClient();
-  const normalizedAccountRef = normalizeAccountRef(accountRef);
-  const normalizedAccessCode = asString(accessCode).toLowerCase();
-  const normalizedDeviceId = normalizeDeviceId(deviceId);
-  const { data, error } = await admin
-    .from("server_app_feature_unlocks")
-    .select("id,access_code,status,started_at,expires_at,revoked_at,device_id")
-    .eq("app_code", appCode)
-    .eq("access_code", normalizedAccessCode)
-    .ilike("account_ref", normalizedAccountRef)
-    .eq("status", "active")
-    .is("revoked_at", null)
-    .order("started_at", { ascending: false })
-    .limit(20);
-  if (error) {
-    if (isMissingRelationError(error, "server_app_feature_unlocks")) return null;
-    throw error;
-  }
-  for (const row of (data ?? []) as any[]) {
-    const rowDeviceId = normalizeDeviceId(row.device_id);
-    const deviceMatches = !normalizedDeviceId || !rowDeviceId || rowDeviceId === normalizedDeviceId;
-    if (!deviceMatches) continue;
-    return row;
-  }
-  return null;
 }
 
 async function chargeWalletForUnlockAccess(params: {
@@ -1093,24 +1126,39 @@ async function findSession(appCode: string, sessionToken: string) {
 }
 
 async function findLatestReusableSession(appCode: string, accountRef: string, deviceId?: string | null) {
-  const normalizedAccountRef = normalizeAccountRef(accountRef);
-  if (!normalizedAccountRef) return null;
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return null;
   const normalizedDeviceId = normalizeDeviceId(deviceId);
   const admin = createAdminClient();
-  let query = admin
-    .from("server_app_sessions")
-    .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version")
-    .eq("app_code", appCode)
-    .ilike("account_ref", normalizedAccountRef)
-    .eq("status", "active")
-    .is("revoked_at", null)
-    .order("last_seen_at", { ascending: false })
-    .limit(20);
-  if (normalizedDeviceId) query = query.eq("device_id", normalizedDeviceId);
-  const { data, error } = await query;
-  if (error) throw error;
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    let query = admin
+      .from("server_app_sessions")
+      .select("id,app_code,account_ref,device_id,entitlement_id,redeem_key_id,status,started_at,last_seen_at,expires_at,revoked_at,client_version")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active")
+      .is("revoked_at", null)
+      .order("last_seen_at", { ascending: false })
+      .limit(20);
+    if (normalizedDeviceId) query = query.eq("device_id", normalizedDeviceId);
+    const { data, error } = await query;
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = asString((row as any)?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  }
   const now = Date.now();
-  for (const row of data ?? []) {
+  rows.sort((left: any, right: any) => {
+    const rightSeen = right?.last_seen_at ? new Date(String(right.last_seen_at)).getTime() : 0;
+    const leftSeen = left?.last_seen_at ? new Date(String(left.last_seen_at)).getTime() : 0;
+    return rightSeen - leftSeen;
+  });
+  for (const row of rows) {
     const expiresAt = asNullableString((row as any).expires_at);
     if (expiresAt && new Date(expiresAt).getTime() <= now) continue;
     return row;
@@ -1142,18 +1190,29 @@ async function getEntitlementById(entitlementId: string | null): Promise<Runtime
 }
 
 async function getLatestActiveEntitlement(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeEntitlement | null> {
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return null;
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_entitlements")
-    .select("id,plan_code,status,starts_at,expires_at,revoked_at,device_limit,account_limit,device_id,updated_at")
-    .eq("app_code", appCode)
-    .ilike("account_ref", normalizeAccountRef(accountRef))
-    .eq("status", "active");
-
-  if (error) throw error;
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    const { data, error } = await admin
+      .from("server_app_entitlements")
+      .select("id,plan_code,status,starts_at,expires_at,revoked_at,device_limit,account_limit,device_id,updated_at")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active");
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = asString((row as any)?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  }
   const now = Date.now();
   const hintedDeviceId = asNullableString(deviceId);
-  const usable = (data ?? []).filter((item: any) => {
+  const usable = rows.filter((item: any) => {
     if (item?.revoked_at) return false;
     if (!item?.expires_at) return true;
     return new Date(String(item.expires_at)).getTime() > now;
@@ -1207,23 +1266,28 @@ async function syncSessionEntitlement(sessionId: string | null, entitlementId: s
 }
 
 async function getWalletRecord(appCode: string, accountRef: string): Promise<RuntimeWallet | null> {
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return null;
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_wallet_balances")
-    .select("id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at")
-    .eq("app_code", appCode)
-    .ilike("account_ref", normalizeAccountRef(accountRef))
-    .maybeSingle();
+  for (const alias of aliases) {
+    const { data, error } = await admin
+      .from("server_app_wallet_balances")
+      .select("id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .maybeSingle();
 
-  if (error) throw error;
-  if (!data) return null;
-  return {
-    id: asString((data as any).id),
-    soft_balance: asNumber((data as any).soft_balance),
-    premium_balance: asNumber((data as any).premium_balance),
-    last_soft_reset_at: asNullableString((data as any).last_soft_reset_at),
-    last_premium_reset_at: asNullableString((data as any).last_premium_reset_at),
-  };
+    if (error) throw error;
+    if (!data) continue;
+    return {
+      id: asString((data as any).id),
+      soft_balance: asNumber((data as any).soft_balance),
+      premium_balance: asNumber((data as any).premium_balance),
+      last_soft_reset_at: asNullableString((data as any).last_soft_reset_at),
+      last_premium_reset_at: asNullableString((data as any).last_premium_reset_at),
+    };
+  }
+  return null;
 }
 
 async function ensureWalletRecord(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeWallet> {
@@ -1406,6 +1470,178 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
   };
 }
 
+
+function inferLegacyFindDumpsAppCode(source: any) {
+  const direct = asString((source as any)?.app_code).toLowerCase();
+  if (direct) return direct;
+  const packageCode = asString((source as any)?.default_package_code).toLowerCase();
+  const creditCode = asString((source as any)?.default_credit_code).toLowerCase();
+  const code = asString((source as any)?.code).toLowerCase();
+  const signature = asString((source as any)?.key_signature).toLowerCase();
+  if (packageCode || creditCode) return "find-dumps";
+  if (signature === "fd") return "find-dumps";
+  if (code.startsWith("fd")) return "find-dumps";
+  return "";
+}
+
+function resolveLegacyFindDumpsRewardFromKeyType(keyType: any) {
+  const packageCode = asString((keyType as any)?.default_package_code).toLowerCase();
+  const creditCode = asString((keyType as any)?.default_credit_code).toLowerCase();
+  const durationSeconds = Math.max(60, Number((keyType as any)?.duration_seconds ?? 3600));
+  const walletKind = asString((keyType as any)?.default_wallet_kind || (creditCode === "credit-vip" ? "vip" : "normal"), "normal").toLowerCase();
+  if (packageCode) {
+    return {
+      reward_mode: "plan",
+      plan_code: packageCode,
+      soft_credit_amount: 0,
+      premium_credit_amount: 0,
+      entitlement_days: 0,
+      entitlement_seconds: durationSeconds,
+      device_limit_override: null,
+      account_limit_override: null,
+      title: `Legacy Find Dumps ${packageCode}`,
+      description: `LEGACY_FREE_BRIDGE package ${packageCode}`,
+      package_code: packageCode,
+      credit_code: null,
+      wallet_kind: null,
+    };
+  }
+  if (creditCode) {
+    return {
+      reward_mode: creditCode === "credit-vip" ? "premium_credit" : "soft_credit",
+      plan_code: null,
+      soft_credit_amount: creditCode === "credit-normal" ? 1.5 : 0,
+      premium_credit_amount: creditCode === "credit-vip" ? 0.5 : 0,
+      entitlement_days: 0,
+      entitlement_seconds: 0,
+      device_limit_override: null,
+      account_limit_override: null,
+      title: `Legacy Find Dumps ${creditCode}`,
+      description: `LEGACY_FREE_BRIDGE credit ${creditCode}`,
+      package_code: null,
+      credit_code: creditCode,
+      wallet_kind: walletKind,
+    };
+  }
+  return null;
+}
+
+async function tryBridgeLegacyLicenseKeyToRedeemKey(appCode: string, redeemKey: string): Promise<RuntimeRedeemKey | null> {
+  if (asString(appCode).toLowerCase() !== "find-dumps") return null;
+  const admin = createAdminClient();
+  let license: any = null;
+  {
+    const { data, error } = await admin
+      .from("licenses")
+      .select("id,key,expires_at,is_active,note,deleted_at,duration_seconds")
+      .eq("key", redeemKey)
+      .maybeSingle();
+    if (error) {
+      if (isMissingRelationError(error, "licenses")) return null;
+      throw error;
+    }
+    license = data;
+  }
+  if (!license || license.deleted_at || license.is_active === false) return null;
+
+  const { data: issue, error: issueError } = await admin
+    .from("licenses_free_issues")
+    .select("issue_id,session_id,server_redeem_key_id,app_code")
+    .eq("license_id", asString((license as any).id))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (issueError) {
+    if (isMissingRelationError(issueError, "licenses_free_issues")) return null;
+    throw issueError;
+  }
+  if (!issue?.session_id) return null;
+  if (issue?.server_redeem_key_id) {
+    const existing = await getRedeemKeyByValue(appCode, redeemKey);
+    if (existing) return existing;
+  }
+
+  const { data: freeSession, error: sessionError } = await admin
+    .from("licenses_free_sessions")
+    .select("session_id,key_type_code,app_code,expires_at,duration_seconds")
+    .eq("session_id", asString((issue as any).session_id))
+    .maybeSingle();
+  if (sessionError) {
+    if (isMissingRelationError(sessionError, "licenses_free_sessions")) return null;
+    throw sessionError;
+  }
+  if (!freeSession?.key_type_code) return null;
+
+  const { data: keyType, error: keyTypeError } = await admin
+    .from("licenses_free_key_types")
+    .select("code,label,duration_seconds,enabled,app_code,default_package_code,default_credit_code,default_wallet_kind,key_signature")
+    .eq("code", asString((freeSession as any).key_type_code))
+    .maybeSingle();
+  if (keyTypeError) {
+    if (isMissingRelationError(keyTypeError, "licenses_free_key_types")) return null;
+    throw keyTypeError;
+  }
+  if (!keyType || keyType.enabled === false) return null;
+  const inferredAppCode = inferLegacyFindDumpsAppCode(keyType) || inferLegacyFindDumpsAppCode(freeSession) || inferLegacyFindDumpsAppCode(issue);
+  if (inferredAppCode !== "find-dumps") return null;
+  const reward = resolveLegacyFindDumpsRewardFromKeyType(keyType);
+  if (!reward) return null;
+
+  const nowIso = getNowIso();
+  const expiresAt = asNullableString((license as any).expires_at) || asNullableString((freeSession as any).expires_at) || addSecondsIso(nowIso, Math.max(60, Math.trunc(asNumber((keyType as any).duration_seconds, 3600))));
+  const existing = await getRedeemKeyByValue(appCode, redeemKey);
+  if (existing) return existing;
+
+  const { data: inserted, error: insertError } = await admin
+    .from("server_app_redeem_keys")
+    .insert({
+      app_code: "find-dumps",
+      redeem_key: redeemKey,
+      title: reward.title,
+      description: reward.description,
+      enabled: true,
+      starts_at: nowIso,
+      expires_at: expiresAt,
+      max_redemptions: 1,
+      redeemed_count: 0,
+      reward_mode: reward.reward_mode,
+      plan_code: reward.plan_code,
+      soft_credit_amount: reward.soft_credit_amount,
+      premium_credit_amount: reward.premium_credit_amount,
+      entitlement_days: reward.entitlement_days,
+      entitlement_seconds: reward.entitlement_seconds,
+      source_free_session_id: asString((freeSession as any).session_id),
+      notes: `LEGACY_FREE_BRIDGE;KEY_TYPE=${String((keyType as any).code).toUpperCase()};APP=find-dumps`,
+      metadata: {
+        source: "legacy-free-bridge",
+        free_session_id: asString((freeSession as any).session_id),
+        key_type_code: asString((keyType as any).code),
+        package_code: reward.package_code,
+        credit_code: reward.credit_code,
+        wallet_kind: reward.wallet_kind,
+        claim_starts_entitlement: Boolean(reward.package_code),
+        expires_from_claim: true,
+      },
+    })
+    .select("id")
+    .single();
+  if (insertError) {
+    if (String((insertError as any)?.code ?? "") != "23505") throw insertError;
+  }
+  const redeemRow = await getRedeemKeyByValue(appCode, redeemKey);
+  if (!redeemRow) return null;
+
+  try {
+    if (inserted?.id) {
+      await admin.from("licenses_free_issues").update({ app_code: "find-dumps", server_redeem_key_id: inserted.id }).eq("issue_id", asString((issue as any).issue_id));
+      await admin.from("licenses_free_sessions").update({ app_code: "find-dumps", issued_server_redeem_key_id: inserted.id, issued_server_reward_mode: reward.reward_mode }).eq("session_id", asString((freeSession as any).session_id));
+    }
+  } catch (_err) {
+    // bridge note updates are best-effort only
+  }
+  return redeemRow;
+}
+
 function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackage | null): RuntimeResolvedReward {
   const claimStartsEntitlement = Boolean((keyRow.metadata as any)?.claim_starts_entitlement);
   const claimBoundExpiresAt = claimStartsEntitlement ? asNullableString(keyRow.expires_at) : null;
@@ -1471,39 +1707,48 @@ async function reserveRedeemKeyUse(keyRow: RuntimeRedeemKey, accountRef: string,
 }
 
 async function revokeActiveDeviceSessions(appCode: string, accountRef: string, deviceId: string, reason: string) {
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return;
   const admin = createAdminClient();
   const nowIso = getNowIso();
-  const { error } = await admin
-    .from("server_app_sessions")
-    .update({
-      status: "revoked",
-      revoked_at: nowIso,
-      revoke_reason: reason,
-      last_seen_at: nowIso,
-      updated_at: nowIso,
-    })
-    .eq("app_code", appCode)
-    .ilike("account_ref", normalizeAccountRef(accountRef))
-    .eq("device_id", normalizeDeviceId(deviceId))
-    .eq("status", "active");
+  const normalizedDeviceId = normalizeDeviceId(deviceId);
+  for (const alias of aliases) {
+    const { error } = await admin
+      .from("server_app_sessions")
+      .update({
+        status: "revoked",
+        revoked_at: nowIso,
+        revoke_reason: reason,
+        last_seen_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("device_id", normalizedDeviceId)
+      .eq("status", "active");
 
-  if (error) throw error;
+    if (error) throw error;
+  }
 }
 
 async function countOtherActiveDevices(appCode: string, accountRef: string, currentDeviceId: string) {
+  const aliases = getAccountRefAliases(accountRef);
+  if (!aliases.length) return 0;
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_sessions")
-    .select("device_id")
-    .eq("app_code", appCode)
-    .ilike("account_ref", normalizeAccountRef(accountRef))
-    .eq("status", "active");
-
-  if (error) throw error;
   const devices = new Set<string>();
-  for (const row of data ?? []) {
-    const deviceId = asString((row as any).device_id);
-    if (deviceId && deviceId !== currentDeviceId) devices.add(deviceId);
+  for (const alias of aliases) {
+    const { data, error } = await admin
+      .from("server_app_sessions")
+      .select("device_id")
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active");
+
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const deviceId = asString((row as any).device_id);
+      if (deviceId && deviceId !== currentDeviceId) devices.add(deviceId);
+    }
   }
   return devices.size;
 }
@@ -2012,7 +2257,10 @@ export async function redeemRuntimeKey(params: {
   if (!deviceId) throw Object.assign(new Error("MISSING_DEVICE_ID"), { status: 400, code: "MISSING_DEVICE_ID" });
 
   const { settings, planMap } = await getRuntimeContext(appCode);
-  const keyRow = await getRedeemKeyByValue(appCode, redeemKey);
+  let keyRow = await getRedeemKeyByValue(appCode, redeemKey);
+  if (!keyRow) {
+    keyRow = await tryBridgeLegacyLicenseKeyToRedeemKey(appCode, redeemKey);
+  }
   if (!keyRow) throw Object.assign(new Error("REDEEM_KEY_NOT_FOUND"), { status: 404, code: "REDEEM_KEY_NOT_FOUND" });
   if (!keyRow.enabled) throw Object.assign(new Error("REDEEM_KEY_DISABLED"), { status: 409, code: "REDEEM_KEY_DISABLED" });
   if (keyRow.blocked_at) throw Object.assign(new Error(keyRow.blocked_reason || "REDEEM_KEY_BLOCKED"), { status: 409, code: "REDEEM_KEY_BLOCKED" });

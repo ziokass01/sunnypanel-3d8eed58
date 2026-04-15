@@ -38,6 +38,20 @@ function asNullableText(value: unknown) {
   return v || null;
 }
 
+
+function inferAdminAppCode(keyType: any) {
+  const direct = asText(keyType?.app_code).toLowerCase();
+  if (direct) return direct;
+  const packageCode = asText(keyType?.default_package_code).toLowerCase();
+  const creditCode = asText(keyType?.default_credit_code).toLowerCase();
+  const code = asText(keyType?.code).toLowerCase();
+  const signature = asText(keyType?.key_signature).toLowerCase();
+  if (packageCode || creditCode) return "find-dumps";
+  if (signature === "fd") return "find-dumps";
+  if (code.startsWith("fd")) return "find-dumps";
+  return "";
+}
+
 function resolveFindDumpsAdminReward(keyType: any) {
   const packageCode = asText(keyType?.default_package_code).toLowerCase();
   const creditCode = asText(keyType?.default_credit_code).toLowerCase();
@@ -216,7 +230,7 @@ Deno.serve(async (req) => {
 
   const key = makeKey();
   const keyExpiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
-  const appCode = asText((keyType as any)?.app_code).toLowerCase();
+  const appCode = inferAdminAppCode(keyType);
 
   if (appCode === "find-dumps") {
     const reward = resolveFindDumpsAdminReward(keyType);
