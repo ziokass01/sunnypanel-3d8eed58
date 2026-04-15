@@ -12,7 +12,7 @@ import { PublicInfo } from "@/features/free/PublicInfo";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory, syncFreeNextEligibleAt } from "@/features/free/flow-ux";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, readBundle, writeBundle } from "@/lib/freeFlow";
-import { getFindDumpsFreeFlowDefaults } from "@/lib/serverAppPolicies";
+import { getFindDumpsFreeFlowDefaults, roundCredit } from "@/lib/serverAppPolicies";
 import {
   getFreeTestMode,
   getOrCreateFingerprint,
@@ -262,10 +262,36 @@ export function FreeLandingPage() {
   const effectiveFindDumpsCode = useMemo(() => String((effectiveFindDumpsKind === "credit" ? selectedKeyMeta?.default_credit_code : selectedKeyMeta?.default_package_code) || (effectiveFindDumpsKind === "credit" ? "credit-normal" : "classic")).trim(), [effectiveFindDumpsKind, selectedKeyMeta?.default_credit_code, selectedKeyMeta?.default_package_code]);
   const effectiveFindDumpsReward = useMemo(() => {
     if (!isFindDumpsSelected) return null;
+    const serverReward = cfg?.find_dumps_rewards?.[effectiveFindDumpsCode] ?? null;
+    if (serverReward) {
+      if (effectiveFindDumpsKind === "credit") {
+        return {
+          choiceKind: "credit" as const,
+          rewardCode: serverReward.code,
+          walletKind: serverReward.wallet_kind === "vip" ? "vip" : "normal",
+          creditAmount: roundCredit((serverReward.wallet_kind === "vip" ? serverReward.premium_credit_amount : serverReward.soft_credit_amount) || 0),
+          expiresHours: Math.max(1, Math.round(Number(serverReward.entitlement_seconds || 0) / 3600) || 72),
+          oneTimeUse: true,
+          expiresFromClaim: true,
+        };
+      }
+      return {
+        choiceKind: "package" as const,
+        rewardCode: serverReward.code,
+        walletKind: null,
+        creditAmount: 0,
+        expiresHours: 0,
+        oneTimeUse: true,
+        expiresFromClaim: true,
+        dailyCredit: roundCredit(Number(serverReward.soft_credit_amount || 0)),
+        dailyVipCredit: roundCredit(Number(serverReward.premium_credit_amount || 0)),
+        discountPercent: 0,
+      };
+    }
     return effectiveFindDumpsKind === "credit"
       ? getFindDumpsFreeFlowDefaults("credit", effectiveFindDumpsCode)
       : getFindDumpsFreeFlowDefaults("package", effectiveFindDumpsCode);
-  }, [effectiveFindDumpsCode, effectiveFindDumpsKind, isFindDumpsSelected]);
+  }, [cfg?.find_dumps_rewards, effectiveFindDumpsCode, effectiveFindDumpsKind, isFindDumpsSelected]);
   const selectedQuotaMeta = useMemo(() => cfg?.free_quota_by_app?.[selectedAppCode] ?? null, [cfg?.free_quota_by_app, selectedAppCode]);
   const selectedKeySummaryMeta = useMemo(() => getFreeKeySummaryMeta(selectedAppCode, selectedKeyMeta), [selectedAppCode, selectedKeyMeta]);
 

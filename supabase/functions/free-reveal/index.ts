@@ -72,6 +72,26 @@ async function getKeyTypeMeta(sb: any, code: string | null) {
   return res.data ?? null;
 }
 
+
+async function getFindDumpsRewardMeta(sb: any, code: string | null) {
+  if (!code) return null;
+  const res = await sb
+    .from("server_app_reward_packages")
+    .select("package_code,title,description,enabled,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds")
+    .eq("app_code", "find-dumps")
+    .eq("package_code", code)
+    .maybeSingle();
+  if (res.error) {
+    const msg = String(res.error?.message ?? "").toLowerCase();
+    if (!(msg.includes("does not exist") || msg.includes("undefined column") || msg.includes("could not find"))) {
+      throw res.error;
+    }
+    return null;
+  }
+  if (!res.data || res.data.enabled === false) return null;
+  return res.data;
+}
+
 function getVietnamDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -516,32 +536,34 @@ Deno.serve(async (req) => {
     let wallet_kind: string | null = null;
 
     if (hasPackage) {
-      const pkg = FIND_DUMPS_PACKAGE_META[sessionPackageCode];
+      const pkgRow = await getFindDumpsRewardMeta(sb, sessionPackageCode);
+      const pkg = pkgRow ?? FIND_DUMPS_PACKAGE_META[sessionPackageCode];
       if (!pkg) {
         throw Object.assign(new Error("FIND_DUMPS_PACKAGE_NOT_FOUND"), { status: 404, code: "FIND_DUMPS_PACKAGE_NOT_FOUND" });
       }
-      reward_mode = pkg.reward_mode;
-      plan_code = pkg.plan_code;
-      soft_credit_amount = pkg.soft_credit_amount;
-      premium_credit_amount = pkg.premium_credit_amount;
+      reward_mode = String(pkg.reward_mode ?? "plan");
+      plan_code = String(pkg.plan_code ?? "").trim() || null;
+      soft_credit_amount = Number(pkg.soft_credit_amount ?? 0);
+      premium_credit_amount = Number(pkg.premium_credit_amount ?? 0);
       entitlement_seconds = durationSeconds;
-      title = `${pkg.title} ${keyTypeMeta?.label ?? ""}`.trim();
+      title = `${String(pkg.title ?? sessionPackageCode)} ${keyTypeMeta?.label ?? ""}`.trim();
       description = `Free flow package ${sessionPackageCode}`;
       package_code = sessionPackageCode;
     } else {
-      const credit = FIND_DUMPS_CREDIT_META[sessionCreditCode];
+      const creditRow = await getFindDumpsRewardMeta(sb, sessionCreditCode);
+      const credit = creditRow ?? FIND_DUMPS_CREDIT_META[sessionCreditCode];
       if (!credit) {
         throw Object.assign(new Error("FIND_DUMPS_CREDIT_NOT_FOUND"), { status: 404, code: "FIND_DUMPS_CREDIT_NOT_FOUND" });
       }
-      reward_mode = credit.reward_mode;
+      reward_mode = String(credit.reward_mode ?? "soft_credit");
       plan_code = null;
-      soft_credit_amount = credit.soft_credit_amount;
-      premium_credit_amount = credit.premium_credit_amount;
+      soft_credit_amount = Number(credit.soft_credit_amount ?? 0);
+      premium_credit_amount = Number(credit.premium_credit_amount ?? 0);
       entitlement_seconds = 0;
-      title = `${credit.title} ${keyTypeMeta?.label ?? ""}`.trim();
+      title = `${String(credit.title ?? sessionCreditCode)} ${keyTypeMeta?.label ?? ""}`.trim();
       description = `Free flow credit ${sessionCreditCode}`;
       credit_code = sessionCreditCode;
-      wallet_kind = requestedWalletKind ?? credit.wallet_kind;
+      wallet_kind = requestedWalletKind ?? ((reward_mode === "premium_credit") ? "vip" : "normal");
     }
 
     const expiresAt = addSecondsIso(issuedAt, durationSeconds);

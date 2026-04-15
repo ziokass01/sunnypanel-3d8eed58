@@ -18,6 +18,16 @@ function rewardModeForCredit(code: string) {
   return code === "credit-vip" ? "premium_credit" : "soft_credit";
 }
 
+const DEFAULT_FIND_DUMPS_PACKAGE_KEY_ROWS = [
+  { code: "fd_package", label: "Find Dumps Go 3 ngày", duration_seconds: 3 * 86400, kind: "day", value: 3, sort_order: 302, enabled: true, app_code: "find-dumps", app_label: "Find Dumps", key_signature: "SUNNY", allow_reset: false, free_selection_mode: "package", free_selection_expand: true, default_package_code: "go", default_credit_code: null, default_wallet_kind: null },
+  { code: "fdd7", label: "Find Dumps Go 7 ngày", duration_seconds: 7 * 86400, kind: "day", value: 7, sort_order: 303, enabled: true, app_code: "find-dumps", app_label: "Find Dumps", key_signature: "SUNNY", allow_reset: false, free_selection_mode: "package", free_selection_expand: true, default_package_code: "go", default_credit_code: null, default_wallet_kind: null },
+  { code: "fdd30", label: "Find Dumps Plus 30 ngày", duration_seconds: 30 * 86400, kind: "day", value: 30, sort_order: 304, enabled: true, app_code: "find-dumps", app_label: "Find Dumps", key_signature: "SUNNY", allow_reset: false, free_selection_mode: "package", free_selection_expand: true, default_package_code: "plus", default_credit_code: null, default_wallet_kind: null },
+];
+
+const DEFAULT_FIND_DUMPS_CREDIT_KEY_ROWS = [
+  { code: "fd_credit", label: "Find Dumps credit", duration_seconds: 72 * 3600, kind: "day", value: 3, sort_order: 310, enabled: true, app_code: "find-dumps", app_label: "Find Dumps", key_signature: "SUNNY", allow_reset: false, free_selection_mode: "credit", free_selection_expand: true, default_package_code: null, default_credit_code: "credit-normal", default_wallet_kind: "normal" },
+];
+
 function packageSeedRows(rows: any[] | null | undefined) {
   const map = new Map((rows || []).map((row: any) => [String(row.package_code || "").trim().toLowerCase(), row]));
   return FIND_DUMPS_PACKAGES.map((item) => {
@@ -33,6 +43,29 @@ function packageSeedRows(rows: any[] | null | undefined) {
       note: String(hit?.description || "Nhận xong là đồng hồ chạy ngay, hết hạn thì key cũng mất."),
     };
   });
+}
+
+function buildKeyTypeDefaults(row: any, mode: "package" | "credit", selectedCode: string, selectedLabel: string, value: number, durationSeconds: number, walletKind?: string | null) {
+  const safeDuration = Math.max(3600, Number(durationSeconds || row?.duration_seconds || (mode === "credit" ? 72 * 3600 : 3 * 86400)));
+  const safeValue = Math.max(1, Math.round(Number(value || row?.value || (mode === "credit" ? 1 : 3))));
+  return {
+    code: String(row?.code || "").trim(),
+    label: String(row?.label || selectedLabel || (mode === "credit" ? "Find Dumps credit" : "Find Dumps package")).trim(),
+    duration_seconds: safeDuration,
+    kind: safeDuration < 86400 ? "hour" : "day",
+    value: safeValue,
+    sort_order: Number(row?.sort_order || 999),
+    enabled: row?.enabled ?? true,
+    app_code: String(row?.app_code || "find-dumps").trim() || "find-dumps",
+    app_label: String(row?.app_label || "Find Dumps").trim() || "Find Dumps",
+    key_signature: String(row?.key_signature || "SUNNY").trim() || "SUNNY",
+    allow_reset: Boolean(row?.allow_reset ?? false),
+    free_selection_mode: mode,
+    free_selection_expand: true,
+    default_package_code: mode === "package" ? selectedCode : null,
+    default_credit_code: mode === "credit" ? selectedCode : null,
+    default_wallet_kind: mode === "credit" ? (walletKind === "vip" ? "vip" : "normal") : null,
+  };
 }
 
 function creditSeedRows(rows: any[] | null | undefined) {
@@ -71,7 +104,7 @@ export function AdminServerAppKeysPage() {
           .order("sort_order", { ascending: true }),
         supabase
           .from("licenses_free_key_types")
-          .select("code,free_selection_mode,default_package_code,default_credit_code,default_wallet_kind")
+          .select("code,label,duration_seconds,kind,value,sort_order,enabled,app_code,app_label,key_signature,allow_reset,free_selection_mode,free_selection_expand,default_package_code,default_credit_code,default_wallet_kind")
           .eq("app_code", appCode)
           .order("sort_order", { ascending: true }),
       ]);
@@ -135,26 +168,36 @@ export function AdminServerAppKeysPage() {
 
       const selectedCredit = creditDrafts.find((item) => item.code === selectedCreditCode) || creditDrafts[0];
       const selectedPackage = packageDrafts.find((item) => item.code === selectedPackageCode) || packageDrafts[0];
-      const creditRows = (rewardsQuery.data?.keyTypes || []).filter((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "credit");
-      const packageRows = (rewardsQuery.data?.keyTypes || []).filter((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "package");
+      const allKeyTypeRows = rewardsQuery.data?.keyTypes || [];
+      const detectedCreditRows = allKeyTypeRows.filter((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "credit" || String(row.code || "").toLowerCase().includes("credit"));
+      const detectedPackageRows = allKeyTypeRows.filter((row: any) => !(String(row.free_selection_mode || "").trim().toLowerCase() === "credit" || String(row.code || "").toLowerCase().includes("credit")));
+      const creditRows = detectedCreditRows.length ? detectedCreditRows : DEFAULT_FIND_DUMPS_CREDIT_KEY_ROWS;
+      const packageRows = detectedPackageRows.length ? detectedPackageRows : DEFAULT_FIND_DUMPS_PACKAGE_KEY_ROWS;
 
       if (creditRows.length && selectedCredit) {
-        const creditUpdate = creditRows.map((row: any) => ({
-          code: row.code,
-          app_code: appCode,
-          default_credit_code: selectedCredit.code,
-          default_wallet_kind: selectedCredit.walletKind === "vip" ? "vip" : "normal",
-        }));
+        const creditUpdate = creditRows.map((row: any) => buildKeyTypeDefaults(
+          row,
+          "credit",
+          selectedCredit.code,
+          selectedCredit.label,
+          1,
+          Number(selectedCredit.expiresHours || 72) * 3600,
+          selectedCredit.walletKind,
+        ));
         const creditWrite = await supabase.from("licenses_free_key_types").upsert(creditUpdate, { onConflict: "code" });
         if (creditWrite.error) throw creditWrite.error;
       }
 
       if (packageRows.length && selectedPackage) {
-        const packageUpdate = packageRows.map((row: any) => ({
-          code: row.code,
-          app_code: appCode,
-          default_package_code: selectedPackage.code,
-        }));
+        const packageUpdate = packageRows.map((row: any) => buildKeyTypeDefaults(
+          row,
+          "package",
+          selectedPackage.code,
+          selectedPackage.label,
+          Number(selectedPackage.durationDays || 3),
+          Number(selectedPackage.durationDays || 3) * 86400,
+          null,
+        ));
         const packageWrite = await supabase.from("licenses_free_key_types").upsert(packageUpdate, { onConflict: "code" });
         if (packageWrite.error) throw packageWrite.error;
       }

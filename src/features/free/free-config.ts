@@ -18,6 +18,19 @@ export type FreeKeyType = {
   default_wallet_kind?: string | null;
 };
 
+
+export type FindDumpsRewardConfig = {
+  code: string;
+  label: string;
+  reward_mode: string;
+  plan_code?: string | null;
+  soft_credit_amount?: number;
+  premium_credit_amount?: number;
+  entitlement_days?: number;
+  entitlement_seconds?: number;
+  wallet_kind?: "normal" | "vip" | null;
+};
+
 export type PublicLink = {
   label: string;
   url: string;
@@ -102,6 +115,7 @@ export type FreeConfig = {
   free_external_download?: FreeExternalDownload;
 
   key_types: FreeKeyType[];
+  find_dumps_rewards?: Record<string, FindDumpsRewardConfig>;
 
   turnstile_enabled: boolean;
   turnstile_site_key: string | null;

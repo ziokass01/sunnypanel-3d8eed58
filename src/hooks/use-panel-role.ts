@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -12,15 +12,17 @@ function normalizePanelRole(value: unknown): PanelRole {
   return null;
 }
 
-const PANEL_ROLE_CACHE_KEY = "sunny:panel-role-cache:v1";
+const PANEL_ROLE_CACHE_KEY = "sunny:panel-role-cache:v2";
+const PANEL_ROLE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function readCachedPanelRole(userId?: string | null): PanelRole {
   if (typeof window === "undefined" || !userId) return null;
   try {
     const raw = window.localStorage.getItem(PANEL_ROLE_CACHE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { userId?: string; role?: unknown };
+    const parsed = JSON.parse(raw) as { userId?: string; role?: unknown; expiresAt?: number };
     if (!parsed || parsed.userId !== userId) return null;
+    if (typeof parsed.expiresAt === "number" && parsed.expiresAt > 0 && parsed.expiresAt < Date.now()) return null;
     return normalizePanelRole(parsed.role);
   } catch {
     return null;
@@ -30,7 +32,7 @@ function readCachedPanelRole(userId?: string | null): PanelRole {
 function writeCachedPanelRole(userId?: string | null, role?: PanelRole) {
   if (typeof window === "undefined" || !userId || !role) return;
   try {
-    window.localStorage.setItem(PANEL_ROLE_CACHE_KEY, JSON.stringify({ userId, role }));
+    window.localStorage.setItem(PANEL_ROLE_CACHE_KEY, JSON.stringify({ userId, role, expiresAt: Date.now() + PANEL_ROLE_CACHE_TTL_MS }));
   } catch {
     // ignore cache write errors
   }
@@ -44,6 +46,7 @@ export function usePanelRole() {
   );
   const cachedRole = useMemo(() => readCachedPanelRole(user?.id), [user?.id]);
   const [role, setRole] = useState<PanelRole>(metadataRole ?? cachedRole);
+  const stickyRoleRef = useRef<PanelRole>(metadataRole ?? cachedRole);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -52,14 +55,16 @@ export function usePanelRole() {
     async function run() {
       if (!user) {
         if (!cancelled) {
+          stickyRoleRef.current = null;
           setRole(null);
           setLoading(false);
         }
         return;
       }
 
-      const optimisticRole = metadataRole ?? cachedRole ?? null;
+      const optimisticRole = metadataRole ?? cachedRole ?? stickyRoleRef.current ?? null;
       if (optimisticRole) {
+        stickyRoleRef.current = optimisticRole;
         setRole(optimisticRole);
       }
       setLoading(true);
@@ -68,9 +73,17 @@ export function usePanelRole() {
       if (cancelled) return;
 
       const dbRole = error ? null : normalizePanelRole(data);
-      const resolved = dbRole ?? metadataRole ?? cachedRole ?? null;
-      if (resolved) writeCachedPanelRole(user.id, resolved);
-      setRole(resolved);
+      const resolved = dbRole ?? metadataRole ?? cachedRole ?? stickyRoleRef.current ?? null;
+      if (resolved) {
+        stickyRoleRef.current = resolved;
+        writeCachedPanelRole(user.id, resolved);
+      }
+      if (error && (metadataRole || cachedRole || stickyRoleRef.current)) {
+        setRole(metadataRole ?? cachedRole ?? stickyRoleRef.current ?? null);
+        setLoading(false);
+        return;
+      }
+      setRole(resolved ?? stickyRoleRef.current ?? null);
       setLoading(false);
     }
 

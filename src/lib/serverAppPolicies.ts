@@ -10,6 +10,7 @@ export type PackagePolicy = {
   label: string;
   enabled: boolean;
   discountPercent: number;
+  discountPercentVip?: number;
   dailyCredit: number;
   dailyVipCredit: number;
   softBalanceCap: number;
@@ -41,24 +42,24 @@ export type FeaturePolicy = {
 };
 
 export const FIND_DUMPS_PACKAGES: PackagePolicy[] = [
-  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, dailyCredit: 5, dailyVipCredit: 0, softBalanceCap: 5, premiumBalanceCap: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
-  { code: "go", label: "Go", enabled: true, discountPercent: 5, dailyCredit: 6, dailyVipCredit: 0.1, softBalanceCap: 30, premiumBalanceCap: 1, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 7 },
-  { code: "plus", label: "Plus", enabled: true, discountPercent: 20, dailyCredit: 20, dailyVipCredit: 0.5, softBalanceCap: 200, premiumBalanceCap: 10, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
-  { code: "pro", label: "Pro", enabled: true, discountPercent: 35, dailyCredit: 50, dailyVipCredit: 1, softBalanceCap: 1000, premiumBalanceCap: 30, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "classic", label: "Classic", enabled: true, discountPercent: 0, discountPercentVip: 0, dailyCredit: 5, dailyVipCredit: 0, softBalanceCap: 5, premiumBalanceCap: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 3 },
+  { code: "go", label: "Go", enabled: true, discountPercent: 10, discountPercentVip: 0, dailyCredit: 7, dailyVipCredit: 0, softBalanceCap: 70, premiumBalanceCap: 0, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 7 },
+  { code: "plus", label: "Plus", enabled: true, discountPercent: 35, discountPercentVip: 20, dailyCredit: 20, dailyVipCredit: 0.25, softBalanceCap: 200, premiumBalanceCap: 5, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
+  { code: "pro", label: "Pro", enabled: true, discountPercent: 55, discountPercentVip: 30, dailyCredit: 50, dailyVipCredit: 0.5, softBalanceCap: 500, premiumBalanceCap: 10, resetDaily: true, expiresFromClaim: true, oneTimeUse: true, defaultDays: 30 },
 ];
 
 export const FIND_DUMPS_CREDITS: CreditPolicy[] = [
   { code: "credit-normal", label: "Credit thường", defaultAmount: 5, allowDecimal: true, expiresHours: 72, oneTimeUse: true, walletKind: "normal" },
-  { code: "credit-vip", label: "Credit VIP", defaultAmount: 0.3, allowDecimal: true, expiresHours: 72, oneTimeUse: true, walletKind: "vip" },
+  { code: "credit-vip", label: "Credit VIP", defaultAmount: 0.2, allowDecimal: true, expiresHours: 72, oneTimeUse: true, walletKind: "vip" },
 ];
 
 export const FIND_DUMPS_FEATURES: FeaturePolicy[] = [
   { code: "search_basic", title: "Search cơ bản", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Không giới hạn" },
-  { code: "batch_search", title: "Batch search", baseCredit: 0.2, vipCredit: 0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Quota theo ngày" },
-  { code: "export_plain", title: "Export text", baseCredit: 0.05, vipCredit: 0, freeForClassic: false, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
-  { code: "export_json", title: "Export JSON", baseCredit: 0.1, vipCredit: 0, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo lượt xuất" },
-  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 0.5, vipCredit: 0.05, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
-  { code: "binary_scan_full", title: "Full scan", baseCredit: 1, vipCredit: 0.1, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt quét" },
+  { code: "batch_search", title: "Batch search", baseCredit: 0.20, vipCredit: 0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Quota theo ngày" },
+  { code: "export_plain", title: "Export text", baseCredit: 0.05, vipCredit: 0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
+  { code: "export_json", title: "Export JSON", baseCredit: 0.10, vipCredit: 0, freeForClassic: false, discountablePlans: ["go", "plus", "pro"], limitLabel: "Theo lượt xuất" },
+  { code: "workspace_browser", title: "Browser + pseudo", baseCredit: 0.50, vipCredit: 0.03, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo feature gate" },
+  { code: "binary_scan_full", title: "Full scan", baseCredit: 1.00, vipCredit: 0.05, freeForClassic: false, discountablePlans: ["plus", "pro"], limitLabel: "Theo lượt quét" },
   { code: "game_profiles", title: "Game Profiles", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
   { code: "runtime_redeem", title: "Nhập mã / kích hoạt", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tiện ích free" },
   { code: "convert_image", title: "Convert image", baseCredit: 0, vipCredit: 0, freeForClassic: true, discountablePlans: ["classic", "go", "plus", "pro"], limitLabel: "Tool free" },
@@ -106,12 +107,12 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
       "workspace_diff",
     ],
     defaultDurationHours: 24,
-    softUnlockCost: 0.5,
-    premiumUnlockCost: 0.05,
-    softUnlockCost7d: 2,
-    premiumUnlockCost7d: 0.2,
-    softUnlockCost30d: 6,
-    premiumUnlockCost30d: 0.6,
+    softUnlockCost: 2.0,
+    premiumUnlockCost: 0.1,
+    softUnlockCost7d: 10.0,
+    premiumUnlockCost7d: 0.5,
+    softUnlockCost30d: 30.0,
+    premiumUnlockCost30d: 1.5,
     freePlans: ["pro"],
     renewable: true,
     enabled: true,
@@ -123,12 +124,12 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
     unlockFeatureCode: "unlock_batch_tools",
     guardedFeatureCodes: ["batch_search", "background_queue", "profile_search"],
     defaultDurationHours: 24,
-    softUnlockCost: 0.2,
+    softUnlockCost: 1.0,
     premiumUnlockCost: 0,
-    softUnlockCost7d: 1,
-    premiumUnlockCost7d: 0.1,
-    softUnlockCost30d: 3,
-    premiumUnlockCost30d: 0.3,
+    softUnlockCost7d: 5.0,
+    premiumUnlockCost7d: 0,
+    softUnlockCost30d: 15.0,
+    premiumUnlockCost30d: 0,
     freePlans: ["plus", "pro"],
     renewable: true,
     enabled: true,
@@ -140,12 +141,12 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
     unlockFeatureCode: "unlock_export_tools",
     guardedFeatureCodes: ["export_plain", "export_text", "export_json", "workspace_export_result", "ida_workspace_export"],
     defaultDurationHours: 24,
-    softUnlockCost: 0.1,
+    softUnlockCost: 1.0,
     premiumUnlockCost: 0,
-    softUnlockCost7d: 0.5,
+    softUnlockCost7d: 4.0,
     premiumUnlockCost7d: 0,
-    softUnlockCost30d: 1.5,
-    premiumUnlockCost30d: 0.1,
+    softUnlockCost30d: 12.0,
+    premiumUnlockCost30d: 0,
     freePlans: ["go", "plus", "pro"],
     renewable: true,
     enabled: true,
@@ -157,15 +158,15 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
     unlockFeatureCode: "unlock_migration_tools",
     guardedFeatureCodes: ["diff_two_dumps", "query_remap", "batch_migrate", "batch_compare", "batch_validate", "export_report"],
     defaultDurationHours: 24,
-    softUnlockCost: 0.4,
-    premiumUnlockCost: 0.04,
-    softUnlockCost7d: 1.6,
-    premiumUnlockCost7d: 0.16,
-    softUnlockCost30d: 4.8,
-    premiumUnlockCost30d: 0.48,
-    freePlans: ["pro"],
+    softUnlockCost: 1.5,
+    premiumUnlockCost: 0.08,
+    softUnlockCost7d: 7.0,
+    premiumUnlockCost7d: 0.35,
+    softUnlockCost30d: 21.0,
+    premiumUnlockCost30d: 1.05,
+    freePlans: ["plus", "pro"],
     renewable: true,
-    enabled: false,
+    enabled: true,
   },
   {
     accessCode: "dumps_soc",
@@ -174,12 +175,12 @@ export const FIND_DUMPS_UNLOCKS: FeatureUnlockPolicy[] = [
     unlockFeatureCode: "unlock_dumps_soc",
     guardedFeatureCodes: ["dumps_soc_analyzer"],
     defaultDurationHours: 24,
-    softUnlockCost: 0.3,
-    premiumUnlockCost: 0.03,
-    softUnlockCost7d: 1.2,
-    premiumUnlockCost7d: 0.12,
-    softUnlockCost30d: 3.6,
-    premiumUnlockCost30d: 0.36,
+    softUnlockCost: 2.0,
+    premiumUnlockCost: 0.1,
+    softUnlockCost7d: 9.0,
+    premiumUnlockCost7d: 0.45,
+    softUnlockCost30d: 27.0,
+    premiumUnlockCost30d: 1.35,
     freePlans: ["pro"],
     renewable: true,
     enabled: true,
@@ -225,7 +226,8 @@ export function computeFindDumpsFeatureCost(featureCode: string, opts?: { planCo
   const baseCost = roundCredit(rawBase);
   const eligibleForDiscount = feature.discountablePlans.includes(plan.code);
   const free = baseCost <= 0 || (plan.code === "classic" && feature.freeForClassic);
-  const discountPercent = free || !eligibleForDiscount ? 0 : Math.max(0, Number(plan.discountPercent || 0));
+  const rawDiscount = walletKind === "vip" ? Number(plan.discountPercentVip ?? plan.discountPercent || 0) : Number(plan.discountPercent || 0);
+  const discountPercent = free || !eligibleForDiscount ? 0 : Math.max(0, rawDiscount);
   const effectiveCost = free ? 0 : roundCredit(baseCost * (1 - discountPercent / 100));
 
   return { feature, plan, walletKind, baseCost, effectiveCost, discountPercent, free };

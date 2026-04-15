@@ -1608,6 +1608,34 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
       ...unlockMeta,
     };
   });
+  const existingFeatureCodes = new Set(decoratedFeatures.map((feature) => String(feature.feature_code || "").toLowerCase()).filter(Boolean));
+  const syntheticUnlockFeatures = unlockRules
+    .filter((rule) => Boolean(rule.enabled))
+    .filter((rule) => !existingFeatureCodes.has(String(rule.access_code || "").toLowerCase()))
+    .map((rule, index) => ({
+      feature_code: rule.access_code,
+      title: rule.title,
+      description: rule.description,
+      min_plan: "classic",
+      requires_credit: false,
+      soft_cost: 0,
+      premium_cost: 0,
+      reset_period: "manual",
+      sort_order: 9000 + index,
+      category: "unlock",
+      group_key: "unlock",
+      icon_key: null,
+      badge_label: "Unlock",
+      visible_to_guest: true,
+      charge_unit: 1,
+      charge_on_success_only: true,
+      client_accumulate_units: false,
+      allowed: true,
+      effective_soft_cost: 0,
+      effective_premium_cost: 0,
+      ...resolveFeatureUnlockMeta(rule.access_code, currentPlan, activePlan, unlockRules, unlockMap),
+    }));
+  const mergedFeatures = [...decoratedFeatures, ...syntheticUnlockFeatures].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
 
   return {
     app: {
@@ -1645,7 +1673,7 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
     account: effectiveAccountRef ? { account_ref: effectiveAccountRef } : null,
     device_id: effectiveDeviceId,
     wallet,
-    features: decoratedFeatures,
+    features: mergedFeatures,
   } as RuntimeAppState;
 }
 

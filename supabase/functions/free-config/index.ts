@@ -256,6 +256,36 @@ if (!free_download_cards.length) {
   }
 
   const appCodes = [...new Set((keyTypes ?? []).map((k: any) => String(k?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire"))];
+  let findDumpsRewards: Record<string, any> = {};
+  if ((requestedAppCode && requestedAppCode === "find-dumps") || appCodes.includes("find-dumps")) {
+    const { data: rewardRows, error: rewardErr } = await sb
+      .from("server_app_reward_packages")
+      .select("package_code,title,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds")
+      .eq("app_code", "find-dumps")
+      .eq("enabled", true);
+    if (rewardErr) {
+      const msg = String(rewardErr?.message ?? "").toLowerCase();
+      if (!(msg.includes("does not exist") || msg.includes("undefined column") || msg.includes("could not find"))) {
+        throw rewardErr;
+      }
+    }
+    for (const row of (rewardRows ?? []) as any[]) {
+      const code = String(row?.package_code ?? "").trim().toLowerCase();
+      if (!code) continue;
+      const rewardMode = String(row?.reward_mode ?? "").trim().toLowerCase();
+      findDumpsRewards[code] = {
+        code,
+        label: String(row?.title ?? code).trim() || code,
+        reward_mode: rewardMode,
+        plan_code: String(row?.plan_code ?? "").trim() || null,
+        soft_credit_amount: Number(row?.soft_credit_amount ?? 0),
+        premium_credit_amount: Number(row?.premium_credit_amount ?? 0),
+        entitlement_days: Math.max(0, Number(row?.entitlement_days ?? 0)),
+        entitlement_seconds: Math.max(0, Number(row?.entitlement_seconds ?? 0)),
+        wallet_kind: rewardMode === "premium_credit" ? "vip" : (rewardMode === "soft_credit" ? "normal" : null),
+      };
+    }
+  }
   const appQuotaSettings = await resolvePerAppQuotaSettings(sb, requestedAppCode ? [requestedAppCode] : appCodes, free_daily_limit_per_fingerprint, free_daily_limit_per_ip);
 
   // FREE flow no longer uses Turnstile. Reset-key keeps its own Turnstile flow.
@@ -418,6 +448,8 @@ if (!free_download_cards.length) {
       badge: free_external_download_badge,
       icon_url: free_external_download_icon_url,
     },
+
+    find_dumps_rewards: findDumpsRewards,
 
     key_types: (keyTypes ?? []).map((k: any) => ({
       code: k.code,
