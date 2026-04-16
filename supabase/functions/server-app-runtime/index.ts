@@ -251,13 +251,24 @@ Deno.serve(async (req) => {
     });
 
     if (action === "catalog" || action === "me") {
-      const boot = await bootstrapRuntimeState(appCode, {
-        sessionToken: sessionToken || null,
-        accountRef: accountRef || null,
-        deviceId: deviceId || req.headers.get("x-fp") || null,
-        clientVersion,
-        ipHash,
-      });
+      const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
+      const boot = sessionToken
+        ? await bootstrapRuntimeState(appCode, {
+            sessionToken: sessionToken || null,
+            accountRef: accountRef || null,
+            deviceId: hintedDeviceId,
+            clientVersion,
+            ipHash,
+          })
+        : {
+            state: await buildRuntimeState(appCode, {
+              sessionToken: null,
+              accountRef: accountRef || null,
+              deviceId: hintedDeviceId,
+            }),
+            sessionToken: null,
+            sessionBound: false,
+          };
       await logSafe({ ok: true, code: "OK", meta: { session_bound: boot.sessionBound, bootstrap_account: accountRef || null } });
       return runtimeJson(200, {
         ok: true,
@@ -270,21 +281,20 @@ Deno.serve(async (req) => {
 
     if (action === "heartbeat") {
       if (!sessionToken) {
-        const boot = await bootstrapRuntimeState(appCode, {
+        const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
+        const state = await buildRuntimeState(appCode, {
           sessionToken: null,
           accountRef: accountRef || null,
-          deviceId: deviceId || req.headers.get("x-fp") || null,
-          clientVersion,
-          ipHash,
+          deviceId: hintedDeviceId,
         });
-        await logSafe({ ok: true, code: "OK", meta: { heartbeat_bootstrap: true, session_bound: boot.sessionBound } });
+        await logSafe({ ok: true, code: "OK", meta: { heartbeat_bootstrap: false, session_bound: false } });
         return runtimeJson(200, {
           ok: true,
           action,
-          active: Boolean(boot.sessionToken),
-          state: boot.state,
-          session_token: boot.sessionToken,
-          session_bound: boot.sessionBound,
+          active: false,
+          state,
+          session_token: null,
+          session_bound: false,
         }, origin);
       }
       const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
@@ -325,7 +335,6 @@ Deno.serve(async (req) => {
         redeemKey,
         accountRef,
         deviceId,
-        traceId,
         clientVersion,
         ipHash,
       });
@@ -333,13 +342,13 @@ Deno.serve(async (req) => {
         ok: true,
         code: "OK",
         session_id: (redeemed as any)?.session?.id ?? null,
-        trace_id: (redeemed as any)?.trace_id ?? traceId ?? null,
-        meta: { reward: (redeemed as any)?.reward ?? null, source_free_session_id: (redeemed as any)?.source_free_session_id ?? null },
+        trace_id: traceId ?? null,
+        meta: { reward: (redeemed as any)?.reward ?? null },
       });
       return runtimeJson(200, {
         ok: true,
         action,
-        trace_id: (redeemed as any)?.trace_id ?? traceId ?? null,
+        trace_id: traceId ?? null,
         ...redeemed,
       }, origin);
     }
@@ -389,13 +398,13 @@ Deno.serve(async (req) => {
         ok: true,
         code: "OK",
         session_id: (consumed as any)?.session?.id ?? null,
-        trace_id: (consumed as any)?.trace_id ?? traceId ?? null,
+        trace_id: traceId ?? null,
         meta: { balances: (consumed as any)?.wallet ?? null },
       });
       return runtimeJson(200, {
         ok: true,
         action,
-        trace_id: (consumed as any)?.trace_id ?? traceId ?? null,
+        trace_id: traceId ?? null,
         session_token: effectiveSessionToken,
         session_bound: Boolean(effectiveSessionToken),
         ...consumed,
