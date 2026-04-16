@@ -653,7 +653,7 @@ export function AdminServerAppDetailPage() {
           <div>
             <h1 className="text-2xl font-semibold">Cấu hình · {appDraft.label}</h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Chia nhỏ cấu hình theo từng tab để mobile gọn hơn: phần cơ bản, gói, tính năng, ví và gói quà.
+              Chia nhỏ cấu hình theo từng tab để mobile gọn hơn: phần cơ bản, gói, tính năng và ví. Mục gói quà đã chuyển hẳn sang tab Create Redeem.
             </p>
           </div>
         </div>
@@ -694,7 +694,7 @@ export function AdminServerAppDetailPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói mặc định</div><div className="mt-1 break-words text-lg font-semibold">{settingsDraft.guest_plan || "classic"}</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Nhãn tab key</div><div className="mt-1 break-words text-lg font-semibold">{settingsDraft.gift_tab_label || "Mã quà"}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Create Redeem</div><div className="mt-1 break-words text-lg font-semibold">Quản lý nhãn gói quà ở tab Create Redeem</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói</div><div className="mt-1 text-lg font-semibold">{plansDraft.length}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Tính năng</div><div className="mt-1 text-lg font-semibold">{featuresDraft.length}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Gói quà</div><div className="mt-1 text-lg font-semibold">{packagesDraft.length}</div></CardContent></Card>
@@ -745,7 +745,7 @@ export function AdminServerAppDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Tên tab nhập key</div>
-                  <Input value={settingsDraft.gift_tab_label || ""} onChange={(e) => setSettingsDraft((prev) => ({ ...prev, gift_tab_label: e.target.value }))} placeholder="Mã quà / Nhập key" />
+                  <Input value={settingsDraft.gift_tab_label || ""} readOnly placeholder="Quản lý ở tab Create Redeem" />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Giờ reset credit thường</div>
@@ -1003,7 +1003,7 @@ export function AdminServerAppDetailPage() {
             <CardHeader>
               <CardTitle>Reward / redeem packages</CardTitle>
               <CardDescription>
-                Đây là lớp để admin phân loại key nhập trong tab Quà tặng sau này: key này mở Go / Plus / Pro hay chỉ nạp credit thường, credit kim cương, hoặc cả hai.
+                Phần gói quà đã được chuyển sang tab Create Redeem riêng. Tại đó admin phân loại key mở Go / Plus / Pro hay chỉ nạp credit thường, credit VIP, hoặc cả hai.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

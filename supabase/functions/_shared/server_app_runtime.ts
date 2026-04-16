@@ -187,6 +187,14 @@ type RuntimeRedeemKey = {
   entitlement_seconds: number;
   device_limit_override: number | null;
   account_limit_override: number | null;
+  max_redeems_per_ip: number;
+  max_redeems_per_device: number;
+  max_redeems_per_account: number;
+  allow_same_plan_extension: boolean;
+  apply_days_only_if_greater: boolean;
+  same_plan_credit_only: boolean;
+  keep_higher_plan: boolean;
+  apply_plan_if_higher: boolean;
   blocked_at: string | null;
   blocked_reason: string | null;
   metadata: Record<string, unknown>;
@@ -314,6 +322,32 @@ function asNumber(value: unknown, fallback = 0) {
 
 function round2(value: number) {
   return Number(value.toFixed(2));
+}
+
+function planRank(planCode: string | null | undefined) {
+  switch (asString(planCode, "classic").toLowerCase()) {
+    case "pro":
+      return 40;
+    case "plus":
+      return 30;
+    case "go":
+      return 20;
+    case "classic":
+      return 10;
+    default:
+      return 0;
+  }
+}
+
+function getRemainingEntitlementSeconds(entitlement: RuntimeEntitlement | null | undefined) {
+  if (!entitlement?.expires_at || !isFutureIso(entitlement.expires_at)) return 0;
+  return Math.max(0, Math.floor((new Date(entitlement.expires_at).getTime() - Date.now()) / 1000));
+}
+
+function normalizeRewardSeconds(reward: RuntimeResolvedReward) {
+  const fromSeconds = Math.max(0, Math.trunc(asNumber(reward.entitlement_seconds, 0)));
+  if (fromSeconds > 0) return fromSeconds;
+  return Math.max(0, Math.trunc(asNumber(reward.entitlement_days, 0))) * 86400;
 }
 
 function applyResetFloorWithDebt(prevBalance: number, target: number, mode: "legacy_floor" | "debt_floor") {
@@ -1245,7 +1279,7 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("server_app_redeem_keys")
-    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,blocked_at,blocked_reason,metadata")
+    .select("id,reward_package_id,redeem_key,enabled,starts_at,expires_at,max_redemptions,redeemed_count,reward_mode,plan_code,soft_credit_amount,premium_credit_amount,entitlement_days,entitlement_seconds,device_limit_override,account_limit_override,max_redeems_per_ip,max_redeems_per_device,max_redeems_per_account,allow_same_plan_extension,apply_days_only_if_greater,same_plan_credit_only,keep_higher_plan,apply_plan_if_higher,blocked_at,blocked_reason,metadata")
     .eq("app_code", appCode)
     .eq("redeem_key", redeemKey)
     .maybeSingle();
@@ -1269,6 +1303,14 @@ async function getRedeemKeyByValue(appCode: string, redeemKey: string): Promise<
     entitlement_seconds: Math.max(0, Math.trunc(asNumber((data as any).entitlement_seconds))),
     device_limit_override: (data as any).device_limit_override == null ? null : Math.trunc(asNumber((data as any).device_limit_override)),
     account_limit_override: (data as any).account_limit_override == null ? null : Math.trunc(asNumber((data as any).account_limit_override)),
+    max_redeems_per_ip: Math.max(0, Math.trunc(asNumber((data as any).max_redeems_per_ip))),
+    max_redeems_per_device: Math.max(0, Math.trunc(asNumber((data as any).max_redeems_per_device))),
+    max_redeems_per_account: Math.max(0, Math.trunc(asNumber((data as any).max_redeems_per_account))),
+    allow_same_plan_extension: Boolean((data as any).allow_same_plan_extension ?? false),
+    apply_days_only_if_greater: Boolean((data as any).apply_days_only_if_greater ?? true),
+    same_plan_credit_only: Boolean((data as any).same_plan_credit_only ?? true),
+    keep_higher_plan: Boolean((data as any).keep_higher_plan ?? true),
+    apply_plan_if_higher: Boolean((data as any).apply_plan_if_higher ?? true),
     blocked_at: asNullableString((data as any).blocked_at),
     blocked_reason: asNullableString((data as any).blocked_reason),
     metadata: typeof (data as any).metadata === "object" && (data as any).metadata != null ? (data as any).metadata : {},
@@ -1313,6 +1355,23 @@ function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackag
   };
 }
 
+async function countRedeemKeyUsage(params: { appCode: string; redeemKeyId: string; accountRef?: string | null; deviceId?: string | null; ipHash?: string | null; }) {
+  const admin = createAdminClient();
+  let query = admin
+    .from("server_app_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("app_code", params.appCode)
+    .eq("redeem_key_id", params.redeemKeyId);
+
+  if (params.accountRef) query = query.eq("account_ref", params.accountRef);
+  if (params.deviceId) query = query.eq("device_id", params.deviceId);
+  if (params.ipHash) query = query.eq("ip_hash", params.ipHash);
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return Math.max(0, Math.trunc(asNumber(count, 0)));
+}
+
 async function reserveRedeemKeyUse(keyRow: RuntimeRedeemKey, accountRef: string, deviceId: string) {
   const nowIso = getNowIso();
   const admin = createAdminClient();
@@ -1323,6 +1382,7 @@ async function reserveRedeemKeyUse(keyRow: RuntimeRedeemKey, accountRef: string,
       last_redeemed_at: nowIso,
       updated_at: nowIso,
       metadata: {
+        ...(keyRow.metadata || {}),
         last_account_ref: accountRef,
         last_device_id: deviceId,
         last_redeemed_at: nowIso,
@@ -1447,10 +1507,12 @@ async function upsertRuntimeEntitlement(params: {
   redeemKeyId: string;
   rewardPackageId: string | null;
   settings: RuntimeSettings;
+  keyRow: RuntimeRedeemKey;
 }) {
+  const rewardSeconds = normalizeRewardSeconds(params.reward);
   const shouldGrantEntitlement = Boolean(
     params.reward.plan_code ||
-    params.reward.entitlement_days > 0 ||
+    rewardSeconds > 0 ||
     params.reward.device_limit_override != null ||
     params.reward.account_limit_override != null,
   );
@@ -1459,34 +1521,76 @@ async function upsertRuntimeEntitlement(params: {
   const admin = createAdminClient();
   const nowIso = getNowIso();
   const usableExisting = isEntitlementUsable(params.existing) ? params.existing : null;
-  const planCode = asString(
-    params.reward.plan_code ?? usableExisting?.plan_code ?? params.settings.guest_plan,
-    params.settings.guest_plan,
-  );
+  const currentPlan = asString(usableExisting?.plan_code ?? params.settings.guest_plan, params.settings.guest_plan);
+  const rewardPlan = asNullableString(params.reward.plan_code);
+  const currentRank = planRank(currentPlan);
+  const rewardRank = planRank(rewardPlan);
+  const remainingSeconds = getRemainingEntitlementSeconds(usableExisting);
 
+  let nextPlanCode = currentPlan;
+  let shouldTouchEntitlement = Boolean(usableExisting);
+  let shouldApplyRewardDays = false;
+
+  if (!usableExisting) {
+    nextPlanCode = rewardPlan ?? currentPlan;
+    shouldTouchEntitlement = Boolean(rewardPlan || rewardSeconds > 0 || params.reward.device_limit_override != null || params.reward.account_limit_override != null);
+    shouldApplyRewardDays = rewardSeconds > 0;
+  } else if (rewardPlan) {
+    if (rewardRank > currentRank) {
+      nextPlanCode = params.keyRow.apply_plan_if_higher ? rewardPlan : currentPlan;
+      shouldTouchEntitlement = true;
+      shouldApplyRewardDays = rewardSeconds > 0;
+    } else if (rewardRank < currentRank) {
+      nextPlanCode = params.keyRow.keep_higher_plan ? currentPlan : rewardPlan;
+      shouldTouchEntitlement = !params.keyRow.keep_higher_plan;
+      shouldApplyRewardDays = !params.keyRow.keep_higher_plan && rewardSeconds > 0;
+    } else {
+      nextPlanCode = currentPlan;
+      shouldTouchEntitlement = true;
+      shouldApplyRewardDays = !params.keyRow.same_plan_credit_only && rewardSeconds > 0;
+      if (params.keyRow.allow_same_plan_extension && rewardSeconds > 0) {
+        shouldApplyRewardDays = !params.keyRow.apply_days_only_if_greater || rewardSeconds > remainingSeconds;
+      }
+    }
+  } else if (rewardSeconds > 0 || params.reward.device_limit_override != null || params.reward.account_limit_override != null) {
+    shouldTouchEntitlement = true;
+    shouldApplyRewardDays = rewardSeconds > 0;
+  }
+
+  if (!shouldTouchEntitlement && !usableExisting) return null;
+
+  const effectivePlanRow = nextPlanCode ? (params.planDefaults && params.planDefaults.plan_code === nextPlanCode ? params.planDefaults : null) : null;
   const deviceLimit = params.reward.device_limit_override
-    ?? params.planDefaults?.device_limit
+    ?? effectivePlanRow?.device_limit
     ?? usableExisting?.device_limit
+    ?? params.planDefaults?.device_limit
     ?? null;
   const accountLimit = params.reward.account_limit_override
-    ?? params.planDefaults?.account_limit
+    ?? effectivePlanRow?.account_limit
     ?? usableExisting?.account_limit
+    ?? params.planDefaults?.account_limit
     ?? null;
 
-  const baseExpiry = usableExisting?.expires_at && isFutureIso(usableExisting.expires_at)
-    ? usableExisting.expires_at
-    : nowIso;
-  const nextExpiry = params.reward.entitlement_seconds > 0
-    ? addSecondsIso(baseExpiry, params.reward.entitlement_seconds)
-    : params.reward.entitlement_days > 0
-      ? addDaysIso(baseExpiry, params.reward.entitlement_days)
-      : (params.settings.key_persist_until_revoked ? null : usableExisting?.expires_at ?? null);
+  let nextExpiry = usableExisting?.expires_at ?? (params.settings.key_persist_until_revoked ? null : nowIso);
+  if (shouldApplyRewardDays && rewardSeconds > 0) {
+    const candidateExpiry = addSecondsIso(nowIso, rewardSeconds);
+    if (params.keyRow.allow_same_plan_extension && usableExisting && rewardRank === currentRank && currentRank > 0) {
+      const base = usableExisting.expires_at && isFutureIso(usableExisting.expires_at) ? usableExisting.expires_at : nowIso;
+      nextExpiry = addSecondsIso(base, rewardSeconds);
+    } else if (params.keyRow.apply_days_only_if_greater && remainingSeconds > 0 && rewardSeconds <= remainingSeconds) {
+      nextExpiry = usableExisting?.expires_at ?? candidateExpiry;
+    } else {
+      nextExpiry = candidateExpiry;
+    }
+  } else if (!usableExisting && !params.settings.key_persist_until_revoked) {
+    nextExpiry = rewardSeconds > 0 ? addSecondsIso(nowIso, rewardSeconds) : nowIso;
+  }
 
   const payload = {
     app_code: params.appCode,
     account_ref: params.accountRef,
     device_id: params.deviceId,
-    plan_code: planCode,
+    plan_code: nextPlanCode,
     source_type: params.rewardPackageId ? "reward_package" : "redeem_key",
     source_redeem_key_id: params.redeemKeyId,
     source_reward_package_id: params.rewardPackageId,
@@ -1501,6 +1605,13 @@ async function upsertRuntimeEntitlement(params: {
       last_redeem_key_id: params.redeemKeyId,
       last_reward_package_id: params.rewardPackageId,
       granted_at: nowIso,
+      current_plan_before: currentPlan,
+      applied_plan_after: nextPlanCode,
+      allow_same_plan_extension: params.keyRow.allow_same_plan_extension,
+      apply_days_only_if_greater: params.keyRow.apply_days_only_if_greater,
+      same_plan_credit_only: params.keyRow.same_plan_credit_only,
+      keep_higher_plan: params.keyRow.keep_higher_plan,
+      apply_plan_if_higher: params.keyRow.apply_plan_if_higher,
     },
   };
 
@@ -1552,8 +1663,8 @@ async function applyWalletTopup(params: {
   softAmount: number;
   premiumAmount: number;
 }) {
-  const softAmount = round2(Math.max(0, params.softAmount));
-  const premiumAmount = round2(Math.max(0, params.premiumAmount));
+  const softAmount = round2(asNumber(params.softAmount, 0));
+  const premiumAmount = round2(asNumber(params.premiumAmount, 0));
   const wallet = await ensureWalletRecord(params.appCode, params.accountRef, params.deviceId);
   if (!softAmount && !premiumAmount) return wallet;
 
@@ -1932,7 +2043,22 @@ export async function redeemRuntimeKey(params: {
   const reward = resolveRewardPackage(keyRow, rewardPackage);
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
 
-  const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
+  const [existingEntitlement, keyUsesByAccount, keyUsesByDevice, keyUsesByIp] = await Promise.all([
+    getLatestActiveEntitlement(appCode, accountRef),
+    keyRow.max_redeems_per_account > 0 ? countRedeemKeyUsage({ appCode, redeemKeyId: keyRow.id, accountRef }) : Promise.resolve(0),
+    keyRow.max_redeems_per_device > 0 ? countRedeemKeyUsage({ appCode, redeemKeyId: keyRow.id, deviceId }) : Promise.resolve(0),
+    keyRow.max_redeems_per_ip > 0 && params.ipHash ? countRedeemKeyUsage({ appCode, redeemKeyId: keyRow.id, ipHash: params.ipHash }) : Promise.resolve(0),
+  ]);
+  if (keyRow.max_redeems_per_account > 0 && keyUsesByAccount >= keyRow.max_redeems_per_account) {
+    throw Object.assign(new Error("REDEEM_KEY_ACCOUNT_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_ACCOUNT_LIMIT_REACHED" });
+  }
+  if (keyRow.max_redeems_per_device > 0 && keyUsesByDevice >= keyRow.max_redeems_per_device) {
+    throw Object.assign(new Error("REDEEM_KEY_DEVICE_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_DEVICE_LIMIT_REACHED" });
+  }
+  if (keyRow.max_redeems_per_ip > 0 && params.ipHash && keyUsesByIp >= keyRow.max_redeems_per_ip) {
+    throw Object.assign(new Error("REDEEM_KEY_IP_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_IP_LIMIT_REACHED" });
+  }
+
   const predictedDeviceLimit = reward.device_limit_override
     ?? planDefaults?.device_limit
     ?? existingEntitlement?.device_limit
@@ -1954,6 +2080,7 @@ export async function redeemRuntimeKey(params: {
     redeemKeyId: keyRow.id,
     rewardPackageId: rewardPackage?.id ?? null,
     settings,
+    keyRow,
   });
 
   const effectivePlan = entitlement?.plan_code ?? settings.guest_plan;

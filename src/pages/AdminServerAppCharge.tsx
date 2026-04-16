@@ -121,6 +121,21 @@ function normalizeWalletRow(row: any | null | undefined) {
   };
 }
 
+
+function badgeForDuration(days: number) {
+  if (days === 7) return { label: "Hot", tone: "bg-rose-500 text-white" };
+  if (days === 30) return { label: "Tiết kiệm", tone: "bg-emerald-500 text-white" };
+  return { label: "Ưu đãi", tone: "bg-amber-500 text-slate-950" };
+}
+
+function durationPreviewCards(rule: any) {
+  return [
+    { days: 1, title: '1 ngày', soft: asNumber(rule.softUnlockCost), premium: asNumber(rule.premiumUnlockCost) },
+    { days: 7, title: '7 ngày', soft: asNumber(rule.softUnlockCost7d), premium: asNumber(rule.premiumUnlockCost7d) },
+    { days: 30, title: '30 ngày', soft: asNumber(rule.softUnlockCost30d), premium: asNumber(rule.premiumUnlockCost30d) },
+  ];
+}
+
 export function AdminServerAppChargePage() {
   const { appCode = "find-dumps" } = useParams();
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
@@ -432,6 +447,39 @@ export function AdminServerAppChargePage() {
               </AccordionItem>
             ))}
           </Accordion>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Popup mua / gia hạn 1 • 7 • 30 ngày</CardTitle>
+          <CardDescription>Preview thẻ bo góc đẹp cho màn mua / gia hạn. Giá thật vẫn lấy từ tab Charge này: 1 ngày, 7 ngày, 30 ngày. Badge hot / tiết kiệm / ưu đãi tự gợi ý ngay tại đây để admin nhìn một phát là biết.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {unlockDrafts.map((rule) => (
+            <div key={`popup-${rule.unlockFeatureCode}`} className="space-y-3 rounded-3xl border p-4">
+              <div>
+                <div className="font-medium">{rule.title}</div>
+                <div className="text-sm text-muted-foreground">Ngày hiển thị trong popup nên rõ kiểu: 02 tháng 07 năm 2026, không còn ISO thô như 2026-06-15T00:57:18.463+00:00.</div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {durationPreviewCards(rule).map((card) => {
+                  const badge = badgeForDuration(card.days);
+                  return (
+                    <div key={`${rule.unlockFeatureCode}-${card.days}`} className="relative overflow-hidden rounded-[24px] border bg-muted/20 p-4 shadow-sm">
+                      <span className={`absolute right-3 top-3 rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.tone}`}>{badge.label}</span>
+                      <div className="text-lg font-semibold">{card.title}</div>
+                      <div className="mt-1 text-sm text-muted-foreground">{card.days === 1 ? 'Mở nhanh / gia hạn ngắn' : card.days === 7 ? 'Dùng nhiều nhất' : 'Giá mềm theo tháng'}</div>
+                      <div className="mt-4 grid gap-2 rounded-2xl border bg-background/80 p-3 text-sm">
+                        <div className="flex items-center justify-between"><span>Giá thường</span><span className="font-semibold">{formatCredit(card.soft)}</span></div>
+                        <div className="flex items-center justify-between"><span>Giá VIP</span><span className="font-semibold">{formatCredit(card.premium)}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </CardContent>
       </Card>
 
