@@ -1355,48 +1355,54 @@ function resolveRewardPackage(keyRow: RuntimeRedeemKey, pkg: RuntimeRewardPackag
   };
 }
 
-async function countRedeemKeyUsage(params: { appCode: string; redeemKeyId: string; accountRef?: string | null; deviceId?: string | null; ipHash?: string | null; }) {
+type RedeemUseReservation = {
+  use_id: string;
+  redeemed_count: number;
+  key_limit: number;
+  account_used: number;
+  device_used: number;
+  ip_used: number;
+};
+
+async function reserveRedeemKeyUse(params: { appCode: string; keyRow: RuntimeRedeemKey; accountRef: string; deviceId: string; ipHash?: string | null; }): Promise<RedeemUseReservation> {
   const admin = createAdminClient();
-  let query = admin
-    .from("server_app_sessions")
-    .select("id", { count: "exact", head: true })
-    .eq("app_code", params.appCode)
-    .eq("redeem_key_id", params.redeemKeyId);
+  const { data, error } = await admin.rpc("server_app_reserve_redeem_use", {
+    p_app_code: params.appCode,
+    p_redeem_key_id: params.keyRow.id,
+    p_account_ref: params.accountRef,
+    p_device_id: params.deviceId,
+    p_ip_hash: asNullableString(params.ipHash),
+    p_metadata: {
+      reward_mode: params.keyRow.reward_mode,
+      plan_code: params.keyRow.plan_code,
+    },
+  });
 
-  if (params.accountRef) query = query.eq("account_ref", params.accountRef);
-  if (params.deviceId) query = query.eq("device_id", params.deviceId);
-  if (params.ipHash) query = query.eq("ip_hash", params.ipHash);
+  if (error) {
+    const code = String((error as any)?.message ?? (error as any)?.details ?? "REDEEM_KEY_BUSY").trim() || "REDEEM_KEY_BUSY";
+    throw Object.assign(new Error(code), { status: 409, code });
+  }
 
-  const { count, error } = await query;
-  if (error) throw error;
-  return Math.max(0, Math.trunc(asNumber(count, 0)));
-}
-
-async function reserveRedeemKeyUse(keyRow: RuntimeRedeemKey, accountRef: string, deviceId: string) {
-  const nowIso = getNowIso();
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("server_app_redeem_keys")
-    .update({
-      redeemed_count: keyRow.redeemed_count + 1,
-      last_redeemed_at: nowIso,
-      updated_at: nowIso,
-      metadata: {
-        ...(keyRow.metadata || {}),
-        last_account_ref: accountRef,
-        last_device_id: deviceId,
-        last_redeemed_at: nowIso,
-      },
-    })
-    .eq("id", keyRow.id)
-    .eq("redeemed_count", keyRow.redeemed_count)
-    .select("id,redeemed_count")
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || !row.use_id) {
     throw Object.assign(new Error("REDEEM_KEY_BUSY"), { status: 409, code: "REDEEM_KEY_BUSY" });
   }
+
+  return {
+    use_id: asString((row as any).use_id),
+    redeemed_count: Math.max(0, Math.trunc(asNumber((row as any).redeemed_count, 0))),
+    key_limit: Math.max(1, Math.trunc(asNumber((row as any).key_limit, params.keyRow.max_redemptions))),
+    account_used: Math.max(0, Math.trunc(asNumber((row as any).account_used, 0))),
+    device_used: Math.max(0, Math.trunc(asNumber((row as any).device_used, 0))),
+    ip_used: Math.max(0, Math.trunc(asNumber((row as any).ip_used, 0))),
+  };
+}
+
+async function releaseRedeemKeyUse(useId: string | null | undefined) {
+  const id = asString(useId);
+  if (!id) return;
+  const admin = createAdminClient();
+  await admin.rpc("server_app_release_redeem_use", { p_use_id: id });
 }
 
 async function revokeActiveDeviceSessions(appCode: string, accountRef: string, deviceId: string, reason: string) {
@@ -2043,21 +2049,7 @@ export async function redeemRuntimeKey(params: {
   const reward = resolveRewardPackage(keyRow, rewardPackage);
   const planDefaults = reward.plan_code ? (planMap.get(reward.plan_code) ?? null) : null;
 
-  const [existingEntitlement, keyUsesByAccount, keyUsesByDevice, keyUsesByIp] = await Promise.all([
-    getLatestActiveEntitlement(appCode, accountRef),
-    keyRow.max_redeems_per_account > 0 ? countRedeemKeyUsage({ appCode, redeemKeyId: keyRow.id, accountRef }) : Promise.resolve(0),
-    keyRow.max_redeems_per_device > 0 ? countRedeemKeyUsage({ appCode, redeemKeyId: keyRow.id, deviceId }) : Promise.resolve(0),
-    keyRow.max_redeems_per_ip > 0 && params.ipHash ? countRedeemKeyUsage({ appCode, redeemKeyId: keyRow.id, ipHash: params.ipHash }) : Promise.resolve(0),
-  ]);
-  if (keyRow.max_redeems_per_account > 0 && keyUsesByAccount >= keyRow.max_redeems_per_account) {
-    throw Object.assign(new Error("REDEEM_KEY_ACCOUNT_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_ACCOUNT_LIMIT_REACHED" });
-  }
-  if (keyRow.max_redeems_per_device > 0 && keyUsesByDevice >= keyRow.max_redeems_per_device) {
-    throw Object.assign(new Error("REDEEM_KEY_DEVICE_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_DEVICE_LIMIT_REACHED" });
-  }
-  if (keyRow.max_redeems_per_ip > 0 && params.ipHash && keyUsesByIp >= keyRow.max_redeems_per_ip) {
-    throw Object.assign(new Error("REDEEM_KEY_IP_LIMIT_REACHED"), { status: 409, code: "REDEEM_KEY_IP_LIMIT_REACHED" });
-  }
+  const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
 
   const predictedDeviceLimit = reward.device_limit_override
     ?? planDefaults?.device_limit
@@ -2068,9 +2060,18 @@ export async function redeemRuntimeKey(params: {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
   }
 
-  await reserveRedeemKeyUse(keyRow, accountRef, deviceId);
+  let reservedUseId: string | null = null;
+  try {
+    const reservation = await reserveRedeemKeyUse({
+      appCode,
+      keyRow,
+      accountRef,
+      deviceId,
+      ipHash: params.ipHash,
+    });
+    reservedUseId = reservation.use_id;
 
-  const entitlement = await upsertRuntimeEntitlement({
+    const entitlement = await upsertRuntimeEntitlement({
     appCode,
     accountRef,
     deviceId,
@@ -2140,6 +2141,12 @@ export async function redeemRuntimeKey(params: {
     wallet,
     state,
   };
+  } catch (error) {
+    if (reservedUseId) {
+      await releaseRedeemKeyUse(reservedUseId);
+    }
+    throw error;
+  }
 }
 
 export async function consumeRuntimeFeature(params: {
