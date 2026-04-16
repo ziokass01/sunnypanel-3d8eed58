@@ -812,8 +812,8 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
         premium_daily_reset_mode: 'debt_floor',
         soft_floor_credit: 5,
         premium_floor_credit: 5,
-        soft_allow_negative: true,
-        premium_allow_negative: true,
+        soft_allow_negative: false,
+        premium_allow_negative: false,
       };
     }
     throw error;
@@ -828,8 +828,8 @@ async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
     premium_daily_reset_mode: String(data?.premium_daily_reset_mode ?? 'debt_floor').trim() === 'legacy_floor' ? 'legacy_floor' : 'debt_floor',
     soft_floor_credit: asNumber(data?.soft_floor_credit, 5),
     premium_floor_credit: asNumber(data?.premium_floor_credit, 5),
-    soft_allow_negative: Boolean(data?.soft_allow_negative ?? true),
-    premium_allow_negative: Boolean(data?.premium_allow_negative ?? true),
+    soft_allow_negative: Boolean(data?.soft_allow_negative ?? false),
+    premium_allow_negative: Boolean(data?.premium_allow_negative ?? false),
   };
 }
 
@@ -2206,17 +2206,15 @@ export async function consumeRuntimeFeature(params: {
     const priority = settings.wallet_rules.consume_priority;
     const softAvailable = effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost;
     const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
-    const softCanGoDebt = Boolean(settings.wallet_rules.soft_allow_negative) && effectiveSoftCost > 0;
-    const premiumCanGoDebt = Boolean(settings.wallet_rules.premium_allow_negative) && effectivePremiumCost > 0;
 
     if (requestedWalletKind === "soft") {
       chargeKind = "soft";
     } else if (requestedWalletKind === "premium") {
       chargeKind = "premium";
     } else if (priority === "premium_first") {
-      if (premiumAvailable || premiumCanGoDebt) {
+      if (premiumAvailable) {
         chargeKind = "premium";
-      } else if (softAvailable || softCanGoDebt) {
+      } else if (softAvailable) {
         chargeKind = "soft";
       } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
         chargeKind = "premium";
@@ -2224,9 +2222,9 @@ export async function consumeRuntimeFeature(params: {
         chargeKind = "soft";
       }
     } else {
-      if (softAvailable || softCanGoDebt) {
+      if (softAvailable) {
         chargeKind = "soft";
-      } else if (premiumAvailable || premiumCanGoDebt) {
+      } else if (premiumAvailable) {
         chargeKind = "premium";
       } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
         chargeKind = "soft";
@@ -2239,7 +2237,10 @@ export async function consumeRuntimeFeature(params: {
       if (effectivePremiumCost <= 0) {
         throw Object.assign(new Error("PREMIUM_COST_NOT_CONFIGURED"), { status: 409, code: "PREMIUM_COST_NOT_CONFIGURED" });
       }
-      if (!settings.wallet_rules.premium_allow_negative && wallet.premium_balance < effectivePremiumCost) {
+      if (wallet.premium_balance < 0) {
+        throw Object.assign(new Error("NEGATIVE_PREMIUM_BALANCE_LOCKED"), { status: 409, code: "NEGATIVE_PREMIUM_BALANCE_LOCKED" });
+      }
+      if (wallet.premium_balance < effectivePremiumCost) {
         throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
       }
       premiumDelta = round2(-effectivePremiumCost);
@@ -2247,7 +2248,10 @@ export async function consumeRuntimeFeature(params: {
       if (effectiveSoftCost <= 0) {
         throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
       }
-      if (!settings.wallet_rules.soft_allow_negative && wallet.soft_balance < effectiveSoftCost) {
+      if (wallet.soft_balance < 0) {
+        throw Object.assign(new Error("NEGATIVE_SOFT_BALANCE_LOCKED"), { status: 409, code: "NEGATIVE_SOFT_BALANCE_LOCKED" });
+      }
+      if (wallet.soft_balance < effectiveSoftCost) {
         throw Object.assign(new Error("INSUFFICIENT_SOFT_BALANCE"), { status: 409, code: "INSUFFICIENT_SOFT_BALANCE" });
       }
       softDelta = round2(-effectiveSoftCost);

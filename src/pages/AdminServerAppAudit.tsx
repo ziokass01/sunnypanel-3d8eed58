@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, BadgeDollarSign, Clock3, Search, ShieldCheck, Wallet } from "lucide-react";
+import { Activity, BadgeDollarSign, Clock3, Search, ShieldCheck, Trophy, Wallet } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,10 +19,10 @@ function short(value?: string | null, size = 14) {
 
 async function loadAuditData(appCode: string) {
   const [wallets, sessions, transactions, events] = await Promise.all([
-    supabase.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(100),
-    supabase.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(100),
-    supabase.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
-    supabase.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(150),
+    supabase.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(500),
+    supabase.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(200),
+    supabase.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(200),
+    supabase.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(200),
   ]);
   if (wallets.error) throw wallets.error;
   if (sessions.error) throw sessions.error;
@@ -60,6 +60,7 @@ export function AdminServerAppAuditPage() {
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
   const [traceInput, setTraceInput] = useState("");
   const [activeTrace, setActiveTrace] = useState("");
+  const [topSearch, setTopSearch] = useState("");
 
   const auditQuery = useQuery({
     queryKey: ["server-app-audit-sections", appCode],
@@ -85,6 +86,22 @@ export function AdminServerAppAuditPage() {
 
   const data = auditQuery.data;
   const trace = traceQuery.data;
+  const topBalances = useMemo(() => {
+    const needle = String(topSearch || "").trim().toLowerCase();
+    const rows = (data?.wallets || []).map((row: any) => ({
+      ...row,
+      total_balance: Number(row?.soft_balance || 0) + Number(row?.premium_balance || 0),
+    }));
+    rows.sort((a: any, b: any) => {
+      if (b.total_balance !== a.total_balance) return b.total_balance - a.total_balance;
+      if (Number(b.premium_balance || 0) !== Number(a.premium_balance || 0)) return Number(b.premium_balance || 0) - Number(a.premium_balance || 0);
+      return Number(b.soft_balance || 0) - Number(a.soft_balance || 0);
+    });
+    const filtered = !needle
+      ? rows
+      : rows.filter((row: any) => [row.account_ref, row.device_id].map((v: any) => String(v || "").toLowerCase()).join(" ").includes(needle));
+    return filtered.map((row: any, index: number) => ({ ...row, rank: index + 1 }));
+  }, [data?.wallets, topSearch]);
 
   return (
     <section className="space-y-5">
@@ -94,20 +111,22 @@ export function AdminServerAppAuditPage() {
         <p className="max-w-4xl text-sm text-muted-foreground">Quyền / Ví / Session / Giao dịch / Sự kiện không còn nằm trong Runtime nữa. Tất cả được gom vào Audit Log để dễ xem, dễ tìm và dễ quản lý.</p>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-5">
-        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Ví</div><div className="mt-2 text-2xl font-semibold">{data?.wallets.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Session</div><div className="mt-2 text-2xl font-semibold">{data?.sessions.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Giao dịch</div><div className="mt-2 text-2xl font-semibold">{data?.transactions.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Sự kiện</div><div className="mt-2 text-2xl font-semibold">{data?.events.length ?? 0}</div></CardContent></Card>
-        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Trace viewer</div><div className="mt-2 text-2xl font-semibold">{activeTrace ? "Đang soi" : "Sẵn sàng"}</div></CardContent></Card>
+      <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-6">
+        <StatCard label="Ví" value={data?.wallets.length ?? 0} />
+        <StatCard label="Session" value={data?.sessions.length ?? 0} />
+        <StatCard label="Giao dịch" value={data?.transactions.length ?? 0} />
+        <StatCard label="Sự kiện" value={data?.events.length ?? 0} />
+        <StatCard label="Top số dư" value={topBalances.length} />
+        <StatCard label="Trace viewer" value={activeTrace ? "Đang soi" : "Sẵn sàng"} />
       </div>
 
       <Tabs defaultValue="wallet" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="wallet">Ví</TabsTrigger>
           <TabsTrigger value="session">Session</TabsTrigger>
           <TabsTrigger value="transactions">Giao dịch</TabsTrigger>
           <TabsTrigger value="events">Sự kiện</TabsTrigger>
+          <TabsTrigger value="top">Top số dư</TabsTrigger>
           <TabsTrigger value="trace">Trace</TabsTrigger>
         </TabsList>
 
@@ -151,6 +170,36 @@ export function AdminServerAppAuditPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="top">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Trophy className="h-4 w-4 text-primary" /> Xếp hạng số dư tài khoản</CardTitle>
+              <CardDescription>Sắp từ số dư cao xuống thấp để dễ soi tài khoản bất thường. Có ô tìm mail ngay trong tab Top.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={topSearch} onChange={(e) => setTopSearch(e.target.value)} placeholder="Tìm tài khoản / mail / device cho lẹ..." className="pl-10" />
+              </div>
+              <div className="space-y-3">
+                {topBalances.map((row: any) => (
+                  <div key={row.id} className="rounded-xl border p-3 text-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="font-medium">#{row.rank} · {row.account_ref || row.device_id || row.id}</div>
+                        <div className="text-xs text-muted-foreground">Device {short(row.device_id, 18)} · cập nhật {row.updated_at || "-"}</div>
+                      </div>
+                      <Badge variant="outline">Tổng {row.total_balance ?? 0}</Badge>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">Soft {row.soft_balance ?? 0} · VIP {row.premium_balance ?? 0}</div>
+                  </div>
+                ))}
+                {!topBalances.length ? <div className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">Không thấy tài khoản nào khớp bộ lọc top số dư.</div> : null}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="trace">
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" /> Trace end-to-end</CardTitle><CardDescription>Dán trace id để lần theo cả chuỗi free-start → free-gate → free-reveal → redeem → runtime.</CardDescription></CardHeader>
@@ -177,4 +226,8 @@ export function AdminServerAppAuditPage() {
       </Tabs>
     </section>
   );
+}
+
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold">{value}</div></CardContent></Card>;
 }
