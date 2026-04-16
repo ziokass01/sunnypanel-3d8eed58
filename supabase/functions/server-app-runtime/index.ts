@@ -12,6 +12,7 @@ import {
   touchRuntimeSession,
   unlockRuntimeFeatureAccess,
 } from "../_shared/server_app_runtime.ts";
+import { createAdminClient } from "../_shared/admin.ts";
 
 function getAllowedOrigin(origin: string | null | undefined) {
   const incoming = String(origin ?? "").trim();
@@ -32,6 +33,13 @@ function runtimeCorsHeaders(origin?: string | null, methods = "POST,OPTIONS") {
 
 type RuntimeAction = "health" | "catalog" | "me" | "redeem" | "consume" | "heartbeat" | "logout" | "unlock_feature";
 
+type RedeemKeyLimitSnapshot = {
+  id: string;
+  max_redeems_per_ip: number;
+  max_redeems_per_device: number;
+  max_redeems_per_account: number;
+};
+
 function getIp(req: Request) {
   return req.headers.get("cf-connecting-ip")
     ?? req.headers.get("x-real-ip")
@@ -42,6 +50,11 @@ function getIp(req: Request) {
 function asBodyString(value: unknown, fallback = "") {
   const v = String(value ?? fallback).trim();
   return v || fallback;
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function toRuntimeErrorMessage(error: unknown) {
@@ -88,6 +101,54 @@ function todayStartIso() {
 function makeControlError(code: string, maintenanceNotice?: string | null, status = 409) {
   const detail = maintenanceNotice ? `${code}: ${maintenanceNotice}` : code;
   return Object.assign(new Error(detail), { status, code });
+}
+
+async function getRedeemKeyLimitSnapshot(appCode: string, redeemKey: string): Promise<RedeemKeyLimitSnapshot | null> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("server_app_redeem_keys")
+    .select("id,max_redeems_per_ip,max_redeems_per_device,max_redeems_per_account")
+    .eq("app_code", appCode)
+    .eq("redeem_key", redeemKey)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: String((data as any).id || ""),
+    max_redeems_per_ip: Math.max(0, Math.trunc(asNumber((data as any).max_redeems_per_ip, 0))),
+    max_redeems_per_device: Math.max(0, Math.trunc(asNumber((data as any).max_redeems_per_device, 0))),
+    max_redeems_per_account: Math.max(0, Math.trunc(asNumber((data as any).max_redeems_per_account, 0))),
+  };
+}
+
+async function countSuccessfulRedeemEventsForKey(params: {
+  appCode: string;
+  redeemKey: string;
+  accountRef?: string | null;
+  deviceId?: string | null;
+  ipHash?: string | null;
+}) {
+  const admin = createAdminClient();
+  let query = admin
+    .from("server_app_runtime_events")
+    .select("id", { count: "exact", head: true })
+    .eq("app_code", params.appCode)
+    .eq("event_type", "redeem")
+    .eq("ok", true)
+    .contains("meta", { redeem_key: params.redeemKey });
+
+  const accountRef = asBodyString(params.accountRef);
+  const deviceId = asBodyString(params.deviceId);
+  const ipHash = asBodyString(params.ipHash);
+
+  if (accountRef) query = query.eq("account_ref", accountRef);
+  if (deviceId) query = query.eq("device_id", deviceId);
+  if (ipHash) query = query.eq("ip_hash", ipHash);
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return Math.max(0, Math.trunc(asNumber(count, 0)));
 }
 
 async function enforceControls(params: {
@@ -195,7 +256,7 @@ Deno.serve(async (req) => {
     const clientVersion = asBodyString((body as any).client_version) || null;
     const accountRef = asBodyString((body as any).account_ref);
     const deviceId = asBodyString((body as any).device_id);
-    const redeemKey = asBodyString((body as any).redeem_key);
+    const redeemKey = asBodyString((body as any).redeem_key).toUpperCase();
     const featureCode = asBodyString((body as any).feature_code);
     const walletKind = asBodyString((body as any).wallet_kind, "auto") || "auto";
     const quantity = Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1));
@@ -251,24 +312,13 @@ Deno.serve(async (req) => {
     });
 
     if (action === "catalog" || action === "me") {
-      const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
-      const boot = sessionToken
-        ? await bootstrapRuntimeState(appCode, {
-            sessionToken: sessionToken || null,
-            accountRef: accountRef || null,
-            deviceId: hintedDeviceId,
-            clientVersion,
-            ipHash,
-          })
-        : {
-            state: await buildRuntimeState(appCode, {
-              sessionToken: null,
-              accountRef: accountRef || null,
-              deviceId: hintedDeviceId,
-            }),
-            sessionToken: null,
-            sessionBound: false,
-          };
+      const boot = await bootstrapRuntimeState(appCode, {
+        sessionToken: sessionToken || null,
+        accountRef: accountRef || null,
+        deviceId: deviceId || req.headers.get("x-fp") || null,
+        clientVersion,
+        ipHash,
+      });
       await logSafe({ ok: true, code: "OK", meta: { session_bound: boot.sessionBound, bootstrap_account: accountRef || null } });
       return runtimeJson(200, {
         ok: true,
@@ -281,20 +331,21 @@ Deno.serve(async (req) => {
 
     if (action === "heartbeat") {
       if (!sessionToken) {
-        const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
-        const state = await buildRuntimeState(appCode, {
+        const boot = await bootstrapRuntimeState(appCode, {
           sessionToken: null,
           accountRef: accountRef || null,
-          deviceId: hintedDeviceId,
+          deviceId: deviceId || req.headers.get("x-fp") || null,
+          clientVersion,
+          ipHash,
         });
-        await logSafe({ ok: true, code: "OK", meta: { heartbeat_bootstrap: false, session_bound: false } });
+        await logSafe({ ok: true, code: "OK", meta: { heartbeat_bootstrap: true, session_bound: boot.sessionBound } });
         return runtimeJson(200, {
           ok: true,
           action,
-          active: false,
-          state,
-          session_token: null,
-          session_bound: false,
+          active: Boolean(boot.sessionToken),
+          state: boot.state,
+          session_token: boot.sessionToken,
+          session_bound: boot.sessionBound,
         }, origin);
       }
       const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
@@ -330,6 +381,35 @@ Deno.serve(async (req) => {
       if (!redeemKey) return runtimeJson(400, { ok: false, code: "MISSING_REDEEM_KEY" }, origin);
       if (!accountRef) return runtimeJson(400, { ok: false, code: "MISSING_ACCOUNT_REF" }, origin);
       if (!deviceId) return runtimeJson(400, { ok: false, code: "MISSING_DEVICE_ID" }, origin);
+
+      const keyLimits = await getRedeemKeyLimitSnapshot(appCode, redeemKey);
+      if (keyLimits) {
+        const [accountCount, deviceCount, ipCount] = await Promise.all([
+          keyLimits.max_redeems_per_account > 0
+            ? countSuccessfulRedeemEventsForKey({ appCode, redeemKey, accountRef })
+            : Promise.resolve(0),
+          keyLimits.max_redeems_per_device > 0
+            ? countSuccessfulRedeemEventsForKey({ appCode, redeemKey, deviceId })
+            : Promise.resolve(0),
+          keyLimits.max_redeems_per_ip > 0
+            ? countSuccessfulRedeemEventsForKey({ appCode, redeemKey, ipHash })
+            : Promise.resolve(0),
+        ]);
+
+        if (keyLimits.max_redeems_per_account > 0 && accountCount >= keyLimits.max_redeems_per_account) {
+          await logSafe({ ok: false, code: "REDEEM_KEY_ACCOUNT_LIMIT_REACHED", redeem_key_id: keyLimits.id, meta: { redeem_key: redeemKey } });
+          return runtimeJson(409, { ok: false, code: "REDEEM_KEY_ACCOUNT_LIMIT_REACHED", msg: "REDEEM_KEY_ACCOUNT_LIMIT_REACHED" }, origin);
+        }
+        if (keyLimits.max_redeems_per_device > 0 && deviceCount >= keyLimits.max_redeems_per_device) {
+          await logSafe({ ok: false, code: "REDEEM_KEY_DEVICE_LIMIT_REACHED", redeem_key_id: keyLimits.id, meta: { redeem_key: redeemKey } });
+          return runtimeJson(409, { ok: false, code: "REDEEM_KEY_DEVICE_LIMIT_REACHED", msg: "REDEEM_KEY_DEVICE_LIMIT_REACHED" }, origin);
+        }
+        if (keyLimits.max_redeems_per_ip > 0 && ipCount >= keyLimits.max_redeems_per_ip) {
+          await logSafe({ ok: false, code: "REDEEM_KEY_IP_LIMIT_REACHED", redeem_key_id: keyLimits.id, meta: { redeem_key: redeemKey } });
+          return runtimeJson(409, { ok: false, code: "REDEEM_KEY_IP_LIMIT_REACHED", msg: "REDEEM_KEY_IP_LIMIT_REACHED" }, origin);
+        }
+      }
+
       const redeemed = await redeemRuntimeKey({
         appCode,
         redeemKey,
@@ -342,8 +422,9 @@ Deno.serve(async (req) => {
         ok: true,
         code: "OK",
         session_id: (redeemed as any)?.session?.id ?? null,
+        redeem_key_id: keyLimits?.id ?? null,
         trace_id: traceId ?? null,
-        meta: { reward: (redeemed as any)?.reward ?? null },
+        meta: { reward: (redeemed as any)?.reward ?? null, redeem_key: redeemKey, redeem_key_id: keyLimits?.id ?? null },
       });
       return runtimeJson(200, {
         ok: true,
@@ -494,7 +575,11 @@ Deno.serve(async (req) => {
             trace_id: asBodyString((body as any).trace_id) || null,
             client_version: asBodyString((body as any).client_version) || null,
             ip_hash: await sha256Hex(getIp(req)),
-            meta: { status, quantity: Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1)) },
+            meta: {
+              status,
+              quantity: Math.max(1, Math.trunc(Number((body as any).quantity ?? 1) || 1)),
+              redeem_key: asBodyString((body as any).redeem_key).toUpperCase() || null,
+            },
           });
         }
       }
