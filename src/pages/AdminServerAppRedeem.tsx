@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { Gift, RefreshCw, Search, ShieldCheck, Sparkles, TicketPercent, Trash2, WandSparkles } from "lucide-react";
+import { RefreshCw, Search, Sparkles, Trash2, WandSparkles, Pencil } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -58,6 +58,8 @@ const EMPTY_DRAFT = {
   metadata: {},
 };
 
+type RedeemTab = "editor" | "admin" | "free";
+
 export function AdminServerAppRedeemPage() {
   const { appCode = "find-dumps" } = useParams();
   const { toast } = useToast();
@@ -67,6 +69,7 @@ export function AdminServerAppRedeemPage() {
   const [giftTabLabel, setGiftTabLabel] = useState("Mã quà");
   const [adminSearch, setAdminSearch] = useState("");
   const [freeSearch, setFreeSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<RedeemTab>("editor");
 
   const query = useQuery({
     queryKey: ["server-app-redeem-admin", appCode],
@@ -189,6 +192,7 @@ export function AdminServerAppRedeemPage() {
     onSuccess: async (data: any) => {
       await query.refetch();
       if (data?.id) setSelectedId(String(data.id));
+      setActiveTab("editor");
       toast({ title: "Đã lưu Create Redeem", description: "Mã quà riêng cho Find Dumps đã được cập nhật cùng giới hạn IP / device / account." });
     },
     onError: (error: any) => toast({ title: "Không lưu được Create Redeem", description: error?.message || "Kiểm tra lại bảng server_app_redeem_keys.", variant: "destructive" }),
@@ -233,27 +237,6 @@ export function AdminServerAppRedeemPage() {
     onError: (error: any) => toast({ title: "Không cập nhật được mã", description: error?.message || "Kiểm tra lại trạng thái mã redeem.", variant: "destructive" }),
   });
 
-  const preview = useMemo(() => {
-    const plan = String(draft.plan_code || "go").toUpperCase();
-    return [
-      `Tổng lượt redeem: ${draft.max_redemptions || 1} • IP tối đa ${draft.max_redeems_per_ip || 0} • device tối đa ${draft.max_redeems_per_device || 0} • tài khoản tối đa ${draft.max_redeems_per_account || 0}.`,
-      `Nếu user đang có gói thấp hơn ${plan} thì áp dụng gói ${plan} + credit của mã.`,
-      draft.keep_higher_plan
-        ? `Nếu user đang có gói cao hơn thì giữ gói hiện tại và chỉ cộng credit, không hạ gói.`
-        : `Nếu tắt giữ gói cao hơn, admin đang cho phép mã ép lại gói được khai báo.`,
-      draft.same_plan_credit_only
-        ? `Nếu user đang có đúng gói ${plan} thì mặc định chỉ cộng credit.`
-        : `Nếu tắt credit-only khi trùng gói, mã này có thể động vào phần ngày hạn khi admin cho phép.`,
-      draft.allow_same_plan_extension
-        ? `Admin đã bật “cho phép gia hạn nếu trùng gói”. Nếu số ngày của mã cao hơn và toggle ngày lớn hơn đang bật thì server mới cộng thêm ngày.`
-        : `Trùng gói sẽ không tự cộng thêm ngày.`,
-      draft.apply_days_only_if_greater
-        ? `Nếu số ngày của mã thấp hơn mức đang có thì không lấy ngày đó.`
-        : `Admin đang cho phép áp ngày mới kể cả khi ngày thấp hơn, nên cần dùng rất cẩn thận.`,
-      `Credit thường: ${draft.soft_credit_amount} • VIP: ${draft.premium_credit_amount}. Admin vẫn có thể tạo credit âm để phạt nợ, nhưng runtime sẽ chặn tiêu hao tiếp khi ví đang âm.`,
-    ];
-  }, [draft]);
-
   const grouped = useMemo(() => {
     const allKeys = query.data?.keys || [];
     const adminKeys = allKeys.filter((row: any) => !isFreeFlowRedeem(row));
@@ -267,12 +250,22 @@ export function AdminServerAppRedeemPage() {
       return hay.includes(needle);
     };
     return {
-      adminKeys,
-      freeKeys,
       filteredAdmin: adminKeys.filter((row: any) => match(row, adminSearch)),
       filteredFree: freeKeys.filter((row: any) => match(row, freeSearch)),
     };
   }, [query.data, adminSearch, freeSearch]);
+
+  const editRow = (row: any) => {
+    setSelectedId(String(row.id));
+    hydrateDraft(row);
+    setActiveTab("editor");
+  };
+
+  const makeNewDraft = () => {
+    setSelectedId("");
+    setDraft({ ...EMPTY_DRAFT, redeem_key: randomRedeemCode() });
+    setActiveTab("editor");
+  };
 
   if (appCode !== "find-dumps") {
     return (
@@ -296,29 +289,34 @@ export function AdminServerAppRedeemPage() {
           </div>
           <CardTitle className="text-2xl">Tạo mã quà tự do</CardTitle>
           <CardDescription>
-            Gộp thông tin mã + giới hạn + phần thưởng vào một nơi cho dễ chỉnh. Danh sách mã phía dưới được chia tách rõ giữa mã admin tạo và key free đẩy từ /free.
+            Gộp phần chỉnh mã thành một nơi duy nhất. Hai tab còn lại tách riêng Redeem admin và Redeem free để đỡ lẫn lộn, dễ tìm, dễ edit.
           </CardDescription>
         </CardHeader>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[1.15fr,0.85fr]">
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <CardTitle>Chỉnh mã đang chọn</CardTitle>
-                <CardDescription>Không chia 3 tab nữa. Tất cả nằm cùng một khu để chỉnh nhanh và đỡ sót.</CardDescription>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RedeemTab)} className="space-y-4">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-3xl border bg-background p-2">
+          <TabsTrigger value="editor">Chỉnh mã</TabsTrigger>
+          <TabsTrigger value="admin">Redeem admin</TabsTrigger>
+          <TabsTrigger value="free">Redeem free</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="editor" className="mt-0">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Chỉnh mã đang chọn</CardTitle>
+                  <CardDescription>Thông tin mã, giới hạn và phần thưởng & logic được gộp vào một khối để chỉnh nhanh hơn.</CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={makeNewDraft}><WandSparkles className="mr-2 h-4 w-4" />Tạo mã mới</Button>
+                  <Button type="button" variant="outline" onClick={() => setDraft((prev: any) => ({ ...prev, redeem_key: randomRedeemCode() }))}><RefreshCw className="mr-2 h-4 w-4" />Random code</Button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => { setSelectedId(""); setDraft({ ...EMPTY_DRAFT, redeem_key: randomRedeemCode() }); }}><WandSparkles className="mr-2 h-4 w-4" />Tạo mã mới</Button>
-                <Button type="button" variant="outline" onClick={() => setDraft((prev: any) => ({ ...prev, redeem_key: randomRedeemCode() }))}><RefreshCw className="mr-2 h-4 w-4" />Random code</Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <section className="space-y-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-primary"><Gift className="h-4 w-4" /> Thông tin mã</div>
-              <div className="grid gap-4 md:grid-cols-2">
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Nhãn tab trong app"><Input value={giftTabLabel} onChange={(e) => setGiftTabLabel(e.target.value)} placeholder="Mã quà / Nhập mã quà" /></Field>
                 <Field label="Mã redeem"><Input value={draft.redeem_key} onChange={(e) => setDraft((p: any) => ({ ...p, redeem_key: e.target.value.toUpperCase() }))} /></Field>
                 <Field label="Tên gợi nhớ"><Input value={draft.title} onChange={(e) => setDraft((p: any) => ({ ...p, title: e.target.value }))} /></Field>
@@ -333,31 +331,10 @@ export function AdminServerAppRedeemPage() {
                 </div>
                 <Field label="Bắt đầu nhận"><Input type="datetime-local" value={draft.starts_at} onChange={(e) => setDraft((p: any) => ({ ...p, starts_at: e.target.value }))} /></Field>
                 <Field label="Hết hạn"><Input type="datetime-local" value={draft.expires_at} onChange={(e) => setDraft((p: any) => ({ ...p, expires_at: e.target.value }))} /></Field>
-                <div className="md:col-span-2 rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">Hiển thị trong app phải rõ như người đọc: bắt đầu <span className="font-medium text-foreground">{formatVietnameseDateTime(fromDateTimeLocalValue(draft.starts_at))}</span> • hết hạn <span className="font-medium text-foreground">{formatVietnameseDateTime(fromDateTimeLocalValue(draft.expires_at))}</span></div>
-                <div className="md:col-span-2 space-y-2">
-                  <Label>Ghi chú admin</Label>
-                  <Textarea rows={4} value={draft.note} onChange={(e) => setDraft((p: any) => ({ ...p, note: e.target.value }))} />
-                </div>
-              </div>
-            </section>
-
-            <Separator />
-
-            <section className="space-y-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-primary"><ShieldCheck className="h-4 w-4" /> Giới hạn</div>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Tổng lượt redeem"><Input value={draft.max_redemptions} onChange={(e) => setDraft((p: any) => ({ ...p, max_redemptions: e.target.value }))} /></Field>
                 <Field label="Mỗi IP tối đa"><Input value={draft.max_redeems_per_ip} onChange={(e) => setDraft((p: any) => ({ ...p, max_redeems_per_ip: e.target.value }))} /></Field>
                 <Field label="Mỗi device tối đa"><Input value={draft.max_redeems_per_device} onChange={(e) => setDraft((p: any) => ({ ...p, max_redeems_per_device: e.target.value }))} /></Field>
                 <Field label="Mỗi tài khoản tối đa"><Input value={draft.max_redeems_per_account} onChange={(e) => setDraft((p: any) => ({ ...p, max_redeems_per_account: e.target.value }))} /></Field>
-              </div>
-            </section>
-
-            <Separator />
-
-            <section className="space-y-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-primary"><Sparkles className="h-4 w-4" /> Phần thưởng & logic</div>
-              <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Reward mode">
                   <Select value={draft.reward_mode} onValueChange={(value) => setDraft((p: any) => ({ ...p, reward_mode: value }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -382,138 +359,64 @@ export function AdminServerAppRedeemPage() {
                 <Field label="Số ngày gói"><Input value={draft.entitlement_days} onChange={(e) => setDraft((p: any) => ({ ...p, entitlement_days: e.target.value }))} /></Field>
                 <Field label="Credit thường (có thể âm)"><Input value={draft.soft_credit_amount} onChange={(e) => setDraft((p: any) => ({ ...p, soft_credit_amount: e.target.value }))} /></Field>
                 <Field label="Credit VIP (có thể âm)"><Input value={draft.premium_credit_amount} onChange={(e) => setDraft((p: any) => ({ ...p, premium_credit_amount: e.target.value }))} /></Field>
-                <div className="space-y-3 rounded-2xl border p-4 md:col-span-2">
+                <div className="md:col-span-2 xl:col-span-4 rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">Hiển thị trong app phải rõ như người đọc: bắt đầu <span className="font-medium text-foreground">{formatVietnameseDateTime(fromDateTimeLocalValue(draft.starts_at))}</span> • hết hạn <span className="font-medium text-foreground">{formatVietnameseDateTime(fromDateTimeLocalValue(draft.expires_at))}</span></div>
+                <div className="space-y-3 rounded-2xl border p-4 md:col-span-2 xl:col-span-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-primary"><Sparkles className="h-4 w-4" /> Phần thưởng & logic</div>
                   <ToggleRow title="Gói cao hơn thì áp dụng gói đó + credit" checked={Boolean(draft.apply_plan_if_higher)} onCheckedChange={(checked) => setDraft((p: any) => ({ ...p, apply_plan_if_higher: checked }))} />
                   <ToggleRow title="Gói thấp hơn thì giữ gói hiện tại + credit" checked={Boolean(draft.keep_higher_plan)} onCheckedChange={(checked) => setDraft((p: any) => ({ ...p, keep_higher_plan: checked }))} />
                   <ToggleRow title="Đúng gói thì mặc định chỉ cộng credit" checked={Boolean(draft.same_plan_credit_only)} onCheckedChange={(checked) => setDraft((p: any) => ({ ...p, same_plan_credit_only: checked }))} />
                   <ToggleRow title="Cho phép gia hạn nếu trùng gói" checked={Boolean(draft.allow_same_plan_extension)} onCheckedChange={(checked) => setDraft((p: any) => ({ ...p, allow_same_plan_extension: checked }))} />
                   <ToggleRow title="Nếu ngày của mã thấp hơn mức đang có thì không lấy ngày đó" checked={Boolean(draft.apply_days_only_if_greater)} onCheckedChange={(checked) => setDraft((p: any) => ({ ...p, apply_days_only_if_greater: checked }))} />
                 </div>
+                <div className="md:col-span-2 xl:col-span-4 space-y-2">
+                  <Label>Ghi chú admin</Label>
+                  <Textarea rows={4} value={draft.note} onChange={(e) => setDraft((p: any) => ({ ...p, note: e.target.value }))} />
+                </div>
               </div>
-            </section>
-
-            <Separator />
-
-            <div className="flex flex-wrap gap-2">
-              <Button className="min-w-40" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || query.isFetching}>Lưu Create Redeem</Button>
-              {selectedId ? (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
+              <div className="flex flex-wrap gap-2">
+                <Button className="min-w-40" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || query.isFetching}>Lưu Create Redeem</Button>
+                {selectedId ? (
+                  <>
+                    <Button type="button" variant="outline" onClick={() => {
                       if (!window.confirm(draft.blocked_at ? "Mở lại mã này?" : "Khóa mã này?")) return;
                       statusMutation.mutate({ row: { id: selectedId, redeem_key: draft.redeem_key }, action: draft.blocked_at ? "unblock" : "block" });
-                    }}
-                    disabled={statusMutation.isPending}
-                  >
-                    {draft.blocked_at ? "Mở lại" : "Khóa / block"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    onClick={() => {
+                    }} disabled={statusMutation.isPending}>{draft.blocked_at ? "Mở lại" : "Khóa / block"}</Button>
+                    <Button type="button" variant="destructive" onClick={() => {
                       if (!window.confirm(`Xóa hẳn mã ${draft.redeem_key}?`)) return;
                       statusMutation.mutate({ row: { id: selectedId, redeem_key: draft.redeem_key }, action: "delete" });
-                    }}
-                    disabled={statusMutation.isPending}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />Xóa mã
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg"><Gift className="h-5 w-5 text-primary" />Preview logic</CardTitle>
-              <CardDescription>Tóm tắt đúng rule bạn chốt cho mã đang chọn.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted-foreground">
-              {preview.map((item) => (
-                <div key={item} className="rounded-2xl border p-3">{item}</div>
-              ))}
+                    }} disabled={statusMutation.isPending}><Trash2 className="mr-2 h-4 w-4" />Xóa mã</Button>
+                  </>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
+        </TabsContent>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Checklist UI bước cuối</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <MiniLine icon={<ShieldCheck className="h-4 w-4" />} text="Giới hạn IP / device / account được lưu riêng cho từng redeem key, không còn dính free admin." />
-              <MiniLine icon={<Sparkles className="h-4 w-4" />} text="Ngày kích hoạt, hết hạn và ngày gia hạn phải hiển thị kiểu 02 tháng 07 năm 2026, không lòi ISO thô." />
-              <MiniLine icon={<TicketPercent className="h-4 w-4" />} text="Giá popup 1 / 7 / 30 ngày được chỉnh ở tab Charge, còn nhãn “gói quà” đã chuyển sang đây." />
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <RedeemListCard
-          title="Mã admin tạo"
-          description="Mã được tạo trực tiếp trong Create Redeem để quản lý, block hoặc xóa nhanh."
-          search={adminSearch}
-          onSearchChange={setAdminSearch}
-          rows={grouped.filteredAdmin}
-          selectedId={selectedId}
-          onSelect={(row) => { setSelectedId(String(row.id)); hydrateDraft(row); }}
-          onToggleBlock={(row) => {
+        <TabsContent value="admin" className="mt-0">
+          <RedeemListCard title="Redeem admin" description="Mã được tạo trực tiếp trong Create Redeem để quản lý, block, xóa hoặc edit nhanh." search={adminSearch} onSearchChange={setAdminSearch} rows={grouped.filteredAdmin} selectedId={selectedId} onEdit={editRow} onToggleBlock={(row) => {
             if (!window.confirm(row.blocked_at ? `Mở lại mã ${row.redeem_key}?` : `Khóa mã ${row.redeem_key}?`)) return;
             statusMutation.mutate({ row, action: row.blocked_at ? "unblock" : "block" });
-          }}
-          onDelete={(row) => {
+          }} onDelete={(row) => {
             if (!window.confirm(`Xóa hẳn mã ${row.redeem_key}?`)) return;
             statusMutation.mutate({ row, action: "delete" });
-          }}
-        />
+          }} />
+        </TabsContent>
 
-        <RedeemListCard
-          title="Key free từ mityangho.id.vn/free"
-          description="Các key được đẩy từ luồng free. Tại đây admin dễ tìm lại để block, xóa hoặc soi trace."
-          search={freeSearch}
-          onSearchChange={setFreeSearch}
-          rows={grouped.filteredFree}
-          selectedId={selectedId}
-          onSelect={(row) => { setSelectedId(String(row.id)); hydrateDraft(row); }}
-          onToggleBlock={(row) => {
+        <TabsContent value="free" className="mt-0">
+          <RedeemListCard title="Redeem free" description="Các key được đẩy từ mityangho.id.vn/free. Tại đây admin dễ tìm lại để block, xóa hoặc sửa nhanh." search={freeSearch} onSearchChange={setFreeSearch} rows={grouped.filteredFree} selectedId={selectedId} onEdit={editRow} onToggleBlock={(row) => {
             if (!window.confirm(row.blocked_at ? `Mở lại mã ${row.redeem_key}?` : `Khóa mã ${row.redeem_key}?`)) return;
             statusMutation.mutate({ row, action: row.blocked_at ? "unblock" : "block" });
-          }}
-          onDelete={(row) => {
+          }} onDelete={(row) => {
             if (!window.confirm(`Xóa hẳn mã ${row.redeem_key}?`)) return;
             statusMutation.mutate({ row, action: "delete" });
-          }}
-        />
-      </div>
+          }} />
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }
 
-function RedeemListCard({
-  title,
-  description,
-  search,
-  onSearchChange,
-  rows,
-  selectedId,
-  onSelect,
-  onToggleBlock,
-  onDelete,
-}: {
-  title: string;
-  description: string;
-  search: string;
-  onSearchChange: (value: string) => void;
-  rows: any[];
-  selectedId: string;
-  onSelect: (row: any) => void;
-  onToggleBlock: (row: any) => void;
-  onDelete: (row: any) => void;
-}) {
+function RedeemListCard({ title, description, search, onSearchChange, rows, selectedId, onEdit, onToggleBlock, onDelete }: { title: string; description: string; search: string; onSearchChange: (value: string) => void; rows: any[]; selectedId: string; onEdit: (row: any) => void; onToggleBlock: (row: any) => void; onDelete: (row: any) => void; }) {
   return (
     <Card>
       <CardHeader>
@@ -527,14 +430,15 @@ function RedeemListCard({
         </div>
         <div className="grid gap-3">
           {rows.map((row: any) => (
-            <div key={row.id} className={`w-full rounded-3xl border p-4 text-left ${selectedId === row.id ? "border-primary bg-primary/[0.06]" : "bg-background hover:border-primary/40"}`}>
+            <div key={row.id} className={`rounded-3xl border p-4 ${selectedId === row.id ? "border-primary bg-primary/[0.06]" : "bg-background hover:border-primary/40"}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <button type="button" onClick={() => onSelect(row)} className="min-w-0 flex-1 text-left">
+                <div className="min-w-0 flex-1">
                   <div className="font-medium break-all">{row.title || row.metadata?.title || row.redeem_key}</div>
                   <div className="mt-1 text-xs text-muted-foreground break-all">{row.redeem_key} • mode {row.reward_mode} • redeem {row.redeemed_count}/{row.max_redemptions}</div>
-                </button>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={row.blocked_at ? "destructive" : row.enabled ? "outline" : "secondary"}>{row.blocked_at ? "Đã block" : row.enabled ? "Đang bật" : "Đã tắt"}</Badge>
+                  <Button size="sm" type="button" variant="outline" onClick={() => onEdit(row)}><Pencil className="mr-1 h-4 w-4" />Edit</Button>
                   <Button size="sm" type="button" variant="outline" onClick={() => onToggleBlock(row)}>{row.blocked_at ? "Mở lại" : "Block"}</Button>
                   <Button size="sm" type="button" variant="destructive" onClick={() => onDelete(row)}>Xóa</Button>
                 </div>
@@ -550,16 +454,7 @@ function RedeemListCard({
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function MiniLine({ icon, text }: { icon: ReactNode; text: string }) {
-  return <div className="flex items-start gap-2 rounded-2xl border p-3 text-muted-foreground">{icon}<span>{text}</span></div>;
+  return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
 }
 
 function ToggleRow({ title, checked, onCheckedChange }: { title: string; checked: boolean; onCheckedChange: (value: boolean) => void }) {

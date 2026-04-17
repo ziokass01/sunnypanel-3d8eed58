@@ -1349,65 +1349,63 @@ export async function consumeRuntimeFeature(params: {
   const effectiveSoftCost = round2(feature.soft_cost * (currentPlan?.soft_cost_multiplier ?? 1));
   const effectivePremiumCost = round2(feature.premium_cost * (currentPlan?.premium_cost_multiplier ?? 1));
 
-  let chargeKind: "none" | "soft" | "premium" = "none";
+  let chargeKind: "none" | "soft" | "premium" | "mixed" = "none";
   let softDelta = 0;
   let premiumDelta = 0;
 
   if (feature.requires_credit) {
-    const priority = settings.wallet_rules.consume_priority;
-    const softAvailable = effectiveSoftCost > 0 && wallet.soft_balance >= effectiveSoftCost;
-    const premiumAvailable = effectivePremiumCost > 0 && wallet.premium_balance >= effectivePremiumCost;
+    const hasSoftCost = effectiveSoftCost > 0;
+    const hasPremiumCost = effectivePremiumCost > 0;
 
-    if (requestedWalletKind === "soft") {
-      chargeKind = "soft";
-    } else if (requestedWalletKind === "premium") {
+    if (hasSoftCost && hasPremiumCost) {
+      let softSpend = Math.min(wallet.soft_balance, effectiveSoftCost);
+      let premiumSpend = Math.min(wallet.premium_balance, effectivePremiumCost);
+      let softRemainBalance = Math.max(0, wallet.soft_balance - softSpend);
+      let premiumRemainBalance = Math.max(0, wallet.premium_balance - premiumSpend);
+      let softMissing = round2(effectiveSoftCost - softSpend);
+      let premiumMissing = round2(effectivePremiumCost - premiumSpend);
+
+      if (softMissing > 0) {
+        const premiumExtraNeeded = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
+        if (premiumRemainBalance + 1e-9 < premiumExtraNeeded) {
+          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+        }
+        premiumSpend = round2(premiumSpend + premiumExtraNeeded);
+      }
+
+      if (premiumMissing > 0) {
+        const softExtraNeeded = round2((premiumMissing * effectiveSoftCost) / effectivePremiumCost);
+        if (softRemainBalance + 1e-9 < softExtraNeeded) {
+          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+        }
+        softSpend = round2(softSpend + softExtraNeeded);
+      }
+
+      softDelta = round2(-softSpend);
+      premiumDelta = round2(-premiumSpend);
+      chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : "premium";
+    } else if (hasPremiumCost) {
       chargeKind = "premium";
-    } else if (priority === "premium_first") {
-      if (premiumAvailable) {
-        chargeKind = "premium";
-      } else if (softAvailable) {
-        chargeKind = "soft";
-      } else if (effectivePremiumCost > 0 && effectiveSoftCost <= 0) {
-        chargeKind = "premium";
-      } else {
-        chargeKind = "soft";
-      }
-    } else {
-      if (softAvailable) {
-        chargeKind = "soft";
-      } else if (premiumAvailable) {
-        chargeKind = "premium";
-      } else if (effectiveSoftCost > 0 && effectivePremiumCost <= 0) {
-        chargeKind = "soft";
-      } else {
-        chargeKind = "premium";
-      }
-    }
-
-    if (chargeKind === "premium") {
-      if (effectivePremiumCost <= 0) {
-        throw Object.assign(new Error("PREMIUM_COST_NOT_CONFIGURED"), { status: 409, code: "PREMIUM_COST_NOT_CONFIGURED" });
-      }
       if (wallet.premium_balance < effectivePremiumCost) {
         throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
       }
       premiumDelta = round2(-effectivePremiumCost);
     } else {
-      if (effectiveSoftCost <= 0) {
+      chargeKind = "soft";
+      if (!hasSoftCost) {
         throw Object.assign(new Error("SOFT_COST_NOT_CONFIGURED"), { status: 409, code: "SOFT_COST_NOT_CONFIGURED" });
       }
       if (wallet.soft_balance < effectiveSoftCost) {
         throw Object.assign(new Error("INSUFFICIENT_SOFT_BALANCE"), { status: 409, code: "INSUFFICIENT_SOFT_BALANCE" });
       }
       softDelta = round2(-effectiveSoftCost);
-      chargeKind = "soft";
     }
   }
 
   let nextSoft = wallet.soft_balance;
   let nextPremium = wallet.premium_balance;
-  if (chargeKind === "soft") nextSoft = round2(wallet.soft_balance + softDelta);
-  if (chargeKind === "premium") nextPremium = round2(wallet.premium_balance + premiumDelta);
+  if (softDelta !== 0) nextSoft = round2(wallet.soft_balance + softDelta);
+  if (premiumDelta !== 0) nextPremium = round2(wallet.premium_balance + premiumDelta);
 
   if (chargeKind !== "none") {
     const admin = createAdminClient();
