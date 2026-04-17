@@ -124,7 +124,7 @@ async function forwardRequest(req, upstreamUrl, env) {
   const headers = buildForwardHeaders(req, env);
   const init = { method, headers };
   if (method !== "GET" && method !== "HEAD") {
-    init.body = await req.text();
+    init.body = await req.arrayBuffer();
   }
   return await fetch(upstreamUrl, init);
 }
