@@ -10,7 +10,7 @@ create or replace function public.server_app_reserve_redeem_use(
 )
 returns table (
   use_id uuid,
-  next_redeemed_count integer,
+  redeemed_count integer,
   key_limit integer,
   account_used integer,
   device_used integer,
