@@ -15,7 +15,7 @@ function corsHeaders(origin, env) {
   const allowOrigin = allowedOrigin(origin, env);
   const headers = {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -100,6 +100,15 @@ function buildForwardHeaders(req, env) {
 
   const hmac = req.headers.get("Hmac");
   if (hmac) headers.set("Hmac", hmac);
+
+  const xTs = req.headers.get("x-ts");
+  if (xTs) headers.set("x-ts", xTs);
+
+  const xNonce = req.headers.get("x-nonce");
+  if (xNonce) headers.set("x-nonce", xNonce);
+
+  const xSig = req.headers.get("x-sig");
+  if (xSig) headers.set("x-sig", xSig);
 
   const clientInfo = req.headers.get("X-Client-Info");
   if (clientInfo) headers.set("X-Client-Info", clientInfo);
