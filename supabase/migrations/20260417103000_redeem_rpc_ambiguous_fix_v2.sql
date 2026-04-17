@@ -1,6 +1,8 @@
 begin;
 
-create or replace function public.server_app_reserve_redeem_use(
+drop function if exists public.server_app_reserve_redeem_use(text, uuid, text, text, text, jsonb);
+
+create function public.server_app_reserve_redeem_use(
   p_app_code text,
   p_redeem_key_id uuid,
   p_account_ref text default null,
@@ -26,7 +28,7 @@ declare
   v_device_used integer := 0;
   v_ip_used integer := 0;
   v_use_id uuid;
-  v_next_redeemed_count integer := 0;
+  v_redeemed_count integer := 0;
 begin
   select *
     into v_key
@@ -117,11 +119,11 @@ begin
         'last_redeemed_at', now()
       )
   where rk.id = p_redeem_key_id
-  returning rk.redeemed_count into v_next_redeemed_count;
+  returning rk.redeemed_count into v_redeemed_count;
 
   return query
   select v_use_id,
-         v_next_redeemed_count,
+         v_redeemed_count,
          coalesce(v_key.max_redemptions, 1),
          v_account_used + case when nullif(trim(coalesce(p_account_ref, '')), '') is null then 0 else 1 end,
          v_device_used + case when nullif(trim(coalesce(p_device_id, '')), '') is null then 0 else 1 end,
