@@ -72,24 +72,15 @@ set title = excluded.title,
 insert into public.server_app_runtime_controls (
   app_code,
   consume_enabled,
-  bootstrap_enabled,
-  session_idle_timeout_minutes,
-  session_max_age_minutes,
-  blocked_accounts,
   maintenance_notice
 )
 values (
   'find-dumps',
   true,
-  true,
-  30,
-  720,
-  '[]'::jsonb,
   null
 )
 on conflict (app_code) do update
 set consume_enabled = coalesce(public.server_app_runtime_controls.consume_enabled, excluded.consume_enabled),
-    bootstrap_enabled = coalesce(public.server_app_runtime_controls.bootstrap_enabled, excluded.bootstrap_enabled),
     updated_at = now();
 
 commit;
