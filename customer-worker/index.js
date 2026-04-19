@@ -15,7 +15,7 @@ function corsHeaders(origin, env) {
   const allowOrigin = allowedOrigin(origin, env);
   const headers = {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig,x-fp,x-admin-key",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -113,6 +113,12 @@ function buildForwardHeaders(req, env) {
   const clientInfo = req.headers.get("X-Client-Info");
   if (clientInfo) headers.set("X-Client-Info", clientInfo);
 
+  const fp = req.headers.get("x-fp");
+  if (fp) headers.set("x-fp", fp);
+
+  const adminKey = req.headers.get("x-admin-key");
+  if (adminKey) headers.set("x-admin-key", adminKey);
+
   const forwardedFor = req.headers.get("CF-Connecting-IP") || req.headers.get("X-Forwarded-For");
   if (forwardedFor) headers.set("X-Forwarded-For", forwardedFor);
 
@@ -177,6 +183,18 @@ export default {
     const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
     responseHeaders.set("Content-Type", contentType);
     responseHeaders.set("X-Gateway-Project", trimTrailingSlash(env.ACTIVE_SUPABASE_URL || env.UPSTREAM_SUPABASE_URL || "") || "custom-functions-base");
+
+    const lowerContentType = String(contentType || "").toLowerCase();
+    const looksHtml = lowerContentType.includes("text/html") || lowerContentType.includes("text/plain");
+    if (upstream.status >= 500 && looksHtml) {
+      return json({
+        ok: false,
+        code: "UPSTREAM_BAD_GATEWAY",
+        function_name: fnName,
+        upstream_status: upstream.status,
+        msg: "Upstream edge runtime returned a non-JSON gateway error",
+      }, 502, origin, env);
+    }
 
     return new Response(upstream.body, {
       status: upstream.status,

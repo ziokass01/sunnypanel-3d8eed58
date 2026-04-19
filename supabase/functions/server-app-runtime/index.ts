@@ -269,11 +269,12 @@ Deno.serve(async (req) => {
     }
 
     if (action === "heartbeat") {
+      const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
       if (!sessionToken) {
         const boot = await bootstrapRuntimeState(appCode, {
           sessionToken: null,
           accountRef: accountRef || null,
-          deviceId: deviceId || req.headers.get("x-fp") || null,
+          deviceId: hintedDeviceId,
           clientVersion,
           ipHash,
         });
@@ -287,33 +288,101 @@ Deno.serve(async (req) => {
           session_bound: boot.sessionBound,
         }, origin);
       }
-      const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
-      const state = await buildRuntimeState(appCode, {
-        sessionToken,
-        accountRef: accountRef || null,
-        deviceId: deviceId || req.headers.get("x-fp") || null,
-      });
-      await logSafe({ ok: true, code: "OK", session_id: (touched as any)?.id ?? null });
-      return runtimeJson(200, {
-        ok: true,
-        action,
-        active: true,
-        state,
-        session_token: sessionToken,
-        session_bound: true,
-      }, origin);
+
+      try {
+        const touched = await touchRuntimeSession(appCode, sessionToken, { clientVersion, ipHash });
+        const state = await buildRuntimeState(appCode, {
+          sessionToken,
+          accountRef: accountRef || null,
+          deviceId: hintedDeviceId,
+        });
+        await logSafe({ ok: true, code: "OK", session_id: (touched as any)?.id ?? null });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          active: true,
+          state,
+          session_token: sessionToken,
+          session_bound: true,
+        }, origin);
+      } catch (error) {
+        const retryable = ["SESSION_NOT_FOUND", "SESSION_INACTIVE", "ENTITLEMENT_INACTIVE", "ENTITLEMENT_EXPIRED", "ENTITLEMENT_REVOKED"].includes(String((error as any)?.code ?? ""));
+        if (!retryable) throw error;
+
+        if (accountRef && hintedDeviceId) {
+          const boot = await bootstrapRuntimeState(appCode, {
+            sessionToken: null,
+            accountRef: accountRef || null,
+            deviceId: hintedDeviceId,
+            clientVersion,
+            ipHash,
+          });
+          await logSafe({
+            ok: true,
+            code: "HEARTBEAT_SESSION_RECOVERED",
+            meta: { previous_code: String((error as any)?.code ?? "UNKNOWN"), session_bound: boot.sessionBound },
+          });
+          return runtimeJson(200, {
+            ok: true,
+            action,
+            active: Boolean(boot.sessionToken),
+            state: boot.state,
+            session_token: boot.sessionToken,
+            session_bound: boot.sessionBound,
+            recovered: true,
+          }, origin);
+        }
+
+        const state = await buildRuntimeState(appCode, {
+          sessionToken: null,
+          accountRef: accountRef || null,
+          deviceId: hintedDeviceId,
+        });
+        await logSafe({ ok: true, code: "HEARTBEAT_SESSION_DROPPED", meta: { previous_code: String((error as any)?.code ?? "UNKNOWN") } });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          active: false,
+          state,
+          session_token: null,
+          session_bound: false,
+          recovered: false,
+        }, origin);
+      }
     }
 
     if (action === "logout") {
-      if (!sessionToken) return runtimeJson(400, { ok: false, code: "MISSING_SESSION_TOKEN" }, origin);
-      const loggedOut = await logoutRuntimeSession(appCode, sessionToken);
-      await logSafe({ ok: true, code: "OK", session_id: (loggedOut as any)?.id ?? null });
-      return runtimeJson(200, {
-        ok: true,
-        action,
-        logged_out: true,
-        session: loggedOut,
-      }, origin);
+      if (!sessionToken) {
+        await logSafe({ ok: true, code: "OK", meta: { logout_no_session: true } });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          logged_out: true,
+          already_logged_out: true,
+          session: null,
+        }, origin);
+      }
+      try {
+        const loggedOut = await logoutRuntimeSession(appCode, sessionToken);
+        await logSafe({ ok: true, code: "OK", session_id: (loggedOut as any)?.id ?? null });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          logged_out: true,
+          session: loggedOut,
+        }, origin);
+      } catch (error) {
+        const retryable = ["SESSION_NOT_FOUND", "SESSION_INACTIVE"].includes(String((error as any)?.code ?? ""));
+        if (!retryable) throw error;
+        await logSafe({ ok: true, code: "LOGOUT_IDEMPOTENT", meta: { previous_code: String((error as any)?.code ?? "UNKNOWN") } });
+        return runtimeJson(200, {
+          ok: true,
+          action,
+          logged_out: true,
+          already_logged_out: true,
+          session: null,
+        }, origin);
+      }
     }
 
     if (action === "redeem") {
