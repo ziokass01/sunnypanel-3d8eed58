@@ -324,30 +324,6 @@ function round2(value: number) {
   return Number(value.toFixed(2));
 }
 
-function resolveDurationUnlockPrice(rule: RuntimeFeatureUnlockRule, durationDays: number) {
-  const safeDays = Math.max(1, Math.trunc(asNumber(durationDays, 1)));
-  if (safeDays >= 30) {
-    const soft = round2(rule.soft_unlock_cost_30d);
-    const premium = round2(rule.premium_unlock_cost_30d);
-    if (soft <= 0 && premium <= 0) {
-      throw Object.assign(new Error("UNLOCK_PRICE_30D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_30D_NOT_CONFIGURED" });
-    }
-    return { soft, premium };
-  }
-  if (safeDays >= 7) {
-    const soft = round2(rule.soft_unlock_cost_7d);
-    const premium = round2(rule.premium_unlock_cost_7d);
-    if (soft <= 0 && premium <= 0) {
-      throw Object.assign(new Error("UNLOCK_PRICE_7D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_7D_NOT_CONFIGURED" });
-    }
-    return { soft, premium };
-  }
-  return {
-    soft: round2(rule.soft_unlock_cost),
-    premium: round2(rule.premium_unlock_cost),
-  };
-}
-
 function planRank(planCode: string | null | undefined) {
   switch (asString(planCode, "classic").toLowerCase()) {
     case "pro":
@@ -751,9 +727,23 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
     const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
     const requestedDays = Math.max(1, Math.round(Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds))) / 86400));
-    const durationPrice = resolveDurationUnlockPrice(rule, requestedDays);
-    const softCost = round2(durationPrice.soft * softMultiplier);
-    const premiumCost = round2(durationPrice.premium * premiumMultiplier);
+    let baseSoftCost = rule.soft_unlock_cost;
+    let basePremiumCost = rule.premium_unlock_cost;
+    if (requestedDays >= 30) {
+      baseSoftCost = rule.soft_unlock_cost_30d;
+      basePremiumCost = rule.premium_unlock_cost_30d;
+      if (baseSoftCost <= 0 && basePremiumCost <= 0) {
+        throw Object.assign(new Error("UNLOCK_PRICE_30D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_30D_NOT_CONFIGURED" });
+      }
+    } else if (requestedDays >= 7) {
+      baseSoftCost = rule.soft_unlock_cost_7d;
+      basePremiumCost = rule.premium_unlock_cost_7d;
+      if (baseSoftCost <= 0 && basePremiumCost <= 0) {
+        throw Object.assign(new Error("UNLOCK_PRICE_7D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_7D_NOT_CONFIGURED" });
+      }
+    }
+    const softCost = round2(baseSoftCost * softMultiplier);
+    const premiumCost = round2(basePremiumCost * premiumMultiplier);
     if (softCost > 0 || premiumCost > 0) {
       await consumeRuntimeFeature({
         appCode: params.appCode,
@@ -2230,12 +2220,10 @@ export async function consumeRuntimeFeature(params: {
     }
 
     if (hasSoftCost && hasPremiumCost) {
-      const preferPremiumOnly = requestedWalletKind === "vip" || requestedWalletKind === "premium";
-      const preferSoftFirst = !preferPremiumOnly;
-
+      const preferSoftFirst = requestedWalletKind !== "vip" && requestedWalletKind !== "premium";
       if (preferSoftFirst) {
         const softSpend = round2(Math.min(wallet.soft_balance, effectiveSoftCost));
-        const softMissing = round2(effectiveSoftCost - softSpend);
+        const softMissing = round2(Math.max(0, effectiveSoftCost - softSpend));
         let premiumSpend = 0;
         if (softMissing > 0) {
           premiumSpend = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
@@ -2247,11 +2235,18 @@ export async function consumeRuntimeFeature(params: {
         premiumDelta = round2(-premiumSpend);
         chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : premiumSpend > 0 ? "premium" : "none";
       } else {
-        chargeKind = "premium";
-        if (wallet.premium_balance < effectivePremiumCost) {
-          throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
+        const premiumSpend = round2(Math.min(wallet.premium_balance, effectivePremiumCost));
+        const premiumMissing = round2(Math.max(0, effectivePremiumCost - premiumSpend));
+        let softSpend = 0;
+        if (premiumMissing > 0) {
+          softSpend = round2((premiumMissing * effectiveSoftCost) / effectivePremiumCost);
+          if (wallet.soft_balance + 1e-9 < softSpend) {
+            throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+          }
         }
-        premiumDelta = round2(-effectivePremiumCost);
+        softDelta = round2(-softSpend);
+        premiumDelta = round2(-premiumSpend);
+        chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : premiumSpend > 0 ? "premium" : softSpend > 0 ? "soft" : "none";
       }
     } else if (hasPremiumCost) {
       chargeKind = "premium";

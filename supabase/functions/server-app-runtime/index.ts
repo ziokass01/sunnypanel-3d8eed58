@@ -409,6 +409,7 @@ Deno.serve(async (req) => {
         ok: true,
         action,
         trace_id: (redeemed as any)?.trace_id ?? traceId ?? null,
+        session_bound: Boolean((redeemed as any)?.session_token),
         ...redeemed,
       }, origin);
     }
