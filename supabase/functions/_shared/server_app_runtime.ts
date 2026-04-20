@@ -324,6 +324,30 @@ function round2(value: number) {
   return Number(value.toFixed(2));
 }
 
+function resolveDurationUnlockPrice(rule: RuntimeFeatureUnlockRule, durationDays: number) {
+  const safeDays = Math.max(1, Math.trunc(asNumber(durationDays, 1)));
+  if (safeDays >= 30) {
+    const soft = round2(rule.soft_unlock_cost_30d);
+    const premium = round2(rule.premium_unlock_cost_30d);
+    if (soft <= 0 && premium <= 0) {
+      throw Object.assign(new Error("UNLOCK_PRICE_30D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_30D_NOT_CONFIGURED" });
+    }
+    return { soft, premium };
+  }
+  if (safeDays >= 7) {
+    const soft = round2(rule.soft_unlock_cost_7d);
+    const premium = round2(rule.premium_unlock_cost_7d);
+    if (soft <= 0 && premium <= 0) {
+      throw Object.assign(new Error("UNLOCK_PRICE_7D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_7D_NOT_CONFIGURED" });
+    }
+    return { soft, premium };
+  }
+  return {
+    soft: round2(rule.soft_unlock_cost),
+    premium: round2(rule.premium_unlock_cost),
+  };
+}
+
 function planRank(planCode: string | null | undefined) {
   switch (asString(planCode, "classic").toLowerCase()) {
     case "pro":
@@ -608,10 +632,10 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
     unlock_duration_seconds: Math.max(3600, Math.trunc(asNumber(row.unlock_duration_seconds, 86400))),
     soft_unlock_cost: asNumber(row.soft_unlock_cost, 0),
     premium_unlock_cost: asNumber(row.premium_unlock_cost, 0),
-    soft_unlock_cost_7d: asNumber(row.soft_unlock_cost_7d, asNumber(row.soft_unlock_cost, 0)),
-    premium_unlock_cost_7d: asNumber(row.premium_unlock_cost_7d, asNumber(row.premium_unlock_cost, 0)),
-    soft_unlock_cost_30d: asNumber(row.soft_unlock_cost_30d, asNumber(row.soft_unlock_cost, 0)),
-    premium_unlock_cost_30d: asNumber(row.premium_unlock_cost_30d, asNumber(row.premium_unlock_cost, 0)),
+    soft_unlock_cost_7d: asNumber(row.soft_unlock_cost_7d, 0),
+    premium_unlock_cost_7d: asNumber(row.premium_unlock_cost_7d, 0),
+    soft_unlock_cost_30d: asNumber(row.soft_unlock_cost_30d, 0),
+    premium_unlock_cost_30d: asNumber(row.premium_unlock_cost_30d, 0),
     free_for_plans: asStringArray(row.free_for_plans).map((item) => item.toLowerCase()),
     guarded_feature_codes: asStringArray(row.guarded_feature_codes).map((item) => item.toLowerCase()),
     renewable: Boolean(row.renewable ?? true),
@@ -685,10 +709,10 @@ function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan
     unlock_feature_code: guardedRule.access_code,
     unlock_soft_cost: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost * softMultiplier),
     unlock_premium_cost: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost * premiumMultiplier),
-    unlock_soft_cost_7d: freeByPlan ? 0 : round2((guardedRule.soft_unlock_cost_7d || guardedRule.soft_unlock_cost) * softMultiplier),
-    unlock_premium_cost_7d: freeByPlan ? 0 : round2((guardedRule.premium_unlock_cost_7d || guardedRule.premium_unlock_cost) * premiumMultiplier),
-    unlock_soft_cost_30d: freeByPlan ? 0 : round2((guardedRule.soft_unlock_cost_30d || guardedRule.soft_unlock_cost) * softMultiplier),
-    unlock_premium_cost_30d: freeByPlan ? 0 : round2((guardedRule.premium_unlock_cost_30d || guardedRule.premium_unlock_cost) * premiumMultiplier),
+    unlock_soft_cost_7d: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost_7d * softMultiplier),
+    unlock_premium_cost_7d: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost_7d * premiumMultiplier),
+    unlock_soft_cost_30d: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost_30d * softMultiplier),
+    unlock_premium_cost_30d: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost_30d * premiumMultiplier),
   };
 }
 
@@ -727,17 +751,9 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
     const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
     const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
     const requestedDays = Math.max(1, Math.round(Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds))) / 86400));
-    let baseSoftCost = rule.soft_unlock_cost;
-    let basePremiumCost = rule.premium_unlock_cost;
-    if (requestedDays >= 30) {
-      baseSoftCost = rule.soft_unlock_cost_30d || rule.soft_unlock_cost;
-      basePremiumCost = rule.premium_unlock_cost_30d || rule.premium_unlock_cost;
-    } else if (requestedDays >= 7) {
-      baseSoftCost = rule.soft_unlock_cost_7d || rule.soft_unlock_cost;
-      basePremiumCost = rule.premium_unlock_cost_7d || rule.premium_unlock_cost;
-    }
-    const softCost = round2(baseSoftCost * softMultiplier);
-    const premiumCost = round2(basePremiumCost * premiumMultiplier);
+    const durationPrice = resolveDurationUnlockPrice(rule, requestedDays);
+    const softCost = round2(durationPrice.soft * softMultiplier);
+    const premiumCost = round2(durationPrice.premium * premiumMultiplier);
     if (softCost > 0 || premiumCost > 0) {
       await consumeRuntimeFeature({
         appCode: params.appCode,
@@ -2214,34 +2230,29 @@ export async function consumeRuntimeFeature(params: {
     }
 
     if (hasSoftCost && hasPremiumCost) {
-      let softSpend = Math.min(wallet.soft_balance, effectiveSoftCost);
-      let premiumSpend = Math.min(wallet.premium_balance, effectivePremiumCost);
-      let softRemainBalance = Math.max(0, wallet.soft_balance - softSpend);
-      let premiumRemainBalance = Math.max(0, wallet.premium_balance - premiumSpend);
-      let softMissing = round2(effectiveSoftCost - softSpend);
-      let premiumMissing = round2(effectivePremiumCost - premiumSpend);
+      const preferPremiumOnly = requestedWalletKind === "vip" || requestedWalletKind === "premium";
+      const preferSoftFirst = !preferPremiumOnly;
 
-      if (softMissing > 0) {
-        const premiumExtraNeeded = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
-        if (premiumRemainBalance + 1e-9 < premiumExtraNeeded) {
-          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+      if (preferSoftFirst) {
+        const softSpend = round2(Math.min(wallet.soft_balance, effectiveSoftCost));
+        const softMissing = round2(effectiveSoftCost - softSpend);
+        let premiumSpend = 0;
+        if (softMissing > 0) {
+          premiumSpend = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
+          if (wallet.premium_balance + 1e-9 < premiumSpend) {
+            throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+          }
         }
-        premiumSpend = round2(premiumSpend + premiumExtraNeeded);
-        premiumRemainBalance = round2(Math.max(0, premiumRemainBalance - premiumExtraNeeded));
-      }
-
-      if (premiumMissing > 0) {
-        const softExtraNeeded = round2((premiumMissing * effectiveSoftCost) / effectivePremiumCost);
-        if (softRemainBalance + 1e-9 < softExtraNeeded) {
-          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+        softDelta = round2(-softSpend);
+        premiumDelta = round2(-premiumSpend);
+        chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : premiumSpend > 0 ? "premium" : "none";
+      } else {
+        chargeKind = "premium";
+        if (wallet.premium_balance < effectivePremiumCost) {
+          throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
         }
-        softSpend = round2(softSpend + softExtraNeeded);
-        softRemainBalance = round2(Math.max(0, softRemainBalance - softExtraNeeded));
+        premiumDelta = round2(-effectivePremiumCost);
       }
-
-      softDelta = round2(-softSpend);
-      premiumDelta = round2(-premiumSpend);
-      chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : "premium";
     } else if (hasPremiumCost) {
       chargeKind = "premium";
       if (wallet.premium_balance < effectivePremiumCost) {

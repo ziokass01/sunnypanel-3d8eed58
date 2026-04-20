@@ -32,6 +32,8 @@ function isOriginAllowed(origin: string, extraAllowed: string[]) {
     "https://www.mityangho.id.vn",
     "https://admin.mityangho.id.vn",
     "https://www.admin.mityangho.id.vn",
+    "https://app.mityangho.id.vn",
+    "https://www.app.mityangho.id.vn",
     "https://sunnypanel.lovable.app",
   ]);
   if (exactAllowed.has(o)) return true;
