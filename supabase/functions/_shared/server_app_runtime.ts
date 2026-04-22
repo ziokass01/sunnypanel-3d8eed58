@@ -608,10 +608,10 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
     unlock_duration_seconds: Math.max(3600, Math.trunc(asNumber(row.unlock_duration_seconds, 86400))),
     soft_unlock_cost: asNumber(row.soft_unlock_cost, 0),
     premium_unlock_cost: asNumber(row.premium_unlock_cost, 0),
-    soft_unlock_cost_7d: asNumber(row.soft_unlock_cost_7d, 0),
-    premium_unlock_cost_7d: asNumber(row.premium_unlock_cost_7d, 0),
-    soft_unlock_cost_30d: asNumber(row.soft_unlock_cost_30d, 0),
-    premium_unlock_cost_30d: asNumber(row.premium_unlock_cost_30d, 0),
+    soft_unlock_cost_7d: asNumber(row.soft_unlock_cost_7d, asNumber(row.soft_unlock_cost, 0)),
+    premium_unlock_cost_7d: asNumber(row.premium_unlock_cost_7d, asNumber(row.premium_unlock_cost, 0)),
+    soft_unlock_cost_30d: asNumber(row.soft_unlock_cost_30d, asNumber(row.soft_unlock_cost, 0)),
+    premium_unlock_cost_30d: asNumber(row.premium_unlock_cost_30d, asNumber(row.premium_unlock_cost, 0)),
     free_for_plans: asStringArray(row.free_for_plans).map((item) => item.toLowerCase()),
     guarded_feature_codes: asStringArray(row.guarded_feature_codes).map((item) => item.toLowerCase()),
     renewable: Boolean(row.renewable ?? true),
@@ -685,10 +685,10 @@ function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan
     unlock_feature_code: guardedRule.access_code,
     unlock_soft_cost: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost * softMultiplier),
     unlock_premium_cost: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost * premiumMultiplier),
-    unlock_soft_cost_7d: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost_7d * softMultiplier),
-    unlock_premium_cost_7d: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost_7d * premiumMultiplier),
-    unlock_soft_cost_30d: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost_30d * softMultiplier),
-    unlock_premium_cost_30d: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost_30d * premiumMultiplier),
+    unlock_soft_cost_7d: freeByPlan ? 0 : round2((guardedRule.soft_unlock_cost_7d || guardedRule.soft_unlock_cost) * softMultiplier),
+    unlock_premium_cost_7d: freeByPlan ? 0 : round2((guardedRule.premium_unlock_cost_7d || guardedRule.premium_unlock_cost) * premiumMultiplier),
+    unlock_soft_cost_30d: freeByPlan ? 0 : round2((guardedRule.soft_unlock_cost_30d || guardedRule.soft_unlock_cost) * softMultiplier),
+    unlock_premium_cost_30d: freeByPlan ? 0 : round2((guardedRule.premium_unlock_cost_30d || guardedRule.premium_unlock_cost) * premiumMultiplier),
   };
 }
 
@@ -730,17 +730,11 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
     let baseSoftCost = rule.soft_unlock_cost;
     let basePremiumCost = rule.premium_unlock_cost;
     if (requestedDays >= 30) {
-      baseSoftCost = rule.soft_unlock_cost_30d;
-      basePremiumCost = rule.premium_unlock_cost_30d;
-      if (baseSoftCost <= 0 && basePremiumCost <= 0) {
-        throw Object.assign(new Error("UNLOCK_PRICE_30D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_30D_NOT_CONFIGURED" });
-      }
+      baseSoftCost = rule.soft_unlock_cost_30d || rule.soft_unlock_cost;
+      basePremiumCost = rule.premium_unlock_cost_30d || rule.premium_unlock_cost;
     } else if (requestedDays >= 7) {
-      baseSoftCost = rule.soft_unlock_cost_7d;
-      basePremiumCost = rule.premium_unlock_cost_7d;
-      if (baseSoftCost <= 0 && basePremiumCost <= 0) {
-        throw Object.assign(new Error("UNLOCK_PRICE_7D_NOT_CONFIGURED"), { status: 409, code: "UNLOCK_PRICE_7D_NOT_CONFIGURED" });
-      }
+      baseSoftCost = rule.soft_unlock_cost_7d || rule.soft_unlock_cost;
+      basePremiumCost = rule.premium_unlock_cost_7d || rule.premium_unlock_cost;
     }
     const softCost = round2(baseSoftCost * softMultiplier);
     const premiumCost = round2(basePremiumCost * premiumMultiplier);
@@ -999,61 +993,6 @@ async function findLatestReusableSession(appCode: string, accountRef: string, de
     if (expiresAt && new Date(expiresAt).getTime() <= now) continue;
     return row;
   }
-  return null;
-}
-
-async function inferAccountRefFromDevice(appCode: string, deviceId?: string | null): Promise<string | null> {
-  const normalizedDeviceId = normalizeDeviceId(deviceId);
-  if (!normalizedDeviceId) return null;
-  const admin = createAdminClient();
-
-  const { data: sessionRows, error: sessionError } = await admin
-    .from("server_app_sessions")
-    .select("account_ref,status,revoked_at,last_seen_at,started_at")
-    .eq("app_code", appCode)
-    .eq("device_id", normalizedDeviceId)
-    .order("last_seen_at", { ascending: false })
-    .limit(20);
-  if (sessionError) throw sessionError;
-  for (const row of sessionRows ?? []) {
-    const accountRef = normalizeAccountRef((row as any)?.account_ref);
-    if (!accountRef) continue;
-    const status = asString((row as any)?.status).toLowerCase();
-    if (status && status !== "active") continue;
-    if (asNullableString((row as any)?.revoked_at)) continue;
-    return accountRef;
-  }
-
-  const { data: entitlementRows, error: entitlementError } = await admin
-    .from("server_app_entitlements")
-    .select("account_ref,status,revoked_at,updated_at")
-    .eq("app_code", appCode)
-    .eq("device_id", normalizedDeviceId)
-    .order("updated_at", { ascending: false })
-    .limit(20);
-  if (entitlementError) throw entitlementError;
-  for (const row of entitlementRows ?? []) {
-    const accountRef = normalizeAccountRef((row as any)?.account_ref);
-    if (!accountRef) continue;
-    const status = asString((row as any)?.status).toLowerCase();
-    if (status && status !== "active") continue;
-    if (asNullableString((row as any)?.revoked_at)) continue;
-    return accountRef;
-  }
-
-  const { data: walletRows, error: walletError } = await admin
-    .from("server_app_wallet_balances")
-    .select("account_ref,updated_at")
-    .eq("app_code", appCode)
-    .eq("device_id", normalizedDeviceId)
-    .order("updated_at", { ascending: false })
-    .limit(20);
-  if (walletError) throw walletError;
-  for (const row of walletRows ?? []) {
-    const accountRef = normalizeAccountRef((row as any)?.account_ref);
-    if (accountRef) return accountRef;
-  }
-
   return null;
 }
 
@@ -1504,6 +1443,86 @@ async function countOtherActiveDevices(appCode: string, accountRef: string, curr
   return devices.size;
 }
 
+async function inferAccountRefFromDevice(appCode: string, deviceId: string) {
+  const normalizedDeviceId = normalizeDeviceId(deviceId);
+  if (!normalizedDeviceId) return null;
+  const admin = createAdminClient();
+
+  const tryPickAccount = (rows: any[] | null | undefined) => {
+    for (const row of rows ?? []) {
+      const accountRef = normalizeAccountRef((row as any)?.account_ref);
+      if (accountRef) return accountRef;
+    }
+    return null;
+  };
+
+  const { data: sessionRows, error: sessionError } = await admin
+    .from("server_app_sessions")
+    .select("account_ref,status,revoked_at,last_seen_at")
+    .eq("app_code", appCode)
+    .eq("device_id", normalizedDeviceId)
+    .order("last_seen_at", { ascending: false })
+    .limit(20);
+  if (sessionError) throw sessionError;
+  const activeSessionRows = (sessionRows ?? []).filter((row: any) => String(row?.status ?? "") === "active" && !row?.revoked_at);
+  const fromActiveSession = tryPickAccount(activeSessionRows);
+  if (fromActiveSession) return fromActiveSession;
+  const fromAnySession = tryPickAccount(sessionRows ?? []);
+  if (fromAnySession) return fromAnySession;
+
+  const { data: entitlementRows, error: entitlementError } = await admin
+    .from("server_app_entitlements")
+    .select("account_ref,status,revoked_at,expires_at,updated_at")
+    .eq("app_code", appCode)
+    .eq("device_id", normalizedDeviceId)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (entitlementError) throw entitlementError;
+  const usableEntitlementRows = (entitlementRows ?? []).filter((row: any) => String(row?.status ?? "") === "active" && !row?.revoked_at && (!row?.expires_at || isFutureIso(String(row.expires_at))));
+  const fromEntitlement = tryPickAccount(usableEntitlementRows);
+  if (fromEntitlement) return fromEntitlement;
+
+  const { data: walletRows, error: walletError } = await admin
+    .from("server_app_wallet_balances")
+    .select("account_ref,updated_at")
+    .eq("app_code", appCode)
+    .eq("device_id", normalizedDeviceId)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (walletError) throw walletError;
+  return tryPickAccount(walletRows ?? []);
+}
+
+async function rebindRuntimeIdentityToDevice(params: { appCode: string; accountRef: string; deviceId: string }) {
+  const normalizedDeviceId = normalizeDeviceId(params.deviceId);
+  const normalizedAccountRef = normalizeAccountRef(params.accountRef);
+  if (!normalizedDeviceId || !normalizedAccountRef) return;
+  const admin = createAdminClient();
+  const nowIso = getNowIso();
+
+  await admin
+    .from("server_app_wallet_balances")
+    .update({ device_id: normalizedDeviceId, updated_at: nowIso, updated_by_source: "runtime_rebind" })
+    .eq("app_code", params.appCode)
+    .eq("account_ref", normalizedAccountRef);
+
+  await admin
+    .from("server_app_entitlements")
+    .update({ device_id: normalizedDeviceId, updated_at: nowIso })
+    .eq("app_code", params.appCode)
+    .eq("account_ref", normalizedAccountRef)
+    .eq("status", "active")
+    .is("revoked_at", null);
+
+  await admin
+    .from("server_app_feature_unlocks")
+    .update({ device_id: normalizedDeviceId, updated_at: nowIso })
+    .eq("app_code", params.appCode)
+    .eq("account_ref", normalizedAccountRef)
+    .eq("status", "active")
+    .is("revoked_at", null);
+}
+
 async function createRuntimeSession(params: {
   appCode: string;
   accountRef: string;
@@ -1796,8 +1815,8 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
   const { config, settings, planMap, features, unlockRules } = await getRuntimeContext(appCode);
 
   const sessionToken = asNullableString(opts?.sessionToken);
+  const hintedAccountRef = asNullableString(opts?.accountRef)?.toLowerCase() ?? null;
   const hintedDeviceId = asNullableString(opts?.deviceId);
-  const hintedAccountRef = normalizeAccountRef(opts?.accountRef) || (await inferAccountRefFromDevice(appCode, hintedDeviceId)) || null;
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
   if (!session && hintedAccountRef) {
     session = await findLatestReusableSession(appCode, hintedAccountRef, hintedDeviceId ?? null);
@@ -1954,12 +1973,16 @@ export async function buildRuntimeState(appCode: string, opts?: { sessionToken?:
 
 export async function bootstrapRuntimeState(appCode: string, opts?: { sessionToken?: string | null; accountRef?: string | null; deviceId?: string | null; clientVersion?: string | null; ipHash?: string | null }) {
   const hintedDeviceId = normalizeDeviceId(opts?.deviceId);
-  const hintedAccountRef = normalizeAccountRef(opts?.accountRef) || (await inferAccountRefFromDevice(appCode, hintedDeviceId)) || null;
+  let hintedAccountRef = normalizeAccountRef(opts?.accountRef) || null;
   let sessionToken = asNullableString(opts?.sessionToken) ?? null;
   let session = sessionToken ? await findSession(appCode, sessionToken) : null;
 
   if (sessionToken && !session) {
     sessionToken = null;
+  }
+
+  if (!hintedAccountRef && hintedDeviceId) {
+    hintedAccountRef = await inferAccountRefFromDevice(appCode, hintedDeviceId);
   }
 
   if (!session && hintedAccountRef) {
@@ -1983,6 +2006,11 @@ export async function bootstrapRuntimeState(appCode: string, opts?: { sessionTok
       ? bestEntitlement
       : (isEntitlementUsable(reusableEntitlement) ? reusableEntitlement : null);
 
+    await rebindRuntimeIdentityToDevice({
+      appCode,
+      accountRef: hintedAccountRef,
+      deviceId: hintedDeviceId,
+    });
     await revokeActiveDeviceSessions(appCode, hintedAccountRef, hintedDeviceId, "bootstrap_rotate");
 
     const created = await createRuntimeSession({
@@ -2008,6 +2036,8 @@ export async function bootstrapRuntimeState(appCode: string, opts?: { sessionTok
     state,
     sessionToken: sessionToken ?? null,
     sessionBound: Boolean(sessionToken),
+    bootstrapAccountRef: hintedAccountRef ?? null,
+    bootstrapDeviceId: hintedDeviceId ?? null,
   };
 }
 
@@ -2275,34 +2305,34 @@ export async function consumeRuntimeFeature(params: {
     }
 
     if (hasSoftCost && hasPremiumCost) {
-      const preferSoftFirst = requestedWalletKind !== "vip" && requestedWalletKind !== "premium";
-      if (preferSoftFirst) {
-        const softSpend = round2(Math.min(wallet.soft_balance, effectiveSoftCost));
-        const softMissing = round2(Math.max(0, effectiveSoftCost - softSpend));
-        let premiumSpend = 0;
-        if (softMissing > 0) {
-          premiumSpend = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
-          if (wallet.premium_balance + 1e-9 < premiumSpend) {
-            throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
-          }
+      let softSpend = Math.min(wallet.soft_balance, effectiveSoftCost);
+      let premiumSpend = Math.min(wallet.premium_balance, effectivePremiumCost);
+      let softRemainBalance = Math.max(0, wallet.soft_balance - softSpend);
+      let premiumRemainBalance = Math.max(0, wallet.premium_balance - premiumSpend);
+      let softMissing = round2(effectiveSoftCost - softSpend);
+      let premiumMissing = round2(effectivePremiumCost - premiumSpend);
+
+      if (softMissing > 0) {
+        const premiumExtraNeeded = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
+        if (premiumRemainBalance + 1e-9 < premiumExtraNeeded) {
+          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
         }
-        softDelta = round2(-softSpend);
-        premiumDelta = round2(-premiumSpend);
-        chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : premiumSpend > 0 ? "premium" : "none";
-      } else {
-        const premiumSpend = round2(Math.min(wallet.premium_balance, effectivePremiumCost));
-        const premiumMissing = round2(Math.max(0, effectivePremiumCost - premiumSpend));
-        let softSpend = 0;
-        if (premiumMissing > 0) {
-          softSpend = round2((premiumMissing * effectiveSoftCost) / effectivePremiumCost);
-          if (wallet.soft_balance + 1e-9 < softSpend) {
-            throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
-          }
-        }
-        softDelta = round2(-softSpend);
-        premiumDelta = round2(-premiumSpend);
-        chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : premiumSpend > 0 ? "premium" : softSpend > 0 ? "soft" : "none";
+        premiumSpend = round2(premiumSpend + premiumExtraNeeded);
+        premiumRemainBalance = round2(Math.max(0, premiumRemainBalance - premiumExtraNeeded));
       }
+
+      if (premiumMissing > 0) {
+        const softExtraNeeded = round2((premiumMissing * effectiveSoftCost) / effectivePremiumCost);
+        if (softRemainBalance + 1e-9 < softExtraNeeded) {
+          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+        }
+        softSpend = round2(softSpend + softExtraNeeded);
+        softRemainBalance = round2(Math.max(0, softRemainBalance - softExtraNeeded));
+      }
+
+      softDelta = round2(-softSpend);
+      premiumDelta = round2(-premiumSpend);
+      chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : "premium";
     } else if (hasPremiumCost) {
       chargeKind = "premium";
       if (wallet.premium_balance < effectivePremiumCost) {

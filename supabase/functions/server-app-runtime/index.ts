@@ -409,7 +409,6 @@ Deno.serve(async (req) => {
         ok: true,
         action,
         trace_id: (redeemed as any)?.trace_id ?? traceId ?? null,
-        session_bound: Boolean((redeemed as any)?.session_token),
         ...redeemed,
       }, origin);
     }
@@ -418,12 +417,11 @@ Deno.serve(async (req) => {
       if (!featureCode) return runtimeJson(400, { ok: false, code: "MISSING_FEATURE_CODE" }, origin);
       let effectiveSessionToken = sessionToken || "";
       const tryBootstrapSession = async () => {
-        const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
-        if (!hintedDeviceId) return null;
+        if (!deviceId) return null;
         const boot = await bootstrapRuntimeState(appCode, {
           sessionToken: null,
           accountRef: accountRef || null,
-          deviceId: hintedDeviceId,
+          deviceId: deviceId || req.headers.get("x-fp") || null,
           clientVersion,
           ipHash,
         });
@@ -444,7 +442,7 @@ Deno.serve(async (req) => {
         });
       } catch (error) {
         const retryable = ["SESSION_NOT_FOUND", "SESSION_INACTIVE", "ENTITLEMENT_INACTIVE", "ENTITLEMENT_EXPIRED", "ENTITLEMENT_REVOKED"].includes(String((error as any)?.code ?? ""));
-        if (!retryable || !(deviceId || req.headers.get("x-fp"))) throw error;
+        if (!retryable || !deviceId) throw error;
         await tryBootstrapSession();
         if (!effectiveSessionToken) throw error;
         consumed = await consumeRuntimeFeature({
@@ -477,12 +475,11 @@ Deno.serve(async (req) => {
       if (!featureCode) return runtimeJson(400, { ok: false, code: "MISSING_FEATURE_CODE" }, origin);
       let effectiveSessionToken = sessionToken || "";
       const tryBootstrapSession = async () => {
-        const hintedDeviceId = deviceId || req.headers.get("x-fp") || null;
-        if (!hintedDeviceId) return null;
+        if (!deviceId) return null;
         const boot = await bootstrapRuntimeState(appCode, {
           sessionToken: null,
           accountRef: accountRef || null,
-          deviceId: hintedDeviceId,
+          deviceId: deviceId || req.headers.get("x-fp") || null,
           clientVersion,
           ipHash,
         });
@@ -503,7 +500,7 @@ Deno.serve(async (req) => {
         });
       } catch (error) {
         const retryable = ["SESSION_NOT_FOUND", "SESSION_INACTIVE", "ENTITLEMENT_INACTIVE", "ENTITLEMENT_EXPIRED", "ENTITLEMENT_REVOKED"].includes(String((error as any)?.code ?? ""));
-        if (!retryable || !(deviceId || req.headers.get("x-fp"))) throw error;
+        if (!retryable || !deviceId) throw error;
         await tryBootstrapSession();
         if (!effectiveSessionToken) throw error;
         unlocked = await unlockRuntimeFeatureAccess({
