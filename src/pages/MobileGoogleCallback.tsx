@@ -15,6 +15,34 @@ function buildDeepLink(session: any, returnTo: string) {
   return url.toString();
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function sessionFromHash() {
+  const hash = window.location.hash?.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  if (!hash) return null;
+  const hashParams = new URLSearchParams(hash);
+  const accessToken = hashParams.get("access_token") || "";
+  const refreshToken = hashParams.get("refresh_token") || "";
+  if (!accessToken || !refreshToken) return null;
+
+  const { data, error } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  if (error) throw error;
+  return data.session ?? null;
+}
+
+async function sessionFromCode(params: URLSearchParams) {
+  const code = params.get("code") || "";
+  if (!code) return null;
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  if (error) throw error;
+  return data.session ?? null;
+}
+
 export function MobileGoogleCallbackPage() {
   const [message, setMessage] = useState("Đang hoàn tất đăng nhập Google...");
   const [error, setError] = useState<string | null>(null);
@@ -24,24 +52,44 @@ export function MobileGoogleCallbackPage() {
     const params = new URLSearchParams(window.location.search);
     const returnTo = params.get("return_to") || "sunnymod://auth/callback";
 
-    async function finishLogin() {
-      let tries = 0;
-      while (!cancelled && tries < 12) {
-        tries += 1;
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          setError(error.message || "Lấy session thất bại");
-          return;
-        }
-        const session = data.session;
-        if (session?.access_token) {
-          window.location.href = buildDeepLink(session, returnTo);
-          return;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 350));
+    async function redirectWhenReady(session: any) {
+      if (cancelled) return true;
+      if (session?.access_token) {
+        window.location.href = buildDeepLink(session, returnTo);
+        return true;
       }
+      return false;
+    }
+
+    async function finishLogin() {
+      setError(null);
+
+      // Supabase OAuth có thể trả token ở hash (#access_token=...) hoặc code ở query (?code=...).
+      // Bản cũ chỉ gọi getSession(), nên trên vài trình duyệt session chưa kịp hydrate và bị null.
+      try {
+        const hashSession = await sessionFromHash();
+        if (await redirectWhenReady(hashSession)) return;
+      } catch (err: any) {
+        if (!cancelled) setMessage("Đang thử hoàn tất phiên Google bằng phương án dự phòng...");
+      }
+
+      try {
+        const codeSession = await sessionFromCode(params);
+        if (await redirectWhenReady(codeSession)) return;
+      } catch (err: any) {
+        if (!cancelled) setMessage("Đang chờ Supabase xác nhận phiên đăng nhập...");
+      }
+
+      let lastError = "";
+      for (let tries = 0; !cancelled && tries < 20; tries += 1) {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) lastError = error.message || "Lấy session thất bại";
+        if (await redirectWhenReady(data.session)) return;
+        await sleep(300);
+      }
+
       if (!cancelled) {
-        setError("Không lấy được session Google từ Supabase callback");
+        setError(lastError || "Không lấy được session Google từ Supabase callback");
         setMessage("Bạn có thể quay lại app và thử đăng nhập Google lần nữa.");
       }
     }
