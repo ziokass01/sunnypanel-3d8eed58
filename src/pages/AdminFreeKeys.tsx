@@ -94,6 +94,7 @@ type KeyTypeRow = {
 const APP_OPTIONS = [
   { code: "free-fire", label: "Free Fire", signature: "FF" },
   { code: "find-dumps", label: "Find Dumps", signature: "FD" },
+  { code: "fake-lag", label: "Fake Lag", signature: "FAKELAG" },
 ] as const;
 
 function getAppMeta(code?: string | null) {
@@ -1759,7 +1760,7 @@ export function AdminFreeKeysPage() {
                     <Input
                       value={newKeySignature}
                       onChange={(e) => setNewKeySignature(e.target.value.toUpperCase())}
-                      placeholder="FF / FD"
+                      placeholder="FF / FD / FAKELAG"
                     />
                   </div>
 
@@ -1788,7 +1789,7 @@ export function AdminFreeKeysPage() {
             <div className="mt-3 flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="font-medium">Cho reset key</div>
-                <div className="text-xs text-muted-foreground">Admin chọn trước loại key này có hỗ trợ reset hay không. Với Find Dumps, reset được chốt ở server key nên nhánh này tự tắt.</div>
+                <div className="text-xs text-muted-foreground">Admin chọn trước loại key này có hỗ trợ reset hay không. Với Find Dumps, reset được chốt ở server key nên nhánh này tự tắt. Fake Lag dùng chữ ký riêng FAKELAG để không trùng key Free Fire.</div>
               </div>
               <Switch checked={newAllowReset} onCheckedChange={setNewAllowReset} />
             </div>
