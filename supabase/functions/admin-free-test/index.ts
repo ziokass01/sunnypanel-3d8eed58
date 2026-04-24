@@ -181,23 +181,41 @@ Deno.serve(async (req) => {
 
   const expiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
   const appCode = String((keyType as any).app_code || "free-fire").trim().toLowerCase() || "free-fire";
-  const keySignature = normalizePrefix((keyType as any).key_signature || (appCode === "fake-lag" ? "FAKELAG" : "SUNNY"));
+
+  let fakeLagRule: any = null;
+  if (appCode === "fake-lag") {
+    const ruleRes = await sb.from("license_access_rules").select("*").eq("app_code", "fake-lag").maybeSingle();
+    fakeLagRule = ruleRes.data ?? null;
+    if (fakeLagRule && fakeLagRule.public_enabled === false) {
+      return json({ ok: false, msg: "APP_KEY_DISABLED" }, 200);
+    }
+  }
+
+  const keySignature = normalizePrefix(
+    appCode === "fake-lag"
+      ? (fakeLagRule?.key_prefix || "FAKELAG")
+      : ((keyType as any).key_signature || "SUNNY"),
+  );
+  const fakeLagMaxDevices = Math.max(1, Number(fakeLagRule?.max_devices_per_key ?? 1));
+  const fakeLagMaxIps = Math.max(1, Number(fakeLagRule?.max_ips_per_key ?? 1));
+  const fakeLagMaxVerify = Math.max(1, Number(fakeLagRule?.max_verify_per_key ?? 1));
+
   let key = "";
   let licenseId = "";
   let lastLicenseInsertError = "";
   for (let attempt = 0; attempt < 12; attempt++) {
-    key = makeKey(appCode === "fake-lag" ? "FAKELAG" : keySignature);
+    key = makeKey(appCode === "fake-lag" ? keySignature : keySignature);
     const insLic = await sb
       .from("licenses")
       .insert({
         key,
         app_code: appCode,
         is_active: true,
-        max_devices: 1,
-        max_ips: appCode === "fake-lag" ? 1 : null,
-        max_verify: appCode === "fake-lag" ? 1 : null,
+        max_devices: appCode === "fake-lag" ? fakeLagMaxDevices : 1,
+        max_ips: appCode === "fake-lag" ? fakeLagMaxIps : null,
+        max_verify: appCode === "fake-lag" ? fakeLagMaxVerify : null,
         expires_at: expiresAt,
-        note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature}`,
+        note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature};RULE_SOURCE=${appCode === "fake-lag" ? "server_app_fake_lag" : "admin_free"}`,
       })
       .select("id")
       .single();

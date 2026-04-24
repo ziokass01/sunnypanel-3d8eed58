@@ -47,6 +47,61 @@ async function readJson(req: Request) {
   try { return await req.json(); } catch { return null; }
 }
 
+function base64UrlEncode(input: string) {
+  return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function base64UrlDecode(input: string) {
+  const pad = "=".repeat((4 - (input.length % 4)) % 4);
+  const normalized = (input + pad).replace(/-/g, "+").replace(/_/g, "/");
+  return atob(normalized);
+}
+async function hmacSha256Base64Url(secret: string, data: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return base64UrlEncode(String.fromCharCode(...new Uint8Array(sig)));
+}
+function getTokenSecret(serviceRoleKey: string) {
+  return (Deno.env.get("FAKE_LAG_TOKEN_SECRET") || serviceRoleKey || "fake-lag-token-secret").trim();
+}
+async function issueSessionToken(serviceRoleKey: string, payload: Record<string, unknown>) {
+  const body = {
+    ...payload,
+    typ: "fake-lag-session",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 15 * 60,
+  };
+  const bodyText = JSON.stringify(body);
+  const bodyPart = base64UrlEncode(bodyText);
+  const sig = await hmacSha256Base64Url(getTokenSecret(serviceRoleKey), bodyPart);
+  return { token: `${bodyPart}.${sig}`, expires_at: new Date(Number(body.exp) * 1000).toISOString(), ttl_seconds: 15 * 60 };
+}
+async function verifySessionToken(serviceRoleKey: string, token: string, expected: Record<string, unknown>) {
+  const raw = String(token || "").trim();
+  const parts = raw.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return { ok: false, msg: "TOKEN_MISSING", payload: null as any };
+  const sig = await hmacSha256Base64Url(getTokenSecret(serviceRoleKey), parts[0]);
+  if (sig !== parts[1]) return { ok: false, msg: "TOKEN_INVALID", payload: null as any };
+  let payload: any = null;
+  try { payload = JSON.parse(base64UrlDecode(parts[0])); } catch { return { ok: false, msg: "TOKEN_INVALID", payload: null as any }; }
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (String(payload?.typ || "") !== "fake-lag-session") return { ok: false, msg: "TOKEN_INVALID", payload };
+  if (Number(payload?.exp || 0) <= nowSec) return { ok: false, msg: "TOKEN_EXPIRED", payload };
+  const keys = ["key", "device", "package_name", "signature_sha256", "build_id"];
+  for (const k of keys) {
+    const a = String(payload?.[k] ?? "").trim();
+    const b = String(expected?.[k] ?? "").trim();
+    if (a !== b) return { ok: false, msg: "TOKEN_MISMATCH", payload };
+  }
+  return { ok: true, msg: "OK", payload };
+}
+
+
 async function checkVersionPolicy(db: any, input: any) {
   const appCode = "fake-lag";
   const { data } = await db.from("server_app_version_policies").select("*").eq("app_code", appCode).maybeSingle();
@@ -119,7 +174,9 @@ Deno.serve(async (req) => {
   if (!input) return json({ ok: false, msg: "INVALID_JSON" }, 400);
 
   const key = normalizeKey(input.key);
-  const mode = safeText(input.mode, 32).toLowerCase() === "refresh" ? "refresh" : "login";
+  const rawMode = safeText(input.mode, 32).toLowerCase();
+  const mode = rawMode === "refresh" || rawMode === "engine" ? rawMode : "login";
+  const sessionToken = safeText(input.session_token, 4096);
   const device = safeText(input.device, 128);
   const deviceName = safeText(input.device_name, 128);
   const ip = getClientIp(req);
@@ -131,6 +188,22 @@ Deno.serve(async (req) => {
   const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
   const version = await checkVersionPolicy(db, input);
   if (!version.allowed) return json({ ok: false, msg: version.reason || "UPDATE_REQUIRED", ...version }, 200);
+
+  const clientIdentity = {
+    key,
+    device,
+    package_name: safeText(input.package_name, 128),
+    signature_sha256: safeText(input.signature_sha256, 128).toUpperCase(),
+    build_id: safeText(input.build_id, 128),
+  };
+
+  if (mode === "engine") {
+    const tokenState = await verifySessionToken(serviceRoleKey, sessionToken, clientIdentity);
+    if (!tokenState.ok) {
+      await db.from("audit_logs").insert({ action: "FAKE_LAG_ENGINE_DENY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: tokenState.msg } });
+      return json({ ok: false, msg: tokenState.msg }, 200);
+    }
+  }
 
   const ipHash = await sha256Hex(ip);
   try {
@@ -208,7 +281,7 @@ Deno.serve(async (req) => {
   }
 
   let guardRow: any = { ok: true, msg: "OK", verify_count: licRow.verify_count ?? null, ip_count: null };
-  if (mode !== "refresh") {
+  if (mode === "login") {
     const useGuard = await db.rpc("increment_fake_lag_license_use", { p_license_id: licRow.id, p_app_code: "fake-lag", p_ip_hash: ipHash });
     guardRow = Array.isArray(useGuard.data) ? useGuard.data[0] : useGuard.data;
     if (useGuard.error) {
@@ -263,5 +336,25 @@ Deno.serve(async (req) => {
 
   await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId } });
   const remainingSeconds = effectiveExpiresAt ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000)) : startsOnFirstUse && !started && typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
-  return json({ ok: true, msg: "OK", key, app_code: "fake-lag", expires_at: effectiveExpiresAt, remaining_seconds: remainingSeconds, max_devices: licRow.max_devices, verify_count: guardRow?.verify_count ?? null, ip_count: guardRow?.ip_count ?? null, server_time: now.toISOString() }, 200);
+  const issuedToken = await issueSessionToken(serviceRoleKey, {
+    ...clientIdentity,
+    app_code: "fake-lag",
+    license_id: licRow.id,
+    mode,
+  });
+  return json({
+    ok: true,
+    msg: "OK",
+    key,
+    app_code: "fake-lag",
+    expires_at: effectiveExpiresAt,
+    remaining_seconds: remainingSeconds,
+    max_devices: licRow.max_devices,
+    verify_count: guardRow?.verify_count ?? null,
+    ip_count: guardRow?.ip_count ?? null,
+    session_token: issuedToken.token,
+    token_expires_at: issuedToken.expires_at,
+    token_ttl_seconds: issuedToken.ttl_seconds,
+    server_time: now.toISOString(),
+  }, 200);
 });

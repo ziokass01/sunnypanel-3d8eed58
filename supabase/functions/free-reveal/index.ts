@@ -878,20 +878,35 @@ Deno.serve(async (req) => {
     }, 200);
   }
 
-  // Mint license
+  // Mint license.
+  // Fake Lag chỉ lấy giới hạn thiết bị/IP/lượt verify từ Server app → Server key
+  // để tránh chỉnh ở Admin Free key rồi làm lệch rule.
+  let fakeLagRule: any = null;
+  if (appCode === "fake-lag") {
+    const ruleRes = await sb.from("license_access_rules").select("*").eq("app_code", "fake-lag").maybeSingle();
+    fakeLagRule = ruleRes.data ?? null;
+    if (fakeLagRule && fakeLagRule.public_enabled === false) {
+      return json({ ok: false, msg: "APP_KEY_DISABLED" }, 200);
+    }
+  }
+  const fakeLagPrefix = normalizeKeyPrefix(fakeLagRule?.key_prefix || "FAKELAG");
+  const fakeLagMaxDevices = Math.max(1, Number(fakeLagRule?.max_devices_per_key ?? 1));
+  const fakeLagMaxIps = Math.max(1, Number(fakeLagRule?.max_ips_per_key ?? 1));
+  const fakeLagMaxVerify = Math.max(1, Number(fakeLagRule?.max_verify_per_key ?? 1));
+
   let inserted: { id: string; key: string } | null = null;
   for (let attempt = 0; attempt < 12; attempt++) {
-    const key = makeKey(appCode === "fake-lag" ? "FAKELAG" : "SUNNY");
+    const key = makeKey(appCode === "fake-lag" ? fakeLagPrefix : "SUNNY");
     const ins = await sb
       .from("licenses")
       .insert({
         key,
         is_active: true,
-        max_devices: 1,
-        max_ips: appCode === "fake-lag" ? 1 : null,
-        max_verify: appCode === "fake-lag" ? 1 : null,
+        max_devices: appCode === "fake-lag" ? fakeLagMaxDevices : 1,
+        max_ips: appCode === "fake-lag" ? fakeLagMaxIps : null,
+        max_verify: appCode === "fake-lag" ? fakeLagMaxVerify : null,
         expires_at,
-        note: freeNote,
+        note: appCode === "fake-lag" ? `${freeNote};RULE_SOURCE=server_app_fake_lag` : freeNote,
         app_code: appCode,
       })
       .select("id,key")
