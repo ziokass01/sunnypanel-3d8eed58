@@ -1,0 +1,14 @@
+SunnyPanel repo full package flattened at root to avoid nested-folder extraction issues.
+
+Included in this package:
+- prior integrated fixes from the provided fixed full base
+- latest 2026-04-21 session bootstrap patch overlay
+
+Main areas changed in this latest overlay:
+- supabase/functions/server-app-runtime/index.ts
+- supabase/functions/_shared/server_app_runtime.ts
+
+Notes:
+- generate key was left alone
+- free-flow files were not modified in this latest overlay
+- deploy target for the session fix remains: server-app-runtime
