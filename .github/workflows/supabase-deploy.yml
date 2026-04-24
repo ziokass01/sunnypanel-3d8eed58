@@ -46,7 +46,7 @@ jobs:
             admin-free-block admin-free-delete-issued admin-free-delete-session admin-free-test
             admin-rent admin-rent-integrations free-admin-test free-close free-config free-gate
             free-resolve free-reveal free-start generate-license-key rent-user rent-verify-key
-            reset-key server-app-runtime server-app-runtime-ops verify-key
+            reset-key server-app-runtime server-app-runtime-ops verify-key fake-lag-check fake-lag-auth
           )
           for fn in "${no_verify_functions[@]}"; do
             if [ -d "supabase/functions/${fn}" ]; then

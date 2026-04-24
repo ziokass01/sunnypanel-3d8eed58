@@ -47,37 +47,6 @@ async function readJson(req: Request) {
   try { return await req.json(); } catch { return null; }
 }
 
-
-function isFunctionMissingError(error: any) {
-  const code = String(error?.code ?? "").trim();
-  const message = String(error?.message ?? error ?? "").toLowerCase();
-  return code === "PGRST202" || code === "42883" || message.includes("could not find the function") || message.includes("function public.increment_fake_lag_license_use") || message.includes("does not exist");
-}
-
-async function fallbackIncrementFakeLagUse(db: any, licRow: any, ipHash: string) {
-  const maxIps = Math.max(1, Number(licRow.max_ips ?? 1));
-  const maxVerify = Math.max(1, Number(licRow.max_verify ?? 1));
-  let ipCount = 1;
-  try {
-    const ipWrite = await db
-      .from("license_ip_bindings")
-      .upsert({ license_id: licRow.id, app_code: "fake-lag", ip_hash: ipHash, last_seen_at: new Date().toISOString() }, { onConflict: "license_id,ip_hash" });
-    if (ipWrite.error) throw ipWrite.error;
-    const ipRes = await db.from("license_ip_bindings").select("id", { count: "exact", head: true }).eq("license_id", licRow.id);
-    ipCount = Number(ipRes.count ?? 1);
-    if (ipCount > maxIps) return { ok: false, msg: "IP_LIMIT_EXCEEDED", verify_count: Number(licRow.verify_count ?? 0), ip_count: ipCount };
-  } catch {
-    ipCount = 1;
-  }
-
-  const nextVerify = Number(licRow.verify_count ?? 0) + 1;
-  if (nextVerify > maxVerify) return { ok: false, msg: "VERIFY_LIMIT_EXCEEDED", verify_count: nextVerify, ip_count: ipCount };
-  try {
-    await db.from("licenses").update({ verify_count: nextVerify }).eq("id", licRow.id);
-  } catch {}
-  return { ok: true, msg: "OK", verify_count: nextVerify, ip_count: ipCount };
-}
-
 async function checkVersionPolicy(db: any, input: any) {
   const appCode = "fake-lag";
   const { data } = await db.from("server_app_version_policies").select("*").eq("app_code", appCode).maybeSingle();
@@ -150,7 +119,7 @@ Deno.serve(async (req) => {
   if (!input) return json({ ok: false, msg: "INVALID_JSON" }, 400);
 
   const key = normalizeKey(input.key);
-  const mode = safeText(input.mode, 24).toLowerCase() === "refresh" ? "refresh" : "login";
+  const mode = safeText(input.mode, 32).toLowerCase() === "refresh" ? "refresh" : "login";
   const device = safeText(input.device, 128);
   const deviceName = safeText(input.device_name, 128);
   const ip = getClientIp(req);
@@ -208,42 +177,54 @@ Deno.serve(async (req) => {
 
   const existingDevice = await db.from("license_devices").select("id").eq("license_id", licRow.id).eq("device_id", device).maybeSingle();
   if (existingDevice.error) return json({ ok: false, msg: "SERVER_ERROR" }, 500);
-
-  if (mode === "refresh") {
-    if (!existingDevice.data) {
-      await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "DEVICE_NOT_REGISTERED", mode } });
-      return json({ ok: false, msg: "DEVICE_NOT_REGISTERED" }, 200);
+  if (!existingDevice.data) {
+    const count = await db.from("license_devices").select("id", { count: "exact", head: true }).eq("license_id", licRow.id);
+    const used = Number(count.count ?? 0);
+    const maxDevices = Math.max(1, Number(licRow.max_devices ?? 1));
+    if (used >= maxDevices) {
+      await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "DEVICE_LIMIT" } });
+      return json({ ok: false, msg: "DEVICE_LIMIT" }, 200);
     }
-    try { await db.from("license_devices").update({ last_seen: now.toISOString() }).eq("id", existingDevice.data.id); } catch {}
-  } else {
-    if (!existingDevice.data) {
-      const count = await db.from("license_devices").select("id", { count: "exact", head: true }).eq("license_id", licRow.id);
-      const used = Number(count.count ?? 0);
-      const maxDevices = Math.max(1, Number(licRow.max_devices ?? 1));
-      if (used >= maxDevices) {
-        await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "DEVICE_LIMIT" } });
-        return json({ ok: false, msg: "DEVICE_LIMIT" }, 200);
-      }
-    }
-
-    const upsertPayload: Record<string, unknown> = { license_id: licRow.id, device_id: device, last_seen: now.toISOString() };
-    if (deviceName) upsertPayload.device_name = deviceName;
-    const up = await db.from("license_devices").upsert(upsertPayload, { onConflict: "license_id,device_id" }).select("id").maybeSingle();
-    if (up.error) return json({ ok: false, msg: "SERVER_ERROR" }, 500);
   }
 
-  let guardRow: any = { ok: true, msg: "OK", verify_count: Number(licRow.verify_count ?? 0), ip_count: null };
+  const upsertPayload: Record<string, unknown> = { license_id: licRow.id, device_id: device, last_seen: now.toISOString() };
+  if (deviceName) upsertPayload.device_name = deviceName;
+  let deviceRowId: string | null = null;
+  const up = await db.from("license_devices").upsert(upsertPayload, { onConflict: "license_id,device_id" }).select("id").maybeSingle();
+  if (up.error) {
+    const retryExisting = await db.from("license_devices").select("id").eq("license_id", licRow.id).eq("device_id", device).maybeSingle();
+    if (retryExisting.data?.id) {
+      deviceRowId = retryExisting.data.id;
+    } else {
+      const ins = await db.from("license_devices").insert(upsertPayload).select("id").maybeSingle();
+      if (ins.error) {
+        await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "DEVICE_BIND_FAILED", error: up.error.message || ins.error.message } });
+        return json({ ok: false, msg: "SERVER_NOT_READY" }, 200);
+      }
+      deviceRowId = ins.data?.id ?? null;
+    }
+  } else {
+    deviceRowId = up.data?.id ?? null;
+  }
+
+  let guardRow: any = { ok: true, msg: "OK", verify_count: licRow.verify_count ?? null, ip_count: null };
   if (mode !== "refresh") {
     const useGuard = await db.rpc("increment_fake_lag_license_use", { p_license_id: licRow.id, p_app_code: "fake-lag", p_ip_hash: ipHash });
     guardRow = Array.isArray(useGuard.data) ? useGuard.data[0] : useGuard.data;
-    if (useGuard.error && isFunctionMissingError(useGuard.error)) {
-      guardRow = await fallbackIncrementFakeLagUse(db, licRow, ipHash);
-    } else if (useGuard.error || !guardRow?.ok) {
-      const msg = useGuard.error ? "SERVER_ERROR" : String(guardRow?.msg || "FAKE_LAG_RULE_BLOCKED");
-      await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg } });
-      return json({ ok: false, msg }, useGuard.error ? 500 : 200);
-    }
-    if (!guardRow?.ok) {
+    if (useGuard.error) {
+      // Fallback cho trường hợp function RPC chưa deploy đúng, tránh đẩy app về SERVER_ERROR.
+      const maxVerify = Math.max(1, Number(licRow.max_verify ?? 1));
+      const currentVerify = Math.max(0, Number(licRow.verify_count ?? 0));
+      if (currentVerify >= maxVerify) {
+        await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "VERIFY_LIMIT_EXCEEDED", fallback: true } });
+        return json({ ok: false, msg: "VERIFY_LIMIT_EXCEEDED" }, 200);
+      }
+      try {
+        await db.from("license_ip_bindings").upsert({ license_id: licRow.id, app_code: "fake-lag", ip_hash: ipHash, last_seen_at: now.toISOString() }, { onConflict: "license_id,ip_hash" });
+      } catch { /* best effort */ }
+      const upd = await db.from("licenses").update({ verify_count: currentVerify + 1 }).eq("id", licRow.id).select("verify_count").maybeSingle();
+      guardRow = { ok: true, msg: "OK", verify_count: upd.data?.verify_count ?? currentVerify + 1, ip_count: null, fallback: true };
+    } else if (!guardRow?.ok) {
       const msg = String(guardRow?.msg || "FAKE_LAG_RULE_BLOCKED");
       await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg } });
       return json({ ok: false, msg }, 200);
@@ -280,7 +261,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, ok: true, app_code: "fake-lag", mode, license_id: licRow.id } });
+  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId } });
   const remainingSeconds = effectiveExpiresAt ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000)) : startsOnFirstUse && !started && typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
   return json({ ok: true, msg: "OK", key, app_code: "fake-lag", expires_at: effectiveExpiresAt, remaining_seconds: remainingSeconds, max_devices: licRow.max_devices, verify_count: guardRow?.verify_count ?? null, ip_count: guardRow?.ip_count ?? null, server_time: now.toISOString() }, 200);
 });
