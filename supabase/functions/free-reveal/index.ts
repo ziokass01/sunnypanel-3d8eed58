@@ -24,8 +24,13 @@ function randomChunk(len = 4) {
   return out;
 }
 
-function makeKey() {
-  return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
+function normalizeKeyPrefix(value: unknown) {
+  const raw = String(value ?? "SUNNY").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+  return raw || "SUNNY";
+}
+
+function makeKey(prefix = "SUNNY") {
+  return `${normalizeKeyPrefix(prefix)}-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
 function makeRedeemKey(signature = "FND") {
@@ -876,7 +881,7 @@ Deno.serve(async (req) => {
   // Mint license
   let inserted: { id: string; key: string } | null = null;
   for (let attempt = 0; attempt < 12; attempt++) {
-    const key = makeKey();
+    const key = makeKey(appCode === "fake-lag" ? "FAKELAG" : "SUNNY");
     const ins = await sb
       .from("licenses")
       .insert({
@@ -885,6 +890,7 @@ Deno.serve(async (req) => {
         max_devices: 1,
         expires_at,
         note: freeNote,
+        app_code: appCode,
       })
       .select("id,key")
       .single();

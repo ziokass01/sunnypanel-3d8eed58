@@ -86,12 +86,20 @@ function randomChunk(len: number) {
   return out;
 }
 
-function makeKey() {
-  return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
+function normalizePrefix(value: unknown) {
+  const raw = String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+  if (!raw) return "SUNNY";
+  if (raw.length > 16) return raw.slice(0, 16);
+  return raw;
+}
+
+function makeKey(prefix = "SUNNY") {
+  return `${normalizePrefix(prefix)}-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
 const inputSchema = z.object({
-  // future-proof: allow choosing prefix/format, but keep strict for now
+  app_code: z.string().trim().max(64).optional(),
+  key_signature: z.string().trim().max(16).optional(),
 });
 
 Deno.serve(async (req) => {
@@ -116,6 +124,9 @@ Deno.serve(async (req) => {
   }
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) return jsonWithCors(req, { ok: false, msg: "INVALID_INPUT" }, 400);
+  const appCode = String(parsed.data.app_code || "").trim().toLowerCase();
+  const requestedPrefix = String(parsed.data.key_signature || "").trim();
+  const keyPrefix = requestedPrefix || (appCode === "fake-lag" ? "FAKELAG" : "SUNNY");
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
@@ -141,7 +152,7 @@ Deno.serve(async (req) => {
   });
 
   for (let attempt = 0; attempt < 10; attempt++) {
-    const key = makeKey();
+    const key = makeKey(keyPrefix);
     const exists = await db.from("licenses").select("id").eq("key", key).maybeSingle();
     if (!exists.data) {
       return jsonWithCors(req, { ok: true, key });

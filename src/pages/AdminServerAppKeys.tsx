@@ -121,6 +121,202 @@ function creditSeedRows(rows: any[] | null | undefined, appCode: string) {
   });
 }
 
+type FakeLagRuleDraft = {
+  key_prefix: string;
+  default_duration_hours: number;
+  max_devices_per_key: number;
+  max_ips_per_key: number;
+  max_verify_per_key: number;
+  public_enabled: boolean;
+  allow_reset: boolean;
+  notes: string;
+};
+
+function normalizeFakeLagRule(row?: any): FakeLagRuleDraft {
+  const seconds = Number(row?.default_duration_seconds ?? 24 * 3600);
+  return {
+    key_prefix: String(row?.key_prefix || "FAKELAG").trim().toUpperCase() || "FAKELAG",
+    default_duration_hours: Math.max(1, Math.round(seconds / 3600)),
+    max_devices_per_key: Math.max(1, Number(row?.max_devices_per_key ?? 1)),
+    max_ips_per_key: Math.max(1, Number(row?.max_ips_per_key ?? 1)),
+    max_verify_per_key: Math.max(1, Number(row?.max_verify_per_key ?? 9999)),
+    public_enabled: Boolean(row?.public_enabled ?? true),
+    allow_reset: Boolean(row?.allow_reset ?? false),
+    notes: String(row?.notes || "Fake Lag dùng key riêng FAKELAG, không trộn với key SUNNY của Free Fire."),
+  };
+}
+
+function FakeLagLegacyServerKeyPanel({ appCode, appLabel }: { appCode: string; appLabel: string }) {
+  const { toast } = useToast();
+  const [draft, setDraft] = useState<FakeLagRuleDraft>(() => normalizeFakeLagRule());
+
+  const ruleQuery = useQuery({
+    queryKey: ["fake-lag-legacy-key-rule", appCode],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("license_access_rules")
+        .select("*")
+        .eq("app_code", appCode)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (!ruleQuery.data) return;
+    setDraft(normalizeFakeLagRule(ruleQuery.data));
+  }, [ruleQuery.data]);
+
+  const saveRule = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        app_code: appCode,
+        key_prefix: draft.key_prefix || "FAKELAG",
+        default_duration_seconds: Math.max(1, Number(draft.default_duration_hours || 24)) * 3600,
+        max_devices_per_key: Math.max(1, Number(draft.max_devices_per_key || 1)),
+        max_ips_per_key: Math.max(1, Number(draft.max_ips_per_key || 1)),
+        max_verify_per_key: Math.max(1, Number(draft.max_verify_per_key || 9999)),
+        public_enabled: Boolean(draft.public_enabled),
+        allow_reset: Boolean(draft.allow_reset),
+        notes: draft.notes,
+      };
+
+      const { error } = await supabase
+        .from("license_access_rules")
+        .upsert(payload, { onConflict: "app_code" });
+      if (error) throw error;
+
+      const keyTypePayload = {
+        code: "fake_lag_free",
+        label: "Fake Lag",
+        duration_seconds: payload.default_duration_seconds,
+        kind: payload.default_duration_seconds < 86400 ? "hour" : "day",
+        value: payload.default_duration_seconds < 86400
+          ? Math.max(1, Math.round(payload.default_duration_seconds / 3600))
+          : Math.max(1, Math.round(payload.default_duration_seconds / 86400)),
+        sort_order: 450,
+        enabled: payload.public_enabled,
+        app_code: appCode,
+        app_label: appLabel,
+        key_signature: payload.key_prefix,
+        allow_reset: payload.allow_reset,
+        free_selection_mode: "legacy",
+        free_selection_expand: false,
+        default_package_code: null,
+        default_credit_code: null,
+        default_wallet_kind: null,
+      };
+      const keyTypeWrite = await supabase
+        .from("licenses_free_key_types")
+        .upsert(keyTypePayload, { onConflict: "code" });
+      if (keyTypeWrite.error) throw keyTypeWrite.error;
+    },
+    onSuccess: async () => {
+      await ruleQuery.refetch();
+      toast({ title: "Đã lưu Server key Fake Lag", description: "Rule cấp key public, prefix, thiết bị, IP và lượt verify đã được cập nhật." });
+    },
+    onError: (error: any) => toast({
+      title: "Không lưu được Server key Fake Lag",
+      description: error?.message || "Kiểm tra migration license_access_rules và quyền Supabase.",
+      variant: "destructive",
+    }),
+  });
+
+  const updateDraft = (patch: Partial<FakeLagRuleDraft>) => setDraft((prev) => ({ ...prev, ...patch }));
+
+  return (
+    <section className="space-y-5">
+      <header className="space-y-2">
+        <Badge variant="outline">Server key riêng</Badge>
+        <h1 className="text-2xl font-semibold">Server key cho {appLabel}</h1>
+        <p className="max-w-4xl text-sm text-muted-foreground">
+          Fake Lag chạy kiểu gần giống Free Fire: không dùng gói/credit Find Dumps. Trang này chỉ giữ rule cấp key public, chữ ký key riêng, giới hạn thiết bị/IP/lượt verify và đồng bộ với khu Free key admin.
+        </p>
+      </header>
+
+      {ruleQuery.error ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="p-5 text-sm text-amber-800">
+            Chưa đọc được bảng <span className="font-mono">license_access_rules</span>. Hãy chạy migration mới rồi reload trang này.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Key prefix</div><div className="mt-2 text-2xl font-semibold">{draft.key_prefix}</div></CardContent></Card>
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">Thiết bị / key</div><div className="mt-2 text-2xl font-semibold">{draft.max_devices_per_key}</div></CardContent></Card>
+        <Card><CardContent className="p-5"><div className="text-xs uppercase text-muted-foreground">IP / key</div><div className="mt-2 text-2xl font-semibold">{draft.max_ips_per_key}</div></CardContent></Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Cấu hình cấp key Fake Lag</CardTitle>
+          <CardDescription>
+            Key public sinh ra sẽ có dạng <span className="font-mono">{draft.key_prefix || "FAKELAG"}-XXXX-XXXX-XXXX</span>. Server verify sẽ dựa vào rule này, không tin version/key rule hardcode trong app.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Chữ ký key</div>
+              <Input value={draft.key_prefix} onChange={(e) => updateDraft({ key_prefix: e.target.value.replace(/[^a-z0-9_-]/gi, "").toUpperCase() })} placeholder="FAKELAG" />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Hạn key sau khi vượt (giờ)</div>
+              <Input type="number" min={1} value={draft.default_duration_hours} onChange={(e) => updateDraft({ default_duration_hours: Number(e.target.value || 1) })} />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Max thiết bị / key</div>
+              <Input type="number" min={1} value={draft.max_devices_per_key} onChange={(e) => updateDraft({ max_devices_per_key: Number(e.target.value || 1) })} />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Max IP / key</div>
+              <Input type="number" min={1} value={draft.max_ips_per_key} onChange={(e) => updateDraft({ max_ips_per_key: Number(e.target.value || 1) })} />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Max lượt verify / key</div>
+              <Input type="number" min={1} value={draft.max_verify_per_key} onChange={(e) => updateDraft({ max_verify_per_key: Number(e.target.value || 1) })} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div>
+                <div className="font-medium">Bật phát key public</div>
+                <div className="text-sm text-muted-foreground">Tắt thì người dùng không lấy được key Fake Lag từ trang free.</div>
+              </div>
+              <Switch checked={draft.public_enabled} onCheckedChange={(checked) => updateDraft({ public_enabled: checked })} />
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div>
+                <div className="font-medium">Cho phép reset public</div>
+                <div className="text-sm text-muted-foreground">Bật nếu muốn key Fake Lag có thể reset thiết bị ở trang public.</div>
+              </div>
+              <Switch checked={draft.allow_reset} onCheckedChange={(checked) => updateDraft({ allow_reset: checked })} />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Ghi chú</div>
+            <Input value={draft.notes} onChange={(e) => updateDraft({ notes: e.target.value })} />
+          </div>
+
+          <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
+            Luồng đúng: Admin cấu hình rule ở đây → Free key admin dùng app <span className="font-medium">fake-lag</span> để sinh key → app Android verify key với server → server kiểm tra prefix, version policy, thiết bị, IP, lượt verify, blocklist rồi mới trả OK.
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={() => saveRule.mutate()} disabled={saveRule.isPending || ruleQuery.isFetching}>Lưu Server key Fake Lag</Button>
+      </div>
+    </section>
+  );
+}
+
+
 export function AdminServerAppKeysPage() {
   const { appCode = "find-dumps" } = useParams();
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
@@ -244,6 +440,10 @@ export function AdminServerAppKeysPage() {
     },
     onError: (error: any) => toast({ title: "Không lưu được Server key", description: error?.message || "Vui lòng kiểm tra bảng server_app_reward_packages.", variant: "destructive" }),
   });
+
+  if (appCode === "fake-lag") {
+    return <FakeLagLegacyServerKeyPanel appCode={appCode} appLabel={meta.label} />;
+  }
 
   if (appCode === "free-fire") {
     return (

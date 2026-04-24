@@ -14,7 +14,7 @@ const inputSchema = z.object({
     .trim()
     .min(1)
     .max(64)
-    .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "INVALID_KEY_FORMAT"),
+    .regex(/^(SUNNY|FAKELAG)-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "INVALID_KEY_FORMAT"),
   device: z.string().trim().min(1).max(128),
   // Optional friendly label for display in admin panel only.
   // IMPORTANT: device limit/enforcement MUST rely on `device` (stable id) only.
@@ -390,6 +390,9 @@ Deno.serve(async (req) => {
 
   // Deno + supabase-js type inference can be noisy here; keep runtime behavior unchanged.
   const licRow: any = lic.data as any;
+  const keyPrefix = String(key).split("-")[0].toUpperCase();
+  const appCode = String(licRow.app_code || (keyPrefix === "FAKELAG" ? "fake-lag" : "free-fire")).trim().toLowerCase();
+
 
   if (licRow.deleted_at) {
     await db.from("audit_logs").insert({
@@ -540,6 +543,29 @@ Deno.serve(async (req) => {
 
     await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+  }
+
+  // 4.4) Extra server-side guard for Fake Lag keys.
+  // This is intentionally enforced on server. The app version/prefix stored in APK is not trusted.
+  if (appCode === "fake-lag" || keyPrefix === "FAKELAG") {
+    const ipHash = await sha256Hex(ip);
+    const useGuard = await db.rpc("increment_fake_lag_license_use" as any, {
+      p_license_id: licRow.id,
+      p_app_code: "fake-lag",
+      p_ip_hash: ipHash,
+    } as any);
+
+    const guardRow: any = Array.isArray(useGuard.data) ? useGuard.data[0] : useGuard.data;
+    if (useGuard.error || !guardRow?.ok) {
+      const msg = useGuard.error ? "SERVER_ERROR" : String(guardRow?.msg || "FAKE_LAG_RULE_BLOCKED");
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: { ip, device, ok: false, msg, app_code: appCode },
+      });
+      await maybeInsertEnumerationAlert(db, ip, key);
+      return json({ ok: false, msg }, useGuard.error ? 500 : 200);
+    }
   }
 
   // 4.5) First successful verify activates "start on first use" licenses
