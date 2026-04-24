@@ -22,8 +22,14 @@ function randomChunk(len = 4) {
   return out;
 }
 
-function makeKey() {
-  return `SUNNY-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
+function normalizePrefix(value: unknown) {
+  const raw = String(value ?? "SUNNY").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+  return raw || "SUNNY";
+}
+
+function makeKey(prefix = "SUNNY") {
+  const p = normalizePrefix(prefix);
+  return `${p}-${randomChunk(4)}-${randomChunk(4)}-${randomChunk(4)}`;
 }
 
 function extractErrorMessage(err: unknown) {
@@ -114,7 +120,7 @@ Deno.serve(async (req) => {
 
   const { data: keyType } = await sb
     .from("licenses_free_key_types")
-    .select("code,duration_seconds,enabled")
+    .select("code,duration_seconds,enabled,app_code,app_label,key_signature,allow_reset")
     .eq("code", parsed.data.key_type_code)
     .maybeSingle();
 
@@ -137,6 +143,7 @@ Deno.serve(async (req) => {
       gate_ok_at: now.toISOString(),
       expires_at: sessionExp,
       trace_id: traceId,
+      app_code: String((keyType as any).app_code || "free-fire").trim().toLowerCase() || "free-fire",
     })
     .select("session_id")
     .single();
@@ -173,21 +180,24 @@ Deno.serve(async (req) => {
   }
 
   const expiresAt = new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString();
+  const appCode = String((keyType as any).app_code || "free-fire").trim().toLowerCase() || "free-fire";
+  const keySignature = normalizePrefix((keyType as any).key_signature || (appCode === "fake-lag" ? "FAKELAG" : "SUNNY"));
   let key = "";
   let licenseId = "";
   let lastLicenseInsertError = "";
   for (let attempt = 0; attempt < 12; attempt++) {
-    key = makeKey();
-    // licenses table schema in this project is minimal: (id, key, created_at, expires_at, max_devices, is_active, note)
-    // Keep insert payload compatible to avoid ADMIN_TEST_INSERT_FAILED due to missing columns.
+    key = makeKey(appCode === "fake-lag" ? "FAKELAG" : keySignature);
     const insLic = await sb
       .from("licenses")
       .insert({
         key,
+        app_code: appCode,
         is_active: true,
         max_devices: 1,
+        max_ips: appCode === "fake-lag" ? 1 : null,
+        max_verify: appCode === "fake-lag" ? 9999 : null,
         expires_at: expiresAt,
-        note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()}`,
+        note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature}`,
       })
       .select("id")
       .single();
@@ -233,6 +243,8 @@ Deno.serve(async (req) => {
     ip_hash: ipHash,
     fingerprint_hash: fpHash,
     ua_hash: uaHash,
+    app_code: appCode,
+    key_signature: keySignature,
   });
 
   await sb.from("licenses_free_sessions")

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getServerAppMeta } from "@/lib/serverAppPolicies";
 import { supabase } from "@/integrations/supabase/client";
+import { AdminFakeLagAuditPage } from "@/pages/AdminFakeLagAudit";
 
 function short(value?: string | null, size = 14) {
   const v = String(value || "").trim();
@@ -73,6 +74,8 @@ export function AdminServerAppAuditPage() {
     queryFn: () => loadTraceBundle(appCode, activeTrace),
     enabled: Boolean(activeTrace),
   });
+
+  if (appCode === "fake-lag") return <AdminFakeLagAuditPage />;
 
   if (appCode === "free-fire") {
     return (

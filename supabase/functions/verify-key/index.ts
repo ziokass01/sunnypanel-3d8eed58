@@ -368,7 +368,7 @@ Deno.serve(async (req) => {
   const lic = await db
     .from("licenses")
     .select(
-      "id,key,is_active,expires_at,max_devices,deleted_at,app_code," +
+      "id,key,is_active,expires_at,max_devices,max_ips,max_verify,deleted_at,app_code," +
         // Legacy fields
         "starts_on_first_use,duration_seconds,activated_at," +
         // New fields

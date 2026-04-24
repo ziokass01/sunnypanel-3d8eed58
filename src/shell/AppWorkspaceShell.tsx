@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
-import { AppWindow, ChevronRight, Cog, Coins, KeyRound, Logs, Menu, ShieldCheck, Ticket, Trash2, X } from "lucide-react";
+import { AppWindow, ChevronRight, Cog, Coins, KeyRound, KeySquare, Logs, Menu, ShieldCheck, Ticket, Trash2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ function navButtonClass(isActive: boolean) {
 function resolveActiveKey(pathname: string): WorkspaceSection {
   if (pathname.includes("/trash")) return "trash";
   if (pathname.includes("/audit")) return "audit";
+  if (pathname.includes("/licenses")) return "licenses";
   if (pathname.includes("/redeem")) return "redeem";
   if (pathname.includes("/control")) return "control";
   if (pathname.includes("/charge")) return "charge";
@@ -54,7 +55,7 @@ export function AppWorkspaceShell() {
       return [...BASE_NAV_ITEMS.slice(0, 4), ...FIND_DUMPS_EXTRA_NAV_ITEMS, ...BASE_NAV_ITEMS.slice(4)];
     }
     if (meta.code === "fake-lag") {
-      return [BASE_NAV_ITEMS[0], BASE_NAV_ITEMS[1], BASE_NAV_ITEMS[2], { key: "control", label: "Trung tâm điều khiển", icon: ShieldCheck }, BASE_NAV_ITEMS[4], BASE_NAV_ITEMS[5]];
+      return [BASE_NAV_ITEMS[0], BASE_NAV_ITEMS[1], BASE_NAV_ITEMS[2], { key: "licenses", label: "Licenses", icon: KeySquare }, { key: "control", label: "Trung tâm điều khiển", icon: ShieldCheck }, BASE_NAV_ITEMS[4], BASE_NAV_ITEMS[5]];
     }
     return BASE_NAV_ITEMS;
   }, [meta.code]);

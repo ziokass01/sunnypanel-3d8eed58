@@ -44,6 +44,7 @@ import { isAdminHostName, isAppHostName } from "@/lib/appWorkspace";
 import { MobileGoogleStartPage } from "@/pages/MobileGoogleStart";
 import { MobileGoogleCallbackPage } from "@/pages/MobileGoogleCallback";
 import { FakeLagPortalPage } from "@/pages/FakeLagPortal";
+import { AdminFakeLagLicensesPage } from "@/pages/AdminFakeLagLicenses";
 const queryClient = new QueryClient();
 
 function ControlHostEntry() {
@@ -138,6 +139,7 @@ const App = () => {
                     <Route path="config" element={<AdminServerAppDetailPage />} />
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
                     <Route path="keys" element={<AdminServerAppKeysPage />} />
+                    <Route path="licenses" element={<AdminFakeLagLicensesPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
                     <Route path="control" element={<AdminServerAppControlPage />} />
                     <Route path="redeem" element={<AdminServerAppRedeemPage />} />
@@ -154,6 +156,7 @@ const App = () => {
                     <Route path="config" element={<AdminServerAppDetailPage />} />
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
                     <Route path="keys" element={<AdminServerAppKeysPage />} />
+                    <Route path="licenses" element={<AdminFakeLagLicensesPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
                     <Route path="control" element={<AdminServerAppControlPage />} />
                     <Route path="redeem" element={<AdminServerAppRedeemPage />} />
@@ -198,6 +201,7 @@ const App = () => {
                     <Route path="config" element={<AdminServerAppDetailPage />} />
                     <Route path="runtime" element={<AdminServerAppRuntimePage />} />
                     <Route path="keys" element={<AdminServerAppKeysPage />} />
+                    <Route path="licenses" element={<AdminFakeLagLicensesPage />} />
                     <Route path="charge" element={<AdminServerAppChargePage />} />
                     <Route path="control" element={<AdminServerAppControlPage />} />
                     <Route path="redeem" element={<AdminServerAppRedeemPage />} />
