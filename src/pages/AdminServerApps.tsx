@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { buildAppWorkspaceUrl } from "@/lib/appWorkspace";
 import { getServerAppMeta } from "@/lib/serverAppPolicies";
 
-const APPS = [getServerAppMeta("free-fire"), getServerAppMeta("find-dumps")] as const;
+const APPS = [getServerAppMeta("free-fire"), getServerAppMeta("find-dumps"), getServerAppMeta("fake-lag")] as const;
 
 export function AdminServerAppsPage() {
   const openTarget = (url: string) => {
@@ -25,7 +25,7 @@ export function AdminServerAppsPage() {
           <div>
             <h1 className="text-2xl font-semibold">Server app</h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Free Fire giữ nguyên nhánh legacy đang chạy ổn. Find Dumps dùng app-host mới để tách riêng cấu hình app, runtime, server key, charge / credit rules, audit log và trash.
+              Free Fire giữ nguyên nhánh legacy đang chạy ổn. Find Dumps và Fake Lag dùng app-host để tách riêng cấu hình app, runtime, server key, khu điều khiển, audit log và trash.
             </p>
           </div>
           <Badge variant="outline">Legacy + App-host</Badge>
@@ -52,11 +52,15 @@ export function AdminServerAppsPage() {
                 </Button>
               ) : (
                 <div className="grid gap-2">
-                  <Button className="w-full" onClick={() => openTarget(buildAppWorkspaceUrl("find-dumps", "keys"))}>
+                  <Button className="w-full" onClick={() => openTarget(buildAppWorkspaceUrl(app.code, "keys"))}>
                     <AppWindow className="mr-2 h-4 w-4" />
                     Server
                   </Button>
-                  <div className="rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600">Find Dumps mở thẳng vào khu Server key. Runtime, Charge / Credit Rules, Audit Log và Trash nằm trong menu app-host để không trộn lẫn với nhánh Free Fire.</div>
+                  <div className="rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600">
+                    {app.code === "fake-lag"
+                      ? "Fake Lag mở thẳng vào khu Server key. Khu điều khiển, audit log, runtime và trash nằm trong menu app-host. Trang get key public dùng mityangho.id.vn/free."
+                      : "Find Dumps mở thẳng vào khu Server key. Runtime, Charge / Credit Rules, Audit Log và Trash nằm trong menu app-host để không trộn lẫn với nhánh Free Fire."}
+                  </div>
                 </div>
               )}
             </CardContent>

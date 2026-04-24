@@ -49,7 +49,15 @@ export function AppWorkspaceShell() {
   const scope = detectWorkspaceScope(location.pathname);
   const listPath = useMemo(() => getWorkspaceListPath(scope, location.pathname), [scope, location.pathname]);
   const activeKey = resolveActiveKey(location.pathname);
-  const navItems = useMemo(() => meta.code === "find-dumps" ? [...BASE_NAV_ITEMS.slice(0, 4), ...FIND_DUMPS_EXTRA_NAV_ITEMS, ...BASE_NAV_ITEMS.slice(4)] : BASE_NAV_ITEMS, [meta.code]);
+  const navItems = useMemo(() => {
+    if (meta.code === "find-dumps") {
+      return [...BASE_NAV_ITEMS.slice(0, 4), ...FIND_DUMPS_EXTRA_NAV_ITEMS, ...BASE_NAV_ITEMS.slice(4)];
+    }
+    if (meta.code === "fake-lag") {
+      return [BASE_NAV_ITEMS[0], BASE_NAV_ITEMS[1], BASE_NAV_ITEMS[2], { key: "control", label: "Trung tâm điều khiển", icon: ShieldCheck }, BASE_NAV_ITEMS[4], BASE_NAV_ITEMS[5]];
+    }
+    return BASE_NAV_ITEMS;
+  }, [meta.code]);
   const activeLabel = navItems.find((item) => item.key === activeKey)?.label ?? "Runtime app";
 
   useEffect(() => {
@@ -89,7 +97,7 @@ export function AppWorkspaceShell() {
                 </div>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-950">{meta.label}</div>
-                  <div className="truncate text-xs text-slate-500">{meta.mode === "legacy" ? "Nhánh legacy giữ nguyên" : "6 tab app-host tách riêng"}</div>
+                  <div className="truncate text-xs text-slate-500">{meta.mode === "legacy" ? "Nhánh legacy giữ nguyên" : `${navItems.length} tab app-host tách riêng`}</div>
                 </div>
               </div>
               <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-950 hover:text-white" onClick={() => setMobileNavOpen(true)}>
@@ -148,7 +156,7 @@ export function AppWorkspaceShell() {
               </div>
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline" className="border-white/15 bg-white/5 text-slate-100">{meta.mode === "legacy" ? "Legacy" : "App-host"}</Badge>
-                <Badge variant="outline" className="border-white/15 bg-white/5 text-slate-100">6 vùng quản trị</Badge>
+                <Badge variant="outline" className="border-white/15 bg-white/5 text-slate-100">{navItems.length} vùng quản trị</Badge>
               </div>
             </div>
             <nav className="space-y-2 px-4 py-4">

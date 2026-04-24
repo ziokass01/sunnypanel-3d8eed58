@@ -59,6 +59,7 @@ function getAllowedFunctions(env) {
     "rent-user",
     "server-app-runtime",
     "server-app-runtime-ops",
+    "fake-lag-check",
   ]);
 }
 

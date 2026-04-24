@@ -43,6 +43,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { isAdminHostName, isAppHostName } from "@/lib/appWorkspace";
 import { MobileGoogleStartPage } from "@/pages/MobileGoogleStart";
 import { MobileGoogleCallbackPage } from "@/pages/MobileGoogleCallback";
+import { FakeLagPortalPage } from "@/pages/FakeLagPortal";
 const queryClient = new QueryClient();
 
 function ControlHostEntry() {
@@ -91,6 +92,7 @@ const App = () => {
               <Route path="/mobile-auth/google" element={<MobileGoogleStartPage />} />
               <Route path="/mobile-auth/callback" element={<MobileGoogleCallbackPage />} />
               <Route path="/free" element={<FreeLandingPage />} />
+              <Route path="/fake-lag" element={<FakeLagPortalPage />} />
               <Route path="/free/gate" element={<FreeGatePage />} />
               <Route path="/free/gat" element={<Navigate to="/free/gate" replace />} />
               <Route path="/free/claim" element={<FreeClaimPage />} />

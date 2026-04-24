@@ -1,6 +1,6 @@
 import { buildAppWorkspaceUrl, getAdminOrigin } from "@/lib/appWorkspace";
 
-export type ServerAppCode = "free-fire" | "find-dumps";
+export type ServerAppCode = "free-fire" | "find-dumps" | "fake-lag";
 export type WorkspaceSection = "config" | "runtime" | "keys" | "charge" | "control" | "redeem" | "audit" | "trash";
 export type FindDumpsFreeChoiceKind = "package" | "credit";
 export type FindDumpsWalletKind = "normal" | "vip";
@@ -289,6 +289,18 @@ export function getServerAppMeta(appCode: string) {
       serverUrl: (import.meta.env.VITE_SERVER_APP_FREE_FIRE_URL as string | undefined)?.trim() || `${getAdminOrigin()}/admin/free-keys?app=free-fire`,
       tabs: ["server"] as const,
       note: "Giữ nguyên luồng cũ, chỉ rút gọn cửa vào.",
+    };
+  }
+
+  if (appCode === "fake-lag") {
+    return {
+      code: "fake-lag",
+      label: "Fake Lag",
+      mode: "app-host" as const,
+      description: "Nhánh Fake Lag tách riêng chữ ký app, server key, kiểm soát thiết bị/IP, audit log và khu điều khiển để không lẫn với Find Dumps.",
+      serverUrl: buildAppWorkspaceUrl("fake-lag", "keys"),
+      tabs: ["config", "runtime", "keys", "control", "audit", "trash"] as const,
+      note: "Ưu tiên khu key, kiểm soát thiết bị/IP và audit. Không bật logic phản công phá hoại nếu bị crack.",
     };
   }
 

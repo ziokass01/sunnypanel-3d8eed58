@@ -22,7 +22,7 @@ export function ServiceLandingPage() {
           </div>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle>Thuê Website</CardTitle>
@@ -50,6 +50,16 @@ export function ServiceLandingPage() {
             </CardHeader>
             <CardContent>
               <Button className="w-full" variant="soft" onClick={() => nav("/reset-key")}>Vào Reset Key</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Fake Lag</CardTitle>
+              <CardDescription>Trang nhập key giao diện tối cho app Fake Lag, có nút Get key, Admin, YouTube và Cộng đồng.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" variant="soft" onClick={() => nav("/fake-lag")}>Vào Fake Lag</Button>
             </CardContent>
           </Card>
         </div>

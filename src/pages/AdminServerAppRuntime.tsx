@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ShieldCheck, Wrench } from "lucide-react";
+import { AlertTriangle, ShieldCheck, Wrench, Smartphone } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,13 +29,21 @@ export function AdminServerAppRuntimePage() {
   const runtimeQuery = useQuery({
     queryKey: ["server-app-runtime-controls-lite", appCode],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("server_app_runtime_controls")
-        .select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,session_idle_timeout_minutes,session_max_age_minutes")
-        .eq("app_code", appCode)
-        .maybeSingle();
-      if (error) throw error;
-      return data as any;
+      const [controlsRes, versionPolicyRes] = await Promise.all([
+        supabase
+          .from("server_app_runtime_controls")
+          .select("app_code,runtime_enabled,catalog_enabled,redeem_enabled,consume_enabled,heartbeat_enabled,maintenance_notice,min_client_version,blocked_client_versions,session_idle_timeout_minutes,session_max_age_minutes")
+          .eq("app_code", appCode)
+          .maybeSingle(),
+        supabase
+          .from("server_app_version_policies")
+          .select("*")
+          .eq("app_code", appCode)
+          .maybeSingle(),
+      ]);
+      if (controlsRes.error) throw controlsRes.error;
+      if (versionPolicyRes.error) throw versionPolicyRes.error;
+      return { controls: controlsRes.data as any, versionPolicy: versionPolicyRes.data as any };
     },
     retry: false,
   });
@@ -53,15 +61,50 @@ export function AdminServerAppRuntimePage() {
     session_max_age_minutes: 720,
   });
 
+
+
+  const [versionDraft, setVersionDraft] = useState<any>({
+    enabled: true,
+    force_update_enabled: true,
+    min_version_name: "1.0.0",
+    min_version_code: 1,
+    latest_version_name: "1.0.0",
+    latest_version_code: 1,
+    update_url: "https://mityangho.id.vn/free",
+    update_title: "Yêu cầu cập nhật",
+    update_message: "Phiên bản Fake Lag bạn đang dùng đã bị chặn hoặc quá cũ. Vui lòng cập nhật để tiếp tục sử dụng.",
+    allowed_package_names: "com.fakelag.cryhard8",
+    allowed_signature_sha256: "",
+    block_unknown_signature: false,
+    blocked_version_names: "",
+    blocked_version_codes: "",
+    blocked_build_ids: "",
+    notes: "",
+  });
   useEffect(() => {
     if (!runtimeQuery.data) return;
-    setDraft((prev: any) => ({
-      ...prev,
-      ...runtimeQuery.data,
-      blocked_client_versions: Array.isArray((runtimeQuery.data as any)?.blocked_client_versions)
-        ? (runtimeQuery.data as any).blocked_client_versions.join("\n")
-        : String((runtimeQuery.data as any)?.blocked_client_versions || ""),
-    }));
+    const controls = (runtimeQuery.data as any)?.controls;
+    const versionPolicy = (runtimeQuery.data as any)?.versionPolicy;
+    if (controls) {
+      setDraft((prev: any) => ({
+        ...prev,
+        ...controls,
+        blocked_client_versions: Array.isArray(controls?.blocked_client_versions)
+          ? controls.blocked_client_versions.join("\n")
+          : String(controls?.blocked_client_versions || ""),
+      }));
+    }
+    if (versionPolicy) {
+      setVersionDraft((prev: any) => ({
+        ...prev,
+        ...versionPolicy,
+        allowed_package_names: Array.isArray(versionPolicy?.allowed_package_names) ? versionPolicy.allowed_package_names.join("\n") : String(versionPolicy?.allowed_package_names || ""),
+        allowed_signature_sha256: Array.isArray(versionPolicy?.allowed_signature_sha256) ? versionPolicy.allowed_signature_sha256.join("\n") : String(versionPolicy?.allowed_signature_sha256 || ""),
+        blocked_version_names: Array.isArray(versionPolicy?.blocked_version_names) ? versionPolicy.blocked_version_names.join("\n") : String(versionPolicy?.blocked_version_names || ""),
+        blocked_version_codes: Array.isArray(versionPolicy?.blocked_version_codes) ? versionPolicy.blocked_version_codes.join("\n") : String(versionPolicy?.blocked_version_codes || ""),
+        blocked_build_ids: Array.isArray(versionPolicy?.blocked_build_ids) ? versionPolicy.blocked_build_ids.join("\n") : String(versionPolicy?.blocked_build_ids || ""),
+      }));
+    }
   }, [runtimeQuery.data]);
 
   const saveMutation = useMutation({
@@ -81,10 +124,32 @@ export function AdminServerAppRuntimePage() {
       };
       const { error } = await supabase.from("server_app_runtime_controls").upsert(payload, { onConflict: "app_code" });
       if (error) throw error;
+
+      const versionPayload = {
+        app_code: appCode,
+        enabled: Boolean(versionDraft.enabled),
+        force_update_enabled: Boolean(versionDraft.force_update_enabled),
+        min_version_name: String(versionDraft.min_version_name || "").trim() || null,
+        min_version_code: Number(versionDraft.min_version_code || 0),
+        latest_version_name: String(versionDraft.latest_version_name || "").trim() || null,
+        latest_version_code: Number(versionDraft.latest_version_code || 0),
+        update_url: String(versionDraft.update_url || "").trim() || "https://mityangho.id.vn/free",
+        update_title: String(versionDraft.update_title || "").trim() || "Yêu cầu cập nhật",
+        update_message: String(versionDraft.update_message || "").trim() || "Phiên bản bạn đang dùng đã cũ. Vui lòng cập nhật để tiếp tục sử dụng.",
+        allowed_package_names: toCsvLines(String(versionDraft.allowed_package_names || "")).split(/\n+/).filter(Boolean),
+        allowed_signature_sha256: toCsvLines(String(versionDraft.allowed_signature_sha256 || "")).split(/\n+/).filter(Boolean).map((item) => item.replace(/[^0-9a-fA-F]/g, "").toUpperCase()).filter(Boolean),
+        block_unknown_signature: Boolean(versionDraft.block_unknown_signature),
+        blocked_version_names: toCsvLines(String(versionDraft.blocked_version_names || "")).split(/\n+/).filter(Boolean),
+        blocked_version_codes: toIntLines(String(versionDraft.blocked_version_codes || "")),
+        blocked_build_ids: toCsvLines(String(versionDraft.blocked_build_ids || "")).split(/\n+/).filter(Boolean),
+        notes: String(versionDraft.notes || "").trim() || null,
+      };
+      const versionWrite = await supabase.from("server_app_version_policies").upsert(versionPayload, { onConflict: "app_code" });
+      if (versionWrite.error) throw versionWrite.error;
     },
     onSuccess: async () => {
       await runtimeQuery.refetch();
-      toast({ title: "Đã lưu Runtime app", description: "Các công tắc vận hành đã được cập nhật." });
+      toast({ title: "Đã lưu Runtime app", description: "Runtime và chính sách phiên bản đã được cập nhật." });
     },
     onError: (error: any) => {
       toast({ title: "Không lưu được Runtime app", description: error?.message || "Vui lòng kiểm tra bảng server_app_runtime_controls.", variant: "destructive" });
@@ -158,6 +223,52 @@ export function AdminServerAppRuntimePage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Smartphone className="h-4 w-4 text-primary" /> Version guard server-side</CardTitle>
+          <CardDescription>
+            Chính sách này dùng cho app Fake Lag gọi function <span className="font-mono">fake-lag-check</span>. Khi chặn bản cũ, app sẽ hiện popup bắt cập nhật. Không dựa vào mỗi version client tự khai báo: hãy set SHA-256 chữ ký release và bật chặn chữ ký lạ.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex items-center justify-between rounded-2xl border px-4 py-3">
+              <div><div className="text-sm font-medium">Bật version guard</div><div className="text-xs text-muted-foreground">Tắt mục này sẽ block theo policy disabled.</div></div>
+              <Switch checked={Boolean(versionDraft.enabled)} onCheckedChange={(checked) => setVersionDraft((prev: any) => ({ ...prev, enabled: checked }))} />
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border px-4 py-3">
+              <div><div className="text-sm font-medium">Ép update bản cũ</div><div className="text-xs text-muted-foreground">Dựa trên min version name/code do server quản lý.</div></div>
+              <Switch checked={Boolean(versionDraft.force_update_enabled)} onCheckedChange={(checked) => setVersionDraft((prev: any) => ({ ...prev, force_update_enabled: checked }))} />
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-2"><div className="text-sm font-medium">Min version name</div><Input value={versionDraft.min_version_name || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, min_version_name: e.target.value }))} placeholder="1.0.0" /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Min version code</div><Input type="number" value={versionDraft.min_version_code || 1} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, min_version_code: Number(e.target.value || 0) }))} min={1} /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Latest version name</div><Input value={versionDraft.latest_version_name || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, latest_version_name: e.target.value }))} placeholder="1.0.1" /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Latest version code</div><Input type="number" value={versionDraft.latest_version_code || 1} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, latest_version_code: Number(e.target.value || 0) }))} min={1} /></div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2"><div className="text-sm font-medium">Update URL</div><Input value={versionDraft.update_url || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, update_url: e.target.value }))} placeholder="https://mityangho.id.vn/free" /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Tiêu đề popup</div><Input value={versionDraft.update_title || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, update_title: e.target.value }))} /></div>
+          </div>
+          <div className="space-y-2"><div className="text-sm font-medium">Nội dung popup update</div><Textarea rows={3} value={versionDraft.update_message || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, update_message: e.target.value }))} /></div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2"><div className="text-sm font-medium">Package name hợp lệ</div><Textarea rows={4} value={versionDraft.allowed_package_names || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, allowed_package_names: e.target.value }))} placeholder={"com.fakelag.cryhard8"} /></div>
+            <div className="space-y-2"><div className="flex items-center justify-between gap-3"><div className="text-sm font-medium">SHA-256 chữ ký release hợp lệ</div><Switch checked={Boolean(versionDraft.block_unknown_signature)} onCheckedChange={(checked) => setVersionDraft((prev: any) => ({ ...prev, block_unknown_signature: checked }))} /></div><Textarea rows={4} value={versionDraft.allowed_signature_sha256 || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, allowed_signature_sha256: e.target.value }))} placeholder="Dán SHA-256 signing certificate release, mỗi dòng 1 hash" /><div className="text-xs text-muted-foreground">Bật switch sau khi đã nhập đúng chữ ký release. Nếu để trống và bật, app repack/chữ ký lạ sẽ bị chặn.</div></div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2"><div className="text-sm font-medium">Version name bị chặn</div><Textarea rows={5} value={versionDraft.blocked_version_names || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, blocked_version_names: e.target.value }))} placeholder={"1.0.0\n1.0.1"} /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Version code bị chặn</div><Textarea rows={5} value={versionDraft.blocked_version_codes || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, blocked_version_codes: e.target.value }))} placeholder={"1\n2"} /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Build ID bị chặn</div><Textarea rows={5} value={versionDraft.blocked_build_ids || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, blocked_build_ids: e.target.value }))} placeholder={"fl-2026-04-24-a"} /></div>
+          </div>
+          <div className="space-y-2"><div className="text-sm font-medium">Ghi chú nội bộ</div><Textarea rows={3} value={versionDraft.notes || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, notes: e.target.value }))} /></div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

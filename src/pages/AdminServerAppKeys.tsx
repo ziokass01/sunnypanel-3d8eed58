@@ -15,7 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { FIND_DUMPS_CREDITS, FIND_DUMPS_PACKAGES, formatCredit, getServerAppMeta } from "@/lib/serverAppPolicies";
 
 function rewardModeForCredit(code: string) {
-  return code === "credit-vip" ? "premium_credit" : "soft_credit";
+  return String(code || "").toLowerCase().includes("vip") ? "premium_credit" : "soft_credit";
 }
 
 const DEFAULT_FIND_DUMPS_PACKAGE_KEY_ROWS = [
@@ -28,9 +28,45 @@ const DEFAULT_FIND_DUMPS_CREDIT_KEY_ROWS = [
   { code: "fd_credit", label: "Find Dumps credit", duration_seconds: 72 * 3600, kind: "day", value: 3, sort_order: 310, enabled: true, app_code: "find-dumps", app_label: "Find Dumps", key_signature: "SUNNY", allow_reset: false, free_selection_mode: "credit", free_selection_expand: true, default_package_code: null, default_credit_code: "credit-normal", default_wallet_kind: "normal" },
 ];
 
-function packageSeedRows(rows: any[] | null | undefined) {
+const FAKE_LAG_PACKAGES = [
+  { code: "go", label: "Fake Lag Go", enabled: true, defaultDays: 7, oneTimeUse: true, resetDaily: false },
+  { code: "plus", label: "Fake Lag Plus", enabled: true, defaultDays: 30, oneTimeUse: true, resetDaily: false },
+  { code: "pro", label: "Fake Lag Pro", enabled: true, defaultDays: 30, oneTimeUse: false, resetDaily: false },
+] as const;
+
+const FAKE_LAG_CREDITS = [
+  { code: "usage-normal", label: "Lượt dùng thường", defaultAmount: 10, allowDecimal: false, expiresHours: 720, oneTimeUse: true, walletKind: "normal" as const },
+  { code: "usage-vip", label: "Lượt dùng VIP", defaultAmount: 3, allowDecimal: false, expiresHours: 720, oneTimeUse: true, walletKind: "vip" as const },
+] as const;
+
+const DEFAULT_FAKE_LAG_PACKAGE_KEY_ROWS = [
+  { code: "fl_go", label: "Fake Lag Go 7 ngày", duration_seconds: 7 * 86400, kind: "day", value: 7, sort_order: 402, enabled: true, app_code: "fake-lag", app_label: "Fake Lag", key_signature: "FAKELAG", allow_reset: false, free_selection_mode: "package", free_selection_expand: true, default_package_code: "go", default_credit_code: null, default_wallet_kind: null },
+  { code: "fl_plus", label: "Fake Lag Plus 30 ngày", duration_seconds: 30 * 86400, kind: "day", value: 30, sort_order: 403, enabled: true, app_code: "fake-lag", app_label: "Fake Lag", key_signature: "FAKELAG", allow_reset: false, free_selection_mode: "package", free_selection_expand: true, default_package_code: "plus", default_credit_code: null, default_wallet_kind: null },
+];
+
+const DEFAULT_FAKE_LAG_CREDIT_KEY_ROWS = [
+  { code: "fl_usage", label: "Fake Lag lượt dùng", duration_seconds: 30 * 86400, kind: "day", value: 30, sort_order: 410, enabled: true, app_code: "fake-lag", app_label: "Fake Lag", key_signature: "FAKELAG", allow_reset: false, free_selection_mode: "credit", free_selection_expand: true, default_package_code: null, default_credit_code: "usage-normal", default_wallet_kind: "normal" },
+];
+
+function getPackageDefinitions(appCode: string) {
+  return appCode === "fake-lag" ? FAKE_LAG_PACKAGES : FIND_DUMPS_PACKAGES;
+}
+
+function getCreditDefinitions(appCode: string) {
+  return appCode === "fake-lag" ? FAKE_LAG_CREDITS : FIND_DUMPS_CREDITS;
+}
+
+function getDefaultKeyTypeRows(appCode: string, mode: "package" | "credit") {
+  if (appCode === "fake-lag") {
+    return mode === "credit" ? DEFAULT_FAKE_LAG_CREDIT_KEY_ROWS : DEFAULT_FAKE_LAG_PACKAGE_KEY_ROWS;
+  }
+  return mode === "credit" ? DEFAULT_FIND_DUMPS_CREDIT_KEY_ROWS : DEFAULT_FIND_DUMPS_PACKAGE_KEY_ROWS;
+}
+
+
+function packageSeedRows(rows: any[] | null | undefined, appCode: string) {
   const map = new Map((rows || []).map((row: any) => [String(row.package_code || "").trim().toLowerCase(), row]));
-  return FIND_DUMPS_PACKAGES.map((item) => {
+  return getPackageDefinitions(appCode).map((item: any) => {
     const hit = map.get(item.code);
     return {
       code: item.code,
@@ -68,9 +104,9 @@ function buildKeyTypeDefaults(row: any, mode: "package" | "credit", selectedCode
   };
 }
 
-function creditSeedRows(rows: any[] | null | undefined) {
+function creditSeedRows(rows: any[] | null | undefined, appCode: string) {
   const map = new Map((rows || []).map((row: any) => [String(row.package_code || "").trim().toLowerCase(), row]));
-  return FIND_DUMPS_CREDITS.map((item) => {
+  return getCreditDefinitions(appCode).map((item: any) => {
     const hit = map.get(item.code);
     return {
       code: item.code,
@@ -90,8 +126,8 @@ export function AdminServerAppKeysPage() {
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
   const { toast } = useToast();
   const [issueKind, setIssueKind] = useState<"package" | "credit">("package");
-  const [selectedPackageCode, setSelectedPackageCode] = useState<string>(FIND_DUMPS_PACKAGES[0].code);
-  const [selectedCreditCode, setSelectedCreditCode] = useState<string>(FIND_DUMPS_CREDITS[0].code);
+  const [selectedPackageCode, setSelectedPackageCode] = useState<string>(() => getPackageDefinitions(appCode)[0]?.code ?? "go");
+  const [selectedCreditCode, setSelectedCreditCode] = useState<string>(() => getCreditDefinitions(appCode)[0]?.code ?? "credit-normal");
 
   const rewardsQuery = useQuery({
     queryKey: ["server-app-keys-lite", appCode],
@@ -118,18 +154,18 @@ export function AdminServerAppKeysPage() {
     retry: false,
   });
 
-  const [packageDrafts, setPackageDrafts] = useState<any[]>(packageSeedRows([]));
-  const [creditDrafts, setCreditDrafts] = useState<any[]>(creditSeedRows([]));
+  const [packageDrafts, setPackageDrafts] = useState<any[]>(() => packageSeedRows([], appCode));
+  const [creditDrafts, setCreditDrafts] = useState<any[]>(() => creditSeedRows([], appCode));
 
   useEffect(() => {
     if (!rewardsQuery.data) return;
-    setPackageDrafts(packageSeedRows(rewardsQuery.data.rewards));
-    setCreditDrafts(creditSeedRows(rewardsQuery.data.rewards));
+    setPackageDrafts(packageSeedRows(rewardsQuery.data.rewards, appCode));
+    setCreditDrafts(creditSeedRows(rewardsQuery.data.rewards, appCode));
     const packageDefault = rewardsQuery.data.keyTypes?.find((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "package" && String(row.default_package_code || "").trim())?.default_package_code;
     const creditDefault = rewardsQuery.data.keyTypes?.find((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "credit" && String(row.default_credit_code || "").trim())?.default_credit_code;
     if (packageDefault) setSelectedPackageCode(String(packageDefault).trim().toLowerCase());
     if (creditDefault) setSelectedCreditCode(String(creditDefault).trim().toLowerCase());
-  }, [rewardsQuery.data]);
+  }, [rewardsQuery.data, appCode]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -171,8 +207,8 @@ export function AdminServerAppKeysPage() {
       const allKeyTypeRows = rewardsQuery.data?.keyTypes || [];
       const detectedCreditRows = allKeyTypeRows.filter((row: any) => String(row.free_selection_mode || "").trim().toLowerCase() === "credit" || String(row.code || "").toLowerCase().includes("credit"));
       const detectedPackageRows = allKeyTypeRows.filter((row: any) => !(String(row.free_selection_mode || "").trim().toLowerCase() === "credit" || String(row.code || "").toLowerCase().includes("credit")));
-      const creditRows = detectedCreditRows.length ? detectedCreditRows : DEFAULT_FIND_DUMPS_CREDIT_KEY_ROWS;
-      const packageRows = detectedPackageRows.length ? detectedPackageRows : DEFAULT_FIND_DUMPS_PACKAGE_KEY_ROWS;
+      const creditRows = detectedCreditRows.length ? detectedCreditRows : getDefaultKeyTypeRows(appCode, "credit");
+      const packageRows = detectedPackageRows.length ? detectedPackageRows : getDefaultKeyTypeRows(appCode, "package");
 
       if (creditRows.length && selectedCredit) {
         const creditUpdate = creditRows.map((row: any) => buildKeyTypeDefaults(
@@ -204,7 +240,7 @@ export function AdminServerAppKeysPage() {
     },
     onSuccess: async () => {
       await rewardsQuery.refetch();
-      toast({ title: "Đã lưu Server key", description: "Package key và credit key của Find Dumps đã được cập nhật." });
+      toast({ title: "Đã lưu Server key", description: `Package key và credit key của ${meta.label} đã được cập nhật.` });
     },
     onError: (error: any) => toast({ title: "Không lưu được Server key", description: error?.message || "Vui lòng kiểm tra bảng server_app_reward_packages.", variant: "destructive" }),
   });
@@ -239,7 +275,7 @@ export function AdminServerAppKeysPage() {
       <header className="space-y-2">
         <Badge variant="outline">Server key</Badge>
         <h1 className="text-2xl font-semibold">Server key cho {meta.label}</h1>
-        <p className="max-w-4xl text-sm text-muted-foreground">Khu này tách hẳn khỏi Runtime và Audit Log. Package key, credit key, số lần dùng, thời hạn và cách bung lựa chọn ở trang free được quản lý riêng cho Find Dumps.</p>
+        <p className="max-w-4xl text-sm text-muted-foreground">Khu này tách hẳn khỏi Runtime và Audit Log. Package key, credit key, số lần dùng, thời hạn và cách bung lựa chọn ở trang free/public được quản lý riêng cho từng app-host.</p>
       </header>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -250,8 +286,8 @@ export function AdminServerAppKeysPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Preview hành vi ở trang free</CardTitle>
-          <CardDescription>Khi chọn key Find Dumps ở trang free, user chỉ bung thêm lựa chọn package hoặc credit. Các ngày/giờ cụ thể được chốt sẵn ở server key, không bắt user nhập lại.</CardDescription>
+          <CardTitle>Preview hành vi ở trang public</CardTitle>
+          <CardDescription>Khi chọn key ở trang public, user chỉ bung thêm lựa chọn package hoặc credit. Các ngày/giờ cụ thể được chốt sẵn ở server key, không bắt user nhập lại.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">

@@ -126,6 +126,12 @@ const APP_FALLBACKS = [
     description: "App SunnyMod Find Dumps. Dùng màn này để chuẩn bị cấu hình go/plus/pro, credit và entitlement riêng.",
     admin_url: (import.meta.env.VITE_SERVER_APP_FIND_DUMPS_URL as string | undefined)?.trim() || buildAppWorkspaceUrl("find-dumps", "keys"),
   },
+  {
+    code: "fake-lag",
+    label: "Fake Lag",
+    description: "App Fake Lag dùng app-host riêng: tách server key, runtime, điều khiển thiết bị/IP, audit log và trash.",
+    admin_url: (import.meta.env.VITE_SERVER_APP_FAKE_LAG_URL as string | undefined)?.trim() || buildAppWorkspaceUrl("fake-lag", "keys"),
+  },
 ] as const;
 
 const PLAN_TEMPLATES: Record<string, ServerAppPlanRow[]> = {
@@ -140,6 +146,12 @@ const PLAN_TEMPLATES: Record<string, ServerAppPlanRow[]> = {
     { app_code: "free-fire", plan_code: "go", label: "Go", enabled: true, daily_soft_credit: 2, daily_premium_credit: 0, soft_cost_multiplier: 0.95, premium_cost_multiplier: 0.8, device_limit: 1, account_limit: 1, sort_order: 20 },
     { app_code: "free-fire", plan_code: "plus", label: "Plus", enabled: true, daily_soft_credit: 4, daily_premium_credit: 1, soft_cost_multiplier: 0.8, premium_cost_multiplier: 0.6, device_limit: 2, account_limit: 1, sort_order: 30 },
     { app_code: "free-fire", plan_code: "pro", label: "Pro", enabled: true, daily_soft_credit: 6, daily_premium_credit: 2, soft_cost_multiplier: 0.7, premium_cost_multiplier: 0.45, device_limit: 3, account_limit: 1, sort_order: 40 },
+  ],
+  "fake-lag": [
+    { app_code: "fake-lag", plan_code: "classic", label: "Classic", enabled: true, daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 1, account_limit: 1, sort_order: 10 },
+    { app_code: "fake-lag", plan_code: "go", label: "Go", enabled: true, daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 1, account_limit: 1, sort_order: 20 },
+    { app_code: "fake-lag", plan_code: "plus", label: "Plus", enabled: true, daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 2, account_limit: 1, sort_order: 30 },
+    { app_code: "fake-lag", plan_code: "pro", label: "Pro", enabled: true, daily_soft_credit: 0, daily_premium_credit: 0, soft_cost_multiplier: 1, premium_cost_multiplier: 1, device_limit: 3, account_limit: 1, sort_order: 40 },
   ],
 };
 
@@ -161,6 +173,12 @@ const FEATURE_TEMPLATES: Record<string, ServerAppFeatureRow[]> = {
     { app_code: "free-fire", feature_code: "vip_2pass", title: "VIP 2-pass", description: "Loại key cần vượt 2 lượt", enabled: true, min_plan: "go", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 20, category: "key", group_key: "vip", icon_key: "key", badge_label: "VIP", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
     { app_code: "free-fire", feature_code: "reset_key", title: "Reset key", description: "Khả năng reset nếu key cho phép", enabled: true, min_plan: "plus", requires_credit: true, soft_cost: 1, premium_cost: 1, reset_period: "daily", sort_order: 30, category: "key", group_key: "reset", icon_key: "reset", badge_label: "Thường", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
   ],
+  "fake-lag": [
+    { app_code: "fake-lag", feature_code: "key_login", title: "Key login", description: "Đăng nhập app bằng key riêng của Fake Lag", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 10, category: "key", group_key: "auth", icon_key: "key", badge_label: "Core", visible_to_guest: true, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "fake-lag", feature_code: "device_bind", title: "Khóa thiết bị", description: "Bind key theo thiết bị và chữ ký app", enabled: true, min_plan: "classic", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 20, category: "security", group_key: "device", icon_key: "shield", badge_label: "Protect", visible_to_guest: false, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "fake-lag", feature_code: "ip_limit", title: "Giới hạn IP", description: "Giới hạn IP theo key và log thay đổi để audit", enabled: true, min_plan: "go", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 30, category: "security", group_key: "ip", icon_key: "network", badge_label: "Rule", visible_to_guest: false, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+    { app_code: "fake-lag", feature_code: "admin_key_ops", title: "Admin key ops", description: "Tạo, chặn, xóa, sửa và reset key từ admin", enabled: true, min_plan: "plus", requires_credit: false, soft_cost: 0, premium_cost: 0, reset_period: "daily", sort_order: 40, category: "admin", group_key: "key", icon_key: "edit", badge_label: "Admin", visible_to_guest: false, charge_unit: 1, charge_on_success_only: true, client_accumulate_units: false },
+  ],
 };
 
 const PACKAGE_TEMPLATES: Record<string, ServerAppRewardPackageRow[]> = {
@@ -173,6 +191,11 @@ const PACKAGE_TEMPLATES: Record<string, ServerAppRewardPackageRow[]> = {
     { app_code: "free-fire", package_code: "ff_go_7d", title: "Free Fire Go 7 ngày", description: "Mở plan Go cho app Free Fire.", enabled: true, reward_mode: "plan", plan_code: "go", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 7, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Có thể map với key mua bên admin." },
     { app_code: "free-fire", package_code: "ff_plus_30d", title: "Free Fire Plus 30 ngày", description: "Mở plan Plus, cho reset key với cost mềm hơn.", enabled: true, reward_mode: "plan", plan_code: "plus", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 30, device_limit_override: 2, account_limit_override: 1, sort_order: 20, notes: "Dùng cho tab Quà tặng sau này." },
     { app_code: "free-fire", package_code: "ff_credit_topup", title: "Top-up credit kim cương", description: "Nạp credit kim cương trả phí để dùng feature hao rẻ hơn.", enabled: true, reward_mode: "premium_credit", plan_code: null, soft_credit_amount: 0, premium_credit_amount: 5, entitlement_days: 0, device_limit_override: null, account_limit_override: null, sort_order: 30, notes: "Dùng cho key top-up riêng." },
+  ],
+  "fake-lag": [
+    { app_code: "fake-lag", package_code: "fl_go_7d", title: "Fake Lag Go 7 ngày", description: "Gói cơ bản cho Fake Lag với chữ ký app riêng.", enabled: true, reward_mode: "plan", plan_code: "go", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 7, device_limit_override: 1, account_limit_override: 1, sort_order: 10, notes: "Phù hợp key random vượt xong dùng ngay." },
+    { app_code: "fake-lag", package_code: "fl_plus_30d", title: "Fake Lag Plus 30 ngày", description: "Tăng giới hạn thiết bị/lượt dùng cho admin cấp riêng.", enabled: true, reward_mode: "plan", plan_code: "plus", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 30, device_limit_override: 2, account_limit_override: 1, sort_order: 20, notes: "Admin có thể sửa/xóa/chặn key ở tab điều khiển." },
+    { app_code: "fake-lag", package_code: "fl_admin_custom", title: "Fake Lag Admin Custom", description: "Gói để admin tạo key tay với số lần dùng, giới hạn IP / thiết bị riêng.", enabled: true, reward_mode: "plan", plan_code: "pro", soft_credit_amount: 0, premium_credit_amount: 0, entitlement_days: 30, device_limit_override: 3, account_limit_override: 1, sort_order: 30, notes: "Dùng cho create key tùy chỉnh từ admin." },
   ],
 };
 
@@ -212,6 +235,24 @@ const WALLET_TEMPLATES: Record<string, ServerAppWalletRuleRow> = {
     soft_allow_negative: true,
     premium_allow_negative: false,
     notes: "Dùng decimal để tránh cảm giác lạm phát credit.",
+  },
+  "fake-lag": {
+    app_code: "fake-lag",
+    soft_wallet_label: "Lượt dùng",
+    premium_wallet_label: "Lượt VIP",
+    allow_decimal: false,
+    soft_daily_reset_enabled: false,
+    premium_daily_reset_enabled: false,
+    soft_daily_reset_amount: 0,
+    premium_daily_reset_amount: 0,
+    consume_priority: 'soft_first',
+    soft_daily_reset_mode: 'debt_floor',
+    premium_daily_reset_mode: 'debt_floor',
+    soft_floor_credit: 0,
+    premium_floor_credit: 0,
+    soft_allow_negative: false,
+    premium_allow_negative: false,
+    notes: "Fake Lag ưu tiên quản lý key, lượt dùng, IP và thiết bị hơn là hệ credit phức tạp.",
   },
 };
 
