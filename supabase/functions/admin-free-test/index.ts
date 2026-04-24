@@ -195,7 +195,7 @@ Deno.serve(async (req) => {
         is_active: true,
         max_devices: 1,
         max_ips: appCode === "fake-lag" ? 1 : null,
-        max_verify: appCode === "fake-lag" ? 9999 : null,
+        max_verify: appCode === "fake-lag" ? 1 : null,
         expires_at: expiresAt,
         note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature}`,
       })

@@ -60,6 +60,7 @@ function getAllowedFunctions(env) {
     "server-app-runtime",
     "server-app-runtime-ops",
     "fake-lag-check",
+    "fake-lag-auth",
   ]);
 }
 

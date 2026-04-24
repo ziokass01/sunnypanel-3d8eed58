@@ -48,7 +48,7 @@ declare
   v_ip_count integer := 0;
   v_verify_count integer := 0;
   v_max_ips integer := 1;
-  v_max_verify integer := 9999;
+  v_max_verify integer := 1;
 begin
   select * into v_rule from public.license_access_rules where app_code = coalesce(nullif(p_app_code, ''), 'fake-lag');
   if not found then select * into v_rule from public.license_access_rules where app_code = 'fake-lag'; end if;
@@ -56,7 +56,7 @@ begin
   select * into v_license from public.licenses where id = p_license_id for update;
   if not found then return query select false, 'KEY_NOT_FOUND', 0, 0; return; end if;
   v_max_ips := greatest(1, coalesce(v_license.max_ips, v_rule.max_ips_per_key, 1));
-  v_max_verify := greatest(1, coalesce(v_license.max_verify, v_rule.max_verify_per_key, 9999));
+  v_max_verify := greatest(1, coalesce(v_license.max_verify, v_rule.max_verify_per_key, 1));
   if p_ip_hash = any(coalesce(v_rule.blocked_ip_hashes, '{}')) then return query select false, 'IP_BLOCKED', coalesce(v_license.verify_count, 0), 0; return; end if;
   insert into public.license_ip_bindings (license_id, app_code, ip_hash, verify_count)
   values (p_license_id, coalesce(nullif(p_app_code, ''), 'fake-lag'), p_ip_hash, 1)

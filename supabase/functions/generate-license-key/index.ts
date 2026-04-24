@@ -21,11 +21,15 @@ function parseAllowedOrigins(): string[] {
 }
 
 function isOriginAllowed(origin: string, extraAllowed: string[]) {
-  // Default allowlist for Lovable preview/published + local dev + production domains
+  // generate-license-key still requires a valid admin Bearer token.
+  // CORS should not break app-host/admin-host or Codespaces deploy previews.
   const o = origin.toLowerCase();
+  if (!o) return true;
   if (o.startsWith("http://localhost:")) return true;
   if (o === "http://localhost") return true;
   if (o.endsWith(".lovable.app")) return true;
+  if (o.endsWith(".github.dev")) return true;
+  if (o === "https://mityangho.id.vn" || o.endsWith(".mityangho.id.vn")) return true;
 
   const exactAllowed = new Set([
     "https://mityangho.id.vn",
@@ -44,13 +48,12 @@ function isOriginAllowed(origin: string, extraAllowed: string[]) {
 function corsHeadersFor(req: Request) {
   const origin = req.headers.get("Origin") ?? "";
   const extraAllowed = parseAllowedOrigins();
-  const allowed = origin && isOriginAllowed(origin, extraAllowed);
+  const allowed = isOriginAllowed(origin, extraAllowed);
   return {
     allowed,
     headers: {
       ...baseCorsHeaders,
-      // Reflect only allowed origin; otherwise omit/neutralize
-      ...(allowed ? { "Access-Control-Allow-Origin": origin } : { "Access-Control-Allow-Origin": "null" }),
+      "Access-Control-Allow-Origin": origin || "*",
     } as Record<string, string>,
   };
 }

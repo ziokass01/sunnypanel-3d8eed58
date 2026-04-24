@@ -888,6 +888,8 @@ Deno.serve(async (req) => {
         key,
         is_active: true,
         max_devices: 1,
+        max_ips: appCode === "fake-lag" ? 1 : null,
+        max_verify: appCode === "fake-lag" ? 1 : null,
         expires_at,
         note: freeNote,
         app_code: appCode,

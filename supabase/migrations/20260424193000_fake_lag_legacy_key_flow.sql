@@ -7,7 +7,7 @@ create table if not exists public.license_access_rules (
   default_duration_seconds integer not null default 86400,
   max_devices_per_key integer not null default 1,
   max_ips_per_key integer not null default 1,
-  max_verify_per_key integer not null default 9999,
+  max_verify_per_key integer not null default 1,
   public_enabled boolean not null default true,
   allow_reset boolean not null default false,
   blocked_device_hashes text[] not null default '{}',
@@ -53,7 +53,7 @@ values (
   86400,
   1,
   1,
-  9999,
+  1,
   true,
   false,
   'Fake Lag dùng key riêng FAKELAG, không trộn với key SUNNY của Free Fire.'
@@ -126,7 +126,7 @@ begin
   where id = p_license_id
   returning verify_count into v_verify_count;
 
-  if v_verify_count > coalesce(v_rule.max_verify_per_key, 9999) then
+  if v_verify_count > coalesce(v_rule.max_verify_per_key, 1) then
     return query select false, 'VERIFY_LIMIT_EXCEEDED', v_verify_count, v_ip_count;
     return;
   end if;
