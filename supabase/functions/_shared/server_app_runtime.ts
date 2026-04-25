@@ -1425,6 +1425,30 @@ async function revokeActiveDeviceSessions(appCode: string, accountRef: string, d
   if (error) throw error;
 }
 
+async function revokeActiveAccountSessions(appCode: string, accountRef: string, reason: string) {
+  const normalizedAccountRef = normalizeAccountRef(accountRef);
+  if (!normalizedAccountRef) return;
+  const admin = createAdminClient();
+  const nowIso = getNowIso();
+  const aliases = getAccountRefAliases(normalizedAccountRef);
+  for (const alias of aliases) {
+    const { error } = await admin
+      .from("server_app_sessions")
+      .update({
+        status: "revoked",
+        revoked_at: nowIso,
+        revoke_reason: reason,
+        last_seen_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq("app_code", appCode)
+      .ilike("account_ref", alias)
+      .eq("status", "active");
+
+    if (error) throw error;
+  }
+}
+
 async function countOtherActiveDevices(appCode: string, accountRef: string, currentDeviceId: string) {
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -2142,14 +2166,10 @@ export async function redeemRuntimeKey(params: {
 
   const existingEntitlement = await getLatestActiveEntitlement(appCode, accountRef);
 
-  const predictedDeviceLimit = reward.device_limit_override
-    ?? planDefaults?.device_limit
-    ?? existingEntitlement?.device_limit
-    ?? 1;
-  const otherActiveDevicesBeforeRedeem = await countOtherActiveDevices(appCode, accountRef, deviceId);
-  if (predictedDeviceLimit > 0 && otherActiveDevicesBeforeRedeem >= predictedDeviceLimit) {
-    throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
-  }
+  // Do not block redeem just because this account has an old active session on another device.
+  // Redeem is the recovery/rotation path used by the Android app: stale sessions from a reinstall,
+  // Android ID change, or an older APK must be revoked before the new runtime session is created.
+  // Per-key abuse limits are still enforced by server_app_reserve_redeem_use() below.
 
   let reservedUseId: string | null = null;
   try {
@@ -2190,7 +2210,7 @@ export async function redeemRuntimeKey(params: {
   });
 
   const deviceLimit = entitlement?.device_limit ?? effectivePlanRow?.device_limit ?? 1;
-  await revokeActiveDeviceSessions(appCode, accountRef, deviceId, "redeem_rotate");
+  await revokeActiveAccountSessions(appCode, accountRef, "redeem_rotate");
   const otherActiveDevices = await countOtherActiveDevices(appCode, accountRef, deviceId);
   if (deviceLimit > 0 && otherActiveDevices >= deviceLimit) {
     throw Object.assign(new Error("DEVICE_LIMIT_REACHED"), { status: 409, code: "DEVICE_LIMIT_REACHED" });
