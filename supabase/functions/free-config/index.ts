@@ -1,14 +1,38 @@
 import { resolveCorsOrigin } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+function normalizePublicBaseUrl(value?: string | null) {
+  const raw = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return raw;
+}
+
+function isBadRuntimeHost(hostOrUrl: string) {
+  const raw = String(hostOrUrl || "").toLowerCase();
+  return raw.includes("edge-runtime.supabase.com")
+    || raw.includes(".functions.supabase.co")
+    || raw.includes(".supabase.co/functions")
+    || raw.includes("/functions/v1/");
+}
+
 function inferBaseUrl(req: Request) {
-  const origin = req.headers.get("origin");
-  if (origin) return origin;
+  const configured = normalizePublicBaseUrl(
+    Deno.env.get("FREE_PUBLIC_BASE_URL")
+    || Deno.env.get("PUBLIC_BASE_URL")
+    || "https://mityangho.id.vn",
+  );
+
+  const origin = normalizePublicBaseUrl(req.headers.get("origin"));
+  if (origin && !isBadRuntimeHost(origin)) return origin;
+
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  if (host) return `${proto}://${host}`;
-  return "";
+  const inferred = host ? normalizePublicBaseUrl(`${proto}://${host}`) : "";
+  if (inferred && !isBadRuntimeHost(inferred)) return inferred;
+
+  return configured;
 }
+
 
 
 function getClientIp(req: Request) {
@@ -105,9 +129,35 @@ async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackF
   }
 
   const rows = Array.isArray(data) ? data : [];
+
+  // Fake Lag phải lấy quota public từ Server app → Fake Lag → Server key.
+  // Không dùng nhầm giới hạn legacy của Admin Free key.
+  let fakeLagRule: any = null;
+  if (uniqueCodes.includes("fake-lag")) {
+    try {
+      const ruleRes = await sb
+        .from("license_access_rules")
+        .select("max_devices_per_key,max_ips_per_key,max_verify_per_key,public_enabled")
+        .eq("app_code", "fake-lag")
+        .maybeSingle();
+      if (!ruleRes.error && ruleRes.data) fakeLagRule = ruleRes.data;
+    } catch {
+      fakeLagRule = null;
+    }
+  }
+
   const map: Record<string, { free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number }> = {};
   for (const code of uniqueCodes) {
     const hit = rows.find((row: any) => String(row?.app_code ?? "").trim().toLowerCase() === code);
+    if (code === "fake-lag" && fakeLagRule) {
+      const fpLimit = Math.max(0, Number(fakeLagRule.max_devices_per_key ?? fakeLagRule.max_verify_per_key ?? hit?.free_daily_limit_per_fingerprint ?? fallbackFp));
+      const ipLimit = Math.max(0, Number(fakeLagRule.max_ips_per_key ?? hit?.free_daily_limit_per_ip ?? fallbackIp));
+      map[code] = {
+        free_daily_limit_per_fingerprint: fpLimit,
+        free_daily_limit_per_ip: ipLimit,
+      };
+      continue;
+    }
     map[code] = {
       free_daily_limit_per_fingerprint: Math.max(0, Number(hit?.free_daily_limit_per_fingerprint ?? fallbackFp)),
       free_daily_limit_per_ip: Math.max(0, Number(hit?.free_daily_limit_per_ip ?? fallbackIp)),
@@ -118,7 +168,7 @@ async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackF
 
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
-  const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
+  const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL || "https://mityangho.id.vn";
 
   const origin = req.headers.get("origin") ?? "";
   const allowOrigin = resolveCorsOrigin(origin, baseUrl || PUBLIC_BASE_URL);

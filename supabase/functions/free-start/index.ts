@@ -4,14 +4,38 @@ import { assertAdmin } from "../_shared/admin.ts";
 import { resolveCorsOrigin } from "../_shared/cors.ts";
 import { resolveClientIp } from "../_shared/client-ip.ts";
 
+function normalizePublicBaseUrl(value?: string | null) {
+  const raw = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return raw;
+}
+
+function isBadRuntimeHost(hostOrUrl: string) {
+  const raw = String(hostOrUrl || "").toLowerCase();
+  return raw.includes("edge-runtime.supabase.com")
+    || raw.includes(".functions.supabase.co")
+    || raw.includes(".supabase.co/functions")
+    || raw.includes("/functions/v1/");
+}
+
 function inferBaseUrl(req: Request) {
-  const origin = req.headers.get("origin");
-  if (origin) return origin;
+  const configured = normalizePublicBaseUrl(
+    Deno.env.get("FREE_PUBLIC_BASE_URL")
+    || Deno.env.get("PUBLIC_BASE_URL")
+    || "https://mityangho.id.vn",
+  );
+
+  const origin = normalizePublicBaseUrl(req.headers.get("origin"));
+  if (origin && !isBadRuntimeHost(origin)) return origin;
+
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  if (host) return `${proto}://${host}`;
-  return "";
+  const inferred = host ? normalizePublicBaseUrl(`${proto}://${host}`) : "";
+  if (inferred && !isBadRuntimeHost(inferred)) return inferred;
+
+  return configured;
 }
+
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -205,7 +229,7 @@ Deno.serve(async (req) => {
     const rawOutbound = String(settings?.free_outbound_url ?? "").trim();
     const fallbackOutbound = "https://link4m.com/PkY7X";
 
-    const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
+    const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL || "https://mityangho.id.vn";
     if (!baseUrl) {
       return jsonResponse({ ok: false, code: "SERVER_MISCONFIG", msg: "Missing PUBLIC_BASE_URL" }, 500);
     }

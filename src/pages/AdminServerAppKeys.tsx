@@ -212,6 +212,22 @@ function FakeLagLegacyServerKeyPanel({ appCode, appLabel }: { appCode: string; a
         .from("licenses_free_key_types")
         .upsert(keyTypePayload, { onConflict: "code" });
       if (keyTypeWrite.error) throw keyTypeWrite.error;
+
+      // Đồng bộ quota trang /free theo đúng Server key của Fake Lag.
+      // Không để /free dùng nhầm giới hạn legacy của Admin Free key.
+      const settingsPayload = {
+        app_code: appCode,
+        free_daily_limit_per_fingerprint: Math.max(0, Number(payload.max_devices_per_key || payload.max_verify_per_key || 1)),
+        free_daily_limit_per_ip: Math.max(0, Number(payload.max_ips_per_key || 0)),
+      };
+      const settingsWrite = await (supabase.from("server_app_settings") as any)
+        .upsert(settingsPayload, { onConflict: "app_code" });
+      if (settingsWrite.error) {
+        const msg = String(settingsWrite.error?.message || "").toLowerCase();
+        if (!(msg.includes("does not exist") || msg.includes("undefined column") || msg.includes("schema cache"))) {
+          throw settingsWrite.error;
+        }
+      }
     },
     onSuccess: async () => {
       await ruleQuery.refetch();

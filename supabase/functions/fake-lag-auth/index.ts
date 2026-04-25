@@ -281,7 +281,10 @@ Deno.serve(async (req) => {
   }
 
   let guardRow: any = { ok: true, msg: "OK", verify_count: licRow.verify_count ?? null, ip_count: null };
-  if (mode === "login") {
+  // Chỉ trừ lượt verify khi key được bind vào thiết bị mới.
+  // Cùng thiết bị đăng nhập lại/refresh không được làm tụt lượt để tránh rớt session vô lý.
+  const shouldCountVerify = mode === "login" && !existingDevice.data;
+  if (shouldCountVerify) {
     const useGuard = await db.rpc("increment_fake_lag_license_use", { p_license_id: licRow.id, p_app_code: "fake-lag", p_ip_hash: ipHash });
     guardRow = Array.isArray(useGuard.data) ? useGuard.data[0] : useGuard.data;
     if (useGuard.error) {

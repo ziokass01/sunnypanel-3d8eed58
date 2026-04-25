@@ -23,14 +23,38 @@ function base64url(bytesLen = 18) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function normalizePublicBaseUrl(value?: string | null) {
+  const raw = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return raw;
+}
+
+function isBadRuntimeHost(hostOrUrl: string) {
+  const raw = String(hostOrUrl || "").toLowerCase();
+  return raw.includes("edge-runtime.supabase.com")
+    || raw.includes(".functions.supabase.co")
+    || raw.includes(".supabase.co/functions")
+    || raw.includes("/functions/v1/");
+}
+
 function inferBaseUrl(req: Request) {
-  const origin = req.headers.get("origin");
-  if (origin) return origin;
+  const configured = normalizePublicBaseUrl(
+    Deno.env.get("FREE_PUBLIC_BASE_URL")
+    || Deno.env.get("PUBLIC_BASE_URL")
+    || "https://mityangho.id.vn",
+  );
+
+  const origin = normalizePublicBaseUrl(req.headers.get("origin"));
+  if (origin && !isBadRuntimeHost(origin)) return origin;
+
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  if (host) return `${proto}://${host}`;
-  return "";
+  const inferred = host ? normalizePublicBaseUrl(`${proto}://${host}`) : "";
+  if (inferred && !isBadRuntimeHost(inferred)) return inferred;
+
+  return configured;
 }
+
 
 function isActiveBlockUntil(blockedUntil?: string | null) {
   if (!blockedUntil) return true;
@@ -766,7 +790,7 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
 
     const rotateBucket = String((sess as any).rotate_bucket_pass2 ?? (sess as any).rotate_bucket ?? "").trim();
-    const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL;
+    const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL || "https://mityangho.id.vn";
     const gateUrlPass2 = baseUrl
       ? `${baseUrl}/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`
       : `/free/gate?p=2&b=${encodeURIComponent(rotateBucket || "0")}`;
@@ -845,7 +869,7 @@ Deno.serve(async (req) => {
 
   if (updErr) return json({ ok: false, code: "SERVER_ERROR", msg: updErr.message } satisfies JsonErr, 500);
 
-  const baseUrl = PUBLIC_BASE_URL || inferBaseUrl(req) || "";
+  const baseUrl = inferBaseUrl(req) || PUBLIC_BASE_URL || "https://mityangho.id.vn";
   let claim_url = "";
   if (baseUrl) {
     const params = new URLSearchParams();

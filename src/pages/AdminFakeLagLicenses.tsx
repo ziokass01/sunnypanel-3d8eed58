@@ -300,7 +300,10 @@ export function AdminFakeLagLicensesPage() {
   const toggleBlockMutation = useMutation({
     mutationFn: async (row: FakeLagLicenseRow) => {
       const next = !row.is_active;
-      const { error } = await (supabase.from("licenses") as any).update({ is_active: next }).eq("id", row.id);
+      const patch = next
+        ? { is_active: true, deleted_at: null }
+        : { is_active: false };
+      const { error } = await (supabase.from("licenses") as any).update(patch).eq("id", row.id);
       if (error) throw error;
       await logAudit(next ? "FAKE_LAG_UNLOCK" : "FAKE_LAG_BLOCK", row.key, { app_code: APP_CODE, license_id: row.id });
     },
