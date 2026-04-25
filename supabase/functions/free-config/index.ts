@@ -112,6 +112,11 @@ function normalizeFreeSelectionMode(value: unknown): "none" | "package" | "credi
   return "none";
 }
 
+function positiveLimit(value: unknown): number | null {
+  const n = Math.floor(Number(value ?? 0));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackFp: number, fallbackIp: number) {
   const uniqueCodes = [...new Set(appCodes.map((v) => String(v || "").trim().toLowerCase()).filter(Boolean))];
   if (!uniqueCodes.length) return {} as Record<string, { free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number }>;
@@ -130,8 +135,10 @@ async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackF
 
   const rows = Array.isArray(data) ? data : [];
 
-  // Fake Lag phải lấy quota public từ Server app → Fake Lag → Server key.
-  // Không dùng nhầm giới hạn legacy của Admin Free key.
+  // Fake Lag public quota must follow Server app -> Fake Lag -> Server key verify limit.
+  // Do not use max_devices_per_key/max_ips_per_key as daily Get Key quota: those fields are
+  // runtime bind constraints and can be 0/1, which made /free show 0 even when server verify
+  // limit was set to 50.
   let fakeLagRule: any = null;
   if (uniqueCodes.includes("fake-lag")) {
     try {
@@ -149,12 +156,18 @@ async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackF
   const map: Record<string, { free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number }> = {};
   for (const code of uniqueCodes) {
     const hit = rows.find((row: any) => String(row?.app_code ?? "").trim().toLowerCase() === code);
-    if (code === "fake-lag" && fakeLagRule) {
-      const fpLimit = Math.max(0, Number(fakeLagRule.max_devices_per_key ?? fakeLagRule.max_verify_per_key ?? hit?.free_daily_limit_per_fingerprint ?? fallbackFp));
-      const ipLimit = Math.max(0, Number(fakeLagRule.max_ips_per_key ?? hit?.free_daily_limit_per_ip ?? fallbackIp));
+    if (code === "fake-lag") {
+      const verifyLimit = positiveLimit(fakeLagRule?.max_verify_per_key);
+      const syncedFpLimit = positiveLimit(hit?.free_daily_limit_per_fingerprint);
+      const fallbackFpLimit = positiveLimit(fallbackFp);
+      const fpLimit = verifyLimit ?? syncedFpLimit ?? fallbackFpLimit ?? 0;
+
+      // A per-IP cap here is optional. Prefer explicit free_daily_limit_per_ip from server_app_settings;
+      // otherwise keep IP unlimited so it cannot hide the real verify limit in the public counter.
+      const syncedIpLimit = positiveLimit(hit?.free_daily_limit_per_ip);
       map[code] = {
         free_daily_limit_per_fingerprint: fpLimit,
-        free_daily_limit_per_ip: ipLimit,
+        free_daily_limit_per_ip: syncedIpLimit ?? 0,
       };
       continue;
     }
