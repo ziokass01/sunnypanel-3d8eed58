@@ -284,15 +284,15 @@ function FakeLagLegacyServerKeyPanel({ appCode, appLabel }: { appCode: string; a
               <Input type="number" min={1} value={draft.default_duration_hours} onChange={(e) => updateDraft({ default_duration_hours: Number(e.target.value || 1) })} />
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">Max thiết bị / key</div>
+              <div className="text-sm font-medium">Quota thiết bị/ngày ở trang free</div>
               <Input type="number" min={1} value={draft.max_devices_per_key} onChange={(e) => updateDraft({ max_devices_per_key: Number(e.target.value || 1) })} />
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">Max IP / key</div>
+              <div className="text-sm font-medium">Quota IP/ngày ở trang free</div>
               <Input type="number" min={1} value={draft.max_ips_per_key} onChange={(e) => updateDraft({ max_ips_per_key: Number(e.target.value || 1) })} />
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">Max lượt verify / key</div>
+              <div className="text-sm font-medium">Lượt verify cho key phát ra</div>
               <Input type="number" min={1} value={draft.max_verify_per_key} onChange={(e) => updateDraft({ max_verify_per_key: Number(e.target.value || 1) })} />
             </div>
           </div>

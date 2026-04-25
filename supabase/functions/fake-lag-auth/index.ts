@@ -180,6 +180,7 @@ Deno.serve(async (req) => {
   const device = safeText(input.device, 128);
   const deviceName = safeText(input.device_name, 128);
   const ip = getClientIp(req);
+  const riskFlags = safeText((input as any).risk_flags, 512);
   const now = new Date();
 
   if (!validFakeLagKey(key)) return json({ ok: false, msg: "INVALID_KEY_FORMAT" }, 200);
@@ -188,6 +189,10 @@ Deno.serve(async (req) => {
   const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
   const version = await checkVersionPolicy(db, input);
   if (!version.allowed) return json({ ok: false, msg: version.reason || "UPDATE_REQUIRED", ...version }, 200);
+  if (/debugger|frida/i.test(riskFlags)) {
+    await db.from("audit_logs").insert({ action: "FAKE_LAG_RUNTIME_RISK", license_key: key || null, detail: { ip, device, ok: false, app_code: "fake-lag", risk_flags: riskFlags } });
+    return json({ ok: false, msg: "RUNTIME_RISK" }, 200);
+  }
 
   const clientIdentity = {
     key,
@@ -250,16 +255,9 @@ Deno.serve(async (req) => {
 
   const existingDevice = await db.from("license_devices").select("id").eq("license_id", licRow.id).eq("device_id", device).maybeSingle();
   if (existingDevice.error) return json({ ok: false, msg: "SERVER_ERROR" }, 500);
-  if (!existingDevice.data) {
-    const count = await db.from("license_devices").select("id", { count: "exact", head: true }).eq("license_id", licRow.id);
-    const used = Number(count.count ?? 0);
-    const maxDevices = Math.max(1, Number(licRow.max_devices ?? 1));
-    if (used >= maxDevices) {
-      await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "DEVICE_LIMIT" } });
-      return json({ ok: false, msg: "DEVICE_LIMIT" }, 200);
-    }
-  }
-
+  // Fake Lag license không giới hạn IP/thiết bị theo từng key.
+  // IP/thiết bị chỉ dùng để giới hạn số lần lấy key public ở /free.
+  // License chỉ giới hạn theo lượt verify/use.
   const upsertPayload: Record<string, unknown> = { license_id: licRow.id, device_id: device, last_seen: now.toISOString() };
   if (deviceName) upsertPayload.device_name = deviceName;
   let deviceRowId: string | null = null;
@@ -337,7 +335,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId } });
+  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId, risk_flags: riskFlags || null } });
   const remainingSeconds = effectiveExpiresAt ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000)) : startsOnFirstUse && !started && typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
   const issuedToken = await issueSessionToken(serviceRoleKey, {
     ...clientIdentity,
@@ -352,7 +350,6 @@ Deno.serve(async (req) => {
     app_code: "fake-lag",
     expires_at: effectiveExpiresAt,
     remaining_seconds: remainingSeconds,
-    max_devices: licRow.max_devices,
     verify_count: guardRow?.verify_count ?? null,
     ip_count: guardRow?.ip_count ?? null,
     session_token: issuedToken.token,

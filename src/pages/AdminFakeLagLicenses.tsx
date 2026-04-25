@@ -241,8 +241,8 @@ export function AdminFakeLagLicensesPage() {
         key,
         app_code: APP_CODE,
         is_active: Boolean(form.isActive),
-        max_devices: Math.max(1, Math.trunc(Number(form.maxDevices) || 1)),
-        max_ips: Math.max(1, Math.trunc(Number(form.maxIps) || 1)),
+        max_devices: 1,
+        max_ips: null,
         max_verify: Math.max(1, Math.trunc(Number(form.maxVerify) || 1)),
         public_reset_disabled: Boolean(form.publicResetDisabled),
         note: form.note.trim() || null,
@@ -348,7 +348,7 @@ export function AdminFakeLagLicensesPage() {
           <Badge variant="outline">Fake Lag Licenses</Badge>
           <h1 className="text-2xl font-semibold">Licenses cho Fake Lag</h1>
           <p className="max-w-4xl text-sm text-muted-foreground">
-            Chỉ quản lý key <span className="font-mono">{ruleDefaults.keyPrefix}</span>. Key vượt free và key admin tạo tay đều hiện ở đây. Khi xóa, key sẽ vào Trash trước, không xóa vĩnh viễn ngay.
+            Chỉ quản lý key <span className="font-mono">{ruleDefaults.keyPrefix}</span>. Key vượt free và key admin tạo tay đều hiện ở đây. License chỉ quản lý thời hạn và lượt dùng; quota IP/thiết bị nằm riêng ở Server key public.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -369,7 +369,7 @@ export function AdminFakeLagLicensesPage() {
           <CardHeader>
             <CardTitle>{form.id ? "Edit Fake Lag key" : "Create Fake Lag key"}</CardTitle>
             <CardDescription>
-              Mặc định lấy từ Server key Fake Lag: Device {ruleDefaults.maxDevices}, IP {ruleDefaults.maxIps}, lượt verify {ruleDefaults.maxVerify}.
+              Mặc định lấy từ Server key Fake Lag: thời hạn và lượt verify {ruleDefaults.maxVerify}. Giới hạn IP/thiết bị chỉ dùng cho trang vượt key public, không áp vào từng license.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -387,9 +387,7 @@ export function AdminFakeLagLicensesPage() {
                 <div className="space-y-2"><Label>Thời lượng</Label><Input type="number" min={1} value={form.durationValue} onChange={e => setForm(p => ({...p, durationValue: Number(e.target.value || 1)}))}/></div>
                 <div className="space-y-2"><Label>Đơn vị</Label><Select value={form.durationUnit} onValueChange={v => setForm(p => ({...p, durationUnit: v as any}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="minutes">Phút</SelectItem><SelectItem value="hours">Giờ</SelectItem><SelectItem value="days">Ngày</SelectItem></SelectContent></Select></div>
               </>}
-              <div className="space-y-2"><Label>Max devices</Label><Input type="number" min={1} value={form.maxDevices} onChange={e => setForm(p => ({...p, maxDevices: Number(e.target.value || 1)}))}/></div>
-              <div className="space-y-2"><Label>Max IP</Label><Input type="number" min={1} value={form.maxIps} onChange={e => setForm(p => ({...p, maxIps: Number(e.target.value || 1)}))}/></div>
-              <div className="space-y-2"><Label>Max verify/lượt nhập</Label><Input type="number" min={1} value={form.maxVerify} onChange={e => setForm(p => ({...p, maxVerify: Number(e.target.value || 1)}))}/></div>
+              <div className="space-y-2"><Label>Lượt dùng / verify</Label><Input type="number" min={1} value={form.maxVerify} onChange={e => setForm(p => ({...p, maxVerify: Number(e.target.value || 1)}))}/></div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -415,15 +413,14 @@ export function AdminFakeLagLicensesPage() {
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-2xl border">
-            <Table><TableHeader><TableRow><TableHead>Key</TableHead><TableHead>Status</TableHead><TableHead>Hạn còn lại</TableHead><TableHead>Giới hạn</TableHead><TableHead>Verify</TableHead><TableHead>Action</TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Key</TableHead><TableHead>Status</TableHead><TableHead>Hạn còn lại</TableHead><TableHead>Lượt dùng</TableHead><TableHead>Action</TableHead></TableRow></TableHeader>
               <TableBody>
                 {(licensesQuery.data ?? []).map(row => (
                   <TableRow key={row.id}>
                     <TableCell><div className="font-mono text-xs break-all">{row.key}</div><div className="mt-1 text-xs text-muted-foreground">Tạo: {formatVn(row.created_at)}</div>{row.note ? <div className="mt-1 max-w-xs truncate text-xs text-muted-foreground">{row.note}</div> : null}</TableCell>
                     <TableCell><Badge variant={statusOf(row) === "Active" ? "secondary" : statusOf(row) === "Blocked" ? "destructive" as any : "outline"}>{statusOf(row)}</Badge></TableCell>
                     <TableCell><div className="text-sm">{remainingText(row)}</div><div className="text-xs text-muted-foreground">Exp: {formatVn(row.expires_at)}</div></TableCell>
-                    <TableCell className="text-sm"><div>Device: {row.max_devices ?? 1}</div><div>IP: {row.max_ips ?? 1}</div><div>Lượt: {row.max_verify ?? 1}</div></TableCell>
-                    <TableCell>{row.verify_count ?? 0}</TableCell>
+                    <TableCell className="text-sm"><div>{row.verify_count ?? 0} / {row.max_verify ?? 1}</div><div className="text-xs text-muted-foreground">Hết lượt thì key bị giới hạn</div></TableCell>
                     <TableCell><div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="soft" onClick={() => startEdit(row)}><Edit3 className="mr-1 h-3.5 w-3.5"/>Edit</Button>
                       <Button size="sm" variant="soft" onClick={() => toggleBlockMutation.mutate(row)}>{row.is_active ? <ShieldOff className="mr-1 h-3.5 w-3.5"/> : <ShieldCheck className="mr-1 h-3.5 w-3.5"/>}{row.is_active ? "Block" : "Unlock"}</Button>
@@ -431,7 +428,7 @@ export function AdminFakeLagLicensesPage() {
                     </div></TableCell>
                   </TableRow>
                 ))}
-                {!licensesQuery.data?.length ? <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">Chưa có key Fake Lag.</TableCell></TableRow> : null}
+                {!licensesQuery.data?.length ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">Chưa có key Fake Lag.</TableCell></TableRow> : null}
               </TableBody>
             </Table>
           </div>

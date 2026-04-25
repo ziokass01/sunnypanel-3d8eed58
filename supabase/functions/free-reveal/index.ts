@@ -879,8 +879,8 @@ Deno.serve(async (req) => {
   }
 
   // Mint license.
-  // Fake Lag chỉ lấy giới hạn thiết bị/IP/lượt verify từ Server app → Server key
-  // để tránh chỉnh ở Admin Free key rồi làm lệch rule.
+  // Fake Lag chỉ lấy prefix và lượt verify từ Server app → Server key.
+  // IP/thiết bị là quota lấy key ở /free, không áp vào license đã phát.
   let fakeLagRule: any = null;
   if (appCode === "fake-lag") {
     const ruleRes = await sb.from("license_access_rules").select("*").eq("app_code", "fake-lag").maybeSingle();
@@ -890,8 +890,6 @@ Deno.serve(async (req) => {
     }
   }
   const fakeLagPrefix = normalizeKeyPrefix(fakeLagRule?.key_prefix || "FAKELAG");
-  const fakeLagMaxDevices = Math.max(1, Number(fakeLagRule?.max_devices_per_key ?? 1));
-  const fakeLagMaxIps = Math.max(1, Number(fakeLagRule?.max_ips_per_key ?? 1));
   const fakeLagMaxVerify = Math.max(1, Number(fakeLagRule?.max_verify_per_key ?? 1));
 
   let inserted: { id: string; key: string } | null = null;
@@ -902,8 +900,8 @@ Deno.serve(async (req) => {
       .insert({
         key,
         is_active: true,
-        max_devices: appCode === "fake-lag" ? fakeLagMaxDevices : 1,
-        max_ips: appCode === "fake-lag" ? fakeLagMaxIps : null,
+        max_devices: 1,
+        max_ips: null,
         max_verify: appCode === "fake-lag" ? fakeLagMaxVerify : null,
         expires_at,
         note: appCode === "fake-lag" ? `${freeNote};RULE_SOURCE=server_app_fake_lag` : freeNote,
