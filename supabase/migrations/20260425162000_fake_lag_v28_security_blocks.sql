@@ -38,3 +38,11 @@ set
   end,
   notes = concat_ws(E'\n', nullif(notes, ''), 'v2.8: package com.fakelag.sunnymod, fail-closed engine heartbeat, security block table for repeated runtime risk.')
 where app_code = 'fake-lag';
+
+
+create index if not exists idx_server_app_security_blocks_last_seen
+  on public.server_app_security_blocks(app_code, last_seen_at desc);
+
+update public.server_app_version_policies
+set notes = concat_ws(E'\n', nullif(notes, ''), 'v2.8 native guard add-on: server stores native_guard/client_watermark in audit detail and auto-block now uses device OR ip within risk window.')
+where app_code = 'fake-lag';

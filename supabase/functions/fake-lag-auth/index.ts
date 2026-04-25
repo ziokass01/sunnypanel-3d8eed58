@@ -268,6 +268,8 @@ async function recordRiskAndMaybeBlock(db: any, args: {
   packageName: string;
   signatureSha256: string;
   buildId: string;
+  nativeGuard?: unknown;
+  clientWatermark?: string;
 }) {
   const policy = await getSecurityPolicy(db);
   const nowIso = new Date().toISOString();
@@ -282,6 +284,8 @@ async function recordRiskAndMaybeBlock(db: any, args: {
     package_name: args.packageName,
     signature_sha256: args.signatureSha256,
     build_id: args.buildId,
+    native_guard: args.nativeGuard ?? null,
+    client_watermark: args.clientWatermark || null,
     policy,
   };
 
@@ -296,14 +300,23 @@ async function recordRiskAndMaybeBlock(db: any, args: {
   if (!policy.enabled) return { blocked: false, hit_count: 1 };
 
   try {
-    const { data: existing } = await db
-      .from("server_app_security_blocks")
-      .select("*")
-      .eq("app_code", "fake-lag")
-      .eq("device_id", args.device)
-      .maybeSingle();
+    const ors = [args.device ? `device_id.eq.${args.device}` : "", args.ipHash ? `ip_hash.eq.${args.ipHash}` : ""].filter(Boolean).join(",");
+    let existing: any = null;
+    if (ors) {
+      const found = await db
+        .from("server_app_security_blocks")
+        .select("*")
+        .eq("app_code", "fake-lag")
+        .or(ors)
+        .order("last_seen_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      existing = found.data;
+    }
 
-    const previousHits = Math.max(0, Number((existing as any)?.hit_count ?? 0));
+    const firstSeenMs = Date.parse(String((existing as any)?.first_seen_at ?? ""));
+    const insideWindow = Number.isFinite(firstSeenMs) && Date.now() - firstSeenMs <= policy.windowSeconds * 1000;
+    const previousHits = insideWindow ? Math.max(0, Number((existing as any)?.hit_count ?? 0)) : 0;
     const hitCount = previousHits + 1;
     const shouldBlock = hitCount >= policy.threshold;
 
@@ -314,7 +327,7 @@ async function recordRiskAndMaybeBlock(db: any, args: {
       reason: "RUNTIME_RISK",
       enabled: shouldBlock,
       hit_count: hitCount,
-      first_seen_at: (existing as any)?.first_seen_at ?? nowIso,
+      first_seen_at: insideWindow && (existing as any)?.first_seen_at ? (existing as any).first_seen_at : nowIso,
       last_seen_at: nowIso,
       blocked_until: shouldBlock ? blockedUntil : null,
       details: detail,
@@ -361,10 +374,12 @@ Deno.serve(async (req) => {
   const packageNameForAudit = safeText(input.package_name, 128);
   const signatureForAudit = normalizeSha(input.signature_sha256);
   const buildIdForAudit = safeText(input.build_id, 128);
+  const nativeGuardForAudit = (input as any).native_guard ?? null;
+  const clientWatermarkForAudit = safeText((input as any).client_watermark, 128);
 
   const securityBlock = await getSecurityBlock(db, device, ipHash);
   if (securityBlock) {
-    await db.from("audit_logs").insert({ action: "FAKE_LAG_SECURITY_BLOCK", license_key: key || null, detail: { ip, ip_hash: ipHash, device, ok: false, app_code: "fake-lag", block: securityBlock } });
+    await db.from("audit_logs").insert({ action: "FAKE_LAG_SECURITY_BLOCK", license_key: key || null, detail: { ip, ip_hash: ipHash, device, ok: false, app_code: "fake-lag", block: securityBlock, native_guard: nativeGuardForAudit, client_watermark: clientWatermarkForAudit || null } });
     return json({ ok: false, msg: "DEVICE_BLOCKED", hard_blocked: true }, 200);
   }
 
@@ -380,6 +395,8 @@ Deno.serve(async (req) => {
       packageName: packageNameForAudit,
       signatureSha256: signatureForAudit,
       buildId: buildIdForAudit,
+      nativeGuard: nativeGuardForAudit,
+      clientWatermark: clientWatermarkForAudit,
     });
     return json({ ok: false, msg: riskState.blocked ? "DEVICE_BLOCKED" : "RUNTIME_RISK", hard_blocked: Boolean(riskState.blocked), risk_hit_count: riskState.hit_count, blocked_until: riskState.blocked_until ?? null }, 200);
   }
@@ -524,7 +541,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId, risk_flags: riskFlags || null } });
+  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId, risk_flags: riskFlags || null, native_guard: nativeGuardForAudit, client_watermark: clientWatermarkForAudit || null } });
   const remainingSeconds = effectiveExpiresAt ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000)) : startsOnFirstUse && !started && typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
   const tokenTtl = mode === "engine" || mode === "heartbeat"
     ? Number(version.policy?.engine_token_ttl_seconds ?? 3 * 60)
@@ -534,6 +551,7 @@ Deno.serve(async (req) => {
     app_code: "fake-lag",
     license_id: licRow.id,
     mode,
+    client_watermark: clientWatermarkForAudit || null,
   }, tokenTtl);
   return json({
     ok: true,
