@@ -1,559 +1,311 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { z } from "npm:zod@3";
-import { corsHeaders } from "../_shared/cors.ts";
-import { resolveClientIp } from "../_shared/client-ip.ts";
+import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 
-const KEY_PATTERN = /^[A-Z0-9]{2,16}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i;
+type JsonRecord = Record<string, unknown>;
 
-const BodySchema = z.object({
-  action: z.enum(["check", "reset"]),
-  key: z
-    .string()
-    .trim()
-    .min(1)
-    .max(64)
-    .regex(KEY_PATTERN, "INVALID_KEY_FORMAT"),
-  cf_turnstile_response: z.string().min(10).max(4096).nullable().optional(),
-  turnstile_token: z.string().min(10).max(4096).nullable().optional(),
-});
-
-function toHex(bytes: ArrayBuffer) {
-  return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
+function env(name: string, fallback = "") {
+  return Deno.env.get(name) ?? fallback;
 }
 
-async function sha256Hex(input: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-  return toHex(digest);
-}
-
-async function verifyTurnstile(secret: string, token: string, remoteIp?: string) {
-  const body = new URLSearchParams();
-  body.set("secret", secret);
-  body.set("response", token);
-  if (remoteIp) body.set("remoteip", remoteIp);
-
-  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  const data = (await res.json().catch(() => null)) as any;
-  return Boolean(data?.success);
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function logRpcError(fn: string, error: any, context?: Record<string, unknown>) {
-  console.error("[reset-key] rpc_error", {
-    function: fn,
-    message: error?.message ?? null,
-    details: error?.details ?? null,
-    hint: error?.hint ?? null,
-    code: error?.code ?? null,
-    context: context ?? null,
+function adminDb() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("SERVER_MISCONFIG");
+  return createClient(url, key, {
+    auth: { persistSession: false },
+    global: { headers: { "X-Client-Info": "sunnypanel-reset-key" } },
   });
 }
 
-function parseAllowResetFromNote(note?: string | null) {
-  const raw = String(note ?? "").toUpperCase();
-  if (!raw) return true;
-  if (raw.includes("ALLOW_RESET=0")) return false;
-  if (raw.includes("ALLOW_RESET=FALSE")) return false;
-  return true;
+function normalizeKey(value: unknown) {
+  return String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
-function mapRpcError(error: any) {
-  const raw = String(error?.message ?? "").toUpperCase();
-  const code = String(error?.code ?? "").toUpperCase();
-  const details = String(error?.details ?? "").toUpperCase();
-  const hint = String(error?.hint ?? "").toUpperCase();
-  const joined = `${raw} ${details} ${hint}`;
-
-  if (joined.includes("NOT_AUTHORIZED") || code === "42501") {
-    return { status: 500, msg: "RPC_PERMISSION_DENIED" };
-  }
-
-  if (joined.includes("DOES NOT EXIST") || code === "42883") {
-    return { status: 500, msg: "RPC_NOT_DEPLOYED" };
-  }
-
-  if (code === "P0001") {
-    if (joined.includes("KEY_NOT_FOUND")) return { status: 200, msg: "KEY_UNAVAILABLE" };
-    if (joined.includes("KEY_BLOCKED")) return { status: 200, msg: "KEY_UNAVAILABLE" };
-    if (joined.includes("KEY_EXPIRED")) return { status: 200, msg: "KEY_UNAVAILABLE" };
-    if (joined.includes("RESET_DISABLED")) return { status: 200, msg: "RESET_DISABLED" };
-  }
-
-  return { status: 500, msg: "SERVER_ERROR" };
+function appCodeFromKey(key: string) {
+  if (key.startsWith("FAKELAG-")) return "fake-lag";
+  if (key.startsWith("FND-") || key.startsWith("FD-")) return "find-dumps";
+  if (key.startsWith("SUNNY-")) return "free-fire";
+  return "unknown";
 }
 
-function remainingSeconds(expiresAt?: string | null) {
-  if (!expiresAt) return null;
-  const ms = Date.parse(expiresAt);
-  if (!Number.isFinite(ms)) return 0;
-  return Math.max(0, Math.floor((ms - Date.now()) / 1000));
+function clampPercent(value: unknown) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
 }
 
-function redeemStatus(row: any) {
-  if (!row) return "not_found";
-  if (!Boolean(row.enabled ?? true) || row.blocked_at) return "blocked";
-  if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return "expired";
-  if (Number(row.redeemed_count ?? 0) >= Math.max(1, Number(row.max_redemptions ?? 1))) return "limited";
-  return "active";
+function secondsBetween(from: Date, toIso: string | null | undefined) {
+  if (!toIso) return null;
+  const to = new Date(toIso);
+  if (!Number.isFinite(to.getTime())) return null;
+  return Math.max(0, Math.floor((to.getTime() - from.getTime()) / 1000));
 }
 
-async function getServerRedeemInfo(db: any, key: string) {
-  const { data, error } = await db
-    .from("server_app_redeem_keys")
-    .select("id,app_code,redeem_key,title,enabled,starts_at,expires_at,max_redemptions,redeemed_count,blocked_at,blocked_reason,created_at,source_free_session_id,trace_id")
-    .eq("redeem_key", key)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const status = redeemStatus(data);
-  return {
-    ok: true,
-    msg: "OK",
-    key: data.redeem_key,
-    key_kind: String(data.app_code || "find-dumps").toUpperCase(),
-    created_at: data.created_at ?? data.starts_at ?? null,
-    expires_at: data.expires_at ?? null,
-    remaining_seconds: remainingSeconds(data.expires_at),
+function addSeconds(date: Date, seconds: number) {
+  return new Date(date.getTime() + Math.max(0, Math.floor(seconds)) * 1000).toISOString();
+}
+
+function response(req: Request, status: number, body: JsonRecord) {
+  const publicBaseUrl = env("PUBLIC_BASE_URL", "https://mityangho.id.vn");
+  return new Response(JSON.stringify(body), {
     status,
-    device_count: Number(data.redeemed_count ?? 0),
-    max_devices: Number(data.max_redemptions ?? 1),
-    admin_reset_count: 0,
-    public_reset_count: Number(data.redeemed_count ?? 0),
-    public_reset_disabled: false,
-    next_reset_penalty_pct: 0,
-    next_reset_will_expire: false,
-    public_reset_cancel_after_count: 0,
-    redeem_key_id: data.id,
-    app_code: data.app_code ?? null,
-    trace_id: data.trace_id ?? null,
-  };
+    headers: {
+      ...buildCorsHeaders(req, publicBaseUrl, "GET,POST,OPTIONS"),
+      "content-type": "application/json; charset=utf-8",
+    },
+  });
 }
 
-async function resetServerRedeemKey(db: any, key: string) {
-  const info = await getServerRedeemInfo(db, key);
-  if (!info?.redeem_key_id) return { ok: false, msg: "KEY_UNAVAILABLE" };
-  const { error } = await db
-    .from("server_app_redeem_keys")
-    .update({ redeemed_count: 0, enabled: true, blocked_at: null, blocked_reason: null, updated_at: new Date().toISOString() })
-    .eq("id", info.redeem_key_id);
-  if (error) throw error;
-  const fresh = await getServerRedeemInfo(db, key);
-  return { ...(fresh ?? info), msg: "RESET_OK", devices_removed: Number(info.device_count ?? 0), penalty_pct: 0, penalty_seconds: 0 };
-}
-
-function isServerRedeemKey(key: string) {
-  return /^(FD|FND)-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(key);
-}
-
-function isFakeLagKey(key: string) {
-  return /^FAKELAG-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(String(key || "").trim());
-}
-
-function safeDateMs(value?: string | null) {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-function fakeLagStatus(row: any) {
-  if (!row) return "not_found";
-  if (row.deleted_at) return "deleted";
-  if (!Boolean(row.is_active ?? true)) return "blocked";
-  const expMs = safeDateMs(row.expires_at);
-  if (expMs != null && expMs < Date.now()) return "expired";
-  const maxVerify = Math.max(1, Number(row.max_verify ?? 1));
-  const verifyCount = Math.max(0, Number(row.verify_count ?? 0));
-  if (verifyCount >= maxVerify) return "limited";
-  if (Boolean(row.start_on_first_use ?? row.starts_on_first_use) && !row.first_used_at && !row.activated_at) return "not_started";
-  return "active";
-}
-
-function fakeLagExpiresAt(row: any) {
-  const fixed = String(row?.expires_at ?? "").trim();
-  if (fixed) return fixed;
-  const firstUsed = String(row?.first_used_at ?? row?.activated_at ?? "").trim();
-  const durationSeconds = Math.max(0, Number(row?.duration_seconds ?? 0));
-  const durationDays = Math.max(0, Number(row?.duration_days ?? 0));
-  const effectiveSeconds = durationSeconds > 0 ? durationSeconds : durationDays > 0 ? durationDays * 86400 : 0;
-  if (firstUsed && effectiveSeconds > 0) {
-    const startMs = Date.parse(firstUsed);
-    if (Number.isFinite(startMs)) return new Date(startMs + effectiveSeconds * 1000).toISOString();
-  }
-  return null;
-}
-
-function fakeLagRemainingSeconds(row: any) {
-  const expiresAt = fakeLagExpiresAt(row);
-  if (expiresAt) return remainingSeconds(expiresAt);
-  if (Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) && !row?.first_used_at && !row?.activated_at) {
-    const durationSeconds = Math.max(0, Number(row?.duration_seconds ?? 0));
-    const durationDays = Math.max(0, Number(row?.duration_days ?? 0));
-    const effectiveSeconds = durationSeconds > 0 ? durationSeconds : durationDays > 0 ? durationDays * 86400 : 0;
-    return effectiveSeconds > 0 ? Math.min(effectiveSeconds, 2147483647) : null;
-  }
-  return null;
-}
-
-async function getFakeLagRule(db: any) {
-  const { data, error } = await db
-    .from("license_access_rules")
-    .select("*")
-    .eq("app_code", "fake-lag")
-    .maybeSingle();
-  if (error) throw error;
-  return data ?? null;
-}
-
-async function getFakeLagLicenseInfo(db: any, key: string) {
-  const { data, error } = await db
-    .from("licenses")
-    .select("*")
-    .eq("key", key)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-
-  const appCode = String(data.app_code || "").trim().toLowerCase();
-  if (appCode !== "fake-lag" && !isFakeLagKey(data.key)) return null;
-
-  const rule = await getFakeLagRule(db);
-  const ruleAllowsReset = Boolean(rule?.allow_reset ?? true);
-  const maxVerify = Math.max(1, Number(data.max_verify ?? rule?.max_verify_per_key ?? 1));
-  const verifyCount = Math.max(0, Number(data.verify_count ?? 0));
-  const expiresAt = fakeLagExpiresAt(data);
-
-  return {
-    ok: true,
-    msg: "OK",
-    key: data.key,
-    key_kind: "FAKE_LAG",
-    app_code: "fake-lag",
-    created_at: data.created_at ?? null,
-    expires_at: expiresAt,
-    remaining_seconds: fakeLagRemainingSeconds(data),
-    status: fakeLagStatus(data),
-    // Với Fake Lag, UI dùng cặp device_count/max_devices để hiển thị lượt dùng.
-    // Không dùng max_devices vì app Fake Lag giới hạn bằng verify_count/max_verify.
-    device_count: verifyCount,
-    max_devices: maxVerify,
-    admin_reset_count: Number(data.admin_reset_count ?? 0),
-    public_reset_count: Number(data.public_reset_count ?? 0),
-    public_reset_disabled: Boolean(data.public_reset_disabled ?? false) || !ruleAllowsReset,
-    next_reset_penalty_pct: 0,
-    next_reset_will_expire: false,
-    public_reset_cancel_after_count: 0,
-    license_id: data.id,
-  };
-}
-
-async function resetFakeLagLicense(db: any, key: string) {
-  const info = await getFakeLagLicenseInfo(db, key);
-  if (!info?.license_id) return { ok: false, msg: "KEY_UNAVAILABLE" };
-  if (info.status === "deleted" || info.status === "blocked" || info.status === "expired") return { ok: false, msg: "KEY_UNAVAILABLE" };
-  if (info.public_reset_disabled) return { ...info, ok: false, msg: "KEY_RESET_DISABLED" };
-
-  const { error: devErr, count: devicesCount } = await db
-    .from("license_devices")
-    .delete({ count: "exact" })
-    .eq("license_id", info.license_id);
-  if (devErr) throw devErr;
-
-  // Best-effort: bảng này có thể chưa tồn tại ở vài DB cũ. Không để lỗi phụ làm hỏng reset.
-  try {
-    await db.from("license_ip_bindings").delete().eq("license_id", info.license_id);
-  } catch (_) {
-    // ignore old schema
-  }
-
-  const { error: updErr } = await db
-    .from("licenses")
-    .update({
-      app_code: "fake-lag",
-      verify_count: 0,
-      public_reset_disabled: false,
-      public_reset_count: Number(info.public_reset_count ?? 0) + 1,
-    })
-    .eq("id", info.license_id);
-  if (updErr) throw updErr;
+async function verifyTurnstile(token: string | undefined | null, req: Request) {
+  const secret = env("TURNSTILE_SECRET_KEY") || env("CLOUDFLARE_TURNSTILE_SECRET");
+  if (!secret) return false;
+  if (!token) return false;
 
   try {
-    await db.from("audit_logs").insert({
-      action: "PUBLIC_RESET_FAKE_LAG",
-      license_key: key,
-      detail: {
-        app_code: "fake-lag",
-        license_id: info.license_id,
-        previous_verify_count: info.device_count ?? 0,
-        devices_removed: Number(devicesCount ?? 0),
-        reset_verify_count_to: 0,
-      },
+    const form = new FormData();
+    form.append("secret", secret);
+    form.append("response", token);
+    const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    if (ip) form.append("remoteip", ip);
+
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body: form,
     });
-  } catch (_) {
-    // audit must never break public reset
+    const json = await res.json().catch(() => ({}));
+    return Boolean(json?.success);
+  } catch {
+    return false;
+  }
+}
+
+async function getResetSettings(db: any) {
+  const { data } = await db.from("license_reset_settings").select("*").eq("id", 1).maybeSingle();
+  return data ?? {
+    enabled: true,
+    require_turnstile: false,
+    free_first_penalty_pct: 0,
+    free_next_penalty_pct: 20,
+    free_next_step_penalty_pct: 20,
+    paid_first_penalty_pct: 0,
+    paid_next_penalty_pct: 20,
+    paid_next_step_penalty_pct: 20,
+    public_reset_cancel_after_count: 0,
+    disabled_message: "Reset key đang tạm tắt.",
+  };
+}
+
+async function getKeyKind(db: any, licenseId: string) {
+  const { data, error } = await db
+    .from("licenses_free_issues")
+    .select("issue_id")
+    .eq("license_id", licenseId)
+    .limit(1);
+  if (!error && Array.isArray(data) && data.length > 0) return "free";
+  return "admin";
+}
+
+async function countRows(db: any, table: string, filters: (q: any) => any) {
+  const q = filters(db.from(table).select("id", { count: "exact", head: true }));
+  const { count, error } = await q;
+  if (error) return 0;
+  return count ?? 0;
+}
+
+function computePenaltyPct(settings: any, keyKind: string, priorResetCount: number) {
+  if (keyKind === "free") {
+    return priorResetCount <= 0
+      ? clampPercent(settings?.free_first_penalty_pct)
+      : clampPercent(settings?.free_next_penalty_pct ?? settings?.free_next_step_penalty_pct);
+  }
+  return priorResetCount <= 0
+    ? clampPercent(settings?.paid_first_penalty_pct)
+    : clampPercent(settings?.paid_next_penalty_pct ?? settings?.paid_next_step_penalty_pct);
+}
+
+function buildSnapshot(args: {
+  lic: any;
+  settings: any;
+  keyKind: string;
+  appCode: string;
+  deviceCount: number;
+  publicResetCount: number;
+  penaltyPct?: number;
+  penaltySeconds?: number;
+  devicesRemoved?: number;
+  msg?: string;
+}) {
+  const now = new Date();
+  const remainingSeconds = secondsBetween(now, args.lic?.expires_at);
+  const nextPenaltyPct = computePenaltyPct(args.settings, args.keyKind, args.publicResetCount);
+  const nextPenaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * nextPenaltyPct / 100);
+
+  const status = !args.lic?.is_active
+    ? "blocked"
+    : args.lic?.deleted_at
+      ? "deleted"
+      : args.lic?.expires_at && remainingSeconds === 0
+        ? "expired"
+        : "active";
+
+  return {
+    ok: true,
+    msg: args.msg ?? "OK",
+    key: args.lic?.key,
+    key_kind: args.keyKind,
+    app_code: args.appCode,
+    created_at: args.lic?.created_at ?? null,
+    expires_at: args.lic?.expires_at ?? null,
+    remaining_seconds: remainingSeconds,
+    status,
+    device_count: args.deviceCount,
+    max_devices: args.lic?.max_devices ?? 1,
+    public_reset_count: args.publicResetCount,
+    penalty_pct: args.penaltyPct,
+    penalty_seconds: args.penaltySeconds,
+    devices_removed: args.devicesRemoved,
+    reset_enabled: Boolean(args.settings?.enabled ?? true),
+    disabled_message: args.settings?.disabled_message ?? null,
+    public_reset_disabled: Boolean(args.lic?.public_reset_disabled),
+    next_reset_penalty_pct: nextPenaltyPct,
+    next_reset_will_expire: remainingSeconds != null && nextPenaltySeconds >= remainingSeconds && nextPenaltyPct > 0,
+    public_reset_cancel_after_count: args.settings?.public_reset_cancel_after_count ?? null,
+  };
+}
+
+async function handleCheck(req: Request, db: any, key: string) {
+  const { data: lic, error } = await db
+    .from("licenses")
+    .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,public_reset_disabled")
+    .eq("key", key)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error || !lic) return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
+
+  const [settings, keyKind, deviceCount, publicResetCount] = await Promise.all([
+    getResetSettings(db),
+    getKeyKind(db, lic.id),
+    countRows(db, "license_devices", (q) => q.eq("license_id", lic.id)),
+    countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
+  ]);
+
+  return response(req, 200, buildSnapshot({
+    lic,
+    settings,
+    keyKind,
+    appCode: appCodeFromKey(key),
+    deviceCount,
+    publicResetCount,
+  }));
+}
+
+async function handleReset(req: Request, db: any, body: any, key: string) {
+  const { data: lic, error } = await db
+    .from("licenses")
+    .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,public_reset_disabled")
+    .eq("key", key)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error || !lic || !lic.is_active) return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
+
+  const settings = await getResetSettings(db);
+  if (!Boolean(settings?.enabled ?? true)) {
+    return response(req, 403, { ok: false, msg: "RESET_DISABLED", disabled_message: settings?.disabled_message ?? null });
+  }
+  if (Boolean(lic.public_reset_disabled)) {
+    return response(req, 403, { ok: false, msg: "KEY_RESET_DISABLED", public_reset_disabled: true });
+  }
+  if (Boolean(settings?.require_turnstile)) {
+    const ok = await verifyTurnstile(body?.turnstile_token, req);
+    if (!ok) return response(req, 403, { ok: false, msg: "TURNSTILE_FAILED" });
   }
 
-  const fresh = await getFakeLagLicenseInfo(db, key);
-  return {
-    ...(fresh ?? info),
-    ok: true,
+  const now = new Date();
+  const [keyKind, deviceCount, priorPublicResetCount] = await Promise.all([
+    getKeyKind(db, lic.id),
+    countRows(db, "license_devices", (q) => q.eq("license_id", lic.id)),
+    countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
+  ]);
+  const appCode = appCodeFromKey(key);
+  const penaltyPct = computePenaltyPct(settings, keyKind, priorPublicResetCount);
+  const remainingSeconds = secondsBetween(now, lic.expires_at);
+  const penaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * penaltyPct / 100);
+  const newExpiresAt = remainingSeconds == null || penaltySeconds <= 0
+    ? lic.expires_at
+    : addSeconds(now, Math.max(0, remainingSeconds - penaltySeconds));
+
+  await db.from("license_devices").delete().eq("license_id", lic.id);
+
+  if (newExpiresAt !== lic.expires_at) {
+    await db.from("licenses").update({
+      expires_at: newExpiresAt,
+      is_active: new Date(newExpiresAt).getTime() > now.getTime(),
+    }).eq("id", lic.id);
+  }
+
+  await db.from("audit_logs").insert({
+    action: "PUBLIC_RESET",
+    license_key: key,
+    detail: {
+      license_id: lic.id,
+      app_code: appCode,
+      key_kind: keyKind,
+      devices_removed: deviceCount,
+      prior_public_reset_count: priorPublicResetCount,
+      penalty_pct: penaltyPct,
+      penalty_seconds: penaltySeconds,
+      old_expires_at: lic.expires_at,
+      new_expires_at: newExpiresAt,
+      source: "public",
+    },
+  });
+
+  const refreshed = { ...lic, expires_at: newExpiresAt, is_active: !newExpiresAt || new Date(newExpiresAt).getTime() > now.getTime() };
+  return response(req, 200, buildSnapshot({
+    lic: refreshed,
+    settings,
+    keyKind,
+    appCode,
+    deviceCount: 0,
+    publicResetCount: priorPublicResetCount + 1,
+    penaltyPct,
+    penaltySeconds,
+    devicesRemoved: deviceCount,
     msg: "RESET_OK",
-    devices_removed: Number(info.device_count ?? 0) + Number(devicesCount ?? 0),
-    penalty_pct: 0,
-    penalty_seconds: 0,
-  };
+  }));
 }
 
 Deno.serve(async (req) => {
-  const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
-  const origin = req.headers.get("origin") ?? "";
-  const cors = corsHeaders(origin, PUBLIC_BASE_URL, "GET,POST,OPTIONS");
-
-  const json = (data: unknown, status = 200) =>
-    new Response(JSON.stringify(data), {
-      status,
-      headers: {
-        ...cors,
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
-      },
-    });
-
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  const publicBaseUrl = env("PUBLIC_BASE_URL", "https://mityangho.id.vn");
+  if (req.method === "OPTIONS") return handleOptions(req, publicBaseUrl, "GET,POST,OPTIONS");
 
   try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return json({ ok: false, msg: "SERVER_MISCONFIG" }, 500);
-    }
-
-    const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false },
-    });
-
-    const settingsRes = await db.from("license_reset_settings").select("*").eq("id", 1).maybeSingle();
-    if (settingsRes.error) {
-      return json({ ok: false, msg: settingsRes.error.message }, 500);
-    }
-
-    const settings = settingsRes.data ?? {
-      enabled: false,
-      require_turnstile: false,
-      public_check_limit: 8,
-      public_check_window_seconds: 300,
-      public_reset_limit: 4,
-      public_reset_window_seconds: 600,
-      disabled_message: "Reset Key đang tạm đóng.",
-    };
-
-    const TURNSTILE_SITE_KEY = (Deno.env.get("TURNSTILE_SITE_KEY") ?? "").trim();
-    const TURNSTILE_SECRET_KEY = (Deno.env.get("TURNSTILE_SECRET_KEY") ?? "").trim();
-    const turnstileConfigured = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+    const db = adminDb();
 
     if (req.method === "GET") {
-      return json({
+      const settings = await getResetSettings(db);
+      return response(req, 200, {
         ok: true,
-        turnstile_enabled: Boolean(settings.require_turnstile),
-        configured: turnstileConfigured,
+        turnstile_enabled: Boolean(settings?.require_turnstile),
+        configured: Boolean(env("TURNSTILE_SECRET_KEY") || env("CLOUDFLARE_TURNSTILE_SECRET")),
       });
     }
 
-    if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
+    if (req.method !== "POST") return response(req, 405, { ok: false, msg: "METHOD_NOT_ALLOWED" });
 
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      return json({ ok: false, msg: "INVALID_JSON" }, 400);
+    const body = await req.json().catch(() => ({}));
+    const action = String(body?.action ?? "check").toLowerCase();
+    const key = normalizeKey(body?.key);
+    if (!/^[A-Z0-9]{2,16}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) {
+      return response(req, 400, { ok: false, msg: "KEY_UNAVAILABLE" });
     }
 
-    const parsed = BodySchema.safeParse(body);
-    if (!parsed.success) {
-      await sleep(500);
-      return json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
-    }
-
-    const ip = resolveClientIp(req) ?? "0.0.0.0";
-    const key = parsed.data.key.trim().toUpperCase();
-    const action = parsed.data.action;
-    const keyBucket = await sha256Hex(key);
-
-    const licRow = await db
-      .from("licenses")
-      .select("id,note")
-      .eq("key", key)
-      .maybeSingle();
-    const allowResetByKey = parseAllowResetFromNote(licRow.data?.note ?? null);
-
-    const needsTurnstile = Boolean(settings.require_turnstile) && action === "reset";
-    let turnstileVerified = false;
-
-    if (needsTurnstile && !turnstileConfigured) {
-      return json({ ok: false, msg: "TURNSTILE_NOT_CONFIGURED" }, 500);
-    }
-
-    const token =
-      String(parsed.data.cf_turnstile_response ?? "").trim() ||
-      String(parsed.data.turnstile_token ?? "").trim();
-
-    if (needsTurnstile) {
-      if (!token) {
-        await sleep(600);
-        return json({ ok: false, msg: "TURNSTILE_REQUIRED" }, 200);
-      }
-
-      const ok = await verifyTurnstile(TURNSTILE_SECRET_KEY, token, ip);
-      if (!ok) {
-        await sleep(600);
-        return json({ ok: false, msg: "TURNSTILE_FAILED" }, 200);
-      }
-      turnstileVerified = true;
-    }
-
-    const shouldRateLimit = action === "check" || !turnstileVerified;
-    if (shouldRateLimit) {
-      const limit = action === "check"
-        ? Number(settings.public_check_limit ?? 8)
-        : Number(settings.public_reset_limit ?? 4);
-
-      const windowSeconds = action === "check"
-        ? Number(settings.public_check_window_seconds ?? 300)
-        : Number(settings.public_reset_window_seconds ?? 600);
-
-      const rl = await db.rpc("check_public_action_rate_limit", {
-        p_action: action.toUpperCase(),
-        p_ip: ip,
-        p_key_bucket: keyBucket,
-        p_limit: Math.max(1, limit),
-        p_window_seconds: Math.max(30, windowSeconds),
-      });
-
-      const rlRow = Array.isArray(rl.data) ? rl.data[0] : null;
-      const allowed = rl.error ? true : Boolean(rlRow?.allowed);
-
-      if (!allowed) {
-        await sleep(700);
-        return json({ ok: false, msg: "RATE_LIMIT" }, 429);
-      }
-    }
-
-    if (isFakeLagKey(key)) {
-      if (action === "check") {
-        const info = await getFakeLagLicenseInfo(db, key);
-        await sleep(450);
-        return info
-          ? json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...info })
-          : json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
-      }
-
-      if (!Boolean(settings.enabled)) {
-        await sleep(450);
-        return json({ ok: false, msg: "RESET_DISABLED", reset_enabled: false, disabled_message: settings.disabled_message ?? null }, 200);
-      }
-
-      const resetPayload = await resetFakeLagLicense(db, key);
-      await sleep(450);
-      return json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...resetPayload });
-    }
-
-    if (!licRow.data && isServerRedeemKey(key)) {
-      if (action === "check") {
-        const info = await getServerRedeemInfo(db, key);
-        await sleep(450);
-        return info ? json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...info }) : json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
-      }
-      const resetPayload = await resetServerRedeemKey(db, key);
-      await sleep(450);
-      return json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...resetPayload });
-    }
-
-    if (action === "check") {
-      const infoRes = await db.rpc("get_public_key_info", { p_key: key });
-      const info = Array.isArray(infoRes.data) ? infoRes.data[0] : infoRes.data;
-
-      if (infoRes.error) {
-        logRpcError("get_public_key_info", infoRes.error, { action, ip, key_prefix: key.slice(0, 9) });
-        const mapped = mapRpcError(infoRes.error);
-        return json({ ok: false, msg: mapped.msg }, mapped.status);
-      }
-
-      if (!info) {
-        await sleep(650);
-        return json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
-      }
-
-      await sleep(450);
-      return json({
-        ok: true,
-        msg: "OK",
-        reset_enabled: Boolean(settings.enabled),
-        disabled_message: settings.disabled_message ?? null,
-        allow_reset: allowResetByKey,
-        ...info,
-      });
-    }
-
-    if (!allowResetByKey) {
-      await sleep(500);
-      return json({
-        ok: false,
-        msg: "KEY_RESET_DISABLED",
-        reset_enabled: Boolean(settings.enabled),
-        disabled_message: settings.disabled_message ?? null,
-      }, 200);
-    }
-
-    const resetRes = await db.rpc("public_reset_key", { p_key: key });
-    if (resetRes.error) {
-      logRpcError("public_reset_key", resetRes.error, { action, ip, key_prefix: key.slice(0, 9) });
-      const mapped = mapRpcError(resetRes.error);
-      return json({ ok: false, msg: mapped.msg }, mapped.status);
-    }
-
-    const payload = resetRes.data as Record<string, unknown> | null;
-    if (!payload || typeof payload !== "object") {
-      console.error("[reset-key] invalid_rpc_payload", { function: "public_reset_key", payloadType: typeof resetRes.data });
-      return json({ ok: false, msg: "INVALID_RPC_PAYLOAD" }, 500);
-    }
-
-    const msg = String(payload?.msg ?? "");
-    if (["KEY_NOT_FOUND", "KEY_BLOCKED", "KEY_EXPIRED"].includes(msg)) {
-      await sleep(650);
-      return json({
-        ok: false,
-        msg: "KEY_UNAVAILABLE",
-        reset_enabled: Boolean(settings.enabled),
-        disabled_message: settings.disabled_message ?? null,
-      }, 200);
-    }
-
-    if (msg === "KEY_RESET_DISABLED") {
-      await sleep(500);
-      return json({
-        ok: false,
-        msg: "KEY_RESET_DISABLED",
-        reset_enabled: Boolean(settings.enabled),
-        disabled_message: settings.disabled_message ?? null,
-      }, 200);
-    }
-
-    await sleep(450);
-    return json({
-      reset_enabled: Boolean(settings.enabled),
-      disabled_message: settings.disabled_message ?? null,
-      ...(payload ?? { ok: false, msg: "SERVER_ERROR" }),
-    });
-  } catch (error) {
-    console.error("[reset-key] unexpected_error", {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : null,
-    });
-    return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+    if (action === "reset") return await handleReset(req, db, body, key);
+    return await handleCheck(req, db, key);
+  } catch (e) {
+    console.error("reset-key error", e);
+    return response(req, 500, { ok: false, msg: "SERVER_ERROR" });
   }
 });

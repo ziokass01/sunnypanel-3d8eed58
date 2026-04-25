@@ -136,6 +136,16 @@ function durationPreviewCards(rule: any) {
   ];
 }
 
+function discountedUnlockPreview(rule: any, plans: any[]) {
+  const enabledPlans = (plans || []).filter((plan) => Boolean(plan.enabled));
+  if (!enabledPlans.length) return "Chưa có gói bật để preview giá sau giảm.";
+  return enabledPlans.map((plan) => {
+    const soft = formatCredit(asNumber(rule.softUnlockCost) * Math.max(0, 1 - asNumber(plan.discountPercent) / 100));
+    const vip = formatCredit(asNumber(rule.premiumUnlockCost) * Math.max(0, 1 - asNumber(plan.discountPercentVip) / 100));
+    return `${plan.label}: thường ${soft} / VIP ${vip}`;
+  }).join(" · ");
+}
+
 export function AdminServerAppChargePage() {
   const { appCode = "find-dumps" } = useParams();
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
@@ -261,6 +271,16 @@ export function AdminServerAppChargePage() {
         <Badge variant="secondary">Legacy charging</Badge>
         <h1 className="text-2xl font-semibold">Free Fire không dùng Charge / Credit Rules ở app-host</h1>
         <p className="max-w-3xl text-sm text-muted-foreground">Free Fire giữ nguyên hệ key legacy. Tab này dành cho Find Dumps và các app-host mới khi cần tính credit số thập phân, giảm giá theo gói và reset hằng ngày.</p>
+      </section>
+    );
+  }
+
+  if (appCode !== "find-dumps") {
+    return (
+      <section className="space-y-4">
+        <Badge variant="secondary">Không chỉnh nhánh này</Badge>
+        <h1 className="text-2xl font-semibold">Charge / Credit Rules chỉ mở cho Find Dumps</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">Để tránh chỉnh nhầm sang Fake Lag hoặc app khác, màn này chỉ cho thao tác với app_code find-dumps. Muốn sửa Fake Lag hãy dùng đúng tab Server key / Control riêng của Fake Lag.</p>
       </section>
     );
   }
@@ -405,7 +425,7 @@ export function AdminServerAppChargePage() {
       <Card>
         <CardHeader>
           <CardTitle>Mở khóa chức năng</CardTitle>
-          <CardDescription>Tab này không thay cho tiêu hao credit. Mở khóa chỉ mở quyền đi qua cổng sử dụng. Khi chạy batch, search diện rộng, Binary Workspace hoặc export lớn thì app vẫn tiêu hao credit theo feature tương ứng.</CardDescription>
+          <CardDescription>Tab này không thay cho tiêu hao credit. Giá nhập ở đây là giá gốc server; app nhận giá đã giảm theo đúng % của gói hiện tại. Ví dụ giá gốc 2, gói Go giảm 10% thì app hiển thị/trừ 1.8.</CardDescription>
         </CardHeader>
         <CardContent>
           <Accordion type="multiple" className="space-y-3">
@@ -415,7 +435,13 @@ export function AdminServerAppChargePage() {
                   <div className="flex flex-1 flex-wrap items-center justify-between gap-2 pr-4 text-left">
                     <div>
                       <div className="font-medium">{rule.title}</div>
-                      <div className="text-xs text-muted-foreground">{rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · hết hạn sau {formatCredit(rule.durationHours)} giờ · 1d {formatCredit(rule.softUnlockCost)}/{formatCredit(rule.premiumUnlockCost)} · 7d {formatCredit(rule.softUnlockCost7d)}/{formatCredit(rule.premiumUnlockCost7d)} · 30d {formatCredit(rule.softUnlockCost30d)}/{formatCredit(rule.premiumUnlockCost30d)}</div>
+                      <div className="text-xs text-muted-foreground">
+                          {rule.unlockFeatureCode} · {rule.unlockRequired ? "Cần mở khóa" : "Không bắt buộc"} · hết hạn sau {formatCredit(rule.durationHours)} giờ
+                          <br />
+                          Giá gốc server: 1d {formatCredit(rule.softUnlockCost)}/{formatCredit(rule.premiumUnlockCost)} · 7d {formatCredit(rule.softUnlockCost7d)}/{formatCredit(rule.premiumUnlockCost7d)} · 30d {formatCredit(rule.softUnlockCost30d)}/{formatCredit(rule.premiumUnlockCost30d)}
+                          <br />
+                          App sẽ thấy sau giảm theo gói: {discountedUnlockPreview(rule, planDrafts)}
+                        </div>
                     </div>
                     <Badge variant={rule.enabled ? "outline" : "secondary"}>{rule.enabled ? "Đang bật" : "Tắt"}</Badge>
                   </div>

@@ -28,7 +28,6 @@ import {
   fetchLicense,
   fetchLicenseDevices,
   reactivateOrRenewLicense,
-  resetLicenseDevices,
   resetLicenseDevicesPenalty,
   softDeleteLicense,
   updateLicense,
@@ -112,14 +111,18 @@ export function LicenseDetailPage() {
   });
 
   const resetDevicesMutation = useMutation({
-    mutationFn: async () => resetLicenseDevices(licenseId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] });
-      toast({ title: "Devices reset" });
+    mutationFn: async () => resetLicenseDevicesPenalty(licenseId),
+    onSuccess: async (result: any) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+      ]);
+      const penaltyText = typeof result?.penalty_pct === "number" ? " • trừ " + result.penalty_pct + "% thời gian còn lại" : "";
+      toast({ title: "Đã reset thiết bị theo chính sách", description: "Đã xóa thiết bị" + penaltyText });
       setResetOpen(false);
     },
     onError: (err) => {
-      toast({ title: "Failed to reset devices", description: getErrorMessage(err), variant: "destructive" });
+      toast({ title: "Reset thiết bị thất bại", description: getErrorMessage(err), variant: "destructive" });
     },
   });
 
@@ -165,7 +168,7 @@ export function LicenseDetailPage() {
 
       await reactivateOrRenewLicense(licenseId, { expires_at });
       if (reactivateResetDevices) {
-        await resetLicenseDevices(licenseId);
+        await resetLicenseDevicesPenalty(licenseId);
       }
     },
     onSuccess: async () => {
@@ -267,7 +270,7 @@ export function LicenseDetailPage() {
             onClick={() => setResetOpen(true)}
             disabled={!licenseId || resetDevicesMutation.isPending}
           >
-            Reset devices
+            Reset devices theo %
           </Button>
 
           {isAdmin ? (
@@ -560,9 +563,9 @@ export function LicenseDetailPage() {
       <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset all devices?</AlertDialogTitle>
+            <AlertDialogTitle>Reset thiết bị theo chính sách?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will delete all device bindings for this license. The next verify will re-register devices from scratch.
+              Hệ thống sẽ xóa thiết bị và trừ thời gian theo đúng % đã cấu hình. Key free và key admin/paid được tách riêng để không bị lẫn cơ chế bù trừ.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -571,7 +574,7 @@ export function LicenseDetailPage() {
               onClick={() => resetDevicesMutation.mutate()}
               disabled={resetDevicesMutation.isPending}
             >
-              {resetDevicesMutation.isPending ? "Resetting…" : "Reset devices"}
+              {resetDevicesMutation.isPending ? "Đang reset…" : "Reset theo %"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

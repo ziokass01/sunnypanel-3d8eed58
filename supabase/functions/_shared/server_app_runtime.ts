@@ -656,6 +656,40 @@ async function getLatestFeatureUnlockStates(appCode: string, accountRef: string,
   return Array.from(chosen.values());
 }
 
+function formatRuntimeCredit(value: number) {
+  const rounded = round2(asNumber(value, 0));
+  if (Math.abs(rounded - Math.round(rounded)) < 0.0001) return String(Math.round(rounded));
+  return String(rounded).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function buildUnlockLabel(rule: RuntimeFeatureUnlockRule, planCode: string, plan: RuntimePlan | null, freeByPlan: boolean, costs: {
+  baseSoft: number;
+  basePremium: number;
+  soft: number;
+  premium: number;
+}) {
+  const planLabel = asString(plan?.label, planCode || "classic");
+  if (freeByPlan) {
+    return `${rule.title}: gói ${planLabel} đang được mở miễn phí theo rule server.`;
+  }
+  const softDiscount = Math.max(0, round2((1 - (plan?.soft_cost_multiplier ?? 1)) * 100));
+  const premiumDiscount = Math.max(0, round2((1 - (plan?.premium_cost_multiplier ?? 1)) * 100));
+  const parts: string[] = [];
+  if (costs.baseSoft > 0) {
+    parts.push(softDiscount > 0
+      ? `Thường: giá gốc ${formatRuntimeCredit(costs.baseSoft)}, gói ${planLabel} giảm ${formatRuntimeCredit(softDiscount)}%, app trừ ${formatRuntimeCredit(costs.soft)}`
+      : `Thường: app trừ ${formatRuntimeCredit(costs.soft)}`);
+  }
+  if (costs.basePremium > 0) {
+    parts.push(premiumDiscount > 0
+      ? `VIP: giá gốc ${formatRuntimeCredit(costs.basePremium)}, gói ${planLabel} giảm ${formatRuntimeCredit(premiumDiscount)}%, app trừ ${formatRuntimeCredit(costs.premium)}`
+      : `VIP: app trừ ${formatRuntimeCredit(costs.premium)}`);
+  }
+  return parts.length
+    ? `${rule.title}: ${parts.join(" • ")}. Giá này do server tính theo gói hiện tại.`
+    : `${rule.title}: mở theo gói hoặc miễn phí.`;
+}
+
 function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan: RuntimePlan | null, unlockRules: RuntimeFeatureUnlockRule[], unlockMap: Map<string, RuntimeFeatureUnlockState>) {
   const normalizedCode = asString(featureCode).toLowerCase();
   const directRule = unlockRules.find((rule) => rule.access_code.toLowerCase() === normalizedCode);
@@ -677,18 +711,31 @@ function resolveFeatureUnlockMeta(featureCode: string, currentPlan: string, plan
   const unlocked = freeByPlan || Boolean(activeUnlock);
   const softMultiplier = plan?.soft_cost_multiplier ?? 1;
   const premiumMultiplier = plan?.premium_cost_multiplier ?? 1;
+  const baseSoft1d = guardedRule.soft_unlock_cost;
+  const basePremium1d = guardedRule.premium_unlock_cost;
+  const soft1d = freeByPlan ? 0 : round2(baseSoft1d * softMultiplier);
+  const premium1d = freeByPlan ? 0 : round2(basePremium1d * premiumMultiplier);
+  const baseSoft7d = guardedRule.soft_unlock_cost_7d || guardedRule.soft_unlock_cost;
+  const basePremium7d = guardedRule.premium_unlock_cost_7d || guardedRule.premium_unlock_cost;
+  const baseSoft30d = guardedRule.soft_unlock_cost_30d || guardedRule.soft_unlock_cost;
+  const basePremium30d = guardedRule.premium_unlock_cost_30d || guardedRule.premium_unlock_cost;
   return {
     unlock_required: Boolean(guardedRule.unlock_required),
     unlocked,
     unlock_expires_at: freeByPlan ? null : (activeUnlock?.expires_at ?? null),
-    unlock_label: guardedRule.title,
+    unlock_label: buildUnlockLabel(guardedRule, planCode, plan, freeByPlan, {
+      baseSoft: baseSoft1d,
+      basePremium: basePremium1d,
+      soft: soft1d,
+      premium: premium1d,
+    }),
     unlock_feature_code: guardedRule.access_code,
-    unlock_soft_cost: freeByPlan ? 0 : round2(guardedRule.soft_unlock_cost * softMultiplier),
-    unlock_premium_cost: freeByPlan ? 0 : round2(guardedRule.premium_unlock_cost * premiumMultiplier),
-    unlock_soft_cost_7d: freeByPlan ? 0 : round2((guardedRule.soft_unlock_cost_7d || guardedRule.soft_unlock_cost) * softMultiplier),
-    unlock_premium_cost_7d: freeByPlan ? 0 : round2((guardedRule.premium_unlock_cost_7d || guardedRule.premium_unlock_cost) * premiumMultiplier),
-    unlock_soft_cost_30d: freeByPlan ? 0 : round2((guardedRule.soft_unlock_cost_30d || guardedRule.soft_unlock_cost) * softMultiplier),
-    unlock_premium_cost_30d: freeByPlan ? 0 : round2((guardedRule.premium_unlock_cost_30d || guardedRule.premium_unlock_cost) * premiumMultiplier),
+    unlock_soft_cost: soft1d,
+    unlock_premium_cost: premium1d,
+    unlock_soft_cost_7d: freeByPlan ? 0 : round2(baseSoft7d * softMultiplier),
+    unlock_premium_cost_7d: freeByPlan ? 0 : round2(basePremium7d * premiumMultiplier),
+    unlock_soft_cost_30d: freeByPlan ? 0 : round2(baseSoft30d * softMultiplier),
+    unlock_premium_cost_30d: freeByPlan ? 0 : round2(basePremium30d * premiumMultiplier),
   };
 }
 
