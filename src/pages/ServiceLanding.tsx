@@ -22,7 +22,7 @@ export function ServiceLandingPage() {
           </div>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-5 md:grid-cols-3">
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle>Thuê Website</CardTitle>
@@ -46,27 +46,17 @@ export function ServiceLandingPage() {
           <Card>
             <CardHeader>
               <CardTitle>Reset Key</CardTitle>
-              <CardDescription>Kiểm tra hạn key, xem loại key và reset thiết bị trực tiếp cho người dùng.</CardDescription>
+              <CardDescription>Kiểm tra hạn key, xem loại key và reset thiết bị/lượt dùng cho Free Fire, Find Dumps và Fake Lag.</CardDescription>
             </CardHeader>
             <CardContent>
               <Button className="w-full" variant="soft" onClick={() => nav("/reset-key")}>Vào Reset Key</Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Fake Lag</CardTitle>
-              <CardDescription>Trang nhập key giao diện tối cho app Fake Lag, có nút Get key, Admin, YouTube và Cộng đồng.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" variant="soft" onClick={() => nav("/fake-lag")}>Vào Fake Lag</Button>
             </CardContent>
           </Card>
         </div>
       </section>
 
       <p className="px-2 text-sm text-slate-500">
-        Lưu ý: Free, Rent và Reset Key dùng các flow riêng để tránh đụng hệ thống đang chạy.
+        Lưu ý: Free, Rent và Reset Key dùng các flow riêng để tránh đụng hệ thống đang chạy. Trang Fake Lag không hiển thị ở màn hình chính public.
       </p>
     </div>
   );
