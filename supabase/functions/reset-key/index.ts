@@ -151,6 +151,162 @@ function isServerRedeemKey(key: string) {
   return /^(FD|FND)-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(key);
 }
 
+function isFakeLagKey(key: string) {
+  return /^FAKELAG-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(String(key || "").trim());
+}
+
+function safeDateMs(value?: string | null) {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function fakeLagStatus(row: any) {
+  if (!row) return "not_found";
+  if (row.deleted_at) return "deleted";
+  if (!Boolean(row.is_active ?? true)) return "blocked";
+  const expMs = safeDateMs(row.expires_at);
+  if (expMs != null && expMs < Date.now()) return "expired";
+  const maxVerify = Math.max(1, Number(row.max_verify ?? 1));
+  const verifyCount = Math.max(0, Number(row.verify_count ?? 0));
+  if (verifyCount >= maxVerify) return "limited";
+  if (Boolean(row.start_on_first_use ?? row.starts_on_first_use) && !row.first_used_at && !row.activated_at) return "not_started";
+  return "active";
+}
+
+function fakeLagExpiresAt(row: any) {
+  const fixed = String(row?.expires_at ?? "").trim();
+  if (fixed) return fixed;
+  const firstUsed = String(row?.first_used_at ?? row?.activated_at ?? "").trim();
+  const durationSeconds = Math.max(0, Number(row?.duration_seconds ?? 0));
+  const durationDays = Math.max(0, Number(row?.duration_days ?? 0));
+  const effectiveSeconds = durationSeconds > 0 ? durationSeconds : durationDays > 0 ? durationDays * 86400 : 0;
+  if (firstUsed && effectiveSeconds > 0) {
+    const startMs = Date.parse(firstUsed);
+    if (Number.isFinite(startMs)) return new Date(startMs + effectiveSeconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function fakeLagRemainingSeconds(row: any) {
+  const expiresAt = fakeLagExpiresAt(row);
+  if (expiresAt) return remainingSeconds(expiresAt);
+  if (Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) && !row?.first_used_at && !row?.activated_at) {
+    const durationSeconds = Math.max(0, Number(row?.duration_seconds ?? 0));
+    const durationDays = Math.max(0, Number(row?.duration_days ?? 0));
+    const effectiveSeconds = durationSeconds > 0 ? durationSeconds : durationDays > 0 ? durationDays * 86400 : 0;
+    return effectiveSeconds > 0 ? Math.min(effectiveSeconds, 2147483647) : null;
+  }
+  return null;
+}
+
+async function getFakeLagRule(db: any) {
+  const { data, error } = await db
+    .from("license_access_rules")
+    .select("app_code,allow_reset,public_enabled,max_verify_per_key")
+    .eq("app_code", "fake-lag")
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+async function getFakeLagLicenseInfo(db: any, key: string) {
+  const { data, error } = await db
+    .from("licenses")
+    .select("id,key,app_code,created_at,expires_at,start_on_first_use,starts_on_first_use,first_used_at,activated_at,duration_seconds,duration_days,is_active,deleted_at,max_verify,verify_count,public_reset_disabled,public_reset_count,admin_reset_count,note")
+    .eq("key", key)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  const appCode = String(data.app_code || "").trim().toLowerCase();
+  if (appCode !== "fake-lag" && !isFakeLagKey(data.key)) return null;
+
+  const rule = await getFakeLagRule(db);
+  const ruleAllowsReset = Boolean(rule?.allow_reset ?? true);
+  const maxVerify = Math.max(1, Number(data.max_verify ?? rule?.max_verify_per_key ?? 1));
+  const verifyCount = Math.max(0, Number(data.verify_count ?? 0));
+  const expiresAt = fakeLagExpiresAt(data);
+
+  return {
+    ok: true,
+    msg: "OK",
+    key: data.key,
+    key_kind: "FAKE_LAG",
+    app_code: "fake-lag",
+    created_at: data.created_at ?? null,
+    expires_at: expiresAt,
+    remaining_seconds: fakeLagRemainingSeconds(data),
+    status: fakeLagStatus(data),
+    // Với Fake Lag, UI dùng cặp device_count/max_devices để hiển thị lượt dùng.
+    // Không dùng max_devices vì app Fake Lag giới hạn bằng verify_count/max_verify.
+    device_count: verifyCount,
+    max_devices: maxVerify,
+    admin_reset_count: Number(data.admin_reset_count ?? 0),
+    public_reset_count: Number(data.public_reset_count ?? 0),
+    public_reset_disabled: Boolean(data.public_reset_disabled ?? false) || !ruleAllowsReset,
+    next_reset_penalty_pct: 0,
+    next_reset_will_expire: false,
+    public_reset_cancel_after_count: 0,
+    license_id: data.id,
+  };
+}
+
+async function resetFakeLagLicense(db: any, key: string) {
+  const info = await getFakeLagLicenseInfo(db, key);
+  if (!info?.license_id) return { ok: false, msg: "KEY_UNAVAILABLE" };
+  if (info.status === "deleted" || info.status === "blocked" || info.status === "expired") return { ok: false, msg: "KEY_UNAVAILABLE" };
+  if (info.public_reset_disabled) return { ...info, ok: false, msg: "KEY_RESET_DISABLED" };
+
+  const { error: devErr, count: devicesCount } = await db
+    .from("license_devices")
+    .delete({ count: "exact" })
+    .eq("license_id", info.license_id);
+  if (devErr) throw devErr;
+
+  // Best-effort: bảng này có thể chưa tồn tại ở vài DB cũ. Không để lỗi phụ làm hỏng reset.
+  try {
+    await db.from("license_ip_bindings").delete().eq("license_id", info.license_id);
+  } catch (_) {
+    // ignore old schema
+  }
+
+  const { error: updErr } = await db
+    .from("licenses")
+    .update({
+      verify_count: 0,
+      public_reset_count: Number(info.public_reset_count ?? 0) + 1,
+    })
+    .eq("id", info.license_id);
+  if (updErr) throw updErr;
+
+  try {
+    await db.from("audit_logs").insert({
+      action: "PUBLIC_RESET_FAKE_LAG",
+      license_key: key,
+      detail: {
+        app_code: "fake-lag",
+        license_id: info.license_id,
+        previous_verify_count: info.device_count ?? 0,
+        devices_removed: Number(devicesCount ?? 0),
+        reset_verify_count_to: 0,
+      },
+    });
+  } catch (_) {
+    // audit must never break public reset
+  }
+
+  const fresh = await getFakeLagLicenseInfo(db, key);
+  return {
+    ...(fresh ?? info),
+    ok: true,
+    msg: "RESET_OK",
+    devices_removed: Number(info.device_count ?? 0) + Number(devicesCount ?? 0),
+    penalty_pct: 0,
+    penalty_seconds: 0,
+  };
+}
+
 Deno.serve(async (req) => {
   const PUBLIC_BASE_URL = Deno.env.get("PUBLIC_BASE_URL") ?? "";
   const origin = req.headers.get("origin") ?? "";
@@ -283,6 +439,25 @@ Deno.serve(async (req) => {
         await sleep(700);
         return json({ ok: false, msg: "RATE_LIMIT" }, 429);
       }
+    }
+
+    if (isFakeLagKey(key)) {
+      if (action === "check") {
+        const info = await getFakeLagLicenseInfo(db, key);
+        await sleep(450);
+        return info
+          ? json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...info })
+          : json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
+      }
+
+      if (!Boolean(settings.enabled)) {
+        await sleep(450);
+        return json({ ok: false, msg: "RESET_DISABLED", reset_enabled: false, disabled_message: settings.disabled_message ?? null }, 200);
+      }
+
+      const resetPayload = await resetFakeLagLicense(db, key);
+      await sleep(450);
+      return json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...resetPayload });
     }
 
     if (!licRow.data && isServerRedeemKey(key)) {
