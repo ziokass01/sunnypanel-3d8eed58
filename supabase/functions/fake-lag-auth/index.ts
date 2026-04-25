@@ -139,6 +139,52 @@ async function verifySessionToken(serviceRoleKey: string, token: string, expecte
   return { ok: true, msg: "OK", payload };
 }
 
+function fnvMix32(value: unknown, seed: number) {
+  let h = (seed || 2166136261) >>> 0;
+  const text = String(value ?? "").slice(0, 512);
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 16777619) >>> 0;
+    h ^= h >>> 13;
+    h >>>= 0;
+  }
+  return h >>> 0;
+}
+function hex32(value: number) {
+  return (value >>> 0).toString(16).padStart(8, "0");
+}
+function challengeResponseV2(args: { key: string; device: string; packageName: string; buildId: string; signatureSha256: string; challenge: string; mode: string }) {
+  let h = 0x8F3D9B7B >>> 0;
+  h = fnvMix32(args.key, h);
+  h = fnvMix32(args.device, h ^ 0xA5A5A5A5);
+  h = fnvMix32(args.packageName, h ^ 0x9E3779B9);
+  h = fnvMix32(args.buildId, h ^ 0x85EBCA6B);
+  h = fnvMix32(normalizeSha(args.signatureSha256), h ^ 0xC2B2AE35);
+  h = fnvMix32(args.challenge, h ^ 0x27D4EB2F);
+  h = fnvMix32(args.mode, h ^ 0x165667B1);
+  h = fnvMix32("sunny-v28-dynamic-challenge-20260425", h ^ 0xD3A2646C);
+  return hex32(h);
+}
+async function makeServerChallenge(args: { key: string; device: string; signatureSha256: string; buildId: string; mode: string }) {
+  const seed = `${args.key}|${args.device}|${normalizeSha(args.signatureSha256)}|${args.buildId}|${args.mode}|${crypto.randomUUID()}|${Date.now()}`;
+  return `c2.${(await sha256Hex(seed)).slice(0, 40)}`;
+}
+async function makeServerWatermark(args: { key: string; device: string; signatureSha256: string; buildId: string }) {
+  const seed = `${args.key}|${args.device}|${normalizeSha(args.signatureSha256)}|${args.buildId}|fake-lag-watermark-v28`;
+  return `wm.${(await sha256Hex(seed)).slice(0, 24)}`;
+}
+async function makeEngineGrant(serviceRoleKey: string, args: { key: string; device: string; signatureSha256: string; buildId: string; challenge: string; exp: string }) {
+  const data = `grant|${args.key}|${args.device}|${normalizeSha(args.signatureSha256)}|${args.buildId}|${args.challenge}|${args.exp}`;
+  return (await hmacSha256Base64Url(getTokenSecret(serviceRoleKey), data)).slice(0, 43);
+}
+function firstText(value: unknown) {
+  const list = listText(value);
+  return list.length ? list[0] : "";
+}
+function listDex(value: unknown) {
+  return listText(value).map((x) => x.replace(/[^0-9a-fA-F]/g, "").toUpperCase()).filter(Boolean);
+}
+
 
 async function checkVersionPolicy(db: any, input: any) {
   const appCode = "fake-lag";
@@ -163,11 +209,18 @@ async function checkVersionPolicy(db: any, input: any) {
   const packageName = safeText(input?.package_name, 128);
   const packageNameLower = normalizeLower(input?.package_name, 128);
   const signatureSha256 = normalizeSha(input?.signature_sha256);
+  const apkSha256 = normalizeSha(input?.apk_sha256);
+  const soSha256 = normalizeSha(input?.so_sha256);
+  const dexCrc = safeText(input?.dex_crc, 32).replace(/[^0-9a-fA-F]/g, "").toUpperCase();
   const blockedCodes = Array.isArray(data.blocked_version_codes) ? data.blocked_version_codes.map((x: any) => Number(x)) : [];
   const blockedNames = listText(data.blocked_version_names);
   const blockedBuilds = listText(data.blocked_build_ids);
   const allowedPackages = listLower(data.allowed_package_names);
   const allowedSignatures = listSha(data.allowed_signature_sha256);
+  const requireIntegrity = asBool((data as any).require_client_integrity, false);
+  const allowedApkSha256 = listSha((data as any).allowed_apk_sha256);
+  const allowedSoSha256 = listSha((data as any).allowed_so_sha256);
+  const allowedDexCrc = listDex((data as any).allowed_dex_crc);
   const minVersionCode = Number(data.min_version_code ?? 0);
   const minVersionName = String(data.min_version_name ?? "").trim();
   const requireSignature = asBool(data.block_unknown_signature, false) || asBool(data.require_signature_match, false);
@@ -185,6 +238,10 @@ async function checkVersionPolicy(db: any, input: any) {
   else if (allowedPackages.length && !allowedPackages.includes(packageNameLower)) { hardBlocked = true; reason = "PACKAGE_NOT_ALLOWED"; }
   else if (requireSignature && blockMissingIdentity && !signatureSha256) { hardBlocked = true; reason = "SIGNATURE_MISSING"; }
   else if (requireSignature && allowedSignatures.length && !allowedSignatures.includes(signatureSha256)) { hardBlocked = true; reason = "SIGNATURE_NOT_ALLOWED"; }
+  else if (requireIntegrity && !apkSha256) { hardBlocked = true; reason = "APK_CHECKSUM_MISSING"; }
+  else if (requireIntegrity && allowedApkSha256.length && !allowedApkSha256.includes(apkSha256)) { hardBlocked = true; reason = "APK_CHECKSUM_NOT_ALLOWED"; }
+  else if (requireIntegrity && allowedSoSha256.length && !allowedSoSha256.includes(soSha256)) { hardBlocked = true; reason = "SO_CHECKSUM_NOT_ALLOWED"; }
+  else if (requireIntegrity && allowedDexCrc.length && !allowedDexCrc.includes(dexCrc)) { hardBlocked = true; reason = "DEX_CHECKSUM_NOT_ALLOWED"; }
   else if (forceUpdate && minVersionCode > 0 && versionCode <= 0) { updateRequired = true; reason = "VERSION_CODE_MISSING"; }
   else if (forceUpdate && minVersionCode > 0 && versionCode < minVersionCode) { updateRequired = true; reason = "VERSION_CODE_TOO_OLD"; }
   else if (forceUpdate && minVersionName && versionName && compareVersionText(versionName, minVersionName) < 0) { updateRequired = true; reason = "VERSION_NAME_TOO_OLD"; }
@@ -202,7 +259,7 @@ async function checkVersionPolicy(db: any, input: any) {
       update_required: updateRequired,
       hard_blocked: hardBlocked,
       reason,
-      meta: { source: "fake-lag-auth", strict: true },
+      meta: { source: "fake-lag-auth", strict: true, apk_sha256: apkSha256 || null, so_sha256: soSha256 || null, dex_crc: dexCrc || null, integrity_mix: safeText(input?.integrity_mix, 64) || null },
     });
   } catch {}
 
@@ -218,6 +275,10 @@ async function checkVersionPolicy(db: any, input: any) {
       login_token_ttl_seconds: Math.max(300, Math.min(3600, Number(data.login_token_ttl_seconds ?? 15 * 60) || 15 * 60)),
       engine_token_ttl_seconds: Math.max(60, Math.min(900, Number(data.engine_token_ttl_seconds ?? 3 * 60) || 3 * 60)),
       heartbeat_seconds: Math.max(20, Math.min(180, Number(data.heartbeat_seconds ?? 45) || 45)),
+      require_client_integrity: requireIntegrity,
+      expected_apk_sha256: firstText((data as any).allowed_apk_sha256),
+      expected_so_sha256: firstText((data as any).allowed_so_sha256),
+      expected_dex_crc: firstText((data as any).allowed_dex_crc),
     },
   };
 }
@@ -376,6 +437,11 @@ Deno.serve(async (req) => {
   const buildIdForAudit = safeText(input.build_id, 128);
   const nativeGuardForAudit = (input as any).native_guard ?? null;
   const clientWatermarkForAudit = safeText((input as any).client_watermark, 128);
+  const challengeResponseForAudit = safeText((input as any).challenge_response, 64).toLowerCase();
+  const apkShaForAudit = normalizeSha((input as any).apk_sha256);
+  const soShaForAudit = normalizeSha((input as any).so_sha256);
+  const dexCrcForAudit = safeText((input as any).dex_crc, 32).replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+  const integrityMixForAudit = safeText((input as any).integrity_mix, 64);
 
   const securityBlock = await getSecurityBlock(db, device, ipHash);
   if (securityBlock) {
@@ -412,8 +478,14 @@ Deno.serve(async (req) => {
   if (mode === "engine" || mode === "heartbeat") {
     const tokenState = await verifySessionToken(serviceRoleKey, sessionToken, clientIdentity);
     if (!tokenState.ok) {
-      await db.from("audit_logs").insert({ action: mode === "heartbeat" ? "FAKE_LAG_HEARTBEAT_DENY" : "FAKE_LAG_ENGINE_DENY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: tokenState.msg } });
+      await db.from("audit_logs").insert({ action: mode === "heartbeat" ? "FAKE_LAG_HEARTBEAT_DENY" : "FAKE_LAG_ENGINE_DENY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: tokenState.msg, challenge_response: challengeResponseForAudit || null } });
       return json({ ok: false, msg: tokenState.msg }, 200);
+    }
+    const tokenChallenge = safeText((tokenState.payload as any)?.challenge, 256);
+    const expectedChallengeResponse = challengeResponseV2({ key, device, packageName: packageNameForAudit, buildId: buildIdForAudit, signatureSha256: signatureForAudit, challenge: tokenChallenge, mode });
+    if (!tokenChallenge || !challengeResponseForAudit || challengeResponseForAudit !== expectedChallengeResponse) {
+      await db.from("audit_logs").insert({ action: mode === "heartbeat" ? "FAKE_LAG_HEARTBEAT_DENY" : "FAKE_LAG_ENGINE_DENY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "CHALLENGE_FAIL", challenge_present: Boolean(tokenChallenge), challenge_response: challengeResponseForAudit || null, expected: expectedChallengeResponse } });
+      return json({ ok: false, msg: "CHALLENGE_FAIL", hard_blocked: true }, 200);
     }
   }
 
@@ -541,16 +613,28 @@ Deno.serve(async (req) => {
     }
   }
 
-  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId, risk_flags: riskFlags || null, native_guard: nativeGuardForAudit, client_watermark: clientWatermarkForAudit || null } });
+  await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId, risk_flags: riskFlags || null, native_guard: nativeGuardForAudit, client_watermark: clientWatermarkForAudit || null, challenge_response: challengeResponseForAudit || null, apk_sha256: apkShaForAudit || null, so_sha256: soShaForAudit || null, dex_crc: dexCrcForAudit || null, integrity_mix: integrityMixForAudit || null } });
   const remainingSeconds = effectiveExpiresAt ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000)) : startsOnFirstUse && !started && typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
   const tokenTtl = mode === "engine" || mode === "heartbeat"
     ? Number(version.policy?.engine_token_ttl_seconds ?? 3 * 60)
     : Number(version.policy?.login_token_ttl_seconds ?? 15 * 60);
+  const serverChallenge = await makeServerChallenge({ key, device, signatureSha256: signatureForAudit, buildId: buildIdForAudit, mode });
+  const serverWatermark = await makeServerWatermark({ key, device, signatureSha256: signatureForAudit, buildId: buildIdForAudit });
+  const grantTtlSeconds = Math.max(45, Math.min(150, Number(version.policy?.heartbeat_seconds ?? 45) + 45));
+  const engineGrantExpiresAt = new Date(now.getTime() + grantTtlSeconds * 1000).toISOString();
+  const engineGrant = await makeEngineGrant(serviceRoleKey, { key, device, signatureSha256: signatureForAudit, buildId: buildIdForAudit, challenge: serverChallenge, exp: engineGrantExpiresAt });
   const issuedToken = await issueSessionToken(serviceRoleKey, {
     ...clientIdentity,
     app_code: "fake-lag",
     license_id: licRow.id,
     mode,
+    challenge: serverChallenge,
+    challenge_version: 2,
+    server_watermark: serverWatermark,
+    apk_sha256: apkShaForAudit || null,
+    so_sha256: soShaForAudit || null,
+    dex_crc: dexCrcForAudit || null,
+    integrity_mix: integrityMixForAudit || null,
     client_watermark: clientWatermarkForAudit || null,
   }, tokenTtl);
   return json({
@@ -565,6 +649,14 @@ Deno.serve(async (req) => {
     session_token: issuedToken.token,
     token_expires_at: issuedToken.expires_at,
     token_ttl_seconds: issuedToken.ttl_seconds,
+    server_challenge: serverChallenge,
+    challenge_version: 2,
+    server_watermark: serverWatermark,
+    engine_grant: engineGrant,
+    engine_grant_expires_at: engineGrantExpiresAt,
+    expected_apk_sha256: String(version.policy?.expected_apk_sha256 || ""),
+    expected_so_sha256: String(version.policy?.expected_so_sha256 || ""),
+    expected_dex_crc: String(version.policy?.expected_dex_crc || ""),
     heartbeat_required: true,
     next_heartbeat_seconds: Number(version.policy?.heartbeat_seconds ?? 45),
     server_time: now.toISOString(),
