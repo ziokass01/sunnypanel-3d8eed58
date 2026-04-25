@@ -299,14 +299,19 @@ async function getSecurityPolicy(db: any) {
   }
 }
 
-async function getSecurityBlock(db: any, device: string, ipHash: string) {
+async function getSecurityBlock(db: any, device: string, _ipHash: string) {
+  // HOTFIX 2026-04-26: do not hard-block login by IP hash.
+  // IP blocks cause false "key sai" for many legitimate users behind the same carrier/NAT.
+  const dev = safeText(device, 128);
+  if (!dev) return null;
   try {
     const { data } = await db
       .from("server_app_security_blocks")
       .select("id,enabled,blocked_until,hit_count,reason")
       .eq("app_code", "fake-lag")
-      .or(`device_id.eq.${device},ip_hash.eq.${ipHash}`)
+      .eq("device_id", dev)
       .eq("enabled", true)
+      .order("last_seen_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (!data) return null;
@@ -359,18 +364,19 @@ async function recordRiskAndMaybeBlock(db: any, args: {
   if (!policy.enabled) return { blocked: false, hit_count: 1 };
 
   try {
-    const ors = [args.device ? `device_id.eq.${args.device}` : "", args.ipHash ? `ip_hash.eq.${args.ipHash}` : ""].filter(Boolean).join(",");
     let existing: any = null;
-    if (ors) {
+    if (args.device) {
       const found = await db
         .from("server_app_security_blocks")
         .select("*")
         .eq("app_code", "fake-lag")
-        .or(ors)
+        .eq("device_id", args.device)
         .order("last_seen_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       existing = found.data;
+    } else {
+      return { blocked: false, hit_count: 1 };
     }
 
     const firstSeenMs = Date.parse(String((existing as any)?.first_seen_at ?? ""));
@@ -382,8 +388,8 @@ async function recordRiskAndMaybeBlock(db: any, args: {
     const payload = {
       app_code: "fake-lag",
       device_id: args.device || null,
-      ip_hash: args.ipHash || null,
-      reason: "RUNTIME_RISK",
+      ip_hash: null,
+      reason: "RUNTIME_RISK_DEVICE_ONLY",
       enabled: shouldBlock,
       hit_count: hitCount,
       first_seen_at: insideWindow && (existing as any)?.first_seen_at ? (existing as any).first_seen_at : nowIso,
@@ -490,7 +496,7 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await db.rpc("check_ip_rate_limit", { p_ip: ip, p_limit: 180, p_window_seconds: 60 });
     const allowed = ipRl.error ? true : Boolean(ipRl.data?.[0]?.allowed);
-    if (!allowed) return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+    if (!allowed) return json({ ok: false, msg: "RATE_LIMIT" }, 200);
   } catch {}
 
   const lic = await db
