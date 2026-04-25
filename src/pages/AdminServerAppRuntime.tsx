@@ -21,6 +21,13 @@ function toCsvLines(value: string) {
     .join("\n");
 }
 
+function toIntLines(value: string) {
+  return toCsvLines(value)
+    .split(/\n+/)
+    .map((item) => Number.parseInt(item, 10))
+    .filter((item) => Number.isFinite(item));
+}
+
 export function AdminServerAppRuntimePage() {
   const { appCode = "find-dumps" } = useParams();
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
@@ -66,15 +73,15 @@ export function AdminServerAppRuntimePage() {
   const [versionDraft, setVersionDraft] = useState<any>({
     enabled: true,
     force_update_enabled: true,
-    min_version_name: "1.0.0",
-    min_version_code: 1,
-    latest_version_name: "1.0.0",
-    latest_version_code: 1,
+    min_version_name: "2.6",
+    min_version_code: 8,
+    latest_version_name: "2.6",
+    latest_version_code: 8,
     update_url: "https://mityangho.id.vn/free",
     update_title: "Yêu cầu cập nhật",
     update_message: "Phiên bản Fake Lag bạn đang dùng đã bị chặn hoặc quá cũ. Vui lòng cập nhật để tiếp tục sử dụng.",
     allowed_package_names: "com.fakelag.cryhard8",
-    allowed_signature_sha256: "",
+    allowed_signature_sha256: "2D:EB:73:EF:73:E9:B3:1C:84:C3:D1:00:07:6B:C4:D6:5C:8C:85:3A:AB:5E:D7:CD:1E:24:DE:51:A4:CD:CC:33",
     block_unknown_signature: false,
     blocked_version_names: "",
     blocked_version_codes: "",
@@ -246,7 +253,7 @@ export function AdminServerAppRuntimePage() {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-2"><div className="text-sm font-medium">Min version name</div><Input value={versionDraft.min_version_name || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, min_version_name: e.target.value }))} placeholder="1.0.0" /></div>
             <div className="space-y-2"><div className="text-sm font-medium">Min version code</div><Input type="number" value={versionDraft.min_version_code || 1} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, min_version_code: Number(e.target.value || 0) }))} min={1} /></div>
-            <div className="space-y-2"><div className="text-sm font-medium">Latest version name</div><Input value={versionDraft.latest_version_name || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, latest_version_name: e.target.value }))} placeholder="1.0.1" /></div>
+            <div className="space-y-2"><div className="text-sm font-medium">Latest version name</div><Input value={versionDraft.latest_version_name || ""} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, latest_version_name: e.target.value }))} placeholder="2.6" /></div>
             <div className="space-y-2"><div className="text-sm font-medium">Latest version code</div><Input type="number" value={versionDraft.latest_version_code || 1} onChange={(e) => setVersionDraft((prev: any) => ({ ...prev, latest_version_code: Number(e.target.value || 0) }))} min={1} /></div>
           </div>
 
