@@ -3,6 +3,8 @@ import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveClientIp } from "../_shared/client-ip.ts";
 
+const KEY_PATTERN = /^[A-Z0-9]{2,16}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i;
+
 const BodySchema = z.object({
   action: z.enum(["check", "reset"]),
   key: z
@@ -10,7 +12,7 @@ const BodySchema = z.object({
     .trim()
     .min(1)
     .max(64)
-    .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "INVALID_KEY_FORMAT"),
+    .regex(KEY_PATTERN, "INVALID_KEY_FORMAT"),
   cf_turnstile_response: z.string().min(10).max(4096).nullable().optional(),
   turnstile_token: z.string().min(10).max(4096).nullable().optional(),
 });
@@ -84,6 +86,69 @@ function mapRpcError(error: any) {
   }
 
   return { status: 500, msg: "SERVER_ERROR" };
+}
+
+function remainingSeconds(expiresAt?: string | null) {
+  if (!expiresAt) return null;
+  const ms = Date.parse(expiresAt);
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, Math.floor((ms - Date.now()) / 1000));
+}
+
+function redeemStatus(row: any) {
+  if (!row) return "not_found";
+  if (!Boolean(row.enabled ?? true) || row.blocked_at) return "blocked";
+  if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return "expired";
+  if (Number(row.redeemed_count ?? 0) >= Math.max(1, Number(row.max_redemptions ?? 1))) return "limited";
+  return "active";
+}
+
+async function getServerRedeemInfo(db: any, key: string) {
+  const { data, error } = await db
+    .from("server_app_redeem_keys")
+    .select("id,app_code,redeem_key,title,enabled,starts_at,expires_at,max_redemptions,redeemed_count,blocked_at,blocked_reason,created_at,source_free_session_id,trace_id")
+    .eq("redeem_key", key)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const status = redeemStatus(data);
+  return {
+    ok: true,
+    msg: "OK",
+    key: data.redeem_key,
+    key_kind: String(data.app_code || "find-dumps").toUpperCase(),
+    created_at: data.created_at ?? data.starts_at ?? null,
+    expires_at: data.expires_at ?? null,
+    remaining_seconds: remainingSeconds(data.expires_at),
+    status,
+    device_count: Number(data.redeemed_count ?? 0),
+    max_devices: Number(data.max_redemptions ?? 1),
+    admin_reset_count: 0,
+    public_reset_count: Number(data.redeemed_count ?? 0),
+    public_reset_disabled: false,
+    next_reset_penalty_pct: 0,
+    next_reset_will_expire: false,
+    public_reset_cancel_after_count: 0,
+    redeem_key_id: data.id,
+    app_code: data.app_code ?? null,
+    trace_id: data.trace_id ?? null,
+  };
+}
+
+async function resetServerRedeemKey(db: any, key: string) {
+  const info = await getServerRedeemInfo(db, key);
+  if (!info?.redeem_key_id) return { ok: false, msg: "KEY_UNAVAILABLE" };
+  const { error } = await db
+    .from("server_app_redeem_keys")
+    .update({ redeemed_count: 0, enabled: true, blocked_at: null, blocked_reason: null, updated_at: new Date().toISOString() })
+    .eq("id", info.redeem_key_id);
+  if (error) throw error;
+  const fresh = await getServerRedeemInfo(db, key);
+  return { ...(fresh ?? info), msg: "RESET_OK", devices_removed: Number(info.device_count ?? 0), penalty_pct: 0, penalty_seconds: 0 };
+}
+
+function isServerRedeemKey(key: string) {
+  return /^(FD|FND)-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(key);
 }
 
 Deno.serve(async (req) => {
@@ -218,6 +283,17 @@ Deno.serve(async (req) => {
         await sleep(700);
         return json({ ok: false, msg: "RATE_LIMIT" }, 429);
       }
+    }
+
+    if (!licRow.data && isServerRedeemKey(key)) {
+      if (action === "check") {
+        const info = await getServerRedeemInfo(db, key);
+        await sleep(450);
+        return info ? json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...info }) : json({ ok: false, msg: "KEY_UNAVAILABLE" }, 200);
+      }
+      const resetPayload = await resetServerRedeemKey(db, key);
+      await sleep(450);
+      return json({ reset_enabled: Boolean(settings.enabled), disabled_message: settings.disabled_message ?? null, ...resetPayload });
     }
 
     if (action === "check") {
