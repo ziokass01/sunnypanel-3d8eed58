@@ -328,9 +328,10 @@ export function AdminServerAppControlPage() {
       const activeMap = new Map((detailQuery.data?.unlocks || []).filter((row: any) => row.status === "active").map((row: any) => [String(row.access_code || ""), row]));
       for (const feature of featureDrafts) {
         const active = activeMap.get(feature.accessCode);
+        const rule = (detailQuery.data?.unlockRules || []).find((row: any) => row.access_code === feature.accessCode);
+        const expiresAt = fromDateTimeLocalValue(feature.expiresAt) || new Date(Date.now() + asNumber(rule?.unlock_duration_seconds, 86400) * 1000).toISOString();
+        const traceId = `admin-${Date.now()}-${String(feature.accessCode || "feature")}`;
         if (feature.enabled && !active) {
-          const rule = (detailQuery.data?.unlockRules || []).find((row: any) => row.access_code === feature.accessCode);
-          const expiresAt = fromDateTimeLocalValue(feature.expiresAt) || new Date(Date.now() + asNumber(rule?.unlock_duration_seconds, 86400) * 1000).toISOString();
           const createRes = await sb.from("server_app_feature_unlocks").insert({
             app_code: appCode,
             access_code: feature.accessCode,
@@ -340,13 +341,38 @@ export function AdminServerAppControlPage() {
             unlock_source: "admin_grant",
             started_at: new Date().toISOString(),
             expires_at: expiresAt,
-            trace_id: `admin-${Date.now()}`,
-            metadata: { updated_from: "control_center", guarded_features: feature.guardedFeatureCodes },
+            trace_id: traceId,
+            metadata: {
+              updated_from: "control_center",
+              admin_reason: reasonDraft || null,
+              guarded_features: feature.guardedFeatureCodes,
+            },
           });
           if (createRes.error) throw createRes.error;
         }
+        if (feature.enabled && active) {
+          // V8 hotfix: trước đây chỉ insert khi chưa có active unlock, nên chỉnh ngày gia hạn
+          // ở web xong lưu lại sẽ bị refetch trả về ngày cũ. Active unlock phải được update
+          // expires_at/status/device/metadata ngay cả khi switch đang bật sẵn.
+          const updateRes = await sb.from("server_app_feature_unlocks").update({
+            device_id: accountDraft.deviceId || active.device_id || null,
+            status: "active",
+            revoked_at: null,
+            expires_at: expiresAt,
+            trace_id: traceId,
+            metadata: {
+              ...(typeof active.metadata === "object" && active.metadata ? active.metadata : {}),
+              updated_from: "control_center",
+              admin_reason: reasonDraft || null,
+              guarded_features: feature.guardedFeatureCodes,
+              previous_expires_at: active.expires_at || null,
+            },
+            updated_at: new Date().toISOString(),
+          }).eq("id", active.id);
+          if (updateRes.error) throw updateRes.error;
+        }
         if (!feature.enabled && active) {
-          const revokeRes = await sb.from("server_app_feature_unlocks").update({ status: "revoked", revoked_at: new Date().toISOString() }).eq("id", active.id);
+          const revokeRes = await sb.from("server_app_feature_unlocks").update({ status: "revoked", revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", active.id);
           if (revokeRes.error) throw revokeRes.error;
         }
       }

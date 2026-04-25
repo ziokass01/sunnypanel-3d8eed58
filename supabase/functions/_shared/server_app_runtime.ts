@@ -2372,34 +2372,39 @@ export async function consumeRuntimeFeature(params: {
     }
 
     if (hasSoftCost && hasPremiumCost) {
-      let softSpend = Math.min(wallet.soft_balance, effectiveSoftCost);
-      let premiumSpend = Math.min(wallet.premium_balance, effectivePremiumCost);
-      let softRemainBalance = Math.max(0, wallet.soft_balance - softSpend);
-      let premiumRemainBalance = Math.max(0, wallet.premium_balance - premiumSpend);
-      let softMissing = round2(effectiveSoftCost - softSpend);
-      let premiumMissing = round2(effectivePremiumCost - premiumSpend);
-
-      if (softMissing > 0) {
-        const premiumExtraNeeded = round2((softMissing * effectivePremiumCost) / effectiveSoftCost);
-        if (premiumRemainBalance + 1e-9 < premiumExtraNeeded) {
-          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
+      // V8 hotfix: soft_cost và premium_cost là HAI GIÁ THAY THẾ nhau, không phải bắt buộc trừ cả hai ví.
+      // Ví dụ Dumps so.c hiển thị "Thường 2 / VIP 0.1" nghĩa là dùng ví thường HOẶC ví VIP.
+      // Bản cũ cộng logic mixed nên tài khoản còn nhiều credit vẫn có thể bị báo thiếu nếu một nhánh ví lệch.
+      const normalizedWallet = requestedWalletKind === "premium" || requestedWalletKind === "vip"
+        ? "premium"
+        : requestedWalletKind === "soft" || requestedWalletKind === "normal"
+          ? "soft"
+          : "auto";
+      const softEnough = wallet.soft_balance + 1e-9 >= effectiveSoftCost;
+      const premiumEnough = wallet.premium_balance + 1e-9 >= effectivePremiumCost;
+      if (normalizedWallet === "soft") {
+        if (!softEnough) throw Object.assign(new Error("INSUFFICIENT_SOFT_BALANCE"), { status: 409, code: "INSUFFICIENT_SOFT_BALANCE" });
+        softDelta = round2(-effectiveSoftCost);
+        chargeKind = "soft";
+      } else if (normalizedWallet === "premium") {
+        if (!premiumEnough) throw Object.assign(new Error("INSUFFICIENT_PREMIUM_BALANCE"), { status: 409, code: "INSUFFICIENT_PREMIUM_BALANCE" });
+        premiumDelta = round2(-effectivePremiumCost);
+        chargeKind = "premium";
+      } else {
+        const priority = settings.wallet_rules?.consume_priority === "premium_first" ? "premium_first" : "soft_first";
+        if (priority === "premium_first" && premiumEnough) {
+          premiumDelta = round2(-effectivePremiumCost);
+          chargeKind = "premium";
+        } else if (softEnough) {
+          softDelta = round2(-effectiveSoftCost);
+          chargeKind = "soft";
+        } else if (premiumEnough) {
+          premiumDelta = round2(-effectivePremiumCost);
+          chargeKind = "premium";
+        } else {
+          throw Object.assign(new Error("INSUFFICIENT_BALANCE_FOR_EITHER_WALLET"), { status: 409, code: "INSUFFICIENT_BALANCE_FOR_EITHER_WALLET" });
         }
-        premiumSpend = round2(premiumSpend + premiumExtraNeeded);
-        premiumRemainBalance = round2(Math.max(0, premiumRemainBalance - premiumExtraNeeded));
       }
-
-      if (premiumMissing > 0) {
-        const softExtraNeeded = round2((premiumMissing * effectiveSoftCost) / effectivePremiumCost);
-        if (softRemainBalance + 1e-9 < softExtraNeeded) {
-          throw Object.assign(new Error("INSUFFICIENT_MIXED_BALANCE"), { status: 409, code: "INSUFFICIENT_MIXED_BALANCE" });
-        }
-        softSpend = round2(softSpend + softExtraNeeded);
-        softRemainBalance = round2(Math.max(0, softRemainBalance - softExtraNeeded));
-      }
-
-      softDelta = round2(-softSpend);
-      premiumDelta = round2(-premiumSpend);
-      chargeKind = softSpend > 0 && premiumSpend > 0 ? "mixed" : softSpend > 0 ? "soft" : "premium";
     } else if (hasPremiumCost) {
       chargeKind = "premium";
       if (wallet.premium_balance < effectivePremiumCost) {
