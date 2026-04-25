@@ -203,7 +203,7 @@ function fakeLagRemainingSeconds(row: any) {
 async function getFakeLagRule(db: any) {
   const { data, error } = await db
     .from("license_access_rules")
-    .select("app_code,allow_reset,public_enabled,max_verify_per_key")
+    .select("*")
     .eq("app_code", "fake-lag")
     .maybeSingle();
   if (error) throw error;
@@ -213,7 +213,7 @@ async function getFakeLagRule(db: any) {
 async function getFakeLagLicenseInfo(db: any, key: string) {
   const { data, error } = await db
     .from("licenses")
-    .select("id,key,app_code,created_at,expires_at,start_on_first_use,starts_on_first_use,first_used_at,activated_at,duration_seconds,duration_days,is_active,deleted_at,max_verify,verify_count,public_reset_disabled,public_reset_count,admin_reset_count,note")
+    .select("*")
     .eq("key", key)
     .maybeSingle();
   if (error) throw error;
@@ -274,7 +274,9 @@ async function resetFakeLagLicense(db: any, key: string) {
   const { error: updErr } = await db
     .from("licenses")
     .update({
+      app_code: "fake-lag",
       verify_count: 0,
+      public_reset_disabled: false,
       public_reset_count: Number(info.public_reset_count ?? 0) + 1,
     })
     .eq("id", info.license_id);

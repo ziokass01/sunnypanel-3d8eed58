@@ -213,8 +213,33 @@ export function ResetKeyPage() {
         key: normalizedKey,
         turnstile_token: action === "reset" ? turnstileToken : undefined,
       });
-      setResult(res);
-      if (res?.ok) setLastCompletedAction(action);
+
+      // Fake Lag/public reset must return a full status card after reset.
+      // If an older deployed backend answers only OK/partial payload, immediately re-check the key
+      // so the page does not show the confusing "Không thể lấy thông tin key / OK" state.
+      let finalRes = res;
+      if (action === "reset" && (!res?.key || !res?.status || String(res?.msg ?? "").toUpperCase() === "OK")) {
+        try {
+          const fresh = await postFunction<ResetKeyPayload>("/reset-key", {
+            action: "check",
+            key: normalizedKey,
+          });
+          if (fresh?.ok) {
+            finalRes = {
+              ...fresh,
+              msg: "RESET_OK",
+              devices_removed: res?.devices_removed,
+              penalty_pct: res?.penalty_pct,
+              penalty_seconds: res?.penalty_seconds,
+            };
+          }
+        } catch {
+          // Keep original response if follow-up check fails.
+        }
+      }
+
+      setResult(finalRes);
+      if (finalRes?.ok) setLastCompletedAction(action);
     } catch (e: any) {
       setResult(toUiError(e));
     } finally {
