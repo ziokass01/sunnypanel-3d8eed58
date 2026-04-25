@@ -249,17 +249,15 @@ async function checkVersionPolicy(db: any, input: any) {
   try {
     await db.from("server_app_version_audit_logs").insert({
       app_code: appCode,
+      decision: hardBlocked ? "blocked" : updateRequired ? "update_required" : "allow",
+      code: reason,
       version_name: versionName || null,
       version_code: Number.isFinite(versionCode) ? versionCode : null,
       build_id: buildId || null,
       package_name: packageName || null,
       signature_sha256: signatureSha256 || null,
       device_id: safeText(input?.device, 128) || null,
-      allowed: !(hardBlocked || updateRequired),
-      update_required: updateRequired,
-      hard_blocked: hardBlocked,
-      reason,
-      meta: { source: "fake-lag-auth", strict: true, apk_sha256: apkSha256 || null, so_sha256: soSha256 || null, dex_crc: dexCrc || null, integrity_mix: safeText(input?.integrity_mix, 64) || null },
+      meta: { source: "fake-lag-auth", strict: true, result: { allowed: !(hardBlocked || updateRequired), update_required: updateRequired, hard_blocked: hardBlocked, reason }, apk_sha256: apkSha256 || null, so_sha256: soSha256 || null, dex_crc: dexCrc || null, integrity_mix: safeText(input?.integrity_mix, 64) || null },
     });
   } catch {}
 

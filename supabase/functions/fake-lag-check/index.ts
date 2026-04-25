@@ -254,11 +254,12 @@ Deno.serve(async (req) => {
   const securityBlock = await getSecurityBlock(supabase, appCode, deviceId, ipHash);
 
   let status = 200;
-  let result = decisionPayload(policy, "allow", "OK", { update_required: false, hard_blocked: false });
+  let statusHint = 200;
+  let result = decisionPayload(policy, "allow", "OK", { update_required: false, hard_blocked: false, http_status_hint: 200 });
 
   if (securityBlock) {
-    status = 403;
-    result = decisionPayload(policy, "blocked", "DEVICE_BLOCKED", { security_blocked: true });
+    statusHint = 403;
+    result = decisionPayload(policy, "blocked", "DEVICE_BLOCKED", { security_blocked: true, http_status_hint: 403 });
   } else if (isRuntimeRisk(riskFlags)) {
     const riskState = await recordVersionRisk(supabase, {
       appCode,
@@ -269,8 +270,8 @@ Deno.serve(async (req) => {
       detail: { app_code: appCode, ip_hash: ipHash, device: deviceId || null, risk_flags: riskFlags, package_name: packageName || null, build_id: buildId || null, signature_sha256: signatureSha256 || null, native_guard: nativeGuard, client_watermark: clientWatermark || null },
     });
     if (riskState.blocked) {
-      status = 403;
-      result = decisionPayload(policy, "blocked", "DEVICE_BLOCKED", { security_blocked: true, risk_hit_count: riskState.hit_count, blocked_until: riskState.blocked_until });
+      statusHint = 403;
+      result = decisionPayload(policy, "blocked", "DEVICE_BLOCKED", { security_blocked: true, risk_hit_count: riskState.hit_count, blocked_until: riskState.blocked_until, http_status_hint: 403 });
     }
   }
 
@@ -279,40 +280,40 @@ Deno.serve(async (req) => {
   const minVersionCode = asInt(policy.min_version_code, 0);
 
   if (String(result.decision || "allow") === "allow" && !policy.enabled) {
-    status = 403;
-    result = decisionPayload(policy, "blocked", "VERSION_GUARD_DISABLED_BY_ADMIN");
+    statusHint = 403;
+    result = decisionPayload(policy, "blocked", "VERSION_GUARD_DISABLED_BY_ADMIN", { http_status_hint: 403 });
   } else if (String(result.decision || "allow") === "allow" && strictIdentity && !packageName) {
-    status = 403;
-    result = decisionPayload(policy, "blocked", "PACKAGE_MISSING");
+    statusHint = 403;
+    result = decisionPayload(policy, "blocked", "PACKAGE_MISSING", { http_status_hint: 403 });
   } else if (String(result.decision || "allow") === "allow" && Array.isArray(policy.allowed_package_names) && policy.allowed_package_names.length > 0 && !listIncludesLower(policy.allowed_package_names, packageName)) {
-    status = 403;
-    result = decisionPayload(policy, "blocked", "PACKAGE_NOT_ALLOWED");
+    statusHint = 403;
+    result = decisionPayload(policy, "blocked", "PACKAGE_NOT_ALLOWED", { http_status_hint: 403 });
   } else if (String(result.decision || "allow") === "allow" && requireSignature && strictIdentity && !signatureSha256) {
-    status = 403;
-    result = decisionPayload(policy, "blocked", "SIGNATURE_MISSING");
+    statusHint = 403;
+    result = decisionPayload(policy, "blocked", "SIGNATURE_MISSING", { http_status_hint: 403 });
   } else if (String(result.decision || "allow") === "allow" && requireSignature && Array.isArray(policy.allowed_signature_sha256) && policy.allowed_signature_sha256.length > 0 && !listIncludesSha(policy.allowed_signature_sha256, signatureSha256)) {
-    status = 403;
-    result = decisionPayload(policy, "blocked", "SIGNATURE_NOT_ALLOWED");
+    statusHint = 403;
+    result = decisionPayload(policy, "blocked", "SIGNATURE_NOT_ALLOWED", { http_status_hint: 403 });
   } else if (String(result.decision || "allow") === "allow" && (listIncludesText(policy.blocked_version_names, versionName) || listIncludesInt(policy.blocked_version_codes, versionCode) || listIncludesText(policy.blocked_build_ids, buildId))) {
-    status = 426;
-    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_BLOCKED");
+    statusHint = 426;
+    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_BLOCKED", { http_status_hint: 426 });
   } else if (String(result.decision || "allow") === "allow" && policy.force_update_enabled && minVersionCode > 0 && versionCode <= 0) {
-    status = 426;
-    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_CODE_MISSING");
+    statusHint = 426;
+    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_CODE_MISSING", { http_status_hint: 426 });
   } else if (String(result.decision || "allow") === "allow" && policy.force_update_enabled && minVersionCode > 0 && versionCode < minVersionCode) {
-    status = 426;
-    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_CODE_TOO_OLD");
+    statusHint = 426;
+    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_CODE_TOO_OLD", { http_status_hint: 426 });
   } else if (String(result.decision || "allow") === "allow" && policy.force_update_enabled && asString(policy.min_version_name) && versionName && compareVersionText(versionName, policy.min_version_name) < 0) {
-    status = 426;
-    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_TOO_OLD");
+    statusHint = 426;
+    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_TOO_OLD", { http_status_hint: 426 });
   }
 
   await logVersionCheck(supabase, {
     ...baseAudit,
     decision: String(result.decision || "allow"),
     code: String(result.code || "OK"),
-    meta: { source: "fake-lag-check", result, risk_flags: riskFlags || null, native_guard: nativeGuard, client_watermark: clientWatermark || null },
+    meta: { source: "fake-lag-check", result, http_status_hint: statusHint, risk_flags: riskFlags || null, native_guard: nativeGuard, client_watermark: clientWatermark || null },
   });
 
-  return json(status, result, origin);
+  return json(200, result, origin);
 });

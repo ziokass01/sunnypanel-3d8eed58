@@ -169,6 +169,21 @@ async function invokeJson<T>(opts: {
       const data = await res.json().catch(() => null);
       if (res.ok) return data as T;
 
+      // Public gate/check functions intentionally return structured JSON for user-flow denials.
+      // Older deployments may still use HTTP 400/403/426; do not turn those into generic
+      // "service unavailable" errors when the body already contains ok:false/code/msg.
+      const normalizedCandidatePath = candidatePath.startsWith("/") ? candidatePath : `/${candidatePath}`;
+      const structuredPublicDenialPaths = new Set([
+        "/free-gate",
+        "/free-start",
+        "/free-reveal",
+        "/free-resolve",
+        "/fake-lag-check",
+      ]);
+      if (structuredPublicDenialPaths.has(normalizedCandidatePath) && data && typeof data === "object" && (data as any).ok === false) {
+        return data as T;
+      }
+
       const err = buildRequestError(opts.path, res.status, data, {
         attemptUrls,
         requestedPath: candidatePath,
