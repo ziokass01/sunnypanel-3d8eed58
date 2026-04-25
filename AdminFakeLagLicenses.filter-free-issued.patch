@@ -1,0 +1,32 @@
+diff --git a/src/pages/AdminFakeLagLicenses.tsx b/src/pages/AdminFakeLagLicenses.tsx
+--- a/src/pages/AdminFakeLagLicenses.tsx
++++ b/src/pages/AdminFakeLagLicenses.tsx
+@@
+-      const { data, error } = await query;
+-      if (error) throw error;
+-      return (data ?? []) as FakeLagLicenseRow[];
++      const [licensesRes, freeIssuedRes] = await Promise.all([
++        query,
++        (supabase.from("licenses_free_issues") as any)
++          .select("license_id")
++          .eq("app_code", APP_CODE)
++          .not("license_id", "is", null)
++          .limit(1000),
++      ]);
++
++      if (licensesRes.error) throw licensesRes.error;
++      if (freeIssuedRes.error) throw freeIssuedRes.error;
++
++      // Key user tự nhận từ /free vẫn có thể được lưu trong bảng licenses để app verify,
++      // nhưng không được hiện trong khu Licenses admin. Khu Licenses chỉ giữ key admin tạo tay.
++      // Toàn bộ key free Fake Lag tra cứu/block/xóa ở Audit Log.
++      const freeIssuedLicenseIds = new Set(
++        (freeIssuedRes.data ?? [])
++          .map((row: any) => String(row.license_id || "").trim())
++          .filter(Boolean),
++      );
++
++      return ((licensesRes.data ?? []) as FakeLagLicenseRow[])
++        .filter((row) => !freeIssuedLicenseIds.has(String(row.id)));
+     },
+   });
