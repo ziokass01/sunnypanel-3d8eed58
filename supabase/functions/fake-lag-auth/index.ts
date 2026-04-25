@@ -222,6 +222,116 @@ async function checkVersionPolicy(db: any, input: any) {
   };
 }
 
+
+async function getSecurityPolicy(db: any) {
+  try {
+    const { data } = await db
+      .from("server_app_version_policies")
+      .select("risk_auto_block_enabled,risk_auto_block_threshold,risk_auto_block_window_seconds")
+      .eq("app_code", "fake-lag")
+      .maybeSingle();
+    return {
+      enabled: asBool((data as any)?.risk_auto_block_enabled, true),
+      threshold: Math.max(1, Number((data as any)?.risk_auto_block_threshold ?? 2) || 2),
+      windowSeconds: Math.max(60, Number((data as any)?.risk_auto_block_window_seconds ?? 600) || 600),
+    };
+  } catch {
+    return { enabled: true, threshold: 2, windowSeconds: 600 };
+  }
+}
+
+async function getSecurityBlock(db: any, device: string, ipHash: string) {
+  try {
+    const { data } = await db
+      .from("server_app_security_blocks")
+      .select("id,enabled,blocked_until,hit_count,reason")
+      .eq("app_code", "fake-lag")
+      .or(`device_id.eq.${device},ip_hash.eq.${ipHash}`)
+      .eq("enabled", true)
+      .limit(1)
+      .maybeSingle();
+    if (!data) return null;
+    const until = String((data as any).blocked_until ?? "").trim();
+    if (until && Date.parse(until) <= Date.now()) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function recordRiskAndMaybeBlock(db: any, args: {
+  key: string;
+  device: string;
+  ip: string;
+  ipHash: string;
+  riskFlags: string;
+  packageName: string;
+  signatureSha256: string;
+  buildId: string;
+}) {
+  const policy = await getSecurityPolicy(db);
+  const nowIso = new Date().toISOString();
+  const blockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const detail = {
+    ip: args.ip,
+    ip_hash: args.ipHash,
+    device: args.device,
+    ok: false,
+    app_code: "fake-lag",
+    risk_flags: args.riskFlags,
+    package_name: args.packageName,
+    signature_sha256: args.signatureSha256,
+    build_id: args.buildId,
+    policy,
+  };
+
+  try {
+    await db.from("audit_logs").insert({
+      action: "FAKE_LAG_RUNTIME_RISK",
+      license_key: args.key || null,
+      detail,
+    });
+  } catch {}
+
+  if (!policy.enabled) return { blocked: false, hit_count: 1 };
+
+  try {
+    const { data: existing } = await db
+      .from("server_app_security_blocks")
+      .select("*")
+      .eq("app_code", "fake-lag")
+      .eq("device_id", args.device)
+      .maybeSingle();
+
+    const previousHits = Math.max(0, Number((existing as any)?.hit_count ?? 0));
+    const hitCount = previousHits + 1;
+    const shouldBlock = hitCount >= policy.threshold;
+
+    const payload = {
+      app_code: "fake-lag",
+      device_id: args.device || null,
+      ip_hash: args.ipHash || null,
+      reason: "RUNTIME_RISK",
+      enabled: shouldBlock,
+      hit_count: hitCount,
+      first_seen_at: (existing as any)?.first_seen_at ?? nowIso,
+      last_seen_at: nowIso,
+      blocked_until: shouldBlock ? blockedUntil : null,
+      details: detail,
+    };
+
+    if ((existing as any)?.id) {
+      await db.from("server_app_security_blocks").update(payload).eq("id", (existing as any).id);
+    } else {
+      await db.from("server_app_security_blocks").insert(payload);
+    }
+
+    return { blocked: shouldBlock, hit_count: hitCount, blocked_until: shouldBlock ? blockedUntil : null };
+  } catch {
+    return { blocked: false, hit_count: 1 };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
@@ -247,19 +357,39 @@ Deno.serve(async (req) => {
   if (!device) return json({ ok: false, msg: "DEVICE_REQUIRED" }, 200);
 
   const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const ipHash = await sha256Hex(ip);
+  const packageNameForAudit = safeText(input.package_name, 128);
+  const signatureForAudit = normalizeSha(input.signature_sha256);
+  const buildIdForAudit = safeText(input.build_id, 128);
+
+  const securityBlock = await getSecurityBlock(db, device, ipHash);
+  if (securityBlock) {
+    await db.from("audit_logs").insert({ action: "FAKE_LAG_SECURITY_BLOCK", license_key: key || null, detail: { ip, ip_hash: ipHash, device, ok: false, app_code: "fake-lag", block: securityBlock } });
+    return json({ ok: false, msg: "DEVICE_BLOCKED", hard_blocked: true }, 200);
+  }
+
   const version = await checkVersionPolicy(db, input);
   if (!version.allowed) return json({ ok: false, msg: version.reason || "UPDATE_REQUIRED", ...version }, 200);
-  if (/debugger|frida/i.test(riskFlags)) {
-    await db.from("audit_logs").insert({ action: "FAKE_LAG_RUNTIME_RISK", license_key: key || null, detail: { ip, device, ok: false, app_code: "fake-lag", risk_flags: riskFlags } });
-    return json({ ok: false, msg: "RUNTIME_RISK" }, 200);
+  if (/debugger|frida|xposed|substrate|hook|tracerpid|socket|port/i.test(riskFlags)) {
+    const riskState = await recordRiskAndMaybeBlock(db, {
+      key,
+      device,
+      ip,
+      ipHash,
+      riskFlags,
+      packageName: packageNameForAudit,
+      signatureSha256: signatureForAudit,
+      buildId: buildIdForAudit,
+    });
+    return json({ ok: false, msg: riskState.blocked ? "DEVICE_BLOCKED" : "RUNTIME_RISK", hard_blocked: Boolean(riskState.blocked), risk_hit_count: riskState.hit_count, blocked_until: riskState.blocked_until ?? null }, 200);
   }
 
   const clientIdentity = {
     key,
     device,
-    package_name: safeText(input.package_name, 128),
-    signature_sha256: normalizeSha(input.signature_sha256),
-    build_id: safeText(input.build_id, 128),
+    package_name: packageNameForAudit,
+    signature_sha256: signatureForAudit,
+    build_id: buildIdForAudit,
   };
 
   if (mode === "engine" || mode === "heartbeat") {
@@ -270,7 +400,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  const ipHash = await sha256Hex(ip);
   try {
     const ipRl = await db.rpc("check_ip_rate_limit", { p_ip: ip, p_limit: 180, p_window_seconds: 60 });
     const allowed = ipRl.error ? true : Boolean(ipRl.data?.[0]?.allowed);
