@@ -43,6 +43,38 @@ function asBool(value: unknown, fallback = false) {
   if (["0", "false", "no", "off"].includes(raw)) return false;
   return fallback;
 }
+function normalizeSha(value: unknown) {
+  return safeText(value, 160).replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+}
+function normalizeLower(value: unknown, max = 128) {
+  return safeText(value, max).toLowerCase();
+}
+function listText(value: unknown) {
+  return Array.isArray(value) ? value.map((x) => String(x ?? "").trim()).filter(Boolean) : [];
+}
+function listLower(value: unknown) {
+  return listText(value).map((x) => x.toLowerCase());
+}
+function listSha(value: unknown) {
+  return listText(value).map((x) => normalizeSha(x)).filter(Boolean);
+}
+function compareVersionText(left: string | null | undefined, right: string | null | undefined) {
+  const a = safeText(left, 64);
+  const b = safeText(right, 64);
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  const ap = a.split(/[^0-9]+/).filter(Boolean).map((x) => Number(x));
+  const bp = b.split(/[^0-9]+/).filter(Boolean).map((x) => Number(x));
+  const n = Math.max(ap.length, bp.length);
+  for (let i = 0; i < n; i += 1) {
+    const av = Number.isFinite(ap[i]) ? ap[i] : 0;
+    const bv = Number.isFinite(bp[i]) ? bp[i] : 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return a.localeCompare(b, undefined, { sensitivity: "base" });
+}
 async function readJson(req: Request) {
   try { return await req.json(); } catch { return null; }
 }
@@ -69,17 +101,20 @@ async function hmacSha256Base64Url(secret: string, data: string) {
 function getTokenSecret(serviceRoleKey: string) {
   return (Deno.env.get("FAKE_LAG_TOKEN_SECRET") || serviceRoleKey || "fake-lag-token-secret").trim();
 }
-async function issueSessionToken(serviceRoleKey: string, payload: Record<string, unknown>) {
+async function issueSessionToken(serviceRoleKey: string, payload: Record<string, unknown>, ttlSeconds = 15 * 60) {
+  const ttl = Math.max(60, Math.min(24 * 60 * 60, Math.trunc(Number(ttlSeconds) || 15 * 60)));
+  const nowSec = Math.floor(Date.now() / 1000);
   const body = {
     ...payload,
     typ: "fake-lag-session",
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 15 * 60,
+    nonce: crypto.randomUUID(),
+    iat: nowSec,
+    exp: nowSec + ttl,
   };
   const bodyText = JSON.stringify(body);
   const bodyPart = base64UrlEncode(bodyText);
   const sig = await hmacSha256Base64Url(getTokenSecret(serviceRoleKey), bodyPart);
-  return { token: `${bodyPart}.${sig}`, expires_at: new Date(Number(body.exp) * 1000).toISOString(), ttl_seconds: 15 * 60 };
+  return { token: `${bodyPart}.${sig}`, expires_at: new Date(Number(body.exp) * 1000).toISOString(), ttl_seconds: ttl };
 }
 async function verifySessionToken(serviceRoleKey: string, token: string, expected: Record<string, unknown>) {
   const raw = String(token || "").trim();
@@ -92,11 +127,14 @@ async function verifySessionToken(serviceRoleKey: string, token: string, expecte
   const nowSec = Math.floor(Date.now() / 1000);
   if (String(payload?.typ || "") !== "fake-lag-session") return { ok: false, msg: "TOKEN_INVALID", payload };
   if (Number(payload?.exp || 0) <= nowSec) return { ok: false, msg: "TOKEN_EXPIRED", payload };
-  const keys = ["key", "device", "package_name", "signature_sha256", "build_id"];
-  for (const k of keys) {
+  const textKeys = ["key", "device", "package_name", "build_id"];
+  for (const k of textKeys) {
     const a = String(payload?.[k] ?? "").trim();
     const b = String(expected?.[k] ?? "").trim();
     if (a !== b) return { ok: false, msg: "TOKEN_MISMATCH", payload };
+  }
+  if (normalizeSha(payload?.signature_sha256) !== normalizeSha(expected?.signature_sha256)) {
+    return { ok: false, msg: "TOKEN_MISMATCH", payload };
   }
   return { ok: true, msg: "OK", payload };
 }
@@ -105,34 +143,51 @@ async function verifySessionToken(serviceRoleKey: string, token: string, expecte
 async function checkVersionPolicy(db: any, input: any) {
   const appCode = "fake-lag";
   const { data } = await db.from("server_app_version_policies").select("*").eq("app_code", appCode).maybeSingle();
-  if (!data || asBool(data.enabled, true) === false) {
-    return { allowed: true, update_required: false, hard_blocked: false, update_url: "https://mityangho.id.vn/free" };
+  if (!data) {
+    return {
+      allowed: true,
+      update_required: false,
+      hard_blocked: false,
+      reason: "NO_POLICY",
+      update_url: "https://mityangho.id.vn/free",
+      policy: { login_token_ttl_seconds: 15 * 60, engine_token_ttl_seconds: 3 * 60, heartbeat_seconds: 45 },
+    };
   }
 
-  const versionCode = Number(input?.version_code ?? 0);
+  const enabled = asBool(data.enabled, true);
+  const forceUpdate = asBool(data.force_update_enabled, true);
+  const versionCodeRaw = Number(input?.version_code ?? 0);
+  const versionCode = Number.isFinite(versionCodeRaw) ? Math.trunc(versionCodeRaw) : 0;
   const versionName = safeText(input?.version_name, 64);
   const buildId = safeText(input?.build_id, 128);
   const packageName = safeText(input?.package_name, 128);
-  const signatureSha256 = safeText(input?.signature_sha256, 128).toUpperCase();
+  const packageNameLower = normalizeLower(input?.package_name, 128);
+  const signatureSha256 = normalizeSha(input?.signature_sha256);
   const blockedCodes = Array.isArray(data.blocked_version_codes) ? data.blocked_version_codes.map((x: any) => Number(x)) : [];
-  const blockedNames = Array.isArray(data.blocked_version_names) ? data.blocked_version_names.map((x: any) => String(x).trim()) : [];
-  const blockedBuilds = Array.isArray(data.blocked_build_ids) ? data.blocked_build_ids.map((x: any) => String(x).trim()) : [];
-  const allowedPackages = Array.isArray(data.allowed_package_names) ? data.allowed_package_names.map((x: any) => String(x).trim()).filter(Boolean) : [];
-  const allowedSignatures = Array.isArray(data.allowed_signature_sha256) ? data.allowed_signature_sha256.map((x: any) => String(x).trim().toUpperCase()).filter(Boolean) : [];
+  const blockedNames = listText(data.blocked_version_names);
+  const blockedBuilds = listText(data.blocked_build_ids);
+  const allowedPackages = listLower(data.allowed_package_names);
+  const allowedSignatures = listSha(data.allowed_signature_sha256);
   const minVersionCode = Number(data.min_version_code ?? 0);
   const minVersionName = String(data.min_version_name ?? "").trim();
-  const requireSignature = asBool(data.require_signature_match, false);
+  const requireSignature = asBool(data.block_unknown_signature, false) || asBool(data.require_signature_match, false);
+  const blockMissingIdentity = asBool(data.block_missing_identity, true);
 
   let hardBlocked = false;
   let updateRequired = false;
   let reason = "OK";
-  if (blockedCodes.includes(versionCode)) { hardBlocked = true; reason = "VERSION_CODE_BLOCKED"; }
-  else if (blockedNames.includes(versionName)) { hardBlocked = true; reason = "VERSION_NAME_BLOCKED"; }
-  else if (buildId && blockedBuilds.includes(buildId)) { hardBlocked = true; reason = "BUILD_ID_BLOCKED"; }
-  else if (allowedPackages.length && !allowedPackages.includes(packageName)) { hardBlocked = true; reason = "PACKAGE_NOT_ALLOWED"; }
+
+  if (!enabled) { hardBlocked = true; reason = "VERSION_GUARD_DISABLED_BY_ADMIN"; }
+  else if (blockedCodes.includes(versionCode)) { updateRequired = true; reason = "VERSION_CODE_BLOCKED"; }
+  else if (blockedNames.includes(versionName)) { updateRequired = true; reason = "VERSION_NAME_BLOCKED"; }
+  else if (buildId && blockedBuilds.includes(buildId)) { updateRequired = true; reason = "BUILD_ID_BLOCKED"; }
+  else if (blockMissingIdentity && !packageName) { hardBlocked = true; reason = "PACKAGE_MISSING"; }
+  else if (allowedPackages.length && !allowedPackages.includes(packageNameLower)) { hardBlocked = true; reason = "PACKAGE_NOT_ALLOWED"; }
+  else if (requireSignature && blockMissingIdentity && !signatureSha256) { hardBlocked = true; reason = "SIGNATURE_MISSING"; }
   else if (requireSignature && allowedSignatures.length && !allowedSignatures.includes(signatureSha256)) { hardBlocked = true; reason = "SIGNATURE_NOT_ALLOWED"; }
-  else if (minVersionCode > 0 && versionCode > 0 && versionCode < minVersionCode) { updateRequired = true; reason = "VERSION_CODE_TOO_OLD"; }
-  else if (minVersionName && versionName && versionName < minVersionName) { updateRequired = true; reason = "VERSION_NAME_TOO_OLD"; }
+  else if (forceUpdate && minVersionCode > 0 && versionCode <= 0) { updateRequired = true; reason = "VERSION_CODE_MISSING"; }
+  else if (forceUpdate && minVersionCode > 0 && versionCode < minVersionCode) { updateRequired = true; reason = "VERSION_CODE_TOO_OLD"; }
+  else if (forceUpdate && minVersionName && versionName && compareVersionText(versionName, minVersionName) < 0) { updateRequired = true; reason = "VERSION_NAME_TOO_OLD"; }
 
   try {
     await db.from("server_app_version_audit_logs").insert({
@@ -147,7 +202,7 @@ async function checkVersionPolicy(db: any, input: any) {
       update_required: updateRequired,
       hard_blocked: hardBlocked,
       reason,
-      meta: { source: "fake-lag-auth" },
+      meta: { source: "fake-lag-auth", strict: true },
     });
   } catch {}
 
@@ -159,6 +214,11 @@ async function checkVersionPolicy(db: any, input: any) {
     title: data.update_title || "Yêu cầu cập nhật",
     message: data.update_message || "Phiên bản bạn đang dùng đã cũ hoặc đã bị chặn. Vui lòng cập nhật để tiếp tục sử dụng.",
     update_url: data.update_url || "https://mityangho.id.vn/free",
+    policy: {
+      login_token_ttl_seconds: Math.max(300, Math.min(3600, Number(data.login_token_ttl_seconds ?? 15 * 60) || 15 * 60)),
+      engine_token_ttl_seconds: Math.max(60, Math.min(900, Number(data.engine_token_ttl_seconds ?? 3 * 60) || 3 * 60)),
+      heartbeat_seconds: Math.max(20, Math.min(180, Number(data.heartbeat_seconds ?? 45) || 45)),
+    },
   };
 }
 
@@ -175,7 +235,7 @@ Deno.serve(async (req) => {
 
   const key = normalizeKey(input.key);
   const rawMode = safeText(input.mode, 32).toLowerCase();
-  const mode = rawMode === "refresh" || rawMode === "engine" ? rawMode : "login";
+  const mode = rawMode === "refresh" || rawMode === "engine" || rawMode === "heartbeat" ? rawMode : "login";
   const sessionToken = safeText(input.session_token, 4096);
   const device = safeText(input.device, 128);
   const deviceName = safeText(input.device_name, 128);
@@ -198,14 +258,14 @@ Deno.serve(async (req) => {
     key,
     device,
     package_name: safeText(input.package_name, 128),
-    signature_sha256: safeText(input.signature_sha256, 128).toUpperCase(),
+    signature_sha256: normalizeSha(input.signature_sha256),
     build_id: safeText(input.build_id, 128),
   };
 
-  if (mode === "engine") {
+  if (mode === "engine" || mode === "heartbeat") {
     const tokenState = await verifySessionToken(serviceRoleKey, sessionToken, clientIdentity);
     if (!tokenState.ok) {
-      await db.from("audit_logs").insert({ action: "FAKE_LAG_ENGINE_DENY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: tokenState.msg } });
+      await db.from("audit_logs").insert({ action: mode === "heartbeat" ? "FAKE_LAG_HEARTBEAT_DENY" : "FAKE_LAG_ENGINE_DENY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: tokenState.msg } });
       return json({ ok: false, msg: tokenState.msg }, 200);
     }
   }
@@ -337,12 +397,15 @@ Deno.serve(async (req) => {
 
   await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, device_name: deviceName || null, mode, ok: true, app_code: "fake-lag", license_id: licRow.id, device_row: deviceRowId, risk_flags: riskFlags || null } });
   const remainingSeconds = effectiveExpiresAt ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000)) : startsOnFirstUse && !started && typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
+  const tokenTtl = mode === "engine" || mode === "heartbeat"
+    ? Number(version.policy?.engine_token_ttl_seconds ?? 3 * 60)
+    : Number(version.policy?.login_token_ttl_seconds ?? 15 * 60);
   const issuedToken = await issueSessionToken(serviceRoleKey, {
     ...clientIdentity,
     app_code: "fake-lag",
     license_id: licRow.id,
     mode,
-  });
+  }, tokenTtl);
   return json({
     ok: true,
     msg: "OK",
@@ -355,6 +418,8 @@ Deno.serve(async (req) => {
     session_token: issuedToken.token,
     token_expires_at: issuedToken.expires_at,
     token_ttl_seconds: issuedToken.ttl_seconds,
+    heartbeat_required: true,
+    next_heartbeat_seconds: Number(version.policy?.heartbeat_seconds ?? 45),
     server_time: now.toISOString(),
   }, 200);
 });

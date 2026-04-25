@@ -10,6 +10,15 @@ function asInt(value: unknown, fallback = 0) {
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
+function asBool(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (value === null || value === undefined) return fallback;
+  const raw = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
 function normalizeSha(value: unknown) {
   return asString(value).replace(/[^0-9a-fA-F]/g, "").toUpperCase();
 }
@@ -159,19 +168,32 @@ Deno.serve(async (req) => {
   let status = 200;
   let result = decisionPayload(policy, "allow", "OK", { update_required: false, hard_blocked: false });
 
+  const strictIdentity = asBool(policy.block_missing_identity, true);
+  const requireSignature = asBool(policy.block_unknown_signature, false) || asBool(policy.require_signature_match, false);
+  const minVersionCode = asInt(policy.min_version_code, 0);
+
   if (!policy.enabled) {
     status = 403;
     result = decisionPayload(policy, "blocked", "VERSION_GUARD_DISABLED_BY_ADMIN");
+  } else if (strictIdentity && !packageName) {
+    status = 403;
+    result = decisionPayload(policy, "blocked", "PACKAGE_MISSING");
   } else if (Array.isArray(policy.allowed_package_names) && policy.allowed_package_names.length > 0 && !listIncludesLower(policy.allowed_package_names, packageName)) {
     status = 403;
     result = decisionPayload(policy, "blocked", "PACKAGE_NOT_ALLOWED");
-  } else if (policy.block_unknown_signature && Array.isArray(policy.allowed_signature_sha256) && policy.allowed_signature_sha256.length > 0 && !listIncludesSha(policy.allowed_signature_sha256, signatureSha256)) {
+  } else if (requireSignature && strictIdentity && !signatureSha256) {
+    status = 403;
+    result = decisionPayload(policy, "blocked", "SIGNATURE_MISSING");
+  } else if (requireSignature && Array.isArray(policy.allowed_signature_sha256) && policy.allowed_signature_sha256.length > 0 && !listIncludesSha(policy.allowed_signature_sha256, signatureSha256)) {
     status = 403;
     result = decisionPayload(policy, "blocked", "SIGNATURE_NOT_ALLOWED");
   } else if (listIncludesText(policy.blocked_version_names, versionName) || listIncludesInt(policy.blocked_version_codes, versionCode) || listIncludesText(policy.blocked_build_ids, buildId)) {
     status = 426;
     result = decisionPayload(policy, "update_required", "CLIENT_VERSION_BLOCKED");
-  } else if (policy.force_update_enabled && asInt(policy.min_version_code, 0) > 0 && versionCode > 0 && versionCode < asInt(policy.min_version_code, 0)) {
+  } else if (policy.force_update_enabled && minVersionCode > 0 && versionCode <= 0) {
+    status = 426;
+    result = decisionPayload(policy, "update_required", "CLIENT_VERSION_CODE_MISSING");
+  } else if (policy.force_update_enabled && minVersionCode > 0 && versionCode < minVersionCode) {
     status = 426;
     result = decisionPayload(policy, "update_required", "CLIENT_VERSION_CODE_TOO_OLD");
   } else if (policy.force_update_enabled && asString(policy.min_version_name) && versionName && compareVersionText(versionName, policy.min_version_name) < 0) {

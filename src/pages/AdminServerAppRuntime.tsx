@@ -146,6 +146,8 @@ export function AdminServerAppRuntimePage() {
         allowed_package_names: toCsvLines(String(versionDraft.allowed_package_names || "")).split(/\n+/).filter(Boolean),
         allowed_signature_sha256: toCsvLines(String(versionDraft.allowed_signature_sha256 || "")).split(/\n+/).filter(Boolean).map((item) => item.replace(/[^0-9a-fA-F]/g, "").toUpperCase()).filter(Boolean),
         block_unknown_signature: Boolean(versionDraft.block_unknown_signature),
+        require_signature_match: Boolean(versionDraft.block_unknown_signature),
+        block_missing_identity: true,
         blocked_version_names: toCsvLines(String(versionDraft.blocked_version_names || "")).split(/\n+/).filter(Boolean),
         blocked_version_codes: toIntLines(String(versionDraft.blocked_version_codes || "")),
         blocked_build_ids: toCsvLines(String(versionDraft.blocked_build_ids || "")).split(/\n+/).filter(Boolean),
