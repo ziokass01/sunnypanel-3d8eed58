@@ -58,7 +58,6 @@ begin
     else
       -- Spend all VIP, then fail only if true combined balance is still insufficient.
       v_remaining_soft_deficit := v_soft_deficit - (greatest(v_vip, 0) * v_ratio);
-      v_vip := 0;
       raise exception 'INSUFFICIENT_SOFT_AND_VIP_BALANCE: missing % regular credit after VIP fallback', round(v_remaining_soft_deficit::numeric, 2)
         using errcode = 'P0001';
     end if;
@@ -83,8 +82,9 @@ on public.server_app_wallet_balances
 for each row
 execute function public.find_dumps_vip_to_soft_wallet_fallback();
 
--- Normalize any old negative soft balances after the trigger is installed.
--- This causes the trigger to convert old soft debt to VIP if possible.
+-- Normalize old negative soft balances only when VIP can fully cover the old debt.
+-- Rows whose old debt is larger than available VIP are intentionally left untouched;
+-- they are real debt/insufficient-balance cases and must not block this migration.
 update public.server_app_wallet_balances
 set
   soft_balance = soft_balance,
@@ -92,6 +92,7 @@ set
   updated_at = now(),
   updated_by_source = 'vip_to_soft_fallback_backfill'
 where app_code = 'find-dumps'
-  and soft_balance < 0;
+  and soft_balance < 0
+  and premium_balance >= (abs(soft_balance) / 20.0);
 
 commit;
