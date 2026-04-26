@@ -18,7 +18,8 @@ alter table public.licenses
   add column if not exists max_ips integer not null default 1,
   add column if not exists max_verify integer not null default 1,
   add column if not exists verify_count integer not null default 0,
-  add column if not exists note text;
+  add column if not exists note text,
+  add column if not exists updated_at timestamptz;
 
 -- Clean old noisy payload note from already-issued Fake Lag keys.
 update public.licenses
@@ -89,6 +90,8 @@ begin
   if coalesce(new.note, '') ~* '^FREE_FAKELAG' then
     new.note := null;
   end if;
+
+  new.updated_at := coalesce(new.updated_at, now());
 
   return new;
 end;
