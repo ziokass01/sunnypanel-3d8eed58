@@ -18,6 +18,12 @@ verify_jwt = false
 [functions.admin-rent-integrations]
 verify_jwt = false
 
+[functions.fake-lag-auth]
+verify_jwt = false
+
+[functions.fake-lag-check]
+verify_jwt = false
+
 [functions.free-admin-test]
 verify_jwt = false
 
