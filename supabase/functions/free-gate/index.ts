@@ -99,38 +99,13 @@ Deno.serve(async (req) => {
   if (!sessionId || !outToken) return await deny("INVALID_SESSION");
 
   const outHash = await sha256Hex(outToken);
-  const sessionLookup = await db
+  const { data: session, error: sessionError } = await db
     .from("licenses_free_sessions")
     .select("*")
     .eq("session_id", sessionId)
     .maybeSingle();
 
-  if (sessionLookup.error) return await deny("SESSION_LOAD_FAILED", { detail: sessionLookup.error.message });
-
-  let session = sessionLookup.data as any | null;
-
-  // HOTFIX 2026-04-26:
-  // Some Link4M/browser flows can return to /free/gate with a stale session_id from
-  // localStorage while the current out_token is still valid. Do not fail the whole
-  // flow just because sid is stale; recover the canonical session by out_token hash.
-  if (!session) {
-    const recovered = await db
-      .from("licenses_free_sessions")
-      .select("*")
-      .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (recovered.error) return await deny("SESSION_LOAD_FAILED", { detail: recovered.error.message, recovered_by_out_token: true });
-    if (recovered.data) {
-      session = recovered.data as any;
-      baseLog.session_id = String((session as any).session_id ?? sessionId);
-      (baseLog.detail as any).input_session_id = sessionId;
-      (baseLog.detail as any).recovered_by_out_token = true;
-    }
-  }
-
+  if (sessionError) return await deny("SESSION_LOAD_FAILED", { detail: sessionError.message });
   if (!session) return await deny("SESSION_NOT_FOUND");
 
   const s = session as any;
@@ -141,7 +116,7 @@ Deno.serve(async (req) => {
   if (s.revealed_at || String(s.status ?? "").toLowerCase() === "revealed") return await deny("ALREADY_REVEALED");
   if (secondsUntil(s.expires_at) <= 0) return await deny("SESSION_EXPIRED");
   if (s.out_expires_at && secondsUntil(s.out_expires_at) <= 0) return await deny("SESSION_EXPIRED");
-  if (text(s.out_token_hash, 128) !== outHash && text(s.out_token_hash_pass2, 128) !== outHash) return await deny("OUT_TOKEN_MISMATCH");
+  if (text(s.out_token_hash, 128) !== outHash) return await deny("OUT_TOKEN_MISMATCH");
 
   const { data: settings } = await db.from("licenses_free_settings").select("*").eq("id", 1).maybeSingle();
   const cfg = (settings ?? {}) as any;
@@ -181,7 +156,7 @@ Deno.serve(async (req) => {
     const outbound = text(cfg.free_outbound_url_pass2, 4096) || text(cfg.free_outbound_url, 4096);
     if (!outbound) return await deny("OUTBOUND_URL_MISSING");
 
-    await updateSession(db, String(s.session_id ?? sessionId), {
+    await updateSession(db, sessionId, {
       status: "waiting_pass2",
       out_token_hash: nextOutHash,
       out_expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
@@ -195,7 +170,7 @@ Deno.serve(async (req) => {
   const claimToken = "clm_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   const claimHash = await sha256Hex(claimToken);
   const claimExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-  await updateSession(db, String(s.session_id ?? sessionId), {
+  await updateSession(db, sessionId, {
     status: "gate_ok",
     gate_ok_at: new Date().toISOString(),
     claim_token_hash: claimHash,

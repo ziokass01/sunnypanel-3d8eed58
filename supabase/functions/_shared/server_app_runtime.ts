@@ -629,8 +629,10 @@ async function getLatestFeatureUnlockStates(appCode: string, accountRef: string,
     .eq("account_ref", accountRef)
     .eq("status", "active")
     .order("started_at", { ascending: false });
-  const normalizedDeviceId = asNullableString(deviceId);
-  if (normalizedDeviceId) query = query.or(`device_id.is.null,device_id.eq.${normalizedDeviceId}`);
+  // Account-wide unlocks: feature unlocks follow the account, not the current device.
+  // Old logic filtered by device_id, so reinstall/data-clear or account-restored device IDs
+  // made paid unlocks look locked even though credit had already been charged.
+  void deviceId;
   const { data, error } = await query;
   if (error) {
     if (isMissingRelationError(error, "server_app_feature_unlocks")) return [];
@@ -754,7 +756,7 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
   const controls = await enforceSessionActiveOrThrow(params.appCode, session);
   void controls;
   const { settings, planMap } = await getRuntimeContext(params.appCode);
-  const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : await getLatestActiveEntitlement(params.appCode, accountRef);
+  const entitlement = session.entitlement_id ? await getEntitlementById(asString(session.entitlement_id)) : await getLatestActiveEntitlement(params.appCode, accountRef, asNullableString(session.device_id));
   const currentPlan = entitlement?.plan_code ? asString(entitlement.plan_code, settings.guest_plan) : settings.guest_plan;
   const activePlan = planMap.get(currentPlan) ?? null;
   const rules = await getFeatureUnlockRules(params.appCode);
@@ -767,63 +769,108 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
   const existingMap = new Map((await getLatestFeatureUnlockStates(params.appCode, accountRef, asNullableString(session.device_id))).map((item) => [item.access_code.toLowerCase(), item]));
   const existing = existingMap.get(accessCode) ?? null;
   if (existing && !rule.renewable) {
-    return { access_code: accessCode, unlocked: true, expires_at: existing.expires_at, free_by_plan: freeByPlan, state: await buildRuntimeState(params.appCode, { sessionToken: params.sessionToken }) };
+    return { access_code: accessCode, unlocked: true, expires_at: existing.expires_at, free_by_plan: freeByPlan, state: await buildRuntimeState(params.appCode, { sessionToken: params.sessionToken, accountRef, deviceId: asNullableString(session.device_id) }) };
   }
-  if (!freeByPlan) {
-    const walletKind = asString(params.walletKind, "auto") === "vip" ? "vip" : "normal";
-    const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
-    const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
-    const requestedDays = Math.max(1, Math.round(Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds))) / 86400));
-    let baseSoftCost = rule.soft_unlock_cost;
-    let basePremiumCost = rule.premium_unlock_cost;
-    if (requestedDays >= 30) {
-      baseSoftCost = rule.soft_unlock_cost_30d || rule.soft_unlock_cost;
-      basePremiumCost = rule.premium_unlock_cost_30d || rule.premium_unlock_cost;
-    } else if (requestedDays >= 7) {
-      baseSoftCost = rule.soft_unlock_cost_7d || rule.soft_unlock_cost;
-      basePremiumCost = rule.premium_unlock_cost_7d || rule.premium_unlock_cost;
-    }
-    const softCost = round2(baseSoftCost * softMultiplier);
-    const premiumCost = round2(basePremiumCost * premiumMultiplier);
-    if (softCost > 0 || premiumCost > 0) {
-      await consumeRuntimeFeature({
-        appCode: params.appCode,
-        sessionToken: params.sessionToken,
-        featureCode: accessCode,
-        walletKind,
-        quantity: 1,
-        traceId: asNullableString(params.traceId),
-        overrideCost: { softCost, premiumCost },
-      });
-    }
-  }
+
   const admin = createAdminClient();
   const nowIso = getNowIso();
   const durationSeconds = Math.max(3600, Math.trunc(asNumber(params.durationSeconds, rule.unlock_duration_seconds)));
   const expiresAt = addSecondsIso(nowIso, durationSeconds);
-  if (existing) {
-    const { error } = await admin.from("server_app_feature_unlocks").update({
+  let chargedSoft = 0;
+  let chargedPremium = 0;
+
+  try {
+    if (!freeByPlan) {
+      const walletKind = asString(params.walletKind, "auto") === "vip" ? "vip" : "normal";
+      const softMultiplier = activePlan?.soft_cost_multiplier ?? 1;
+      const premiumMultiplier = activePlan?.premium_cost_multiplier ?? 1;
+      const requestedDays = Math.max(1, Math.round(durationSeconds / 86400));
+      let baseSoftCost = rule.soft_unlock_cost;
+      let basePremiumCost = rule.premium_unlock_cost;
+      if (requestedDays >= 30) {
+        baseSoftCost = rule.soft_unlock_cost_30d || rule.soft_unlock_cost;
+        basePremiumCost = rule.premium_unlock_cost_30d || rule.premium_unlock_cost;
+      } else if (requestedDays >= 7) {
+        baseSoftCost = rule.soft_unlock_cost_7d || rule.soft_unlock_cost;
+        basePremiumCost = rule.premium_unlock_cost_7d || rule.premium_unlock_cost;
+      }
+      const softCost = round2(baseSoftCost * softMultiplier);
+      const premiumCost = round2(basePremiumCost * premiumMultiplier);
+      if (softCost > 0 || premiumCost > 0) {
+        const charged = await consumeRuntimeFeature({
+          appCode: params.appCode,
+          sessionToken: params.sessionToken,
+          featureCode: accessCode,
+          walletKind,
+          quantity: 1,
+          traceId: asNullableString(params.traceId),
+          overrideCost: { softCost, premiumCost },
+        });
+        chargedSoft = round2(asNumber((charged as any)?.charged_soft, 0));
+        chargedPremium = round2(asNumber((charged as any)?.charged_premium, 0));
+      }
+    }
+
+    const unlockPatch = {
       expires_at: expiresAt,
       revoked_at: null,
       status: "active",
+      device_id: null,
       trace_id: asNullableString(params.traceId),
       updated_at: nowIso,
-    }).eq("id", existing.id);
-    if (error) throw error;
-  } else {
-    const { error } = await admin.from("server_app_feature_unlocks").insert({
-      app_code: params.appCode,
-      access_code: accessCode,
-      account_ref: accountRef,
-      device_id: asNullableString(session.device_id),
-      status: "active",
-      started_at: nowIso,
-      expires_at: expiresAt,
-      trace_id: asNullableString(params.traceId),
-      unlock_source: freeByPlan ? "plan_free" : "credit_purchase",
-    });
-    if (error) throw error;
+      metadata: {
+        account_wide: true,
+        duration_seconds: durationSeconds,
+        charged_soft: chargedSoft,
+        charged_premium: chargedPremium,
+        plan_code: currentPlan,
+        source: freeByPlan ? "plan_free" : "credit_purchase",
+      },
+    };
+
+    if (existing) {
+      const { error } = await admin.from("server_app_feature_unlocks").update(unlockPatch).eq("id", existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await admin.from("server_app_feature_unlocks").insert({
+        app_code: params.appCode,
+        access_code: accessCode,
+        account_ref: accountRef,
+        device_id: null,
+        status: "active",
+        unlock_source: freeByPlan ? "plan_free" : "credit_purchase",
+        started_at: nowIso,
+        expires_at: expiresAt,
+        trace_id: asNullableString(params.traceId),
+        metadata: {
+          account_wide: true,
+          duration_seconds: durationSeconds,
+          charged_soft: chargedSoft,
+          charged_premium: chargedPremium,
+          plan_code: currentPlan,
+        },
+      });
+      if (error) throw error;
+    }
+  } catch (error) {
+    if ((chargedSoft > 0 || chargedPremium > 0) && !freeByPlan) {
+      try {
+        await adjustRuntimeWalletBalance({
+          appCode: params.appCode,
+          accountRef,
+          deviceId: asNullableString(session.device_id),
+          softDelta: chargedSoft,
+          premiumDelta: chargedPremium,
+          note: `Auto-refund unlock charge after unlock write failed: ${accessCode}`,
+          metadata: { access_code: accessCode, trace_id: asNullableString(params.traceId), error: String((error as any)?.message ?? error) },
+        });
+      } catch {
+        // keep original unlock error; refund failure is audited through wallet transaction failures separately
+      }
+    }
+    throw error;
   }
+
   await logRuntimeEvent({
     app_code: params.appCode,
     event_type: "unlock_feature",
@@ -834,10 +881,11 @@ export async function unlockRuntimeFeatureAccess(params: { appCode: string; sess
     session_id: asString(session.id),
     feature_code: accessCode,
     wallet_kind: null,
-    meta: { expires_at: expiresAt, free_by_plan: freeByPlan },
+    meta: { expires_at: expiresAt, free_by_plan: freeByPlan, account_wide: true, charged_soft: chargedSoft, charged_premium: chargedPremium },
   });
-  return { access_code: accessCode, unlocked: true, expires_at: expiresAt, free_by_plan: freeByPlan, state: await buildRuntimeState(params.appCode, { sessionToken: params.sessionToken }) };
+  return { access_code: accessCode, unlocked: true, expires_at: expiresAt, free_by_plan: freeByPlan, state: await buildRuntimeState(params.appCode, { sessionToken: params.sessionToken, accountRef, deviceId: asNullableString(session.device_id) }) };
 }
+
 
 async function getWalletRules(appCode: string): Promise<RuntimeWalletRules> {
   const admin = createAdminClient();

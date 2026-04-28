@@ -242,7 +242,7 @@ export function AdminServerAppControlPage() {
       const walletPayload = {
         app_code: appCode,
         account_ref: accountRef,
-        device_id: accountDraft.deviceId || null,
+        device_id: accountDraft.deviceId || null
         soft_balance: softBalance,
         premium_balance: premiumBalance,
         updated_by_source: "admin_control",
@@ -257,7 +257,7 @@ export function AdminServerAppControlPage() {
       const entitlementPayload = {
         app_code: appCode,
         account_ref: accountRef,
-        device_id: accountDraft.deviceId || null,
+        device_id: accountDraft.deviceId || null
         plan_code: accountDraft.currentPlan,
         starts_at: new Date().toISOString(),
         expires_at: expiresAtIso,
@@ -281,7 +281,7 @@ export function AdminServerAppControlPage() {
         app_code: appCode,
         wallet_balance_id: balanceAfterRes.data?.id || null,
         account_ref: accountRef,
-        device_id: accountDraft.deviceId || null,
+        device_id: accountDraft.deviceId || null
         transaction_type: "admin_adjust",
         wallet_kind: "mixed",
         soft_delta: softBalance,
@@ -336,7 +336,7 @@ export function AdminServerAppControlPage() {
             app_code: appCode,
             access_code: feature.accessCode,
             account_ref: accountRef,
-            device_id: accountDraft.deviceId || null,
+            device_id: null,// account-wide unlock
             status: "active",
             unlock_source: "admin_grant",
             started_at: new Date().toISOString(),
@@ -355,7 +355,7 @@ export function AdminServerAppControlPage() {
           // ở web xong lưu lại sẽ bị refetch trả về ngày cũ. Active unlock phải được update
           // expires_at/status/device/metadata ngay cả khi switch đang bật sẵn.
           const updateRes = await sb.from("server_app_feature_unlocks").update({
-            device_id: accountDraft.deviceId || active.device_id || null,
+            device_id: null,// account-wide unlock
             status: "active",
             revoked_at: null,
             expires_at: expiresAt,
@@ -406,8 +406,8 @@ export function AdminServerAppControlPage() {
         const write = await sb.from("server_app_runtime_account_bindings").upsert({
           app_code: appCode,
           account_ref: accountRef,
-          first_device_id: accountDraft.deviceId || null,
-          last_device_id: accountDraft.deviceId || null,
+          first_device_id: accountDraft.deviceId || null
+          last_device_id: accountDraft.deviceId || null
           first_ip_hash: accountDraft.firstSeenIp || null,
           last_ip_hash: accountDraft.lastSeenIp || null,
           locked_at: new Date().toISOString(),
@@ -421,8 +421,8 @@ export function AdminServerAppControlPage() {
         const write = await sb.from("server_app_runtime_account_bindings").upsert({
           app_code: appCode,
           account_ref: accountRef,
-          first_device_id: accountDraft.deviceId || null,
-          last_device_id: accountDraft.deviceId || null,
+          first_device_id: accountDraft.deviceId || null
+          last_device_id: accountDraft.deviceId || null
           first_ip_hash: accountDraft.firstSeenIp || null,
           last_ip_hash: accountDraft.lastSeenIp || null,
           locked_at: null,
