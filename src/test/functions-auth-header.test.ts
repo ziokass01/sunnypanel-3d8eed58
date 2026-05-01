@@ -40,6 +40,38 @@ describe("functions auth headers", () => {
     expect(headers.Authorization).toBeUndefined();
   });
 
+  it("sends rent-user custom session through x-rent-token instead of Authorization", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    await postFunction("/rent-user", { action: "generate_key" }, { authToken: "rent.custom.jwt" });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.apikey).toBe("sb_publishable_xxx");
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers["x-rent-token"]).toBe("rent.custom.jwt");
+  });
+
+  it("keeps Supabase anon Authorization for rent-user when an anon JWT is available", async () => {
+    vi.stubEnv("VITE_SUPABASE_ANON_KEY", "aaa.bbb.ccc");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    await postFunction("/rent-user", { action: "generate_key" }, { authToken: "rent.custom.jwt" });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer aaa.bbb.ccc");
+    expect(headers["x-rent-token"]).toBe("rent.custom.jwt");
+  });
+
   it("still attaches Authorization bearer for authenticated admin function calls", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
