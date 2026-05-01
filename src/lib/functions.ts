@@ -48,8 +48,16 @@ function getAnonJwt() {
   return parts.length === 3 ? anonJwt : undefined;
 }
 
+function normalizeFunctionPath(path: string) {
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+function isRentUserFunction(path: string) {
+  return normalizeFunctionPath(path) === "/rent-user";
+}
+
 function shouldSkipAnonJwtFallback(path: string) {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const normalized = normalizeFunctionPath(path);
   return [
     "/verify-key",
     "/rent-verify-key",
@@ -66,6 +74,20 @@ function shouldSkipAnonJwtFallback(path: string) {
 
 function buildAuthHeader(path: string, authToken?: string | null) {
   const token = String(authToken ?? "").trim();
+
+  // /rent-user uses its own custom session JWT. Do not put that custom JWT in
+  // Authorization, because a Supabase deployment that accidentally has JWT
+  // verification enabled will reject it before the Edge Function can add CORS
+  // headers. Keep Authorization reserved for the Supabase anon JWT when present
+  // and forward the rent session through x-rent-token instead.
+  if (token && isRentUserFunction(path)) {
+    const anonJwt = getAnonJwt();
+    return {
+      ...(anonJwt ? { Authorization: `Bearer ${anonJwt}` } : {}),
+      "x-rent-token": token,
+    };
+  }
+
   if (token) return { Authorization: `Bearer ${token}` };
 
   if (shouldSkipAnonJwtFallback(path)) return {};
@@ -172,7 +194,7 @@ async function invokeJson<T>(opts: {
       // Public gate/check functions intentionally return structured JSON for user-flow denials.
       // Older deployments may still use HTTP 400/403/426; do not turn those into generic
       // "service unavailable" errors when the body already contains ok:false/code/msg.
-      const normalizedCandidatePath = candidatePath.startsWith("/") ? candidatePath : `/${candidatePath}`;
+      const normalizedCandidatePath = normalizeFunctionPath(candidatePath);
       const structuredPublicDenialPaths = new Set([
         "/free-gate",
         "/free-start",
