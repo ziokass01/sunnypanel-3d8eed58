@@ -15,7 +15,7 @@ function corsHeaders(origin, env) {
   const allowOrigin = allowedOrigin(origin, env);
   const headers = {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig,x-fp,x-admin-key",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig,x-fp,x-admin-key,x-rent-token",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -89,13 +89,19 @@ function extractRoute(pathname) {
   return { kind: "function", name: parts[0] };
 }
 
-function buildForwardHeaders(req, env) {
+function buildForwardHeaders(req, env, fnName = "") {
   const headers = new Headers();
   const contentType = req.headers.get("Content-Type");
   if (contentType) headers.set("Content-Type", contentType);
 
   const auth = req.headers.get("Authorization");
   if (auth) headers.set("Authorization", auth);
+
+  // The rent customer portal uses its own session JWT. When it is sent as
+  // x-rent-token, translate it back to Authorization only inside the trusted
+  // gateway hop so the Edge Function can read the old Bearer format.
+  const rentToken = (req.headers.get("x-rent-token") || "").trim();
+  if (rentToken && fnName === "rent-user") headers.set("Authorization", `Bearer ${rentToken}`);
 
   const apikey = req.headers.get("apikey") || String(env.UPSTREAM_ANON_KEY || env.UPSTREAM_APIKEY || "").trim();
   if (apikey) headers.set("apikey", apikey);
@@ -127,9 +133,9 @@ function buildForwardHeaders(req, env) {
   return headers;
 }
 
-async function forwardRequest(req, upstreamUrl, env) {
+async function forwardRequest(req, upstreamUrl, env, fnName = "") {
   const method = req.method.toUpperCase();
-  const headers = buildForwardHeaders(req, env);
+  const headers = buildForwardHeaders(req, env, fnName);
   const init = { method, headers };
   if (method !== "GET" && method !== "HEAD") {
     init.body = await req.arrayBuffer();
@@ -176,7 +182,7 @@ export default {
 
     let upstream;
     try {
-      upstream = await forwardRequest(req, upstreamUrl, env);
+      upstream = await forwardRequest(req, upstreamUrl, env, fnName);
     } catch (error) {
       return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: String(error?.message || error), upstream_url: upstreamUrl }, 502, origin, env);
     }
