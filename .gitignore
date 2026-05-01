@@ -43,3 +43,11 @@ supabase/.temp/
 *.zip
 *.bak
 *.bak_*
+
+# Virbox local installer/output - do not commit
+virbox/*.deb
+virbox/*.rpm
+virbox/*.run
+virbox/output/*.apk
+virbox/output/*.aab
+virbox/output/*.zip
