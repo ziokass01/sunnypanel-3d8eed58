@@ -670,6 +670,48 @@ Deno.serve(async (req) => {
     };
   }
 
+
+
+  async function issueAiSunnyRedeemKey(sessRow: any, keyTypeMeta: any) {
+    const durationSeconds = Math.max(60, Number(sessRow?.duration_seconds ?? keyTypeMeta?.duration_seconds ?? 86400) || 86400);
+    const issuedAt = new Date().toISOString();
+    const expiresAt = addSecondsIso(issuedAt, durationSeconds);
+    const pepper = Deno.env.get("AI_SUNNY_KEY_PEPPER") ?? Deno.env.get("AI_SUNNY_HASH_PEPPER") ?? "sunny-ai";
+    const appCode = "ai-coding";
+    const keySignature = String(keyTypeMeta?.key_signature ?? "AI-SUNNY").trim().toUpperCase() || "AI-SUNNY";
+    let inserted: { id: string; key: string } | null = null;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const rawKey = makeKey(keySignature);
+      const codeHash = await sha256Hex(`${pepper}:${rawKey.trim().toUpperCase()}`);
+      const ins = await sb.from("ai_sunny_redeem_keys").insert({
+        code_hash: codeHash,
+        code_mask: maskKey(rawKey),
+        title: `${String(keyTypeMeta?.label ?? "SunnyMod AI key vượt")}`.trim(),
+        status: "active",
+        plan_code_to_grant: "free",
+        grant_hours: Math.max(1, Math.ceil(durationSeconds / 3600)),
+        bonus_daily_tokens: Math.max(10000, Number((keyTypeMeta?.metadata ?? {})?.bonus_daily_tokens ?? 40000) || 40000),
+        bonus_daily_messages: Math.max(5, Number((keyTypeMeta?.metadata ?? {})?.bonus_daily_messages ?? 30) || 30),
+        allowed_models: ["mimo-v2.5"],
+        max_uses_total: 1,
+        max_uses_per_day: 1,
+        per_user_once: true,
+        daily_ip_limit: 1,
+        daily_device_limit: 1,
+        require_device_id: true,
+        expires_at: expiresAt,
+        created_by: "free-flow",
+        note: `FREE_FLOW;TRACE=${String(sessRow?.trace_id ?? "").trim() || "-"};SESSION=${sessionId};KEY_TYPE=${sessRow?.key_type_code ?? ""};APP=${appCode}`,
+        metadata: { source: "free-flow", free_session_id: sessionId, trace_id: String(sessRow?.trace_id ?? "").trim() || null, key_type_code: sessRow?.key_type_code ?? null, key_signature: keySignature, issued_at: issuedAt, free_duration_seconds: durationSeconds },
+      }).select("id").single();
+      if (!ins.error && ins.data?.id) { inserted = { id: String(ins.data.id), key: rawKey }; break; }
+    }
+    if (!inserted) throw Object.assign(new Error("AI_REDEEM_KEY_INSERT_FAILED"), { status: 500, code: "AI_REDEEM_KEY_INSERT_FAILED" });
+    await sb.from("licenses_free_sessions").update({ issued_server_redeem_key_id: inserted.id, issued_server_reward_mode: "ai_redeem", app_code: appCode, selection_meta: { app_code: appCode, reward_mode: "ai_redeem", duration_seconds: durationSeconds, trace_id: String(sessRow?.trace_id ?? "").trim() || null } }).eq("session_id", sessionId);
+    await sb.from("licenses_free_issues").insert({ license_id: null, key_mask: inserted.key, expires_at: expiresAt, session_id: sessionId, ip_hash: ipHash, fingerprint_hash: fpHash, app_code: appCode, key_signature: keySignature, server_redeem_key_id: inserted.id });
+    return { key: inserted.key, expires_at: expiresAt, allow_reset: false, app_code: appCode, key_signature: keySignature, reward_mode: "ai_redeem", created_at: issuedAt, server_redeem_key_id: inserted.id };
+  }
+
   // Already revealed (or in-progress) => return same key if present; otherwise auto-repair inconsistent state.
   if (Number(sess.reveal_count ?? 0) > 0 || sess.status === "revealed" || sess.status === "revealing") {
     const existing = await findExistingIssuedKey();
@@ -827,7 +869,17 @@ Deno.serve(async (req) => {
     `ALLOW_RESET=${allowReset ? 1 : 0}`,
   ].join(";");
 
-  if (appCode === "find-dumps") {
+  if (appCode === "ai-coding") {
+      try {
+        const issued = await issueAiSunnyRedeemKey(sess, keyTypeMeta);
+        return json({ ok: true, ...issued, key_type_label: keyTypeMeta?.label ?? null, warnings }, 200);
+      } catch (error) {
+        const code = String((error as any)?.code ?? (error as any)?.message ?? "AI_REDEEM_KEY_FAILED");
+        return json({ ok: false, msg: code, code }, Number((error as any)?.status ?? 500));
+      }
+    }
+
+    if (appCode === "find-dumps") {
     const issued = await issueFindDumpsRedeemKey(sess, keyTypeMeta);
     await sb
       .from("licenses_free_sessions")

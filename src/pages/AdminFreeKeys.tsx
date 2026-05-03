@@ -95,6 +95,7 @@ const APP_OPTIONS = [
   { code: "free-fire", label: "Free Fire", signature: "FF" },
   { code: "find-dumps", label: "Find Dumps", signature: "FD" },
   { code: "fake-lag", label: "Fake Lag", signature: "FAKELAG" },
+  { code: "ai-coding", label: "AI Coding", signature: "AI-SUNNY" },
 ] as const;
 
 function getAppMeta(code?: string | null) {
@@ -1712,44 +1713,8 @@ export function AdminFreeKeysPage() {
 
               <Card className="border-amber-200/70 bg-amber-50/50">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-xl">
-                    <Bot className="h-5 w-5 text-amber-500" /> SunnyMod AI key vượt
-                  </CardTitle>
-                  <CardDescription>
-                    Tạo nhanh key AI riêng cho người dùng nhập ở /coding-ai. Prefix/chữ ký riêng là AI-SUNNY nên không trùng Free Fire / Find Dumps / Fake Lag.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      className="rounded-2xl"
-                      onClick={() => createQuickAiKey.mutate()}
-                      disabled={createQuickAiKey.isPending}
-                    >
-                      <KeyRound className="mr-2 h-4 w-4" />
-                      {createQuickAiKey.isPending ? "Đang tạo..." : "Tạo key AI 1 ngày / 30 tin"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="rounded-2xl"
-                      onClick={() => window.location.assign("/admin/ai?tab=keys")}
-                    >
-                      Mở quản lý AI
-                    </Button>
-                  </div>
-                  {lastCreatedAiKey ? (
-                    <div className="rounded-2xl border border-amber-200 bg-white px-3 py-3 text-sm">
-                      <div className="font-semibold text-slate-900">Key AI mới tạo, chỉ hiện lần này:</div>
-                      <div className="mt-1 break-all font-mono text-xs text-slate-800">{lastCreatedAiKey}</div>
-                      <Button type="button" size="sm" variant="outline" className="mt-2 rounded-xl" onClick={() => copyText(lastCreatedAiKey)}>
-                        Copy lại key AI
-                      </Button>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
+                  
+
 
 
           <div ref={createKeyTypeRef} className="mb-4 rounded-md border p-3">

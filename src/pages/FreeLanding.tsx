@@ -64,6 +64,7 @@ const FREE_KEY_SUMMARY_META: Record<string, FreeKeySummaryMeta> = {
   "free-fire": { label: "Key Free Fire", badge: "Free Fire" },
   "find-dumps": { label: "Key Find Dumps", badge: "Find Dumps" },
   "fake-lag": { label: "Key Fake Lag", badge: "Fake Lag" },
+  "ai-coding": { label: "Key SunnyMod AI", badge: "AI Coding" },
 };
 
 function getFreeKeySummaryMeta(appCode?: string | null, keyType?: FreeKeyType | null) {
