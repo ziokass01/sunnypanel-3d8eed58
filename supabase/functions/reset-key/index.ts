@@ -17,11 +17,22 @@ function adminDb() {
   });
 }
 
+function toHex(bytes: ArrayBuffer) {
+  return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Hex(input: string) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return toHex(digest);
+}
+
 function normalizeKey(value: unknown) {
   return String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
 function appCodeFromKey(key: string) {
+  if (key.startsWith("AI-SUNNY-") || key.startsWith("AI-")) return "ai-coding";
   if (key.startsWith("FAKELAG-")) return "fake-lag";
   if (key.startsWith("FND-") || key.startsWith("FD-")) return "find-dumps";
   if (key.startsWith("SUNNY-")) return "free-fire";
@@ -60,18 +71,13 @@ async function verifyTurnstile(token: string | undefined | null, req: Request) {
   const secret = env("TURNSTILE_SECRET_KEY") || env("CLOUDFLARE_TURNSTILE_SECRET");
   if (!secret) return false;
   if (!token) return false;
-
   try {
     const form = new FormData();
     form.append("secret", secret);
     form.append("response", token);
     const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
     if (ip) form.append("remoteip", ip);
-
-    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
-      body: form,
-    });
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
     const json = await res.json().catch(() => ({}));
     return Boolean(json?.success);
   } catch {
@@ -96,11 +102,7 @@ async function getResetSettings(db: any) {
 }
 
 async function getKeyKind(db: any, licenseId: string) {
-  const { data, error } = await db
-    .from("licenses_free_issues")
-    .select("issue_id")
-    .eq("license_id", licenseId)
-    .limit(1);
+  const { data, error } = await db.from("licenses_free_issues").select("issue_id").eq("license_id", licenseId).limit(1);
   if (!error && Array.isArray(data) && data.length > 0) return "free";
   return "admin";
 }
@@ -139,7 +141,6 @@ function buildSnapshot(args: {
   const remainingSeconds = secondsBetween(now, args.lic?.expires_at);
   const nextPenaltyPct = computePenaltyPct(args.settings, args.keyKind, args.publicResetCount);
   const nextPenaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * nextPenaltyPct / 100);
-
   const status = !args.lic?.is_active
     ? "blocked"
     : args.lic?.deleted_at
@@ -147,7 +148,6 @@ function buildSnapshot(args: {
       : args.lic?.expires_at && remainingSeconds === 0
         ? "expired"
         : "active";
-
   return {
     ok: true,
     msg: args.msg ?? "OK",
@@ -173,55 +173,148 @@ function buildSnapshot(args: {
   };
 }
 
+async function aiKeyHash(key: string) {
+  const pepper = env("AI_SUNNY_KEY_PEPPER") || env("AI_SUNNY_HASH_PEPPER") || "sunny-ai";
+  return await sha256Hex(`${pepper}:${key}`);
+}
+
+async function findAiKey(db: any, key: string) {
+  const codeHash = await aiKeyHash(key);
+  const { data, error } = await db
+    .from("ai_sunny_redeem_keys")
+    .select("id,code_mask,title,status,created_at,updated_at,expires_at,grant_hours,max_uses_total,max_uses_per_day,used_count,daily_ip_limit,daily_device_limit")
+    .eq("code_hash", codeHash)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+function buildAiLicenseShape(key: string, row: any) {
+  const active = String(row?.status ?? "").toLowerCase() === "active";
+  return {
+    id: row?.id,
+    key,
+    created_at: row?.created_at ?? null,
+    expires_at: row?.expires_at ?? null,
+    is_active: active,
+    deleted_at: null,
+    max_devices: row?.daily_device_limit ?? 1,
+    public_reset_disabled: false,
+  };
+}
+
+async function handleAiCheck(req: Request, db: any, key: string) {
+  const row = await findAiKey(db, key);
+  if (!row) return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
+  const [settings, deviceCount, publicResetCount] = await Promise.all([
+    getResetSettings(db),
+    countRows(db, "ai_sunny_redeem_logs", (q) => q.eq("redeem_key_id", row.id)),
+    countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
+  ]);
+  return response(req, 200, buildSnapshot({
+    lic: buildAiLicenseShape(key, row),
+    settings,
+    keyKind: "free",
+    appCode: "ai-coding",
+    deviceCount,
+    publicResetCount,
+  }));
+}
+
+async function handleAiReset(req: Request, db: any, body: any, key: string) {
+  const row = await findAiKey(db, key);
+  if (!row || String(row.status ?? "") !== "active") return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
+  const settings = await getResetSettings(db);
+  if (!Boolean(settings?.enabled ?? true)) return response(req, 403, { ok: false, msg: "RESET_DISABLED", disabled_message: settings?.disabled_message ?? null });
+  if (Boolean(settings?.require_turnstile)) {
+    const ok = await verifyTurnstile(body?.turnstile_token, req);
+    if (!ok) return response(req, 403, { ok: false, msg: "TURNSTILE_FAILED" });
+  }
+
+  const now = new Date();
+  const [deviceCount, priorPublicResetCount] = await Promise.all([
+    countRows(db, "ai_sunny_redeem_logs", (q) => q.eq("redeem_key_id", row.id)),
+    countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
+  ]);
+  const penaltyPct = computePenaltyPct(settings, "free", priorPublicResetCount);
+  const remainingSeconds = secondsBetween(now, row.expires_at);
+  const penaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * penaltyPct / 100);
+  const newExpiresAt = remainingSeconds == null || penaltySeconds <= 0 ? row.expires_at : addSeconds(now, Math.max(0, remainingSeconds - penaltySeconds));
+
+  await db.from("ai_sunny_redeem_logs").delete().eq("redeem_key_id", row.id);
+  await db.from("ai_sunny_redeem_keys").update({
+    used_count: 0,
+    status: newExpiresAt && new Date(newExpiresAt).getTime() <= now.getTime() ? "disabled" : "active",
+    expires_at: newExpiresAt ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq("id", row.id);
+
+  await db.from("audit_logs").insert({
+    action: "PUBLIC_RESET",
+    license_key: key,
+    detail: {
+      ai_redeem_key_id: row.id,
+      app_code: "ai-coding",
+      key_kind: "free",
+      devices_removed: deviceCount,
+      prior_public_reset_count: priorPublicResetCount,
+      penalty_pct: penaltyPct,
+      penalty_seconds: penaltySeconds,
+      old_expires_at: row.expires_at,
+      new_expires_at: newExpiresAt,
+      source: "public-ai",
+    },
+  });
+
+  const refreshed = { ...row, expires_at: newExpiresAt, used_count: 0, status: newExpiresAt && new Date(newExpiresAt).getTime() <= now.getTime() ? "disabled" : "active" };
+  return response(req, 200, buildSnapshot({
+    lic: buildAiLicenseShape(key, refreshed),
+    settings,
+    keyKind: "free",
+    appCode: "ai-coding",
+    deviceCount: 0,
+    publicResetCount: priorPublicResetCount + 1,
+    penaltyPct,
+    penaltySeconds,
+    devicesRemoved: deviceCount,
+    msg: "RESET_OK",
+  }));
+}
+
 async function handleCheck(req: Request, db: any, key: string) {
+  if (appCodeFromKey(key) === "ai-coding") return await handleAiCheck(req, db, key);
   const { data: lic, error } = await db
     .from("licenses")
     .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,public_reset_disabled")
     .eq("key", key)
     .is("deleted_at", null)
     .maybeSingle();
-
   if (error || !lic) return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
-
   const [settings, keyKind, deviceCount, publicResetCount] = await Promise.all([
     getResetSettings(db),
     getKeyKind(db, lic.id),
     countRows(db, "license_devices", (q) => q.eq("license_id", lic.id)),
     countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
   ]);
-
-  return response(req, 200, buildSnapshot({
-    lic,
-    settings,
-    keyKind,
-    appCode: appCodeFromKey(key),
-    deviceCount,
-    publicResetCount,
-  }));
+  return response(req, 200, buildSnapshot({ lic, settings, keyKind, appCode: appCodeFromKey(key), deviceCount, publicResetCount }));
 }
 
 async function handleReset(req: Request, db: any, body: any, key: string) {
+  if (appCodeFromKey(key) === "ai-coding") return await handleAiReset(req, db, body, key);
   const { data: lic, error } = await db
     .from("licenses")
     .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,public_reset_disabled")
     .eq("key", key)
     .is("deleted_at", null)
     .maybeSingle();
-
   if (error || !lic || !lic.is_active) return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
-
   const settings = await getResetSettings(db);
-  if (!Boolean(settings?.enabled ?? true)) {
-    return response(req, 403, { ok: false, msg: "RESET_DISABLED", disabled_message: settings?.disabled_message ?? null });
-  }
-  if (Boolean(lic.public_reset_disabled)) {
-    return response(req, 403, { ok: false, msg: "KEY_RESET_DISABLED", public_reset_disabled: true });
-  }
+  if (!Boolean(settings?.enabled ?? true)) return response(req, 403, { ok: false, msg: "RESET_DISABLED", disabled_message: settings?.disabled_message ?? null });
+  if (Boolean(lic.public_reset_disabled)) return response(req, 403, { ok: false, msg: "KEY_RESET_DISABLED", public_reset_disabled: true });
   if (Boolean(settings?.require_turnstile)) {
     const ok = await verifyTurnstile(body?.turnstile_token, req);
     if (!ok) return response(req, 403, { ok: false, msg: "TURNSTILE_FAILED" });
   }
-
   const now = new Date();
   const [keyKind, deviceCount, priorPublicResetCount] = await Promise.all([
     getKeyKind(db, lic.id),
@@ -232,76 +325,36 @@ async function handleReset(req: Request, db: any, body: any, key: string) {
   const penaltyPct = computePenaltyPct(settings, keyKind, priorPublicResetCount);
   const remainingSeconds = secondsBetween(now, lic.expires_at);
   const penaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * penaltyPct / 100);
-  const newExpiresAt = remainingSeconds == null || penaltySeconds <= 0
-    ? lic.expires_at
-    : addSeconds(now, Math.max(0, remainingSeconds - penaltySeconds));
-
+  const newExpiresAt = remainingSeconds == null || penaltySeconds <= 0 ? lic.expires_at : addSeconds(now, Math.max(0, remainingSeconds - penaltySeconds));
   await db.from("license_devices").delete().eq("license_id", lic.id);
-
   if (newExpiresAt !== lic.expires_at) {
-    await db.from("licenses").update({
-      expires_at: newExpiresAt,
-      is_active: new Date(newExpiresAt).getTime() > now.getTime(),
-    }).eq("id", lic.id);
+    await db.from("licenses").update({ expires_at: newExpiresAt, is_active: new Date(newExpiresAt).getTime() > now.getTime() }).eq("id", lic.id);
   }
-
   await db.from("audit_logs").insert({
     action: "PUBLIC_RESET",
     license_key: key,
-    detail: {
-      license_id: lic.id,
-      app_code: appCode,
-      key_kind: keyKind,
-      devices_removed: deviceCount,
-      prior_public_reset_count: priorPublicResetCount,
-      penalty_pct: penaltyPct,
-      penalty_seconds: penaltySeconds,
-      old_expires_at: lic.expires_at,
-      new_expires_at: newExpiresAt,
-      source: "public",
-    },
+    detail: { license_id: lic.id, app_code: appCode, key_kind: keyKind, devices_removed: deviceCount, prior_public_reset_count: priorPublicResetCount, penalty_pct: penaltyPct, penalty_seconds: penaltySeconds, old_expires_at: lic.expires_at, new_expires_at: newExpiresAt, source: "public" },
   });
-
   const refreshed = { ...lic, expires_at: newExpiresAt, is_active: !newExpiresAt || new Date(newExpiresAt).getTime() > now.getTime() };
-  return response(req, 200, buildSnapshot({
-    lic: refreshed,
-    settings,
-    keyKind,
-    appCode,
-    deviceCount: 0,
-    publicResetCount: priorPublicResetCount + 1,
-    penaltyPct,
-    penaltySeconds,
-    devicesRemoved: deviceCount,
-    msg: "RESET_OK",
-  }));
+  return response(req, 200, buildSnapshot({ lic: refreshed, settings, keyKind, appCode, deviceCount: 0, publicResetCount: priorPublicResetCount + 1, penaltyPct, penaltySeconds, devicesRemoved: deviceCount, msg: "RESET_OK" }));
 }
 
 Deno.serve(async (req) => {
   const publicBaseUrl = env("PUBLIC_BASE_URL", "https://mityangho.id.vn");
   if (req.method === "OPTIONS") return handleOptions(req, publicBaseUrl, "GET,POST,OPTIONS");
-
   try {
     const db = adminDb();
-
     if (req.method === "GET") {
       const settings = await getResetSettings(db);
-      return response(req, 200, {
-        ok: true,
-        turnstile_enabled: Boolean(settings?.require_turnstile),
-        configured: Boolean(env("TURNSTILE_SECRET_KEY") || env("CLOUDFLARE_TURNSTILE_SECRET")),
-      });
+      return response(req, 200, { ok: true, turnstile_enabled: Boolean(settings?.require_turnstile), configured: Boolean(env("TURNSTILE_SECRET_KEY") || env("CLOUDFLARE_TURNSTILE_SECRET")) });
     }
-
     if (req.method !== "POST") return response(req, 405, { ok: false, msg: "METHOD_NOT_ALLOWED" });
-
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "check").toLowerCase();
     const key = normalizeKey(body?.key);
-    if (!/^[A-Z0-9]{2,16}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) {
+    if (!/^[A-Z0-9_-]{2,24}-[A-Z0-9]{4,8}-[A-Z0-9]{4,8}-[A-Z0-9]{4,8}$/.test(key)) {
       return response(req, 400, { ok: false, msg: "KEY_UNAVAILABLE" });
     }
-
     if (action === "reset") return await handleReset(req, db, body, key);
     return await handleCheck(req, db, key);
   } catch (e) {
