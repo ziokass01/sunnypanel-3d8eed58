@@ -642,7 +642,8 @@ Deno.serve(async (req) => {
       },
     }).eq("session_id", sessionId);
 
-    await sb.from("licenses_free_issues").insert({
+    try {
+      await sb.from("licenses_free_issues").insert({
       license_id: null,
       key_mask: inserted.redeem_key,
       expires_at: expiresAt,
@@ -653,6 +654,9 @@ Deno.serve(async (req) => {
       key_signature: "FD",
       server_redeem_key_id: inserted.id,
     });
+    } catch (monitorError) {
+      console.warn("AI_FREE_ISSUE_MONITOR_INSERT_FAILED_NON_FATAL", monitorError);
+    }
 
     return {
       key: inserted.redeem_key,
