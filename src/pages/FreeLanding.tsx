@@ -364,6 +364,26 @@ export function FreeLandingPage() {
 
               <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
 
+              <div data-sunny-ai-free-card className="rounded-2xl border bg-gradient-to-br from-amber-50 via-background to-background p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">SunnyMod Coding AI</div>
+                    <div className="mt-1 text-sm leading-6 text-muted-foreground">
+                      Dùng AI để hỏi code/debug. Nếu có key AI, vào trang AI để đăng nhập và nhập key mở token trong ngày.
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">AI</Badge>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="mt-3 w-full rounded-2xl"
+                  onClick={() => window.location.assign('/coding-ai')}
+                >
+                  Vào SunnyMod AI / Nhập key AI
+                </Button>
+              </div>
+
               <FreeDeviceHistoryCard
                 history={deviceHistory}
                 remainingTodayServer={selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null}

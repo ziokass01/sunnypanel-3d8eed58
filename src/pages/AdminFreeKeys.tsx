@@ -1688,6 +1688,15 @@ export function AdminFreeKeysPage() {
 
               {newAppCode === "find-dumps" ? (
                 <>
+      <div className="fixed bottom-24 right-4 z-40 flex flex-col gap-2 sm:bottom-6">
+        <Button
+          type="button"
+          className="rounded-2xl shadow-xl"
+          onClick={() => window.location.assign("/admin/ai?tab=keys")}
+        >
+          Tạo key AI
+        </Button>
+      </div>
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Nhánh key</div>
                     <Select value={newFindDumpsFlow} onValueChange={(v) => setNewFindDumpsFlow(v === "credit" ? "credit" : "package")}>

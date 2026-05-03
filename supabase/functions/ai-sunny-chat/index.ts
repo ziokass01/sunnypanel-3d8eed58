@@ -17,6 +17,34 @@ const MODEL_ALLOW_LIST = new Set([
   "mimo-v2.5-tts-voicedesign",
 ]);
 
+const DEFAULT_CONFIG = {
+  enabled: true,
+  public_enabled: true,
+  maintenance_message: "SunnyMod Coding AI đang bảo trì, vui lòng thử lại sau.",
+  default_model: "mimo-v2.5",
+  pro_model: "mimo-v2.5-pro",
+  mimo_base_url: "https://token-plan-sgp.xiaomimimo.com/v1",
+  global_daily_token_limit: 80000000,
+  global_monthly_stop_at_tokens: 1500000000,
+  max_input_chars: 24000,
+  system_prompt: "You are SunnyMod Coding AI, a coding assistant for debugging, explaining logs, reviewing code, and helping with safe software development. Reply in Vietnamese by default when the user writes Vietnamese. Do not expose secrets or encourage unsafe abuse.",
+  sandbox_global_enabled: false,
+};
+
+const DEFAULT_FREE_PLAN = {
+  plan_code: "free",
+  label: "Free Coding",
+  enabled: true,
+  daily_token_limit: 40000,
+  daily_message_limit: 30,
+  max_tokens_per_request: 800,
+  max_input_chars: 6000,
+  allowed_models: ["mimo-v2.5"],
+  sandbox_enabled: false,
+  terminal_enabled: false,
+  tts_enabled: false,
+};
+
 function dayKeyVN(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -40,6 +68,11 @@ function getIp(req: Request) {
   return req.headers.get("cf-connecting-ip")
     || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     || "unknown";
+}
+
+function isSchemaMissing(error: any) {
+  const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  return msg.includes("ai_sunny_") && (msg.includes("schema cache") || msg.includes("does not exist") || msg.includes("relation"));
 }
 
 function normalizeMessages(raw: unknown, maxInputChars: number): ChatMessage[] {
@@ -102,8 +135,9 @@ Deno.serve(async (req) => {
   const db = createAdminClient();
   const ip = getIp(req);
   const ua = req.headers.get("user-agent") ?? "";
-  const ipHash = await sha256Hex(`ip:${ip}:${Deno.env.get("AI_SUNNY_HASH_PEPPER") ?? "sunny-ai"}`);
-  const uaHash = await sha256Hex(`ua:${ua}:${Deno.env.get("AI_SUNNY_HASH_PEPPER") ?? "sunny-ai"}`);
+  const pepper = Deno.env.get("AI_SUNNY_HASH_PEPPER") ?? "sunny-ai";
+  const ipHash = await sha256Hex(`ip:${ip}:${pepper}`);
+  const uaHash = await sha256Hex(`ua:${ua}:${pepper}`);
   const dayKey = dayKeyVN();
 
   const { user } = await getUser(req);
@@ -112,37 +146,61 @@ Deno.serve(async (req) => {
   const email = String(user.email ?? "").toLowerCase();
   const body = await req.json().catch(() => ({}));
   const deviceRaw = String(body?.device_id ?? req.headers.get("x-ai-device") ?? "").trim();
-  const deviceHash = deviceRaw ? await sha256Hex(`device:${deviceRaw}:${Deno.env.get("AI_SUNNY_HASH_PEPPER") ?? "sunny-ai"}`) : null;
+  const deviceHash = deviceRaw ? await sha256Hex(`device:${deviceRaw}:${pepper}`) : null;
 
-  const { data: config } = await db.from("ai_sunny_config").select("*").eq("id", 1).maybeSingle();
-  if (!config?.enabled || !config?.public_enabled) {
-    return json(403, { ok: false, code: "AI_DISABLED", msg: config?.maintenance_message ?? "AI đang tạm đóng." }, origin);
+  const configRes = await db.from("ai_sunny_config").select("*").eq("id", 1).maybeSingle();
+  if (configRes.error && isSchemaMissing(configRes.error)) {
+    return json(503, {
+      ok: false,
+      code: "AI_SCHEMA_NOT_READY",
+      msg: "Database chưa có bảng ai_sunny_*. Hãy chạy migration AI hotfix rồi deploy lại function.",
+      detail: configRes.error.message,
+    }, origin);
+  }
+  if (configRes.error) return json(500, { ok: false, code: "CONFIG_ERROR", msg: configRes.error.message }, origin);
+
+  const config = { ...DEFAULT_CONFIG, ...(configRes.data ?? {}) };
+  if (!config.enabled || !config.public_enabled) {
+    return json(403, { ok: false, code: "AI_DISABLED", msg: config.maintenance_message ?? DEFAULT_CONFIG.maintenance_message }, origin);
   }
 
-  const { data: access } = await db
+  const accessRes = await db
     .from("ai_sunny_user_access")
     .select("*")
     .eq("user_id", user.id)
     .eq("status", "active")
     .maybeSingle();
 
-  if (!access) {
-    return json(403, {
-      ok: false,
-      code: "PLAN_REQUIRED",
-      msg: "Tài khoản chưa có gói AI. Hãy nhập key mở token hoặc liên hệ admin để cấp gói.",
-    }, origin);
+  if (accessRes.error && isSchemaMissing(accessRes.error)) {
+    return json(503, { ok: false, code: "AI_SCHEMA_NOT_READY", msg: "Database chưa có bảng ai_sunny_user_access." }, origin);
   }
+  if (accessRes.error) return json(500, { ok: false, code: "ACCESS_ERROR", msg: accessRes.error.message }, origin);
 
-  if (access.expires_at && new Date(access.expires_at).getTime() < Date.now()) {
+  let access = accessRes.data;
+  let planCode = String(access?.plan_code ?? "free").trim().toLowerCase() || "free";
+
+  if (access?.expires_at && new Date(access.expires_at).getTime() < Date.now()) {
     await db.from("ai_sunny_user_access").update({ status: "expired", updated_at: new Date().toISOString() }).eq("id", access.id);
-    return json(403, { ok: false, code: "PLAN_EXPIRED", msg: "Gói AI đã hết hạn." }, origin);
+    access = null;
+    planCode = "free";
   }
 
-  const { data: plan } = await db.from("ai_sunny_plans").select("*").eq("plan_code", access.plan_code).maybeSingle();
-  if (!plan?.enabled) return json(403, { ok: false, code: "PLAN_DISABLED", msg: "Gói AI hiện đang bị tắt." }, origin);
+  const planRes = await db.from("ai_sunny_plans").select("*").eq("plan_code", planCode).maybeSingle();
+  if (planRes.error && isSchemaMissing(planRes.error)) {
+    return json(503, { ok: false, code: "AI_SCHEMA_NOT_READY", msg: "Database chưa có bảng ai_sunny_plans." }, origin);
+  }
+  if (planRes.error) return json(500, { ok: false, code: "PLAN_ERROR", msg: planRes.error.message }, origin);
 
-  const allowedModels: string[] = Array.isArray(plan.allowed_models) ? plan.allowed_models : [];
+  let plan = planRes.data;
+  if (!plan && planCode !== "free") {
+    const freePlanRes = await db.from("ai_sunny_plans").select("*").eq("plan_code", "free").maybeSingle();
+    plan = freePlanRes.data ?? DEFAULT_FREE_PLAN;
+    planCode = "free";
+  }
+  if (!plan) plan = DEFAULT_FREE_PLAN;
+  if (!plan.enabled) return json(403, { ok: false, code: "PLAN_DISABLED", msg: "Gói AI hiện đang bị tắt." }, origin);
+
+  const allowedModels: string[] = Array.isArray(plan.allowed_models) ? plan.allowed_models : DEFAULT_FREE_PLAN.allowed_models;
   const requestedModel = String(body?.model ?? config.default_model ?? "mimo-v2.5").trim();
   const model = MODEL_ALLOW_LIST.has(requestedModel) ? requestedModel : String(config.default_model ?? "mimo-v2.5");
 
@@ -150,7 +208,7 @@ Deno.serve(async (req) => {
     return json(403, {
       ok: false,
       code: "MODEL_NOT_IN_PLAN",
-      msg: `Gói ${plan.label ?? plan.plan_code} chưa mở model ${model}.`,
+      msg: `Gói ${plan.label ?? plan.plan_code ?? planCode} chưa mở model ${model}.`,
     }, origin);
   }
 
@@ -159,15 +217,15 @@ Deno.serve(async (req) => {
     return json(403, { ok: false, code: "SANDBOX_NOT_ALLOWED", msg: "Sandbox/terminal chỉ mở cho gói Max khi admin bật." }, origin);
   }
 
-  const maxInputChars = Math.max(1000, Math.min(Number(access.max_input_chars ?? plan.max_input_chars ?? config.max_input_chars ?? 12000), Number(config.max_input_chars ?? 24000)));
+  const maxInputChars = Math.max(1000, Math.min(Number(access?.max_input_chars ?? plan.max_input_chars ?? config.max_input_chars ?? 6000), Number(config.max_input_chars ?? 24000)));
   const messages = normalizeMessages(body?.messages ?? [{ role: "user", content: body?.message ?? "" }], maxInputChars);
   const inputChars = sumChars(messages);
   if (!messages.length) return json(400, { ok: false, code: "MESSAGE_MISSING", msg: "Thiếu nội dung chat." }, origin);
 
-  const userDailyTokenLimit = Number(access.daily_token_limit_override ?? plan.daily_token_limit ?? 0);
-  const userDailyMessageLimit = Number(access.daily_message_limit_override ?? plan.daily_message_limit ?? 0);
-  const dailyIpLimit = Number(access.daily_ip_limit_override ?? 0);
-  const dailyDeviceLimit = Number(access.daily_device_limit_override ?? 0);
+  const userDailyTokenLimit = Number(access?.daily_token_limit_override ?? plan.daily_token_limit ?? 0);
+  const userDailyMessageLimit = Number(access?.daily_message_limit_override ?? plan.daily_message_limit ?? 0);
+  const dailyIpLimit = Number(access?.daily_ip_limit_override ?? 0);
+  const dailyDeviceLimit = Number(access?.daily_device_limit_override ?? 0);
 
   const { data: dailyRows } = await db
     .from("ai_sunny_usage_logs")
@@ -211,12 +269,12 @@ Deno.serve(async (req) => {
   if (!mimoApiKey) return json(500, { ok: false, code: "MIMO_API_KEY_MISSING", msg: "Server chưa cấu hình MIMO_API_KEY." }, origin);
 
   const requestMessages = [
-    { role: "system", content: String(config.system_prompt ?? "You are a coding assistant.") },
+    { role: "system", content: String(config.system_prompt ?? DEFAULT_CONFIG.system_prompt) },
     ...messages.filter((m) => m.role !== "system"),
   ];
 
-  const maxTokens = Math.max(200, Math.min(Number(body?.max_tokens ?? plan.max_tokens_per_request ?? 1200), Number(plan.max_tokens_per_request ?? 1200)));
-  const baseUrl = String(config.mimo_base_url ?? "https://token-plan-sgp.xiaomimimo.com/v1").replace(/\/+$/, "");
+  const maxTokens = Math.max(100, Math.min(Number(body?.max_tokens ?? plan.max_tokens_per_request ?? 800), Number(plan.max_tokens_per_request ?? 800)));
+  const baseUrl = String(config.mimo_base_url ?? DEFAULT_CONFIG.mimo_base_url).replace(/\/+$/, "");
 
   let upstreamData: any = null;
   let status = 200;
@@ -241,7 +299,7 @@ Deno.serve(async (req) => {
       await insertUsage(db, {
         user_id: user.id,
         email,
-        plan_code: access.plan_code,
+        plan_code: planCode,
         model,
         mode,
         day_key: dayKey,
@@ -266,7 +324,7 @@ Deno.serve(async (req) => {
     await insertUsage(db, {
       user_id: user.id,
       email,
-      plan_code: access.plan_code,
+      plan_code: planCode,
       model,
       mode,
       day_key: dayKey,
@@ -279,13 +337,13 @@ Deno.serve(async (req) => {
       completion_tokens: completionTokens,
       estimated_tokens: estimatedTokens,
       request_status: "ok",
-      metadata: { upstream_model: upstreamData?.model ?? model },
+      metadata: { upstream_model: upstreamData?.model ?? model, access_source: access?.source ?? "free-fallback" },
     });
 
     return json(200, {
       ok: true,
       model,
-      plan_code: access.plan_code,
+      plan_code: planCode,
       answer,
       usage: {
         prompt_tokens: promptTokens,
@@ -293,6 +351,8 @@ Deno.serve(async (req) => {
         estimated_tokens: estimatedTokens,
         daily_used_tokens: usedTokens + estimatedTokens,
         daily_token_limit: userDailyTokenLimit,
+        daily_used_messages: usedMessages + 1,
+        daily_message_limit: userDailyMessageLimit,
       },
       raw: body?.include_raw ? upstreamData : undefined,
     }, origin);
@@ -300,7 +360,7 @@ Deno.serve(async (req) => {
     await insertUsage(db, {
       user_id: user.id,
       email,
-      plan_code: access.plan_code,
+      plan_code: planCode,
       model,
       mode,
       day_key: dayKey,
@@ -311,8 +371,8 @@ Deno.serve(async (req) => {
       estimated_tokens: estimateTokensFromChars(inputChars),
       request_status: "error",
       error_code: "FETCH_FAILED",
-      error_message: String(e?.message ?? e),
+      error_message: String((e as any)?.message ?? e),
     });
-    return json(status >= 400 ? status : 500, { ok: false, code: "FETCH_FAILED", msg: String(e?.message ?? e) }, origin);
+    return json(status >= 400 ? status : 500, { ok: false, code: "FETCH_FAILED", msg: String((e as any)?.message ?? e) }, origin);
   }
 });

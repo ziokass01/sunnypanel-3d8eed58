@@ -104,6 +104,11 @@ export function SunnyModCodingAIPage() {
   const hasStartedChat = messages.length > 1;
 
   useEffect(() => {
+    if (user && currentPlan === "Chưa mở gói") setCurrentPlan("free");
+    if (!user && currentPlan !== "Chưa mở gói") setCurrentPlan("Chưa mở gói");
+  }, [user, currentPlan]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending]);
 

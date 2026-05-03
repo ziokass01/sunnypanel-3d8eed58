@@ -79,7 +79,12 @@ export function AdminSunnyModAIPage() {
   const { session } = useAuth();
   const { toast } = useToast();
   const token = session?.access_token ?? null;
-  const [tab, setTab] = useState<TabKey>("overview");
+  const initialTab = useMemo<TabKey>(() => {
+    if (typeof window === "undefined") return "overview";
+    const raw = new URLSearchParams(window.location.search).get("tab") as TabKey | null;
+    return (["overview", "plans", "keys", "users", "logs", "sandbox"] as TabKey[]).includes(raw as TabKey) ? (raw as TabKey) : "overview";
+  }, []);
+  const [tab, setTab] = useState<TabKey>(initialTab);
   const [lastCreatedKey, setLastCreatedKey] = useState("");
 
   const dashboardQuery = useQuery({
@@ -103,13 +108,13 @@ export function AdminSunnyModAIPage() {
   const effectiveConfig = configDraft ?? config;
 
   const [planDraft, setPlanDraft] = useState<any>({
-    plan_code: "trial",
-    label: "Trial / Key vượt",
-    description: "Gói mở bằng key vượt trong ngày.",
+    plan_code: "free",
+    label: "Free Coding",
+    description: "Gói free sau khi đăng nhập: chat thử khoảng vài chục tin/ngày.",
     enabled: true,
-    daily_token_limit: 50000,
-    daily_message_limit: 20,
-    max_tokens_per_request: 700,
+    daily_token_limit: 40000,
+    daily_message_limit: 30,
+    max_tokens_per_request: 800,
     max_input_chars: 6000,
     allowed_models: "mimo-v2.5",
     sandbox_enabled: false,
@@ -125,8 +130,8 @@ export function AdminSunnyModAIPage() {
     title: "Key vượt SunnyMod AI",
     plan_code_to_grant: "trial",
     grant_hours: 24,
-    bonus_daily_tokens: 50000,
-    bonus_daily_messages: 20,
+    bonus_daily_tokens: 60000,
+    bonus_daily_messages: 30,
     max_uses_total: 1,
     max_uses_per_day: 1,
     daily_ip_limit: 1,
@@ -266,11 +271,11 @@ export function AdminSunnyModAIPage() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2"><Label>Base URL MiMo</Label><Input value={effectiveConfig.mimo_base_url ?? ""} onChange={(e) => setConfigDraft({ ...effectiveConfig, mimo_base_url: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Base URL MiMo</Label><Input value={effectiveConfig.mimo_base_url ?? "https://token-plan-sgp.xiaomimimo.com/v1"} onChange={(e) => setConfigDraft({ ...effectiveConfig, mimo_base_url: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Default model</Label><Input value={effectiveConfig.default_model ?? "mimo-v2.5"} onChange={(e) => setConfigDraft({ ...effectiveConfig, default_model: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Pro model</Label><Input value={effectiveConfig.pro_model ?? "mimo-v2.5-pro"} onChange={(e) => setConfigDraft({ ...effectiveConfig, pro_model: e.target.value })} /></div>
-                <div className="space-y-2"><Label>Global daily token limit</Label><Input type="number" value={effectiveConfig.global_daily_token_limit ?? 0} onChange={(e) => setConfigDraft({ ...effectiveConfig, global_daily_token_limit: Number(e.target.value) })} /></div>
-                <div className="space-y-2"><Label>Monthly stop at tokens</Label><Input type="number" value={effectiveConfig.global_monthly_stop_at_tokens ?? 0} onChange={(e) => setConfigDraft({ ...effectiveConfig, global_monthly_stop_at_tokens: Number(e.target.value) })} /></div>
+                <div className="space-y-2"><Label>Global daily token limit</Label><Input type="number" value={effectiveConfig.global_daily_token_limit ?? 80000000} onChange={(e) => setConfigDraft({ ...effectiveConfig, global_daily_token_limit: Number(e.target.value) })} /></div>
+                <div className="space-y-2"><Label>Monthly stop at tokens</Label><Input type="number" value={effectiveConfig.global_monthly_stop_at_tokens ?? 1500000000} onChange={(e) => setConfigDraft({ ...effectiveConfig, global_monthly_stop_at_tokens: Number(e.target.value) })} /></div>
                 <div className="space-y-2"><Label>Max input chars</Label><Input type="number" value={effectiveConfig.max_input_chars ?? 24000} onChange={(e) => setConfigDraft({ ...effectiveConfig, max_input_chars: Number(e.target.value) })} /></div>
               </div>
               <div className="space-y-2"><Label>Maintenance message</Label><Input value={effectiveConfig.maintenance_message ?? ""} onChange={(e) => setConfigDraft({ ...effectiveConfig, maintenance_message: e.target.value })} /></div>
