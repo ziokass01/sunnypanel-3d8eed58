@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
 import { postFunction } from "@/lib/functions";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,8 @@ const MODELS = [
 
 type Msg = { role: "user" | "assistant"; content: string };
 type LockedDialog = { title: string; description: string } | null;
+
+const ADMIN_ZALO_URL = "https://zalo.me/84373752504";
 
 function getDeviceId() {
   if (typeof window === "undefined") return "";
@@ -61,9 +64,9 @@ function isAllowedByPlan(modelId: string, planCode: string, hasUser: boolean) {
   return modelId === "mimo-v2.5";
 }
 
-function getLoginUrl() {
-  if (typeof window === "undefined") return "/mobile-auth/google";
-  return `/mobile-auth/google?return_to=${encodeURIComponent(`${window.location.origin}/coding-ai`)}`;
+function getLoginRedirectUrl() {
+  if (typeof window === "undefined") return undefined;
+  return `${window.location.origin}/coding-ai`;
 }
 
 export function SunnyModCodingAIPage() {
@@ -82,6 +85,7 @@ export function SunnyModCodingAIPage() {
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const deviceId = useMemo(() => getDeviceId(), []);
@@ -101,7 +105,30 @@ export function SunnyModCodingAIPage() {
   };
 
   const contactAdmin = () => {
-    if (typeof window !== "undefined") window.open("/free", "_blank", "noopener,noreferrer");
+    if (typeof window !== "undefined") window.open(ADMIN_ZALO_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const loginWithGoogle = async () => {
+    if (loggingIn) return;
+    setLoggingIn(true);
+    try {
+      const redirectTo = getLoginRedirectUrl();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      });
+      if (error) throw error;
+      if (data?.url) window.location.href = data.url;
+    } catch (e: any) {
+      toast({ title: "Không mở được đăng nhập", description: e?.message ?? "Hãy thử lại hoặc liên hệ admin.", variant: "destructive" });
+      setLoggingIn(false);
+    }
   };
 
   const newChat = () => {
@@ -241,7 +268,7 @@ export function SunnyModCodingAIPage() {
             </button>
             {redeemOpen ? (
               <div className="mt-3 space-y-2">
-                <input value={redeemCode} onChange={(e) => setRedeemCode(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/40 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600" placeholder="AI-XXXXXX-XXXXXX" />
+                <input value={redeemCode} onChange={(e) => setRedeemCode(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-white caret-white outline-none placeholder:text-zinc-600" style={{ color: "#fff", WebkitTextFillColor: "#fff" }} placeholder="AI-XXXXXX-XXXXXX" />
                 <button onClick={redeem} className="w-full rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-black">Xác nhận key</button>
               </div>
             ) : null}
@@ -255,7 +282,7 @@ export function SunnyModCodingAIPage() {
               <div className="truncate text-sm font-medium">{shortEmail(user?.email)}</div>
               <div className="text-xs text-zinc-500">{user ? "Đã đăng nhập" : "Cần đăng nhập"}</div>
             </div>
-            {!user ? <button onClick={() => { window.location.href = getLoginUrl(); }} className="rounded-xl p-2 hover:bg-white/10"><LogIn className="h-4 w-4" /></button> : null}
+            {!user ? <button onClick={loginWithGoogle} disabled={loggingIn} className="rounded-xl p-2 hover:bg-white/10 disabled:opacity-60"><LogIn className="h-4 w-4" /></button> : null}
           </div>
         </div>
       </aside>
@@ -287,8 +314,8 @@ export function SunnyModCodingAIPage() {
               <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl">Bạn muốn debug gì hôm nay?</h1>
               <p className="mt-4 max-w-xl text-base leading-7 text-zinc-500">Gửi log build, lỗi Supabase, code Android/NDK hoặc mô tả bug. Các chức năng chưa mở sẽ hiện khóa và liên hệ admin.</p>
               {!user ? (
-                <button onClick={() => { window.location.href = getLoginUrl(); }} className="mt-6 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black hover:bg-zinc-200">
-                  Đăng nhập để dùng AI
+                <button onClick={loginWithGoogle} disabled={loggingIn} className="mt-6 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black hover:bg-zinc-200 disabled:opacity-60">
+                  {loggingIn ? "Đang mở Google..." : "Đăng nhập để dùng AI"}
                 </button>
               ) : null}
             </div>
@@ -316,7 +343,7 @@ export function SunnyModCodingAIPage() {
                 <FeatureButton icon={ImageIcon} label="Thêm ảnh" desc="Dành cho Omni/Max" locked onClick={() => openLocked("Phân tích ảnh đang khóa", "Tính năng ảnh cần gói Omni/Max hoặc admin cấp riêng.")} />
                 <FeatureButton icon={TerminalSquare} label="Sandbox / Terminal" desc="Gói Max, có giới hạn phiên" locked onClick={() => openLocked("Sandbox Terminal đang khóa", "Terminal chỉ mở cho gói cao nhất để tránh lạm dụng server.")} />
                 <FeatureButton icon={KeyRound} label="Nhập key mở token" desc="Mở quota ngày hoặc gói tạm" onClick={() => { setRedeemOpen(true); setSidebarOpen(true); setPlusOpen(false); }} />
-                <FeatureButton icon={Settings} label="Liên hệ admin" desc="Mở trang GetKey Free có link Zalo" onClick={contactAdmin} />
+                <FeatureButton icon={Settings} label="Liên hệ admin" desc="Mở Zalo admin trực tiếp" onClick={contactAdmin} />
               </div>
             ) : null}
 
@@ -341,7 +368,7 @@ export function SunnyModCodingAIPage() {
             <div className="flex items-end gap-2 rounded-[2rem] border border-white/10 bg-[#19191a] p-2 shadow-2xl shadow-black/30">
               <button onClick={() => { setPlusOpen((v) => !v); setModelOpen(false); }} className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-zinc-200 transition hover:bg-white/15"><Plus className="h-5 w-5" /></button>
               <textarea
-                className="max-h-40 min-h-[52px] flex-1 resize-none bg-transparent px-2 py-3 text-[15px] leading-6 text-white outline-none placeholder:text-zinc-600"
+                className="max-h-40 min-h-[52px] flex-1 resize-none bg-transparent px-2 py-3 text-[15px] leading-6 text-white caret-white outline-none placeholder:text-zinc-600" style={{ color: "#fff", WebkitTextFillColor: "#fff", caretColor: "#fff" }}
                 placeholder="Hỏi SunnyMod AI hoặc dán log/code cần debug..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
