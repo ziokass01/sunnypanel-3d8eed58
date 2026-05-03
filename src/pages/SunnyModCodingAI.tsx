@@ -34,7 +34,7 @@ const MODELS = [
 ] as const;
 
 type Msg = { role: "user" | "assistant"; content: string };
-type LockedDialog = { title: string; description: string } | null;
+type LockedDialog = { title: string; description: string; action?: "contact" | "login" } | null;
 
 const ADMIN_ZALO_URL = "https://zalo.me/84373752504";
 
@@ -66,7 +66,17 @@ function isAllowedByPlan(modelId: string, planCode: string, hasUser: boolean) {
 
 function getLoginRedirectUrl() {
   if (typeof window === "undefined") return undefined;
-  return `${window.location.origin}/coding-ai`;
+  const { protocol, hostname, origin } = window.location;
+  const host = hostname.toLowerCase();
+
+  // Public domain does not host the normal control-panel login flow.
+  // Send OAuth back to app-host /coding-ai so the AI page opens after login
+  // instead of falling through to /apps.
+  if (host === "mityangho.id.vn" || host === "www.mityangho.id.vn") {
+    return `${protocol}//app.mityangho.id.vn/coding-ai`;
+  }
+
+  return `${origin}/coding-ai`;
 }
 
 export function SunnyModCodingAIPage() {
@@ -97,15 +107,21 @@ export function SunnyModCodingAIPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending]);
 
-  const openLocked = (title: string, description?: string) => {
+  const openLocked = (title: string, description?: string, action: "contact" | "login" = "contact") => {
     setLockedDialog({
       title,
+      action,
       description: description || "Chức năng này chưa được mở cho tài khoản/gói hiện tại. Hãy liên hệ admin để nâng gói hoặc cấp quyền.",
     });
   };
 
   const contactAdmin = () => {
     if (typeof window !== "undefined") window.open(ADMIN_ZALO_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const loginFromDialog = () => {
+    setLockedDialog(null);
+    void loginWithGoogle();
   };
 
   const loginWithGoogle = async () => {
@@ -140,11 +156,20 @@ export function SunnyModCodingAIPage() {
   };
 
   const selectModel = (nextModel: string) => {
+    if (!user) {
+      openLocked(
+        "Cần đăng nhập",
+        "Bạn cần đăng nhập Google trước, sau đó nhập key hoặc dùng gói do admin cấp để mở model.",
+        "login",
+      );
+      return;
+    }
+
     if (!isAllowedByPlan(nextModel, currentPlan, Boolean(user))) {
       const meta = MODELS.find((m) => m.id === nextModel);
       openLocked(
         `${meta?.label ?? nextModel} đang bị khóa`,
-        `Model ${nextModel} cần gói phù hợp. Bạn có thể nhập key mở token/gói hoặc liên hệ admin ở trang GetKey Free.`,
+        `Model ${nextModel} cần gói phù hợp. Bạn có thể nhập key mở token/gói hoặc liên hệ admin qua Zalo.`,
       );
       return;
     }
@@ -155,7 +180,7 @@ export function SunnyModCodingAIPage() {
 
   const redeem = async () => {
     if (!token) {
-      openLocked("Cần đăng nhập", "Bạn cần đăng nhập tài khoản trước khi nhập key mở token/ngày hoặc gói AI.");
+      openLocked("Cần đăng nhập", "Bạn cần đăng nhập Google trước khi nhập key mở token/ngày hoặc gói AI.", "login");
       return;
     }
     if (!redeemCode.trim()) return;
@@ -176,7 +201,7 @@ export function SunnyModCodingAIPage() {
     const text = input.trim();
     if (!text || sending) return;
     if (!token) {
-      openLocked("Cần đăng nhập", "Tài khoản của bạn chưa đăng nhập nên chưa gọi được AI. Hãy đăng nhập bằng Google rồi nhập key/gói do admin cấp.");
+      openLocked("Cần đăng nhập", "Tài khoản của bạn chưa đăng nhập nên chưa gọi được AI. Hãy đăng nhập bằng Google rồi nhập key/gói do admin cấp.", "login");
       return;
     }
 
@@ -401,7 +426,13 @@ export function SunnyModCodingAIPage() {
             </div>
             <div className="mt-5 grid grid-cols-2 gap-2">
               <button onClick={() => setLockedDialog(null)} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-white/10">Hủy</button>
-              <button onClick={contactAdmin} className="rounded-2xl bg-amber-400 px-4 py-3 text-sm font-bold text-black hover:bg-amber-300">Liên hệ admin</button>
+              <button
+                onClick={lockedDialog.action === "login" ? loginFromDialog : contactAdmin}
+                disabled={lockedDialog.action === "login" && loggingIn}
+                className="rounded-2xl bg-amber-400 px-4 py-3 text-sm font-bold text-black hover:bg-amber-300 disabled:opacity-60"
+              >
+                {lockedDialog.action === "login" ? (loggingIn ? "Đang mở..." : "Đăng nhập") : "Liên hệ admin"}
+              </button>
             </div>
           </div>
         </div>
