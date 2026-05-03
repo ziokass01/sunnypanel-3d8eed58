@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   Bot,
-  Code2,
-  Crown,
-  History,
+  ChevronDown,
+  Image as ImageIcon,
   KeyRound,
+  Lock,
   LogIn,
   Menu,
   MessageSquare,
-  PanelLeftClose,
+  Paperclip,
   Plus,
+  Search,
   Send,
+  Settings,
   ShieldCheck,
   Sparkles,
   TerminalSquare,
-  Upload,
   X,
 } from "lucide-react";
 
@@ -23,26 +23,17 @@ import { useAuth } from "@/auth/AuthProvider";
 import { postFunction } from "@/lib/functions";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 
 const MODELS = [
-  { id: "mimo-v2.5", label: "Chat thường", short: "Chat", desc: "Tiết kiệm, dùng hằng ngày", plan: "Basic", icon: MessageSquare },
-  { id: "mimo-v2-pro", label: "Code tiết kiệm", short: "Code", desc: "Code ổn, ít tốn hơn Pro", plan: "Basic+", icon: Code2 },
-  { id: "mimo-v2.5-pro", label: "Code Debug Pro", short: "Pro", desc: "Mạnh nhất cho code/debug", plan: "Pro", icon: Crown },
-  { id: "mimo-v2-omni", label: "Omni", short: "Omni", desc: "Đa phương thức khi server hỗ trợ", plan: "Max", icon: Sparkles },
-  { id: "mimo-v2.5-tts", label: "TTS", short: "TTS", desc: "Text to speech, mở theo gói", plan: "TTS", icon: Bot },
-];
-
-const SUGGESTIONS = [
-  "Sửa lỗi build Android/NDK từ log này",
-  "Phân tích lỗi Supabase Edge Function",
-  "Viết migration SQL an toàn, không đụng module khác",
-  "Tóm tắt thay đổi repo thành note kỹ thuật",
-];
+  { id: "mimo-v2.5", label: "Chat thường", desc: "Tiết kiệm, dùng hằng ngày", tier: "basic" },
+  { id: "mimo-v2-pro", label: "Code tiết kiệm", desc: "Code ổn, ít tốn hơn Pro", tier: "basic" },
+  { id: "mimo-v2.5-pro", label: "Code Debug Pro", desc: "Mạnh nhất cho code/debug", tier: "pro" },
+  { id: "mimo-v2-omni", label: "Omni", desc: "Đa phương thức khi server hỗ trợ", tier: "max" },
+  { id: "mimo-v2.5-tts", label: "TTS", desc: "Text to speech, mở theo gói", tier: "tts" },
+] as const;
 
 type Msg = { role: "user" | "assistant"; content: string };
+type LockedDialog = { title: string; description: string } | null;
 
 function getDeviceId() {
   if (typeof window === "undefined") return "";
@@ -54,31 +45,40 @@ function getDeviceId() {
   return id;
 }
 
-function buildChatTitle(messages: Msg[]) {
-  const firstUser = messages.find((m) => m.role === "user")?.content?.trim();
-  if (!firstUser) return "Đoạn chat mới";
-  return firstUser.length > 42 ? `${firstUser.slice(0, 42)}…` : firstUser;
+function shortEmail(email?: string | null) {
+  const raw = String(email ?? "").trim();
+  if (!raw) return "Khách";
+  return raw.length > 28 ? `${raw.slice(0, 28)}…` : raw;
 }
 
-function formatTime(date = new Date()) {
-  return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit" }).format(date);
+function isAllowedByPlan(modelId: string, planCode: string, hasUser: boolean) {
+  if (!hasUser) return false;
+  const plan = planCode.toLowerCase();
+  if (plan.includes("max") || plan.includes("admin")) return true;
+  if (plan.includes("tts")) return modelId === "mimo-v2.5-tts" || modelId === "mimo-v2.5";
+  if (plan.includes("pro")) return ["mimo-v2.5", "mimo-v2-pro", "mimo-v2.5-pro"].includes(modelId);
+  if (plan.includes("basic")) return ["mimo-v2.5", "mimo-v2-pro"].includes(modelId);
+  return modelId === "mimo-v2.5";
+}
+
+function getLoginUrl() {
+  if (typeof window === "undefined") return "/mobile-auth/google";
+  return `/mobile-auth/google?return_to=${encodeURIComponent(`${window.location.origin}/coding-ai`)}`;
 }
 
 export function SunnyModCodingAIPage() {
   const { session, user, loading } = useAuth();
   const { toast } = useToast();
-  const nav = useNavigate();
   const [model, setModel] = useState("mimo-v2.5");
-  const [showTools, setShowTools] = useState(false);
-  const [showModels, setShowModels] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [redeemOpen, setRedeemOpen] = useState(false);
   const [redeemCode, setRedeemCode] = useState("");
+  const [currentPlan, setCurrentPlan] = useState("Chưa mở gói");
+  const [lockedDialog, setLockedDialog] = useState<LockedDialog>(null);
   const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "assistant",
-      content:
-        "Xin chào, tôi là SunnyMod Coding AI. Hãy gửi lỗi build, log Supabase, code hoặc câu hỏi debug của bạn.",
-    },
+    { role: "assistant", content: "Xin chào, tôi là SunnyMod Coding AI. Hãy gửi lỗi build, log Supabase, code hoặc câu hỏi debug của bạn." },
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -87,62 +87,69 @@ export function SunnyModCodingAIPage() {
   const deviceId = useMemo(() => getDeviceId(), []);
   const token = session?.access_token ?? null;
   const selectedModel = MODELS.find((m) => m.id === model) ?? MODELS[0];
-  const SelectedIcon = selectedModel.icon;
-  const hasStarted = messages.some((m) => m.role === "user");
-
-  const conversations = useMemo(
-    () => [
-      { id: "current", title: buildChatTitle(messages), time: formatTime() },
-      { id: "hint-1", title: "Debug build Android / AIDE", time: "Gợi ý" },
-      { id: "hint-2", title: "Supabase function logs", time: "Gợi ý" },
-      { id: "hint-3", title: "Viết note kỹ thuật repo", time: "Gợi ý" },
-    ],
-    [messages],
-  );
+  const hasStartedChat = messages.length > 1;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending]);
 
+  const openLocked = (title: string, description?: string) => {
+    setLockedDialog({
+      title,
+      description: description || "Chức năng này chưa được mở cho tài khoản/gói hiện tại. Hãy liên hệ admin để nâng gói hoặc cấp quyền.",
+    });
+  };
+
+  const contactAdmin = () => {
+    if (typeof window !== "undefined") window.open("/free", "_blank", "noopener,noreferrer");
+  };
+
   const newChat = () => {
     setMessages([
-      {
-        role: "assistant",
-        content:
-          "Đã mở đoạn chat mới. Gửi log/code/lỗi cần debug, tôi sẽ phân tích theo hướng an toàn, không đụng lan man.",
-      },
+      { role: "assistant", content: "Đã tạo đoạn chat mới. Gửi lỗi build, log hoặc code cần debug cho tôi." },
     ]);
     setInput("");
-    setShowTools(false);
-    setShowModels(false);
     setSidebarOpen(false);
+  };
+
+  const selectModel = (nextModel: string) => {
+    if (!isAllowedByPlan(nextModel, currentPlan, Boolean(user))) {
+      const meta = MODELS.find((m) => m.id === nextModel);
+      openLocked(
+        `${meta?.label ?? nextModel} đang bị khóa`,
+        `Model ${nextModel} cần gói phù hợp. Bạn có thể nhập key mở token/gói hoặc liên hệ admin ở trang GetKey Free.`,
+      );
+      return;
+    }
+    setModel(nextModel);
+    setModelOpen(false);
+    setPlusOpen(false);
   };
 
   const redeem = async () => {
     if (!token) {
-      toast({ title: "Cần đăng nhập", description: "Bạn cần đăng nhập tài khoản trước khi nhập key AI.", variant: "destructive" });
+      openLocked("Cần đăng nhập", "Bạn cần đăng nhập tài khoản trước khi nhập key mở token/ngày hoặc gói AI.");
       return;
     }
     if (!redeemCode.trim()) return;
     try {
       const res = await postFunction<any>("/ai-sunny-redeem", { code: redeemCode, device_id: deviceId }, { authToken: token });
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "Redeem failed");
-      toast({
-        title: "Đã mở AI",
-        description: `${res.plan_code} tới ${res.expires_at ? new Date(res.expires_at).toLocaleString("vi-VN") : "hôm nay"}`,
-      });
+      const planCode = String(res.plan_code ?? "basic");
+      setCurrentPlan(planCode);
+      toast({ title: "Đã mở AI", description: `${planCode} tới ${res.expires_at ? new Date(res.expires_at).toLocaleString("vi-VN") : "hôm nay"}` });
       setRedeemCode("");
-      setShowTools(false);
+      setRedeemOpen(false);
     } catch (e: any) {
       toast({ title: "Key không dùng được", description: e?.message ?? "Không thể nhập key.", variant: "destructive" });
     }
   };
 
-  const send = async (forcedText?: string) => {
-    const text = String(forcedText ?? input).trim();
+  const send = async () => {
+    const text = input.trim();
     if (!text || sending) return;
     if (!token) {
-      toast({ title: "Cần đăng nhập", description: "Tài khoản của bạn chưa đăng nhập nên chưa gọi được AI.", variant: "destructive" });
+      openLocked("Cần đăng nhập", "Tài khoản của bạn chưa đăng nhập nên chưa gọi được AI. Hãy đăng nhập bằng Google rồi nhập key/gói do admin cấp.");
       return;
     }
 
@@ -150,22 +157,19 @@ export function SunnyModCodingAIPage() {
     setMessages(nextMessages);
     setInput("");
     setSending(true);
-    setShowTools(false);
-    setShowModels(false);
+    setPlusOpen(false);
+    setModelOpen(false);
 
     try {
       const apiMessages = nextMessages.slice(-16).map((m) => ({ role: m.role, content: m.content }));
-      const res = await postFunction<any>(
-        "/ai-sunny-chat",
-        {
-          model,
-          mode: model.includes("tts") ? "tts" : "chat",
-          device_id: deviceId,
-          messages: apiMessages,
-        },
-        { authToken: token },
-      );
+      const res = await postFunction<any>("/ai-sunny-chat", {
+        model,
+        mode: model.includes("tts") ? "tts" : "chat",
+        device_id: deviceId,
+        messages: apiMessages,
+      }, { authToken: token });
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "AI request failed");
+      if (res.plan_code) setCurrentPlan(String(res.plan_code));
       setMessages((prev) => [...prev, { role: "assistant", content: String(res.answer ?? "") }]);
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: "assistant", content: `Không gọi được AI: ${e?.message ?? e}` }]);
@@ -174,266 +178,207 @@ export function SunnyModCodingAIPage() {
     }
   };
 
-  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
-    <aside className={`${mobile ? "h-full w-[82vw] max-w-[340px]" : "hidden w-[300px] shrink-0 lg:flex"} flex-col border-r border-white/10 bg-[#101014] text-white`}>
-      <div className="flex items-center gap-3 border-b border-white/10 p-4">
-        <img src="/android-chrome-512x512.png" alt="SUNNY" className="h-9 w-9 rounded-xl object-cover" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold">SunnyMod AI</div>
-          <div className="truncate text-xs text-zinc-400">Coding assistant</div>
-        </div>
-        {mobile && (
-          <Button size="icon" variant="ghost" className="text-zinc-200 hover:bg-white/10" onClick={() => setSidebarOpen(false)}>
-            <X className="h-5 w-5" />
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-3 p-3">
-        <Button onClick={newChat} className="h-11 w-full justify-start rounded-2xl bg-white text-black hover:bg-zinc-200">
-          <Plus className="mr-2 h-4 w-4" /> Đoạn chat mới
-        </Button>
-        <button className="flex h-11 w-full items-center gap-2 rounded-2xl border border-white/10 px-3 text-left text-sm text-zinc-300 hover:bg-white/5">
-          <History className="h-4 w-4" /> Lịch sử chat
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        <div className="mb-2 px-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Gần đây</div>
-        <div className="space-y-1">
-          {conversations.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => item.id === "current" && setSidebarOpen(false)}
-              className={`w-full rounded-2xl px-3 py-3 text-left transition ${item.id === "current" ? "bg-white/10" : "hover:bg-white/5"}`}
-            >
-              <div className="truncate text-sm text-zinc-100">{item.title}</div>
-              <div className="mt-1 text-xs text-zinc-500">{item.time}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="border-t border-white/10 p-3">
-        <div className="rounded-2xl bg-white/5 p-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <ShieldCheck className="h-4 w-4 text-amber-300" /> {user?.email ? "Đã đăng nhập" : "Chưa đăng nhập"}
-          </div>
-          <div className="mt-1 truncate text-xs text-zinc-500">{user?.email ?? "Cần đăng nhập để gọi AI"}</div>
-          {!user && (
-            <Button size="sm" className="mt-3 w-full rounded-xl" onClick={() => nav("/login")}>
-              <LogIn className="mr-2 h-4 w-4" /> Đăng nhập
-            </Button>
-          )}
-        </div>
-      </div>
-    </aside>
+  const FeatureButton = ({ icon: Icon, label, desc, locked, onClick }: any) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm text-zinc-100 transition hover:bg-white/10"
+    >
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-zinc-100"><Icon className="h-4 w-4" /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium">{label}</span>
+        <span className="block truncate text-xs text-zinc-500">{desc}</span>
+      </span>
+      {locked ? <Lock className="h-4 w-4 text-amber-300" /> : null}
+    </button>
   );
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-[#0b0b0d] text-white">
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
-          <div className="relative z-10 h-full"><Sidebar mobile /></div>
+    <div className="min-h-svh overflow-hidden bg-[#0f0f10] text-zinc-50">
+      {sidebarOpen ? <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} /> : null}
+
+      <aside className={`fixed inset-y-0 left-0 z-40 flex w-[286px] flex-col border-r border-white/10 bg-[#0b0b0c] transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <img src="/android-chrome-512x512.png" alt="SUNNY" className="h-9 w-9 rounded-xl object-cover" />
+            <div>
+              <div className="font-semibold leading-none">SunnyMod AI</div>
+              <div className="mt-1 text-[11px] text-zinc-500">Coding assistant</div>
+            </div>
+          </div>
+          <button className="rounded-xl p-2 text-zinc-400 hover:bg-white/10 lg:hidden" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></button>
         </div>
-      )}
 
-      <div className="flex h-full">
-        <Sidebar />
+        <div className="px-3">
+          <button onClick={newChat} className="flex w-full items-center gap-3 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200">
+            <Plus className="h-4 w-4" /> Đoạn chat mới
+          </button>
+          <div className="mt-3 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-400">
+            <Search className="h-4 w-4" />
+            <input className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600" placeholder="Tìm kiếm đoạn chat" />
+          </div>
+        </div>
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b0b0d]/95 px-3 backdrop-blur sm:px-5">
-            <Button size="icon" variant="ghost" className="text-zinc-200 hover:bg-white/10 lg:hidden" onClick={() => setSidebarOpen(true)}>
-              <Menu className="h-6 w-6" />
-            </Button>
-            <Button size="icon" variant="ghost" className="hidden text-zinc-200 hover:bg-white/10 lg:inline-flex">
-              <PanelLeftClose className="h-5 w-5" />
-            </Button>
+        <div className="mt-5 flex-1 overflow-y-auto px-3">
+          <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-zinc-500">Gần đây</div>
+          <button className="flex w-full items-center gap-3 rounded-2xl bg-white/10 px-3 py-3 text-left text-sm text-zinc-100">
+            <MessageSquare className="h-4 w-4 text-zinc-400" />
+            <span className="line-clamp-1">Debug Android/Supabase</span>
+          </button>
+          <button className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm text-zinc-400 hover:bg-white/10">
+            <MessageSquare className="h-4 w-4" />
+            <span className="line-clamp-1">Phân tích log build</span>
+          </button>
 
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold sm:text-base">SunnyMod Coding AI</div>
-              <div className="truncate text-xs text-zinc-500">Không dán API key, service role, secret vào chat</div>
+          <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.04] p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck className="h-4 w-4 text-amber-300" /> Gói đang có</div>
+            <div className="mt-3 rounded-2xl bg-black/30 p-3">
+              <div className="text-lg font-bold">{user ? currentPlan : "Chưa đăng nhập"}</div>
+              <div className="mt-1 text-xs text-zinc-500">Model hiện tại: {selectedModel.id}</div>
             </div>
-
-            <button
-              onClick={() => setShowModels((v) => !v)}
-              className="flex max-w-[180px] items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-left hover:bg-white/10"
-            >
-              <SelectedIcon className="h-4 w-4 text-amber-300" />
-              <span className="truncate text-xs font-medium sm:text-sm">{selectedModel.short}: {model}</span>
+            <button onClick={() => setRedeemOpen((v) => !v)} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 px-3 py-2.5 text-sm font-bold text-black hover:bg-amber-300">
+              <KeyRound className="h-4 w-4" /> Nhập key mở token
             </button>
-
-            {!loading && !user && (
-              <Button size="sm" className="hidden rounded-2xl bg-white text-black hover:bg-zinc-200 sm:inline-flex" onClick={() => nav("/login")}>
-                Đăng nhập
-              </Button>
-            )}
-          </header>
-
-          <div className="relative min-h-0 flex-1 overflow-y-auto">
-            {showModels && (
-              <div className="absolute right-3 top-3 z-20 w-[min(92vw,380px)] rounded-3xl border border-white/10 bg-[#17171b] p-3 shadow-2xl">
-                <div className="mb-2 px-2 text-sm font-semibold">Chọn model</div>
-                <div className="space-y-2">
-                  {MODELS.map((m) => {
-                    const Icon = m.icon;
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => { setModel(m.id); setShowModels(false); }}
-                        className={`flex w-full items-start gap-3 rounded-2xl p-3 text-left transition ${model === m.id ? "bg-amber-400 text-black" : "bg-white/5 hover:bg-white/10"}`}
-                      >
-                        <Icon className="mt-0.5 h-4 w-4" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold">{m.label}</span>
-                          <span className={`block text-xs ${model === m.id ? "text-black/65" : "text-zinc-400"}`}>{m.id} · {m.desc}</span>
-                        </span>
-                        <Badge variant={model === m.id ? "secondary" : "outline"}>{m.plan}</Badge>
-                      </button>
-                    );
-                  })}
-                </div>
+            {redeemOpen ? (
+              <div className="mt-3 space-y-2">
+                <input value={redeemCode} onChange={(e) => setRedeemCode(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/40 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600" placeholder="AI-XXXXXX-XXXXXX" />
+                <button onClick={redeem} className="w-full rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-black">Xác nhận key</button>
               </div>
-            )}
+            ) : null}
+          </div>
+        </div>
 
-            <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-6 sm:px-6">
-              {!hasStarted ? (
-                <div className="flex flex-1 flex-col items-center justify-center pb-28 text-center">
-                  <div className="mb-5 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-2xl">
-                    <img src="/android-chrome-512x512.png" alt="SUNNY" className="h-16 w-16 rounded-2xl object-cover" />
-                  </div>
-                  <h1 className="max-w-2xl text-4xl font-bold tracking-tight sm:text-6xl">Bạn muốn debug gì hôm nay?</h1>
-                  <p className="mt-4 max-w-xl text-base leading-7 text-zinc-400 sm:text-lg">
-                    Chat AI hỗ trợ code, lỗi build, Supabase, Android/NDK và ghi note kỹ thuật theo flow SunnyMod.
-                  </p>
+        <div className="border-t border-white/10 p-3">
+          <div className="flex items-center gap-3 rounded-2xl bg-white/[0.04] p-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-400 text-sm font-bold text-black">{user?.email?.[0]?.toUpperCase() || "S"}</div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{shortEmail(user?.email)}</div>
+              <div className="text-xs text-zinc-500">{user ? "Đã đăng nhập" : "Cần đăng nhập"}</div>
+            </div>
+            {!user ? <button onClick={() => { window.location.href = getLoginUrl(); }} className="rounded-xl p-2 hover:bg-white/10"><LogIn className="h-4 w-4" /></button> : null}
+          </div>
+        </div>
+      </aside>
 
-                  {!loading && !user && (
-                    <div className="mt-5 rounded-2xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
-                      Cần đăng nhập để gọi AI. Bạn vẫn có thể xem giao diện và chọn model.
-                    </div>
-                  )}
-
-                  <div className="mt-8 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
-                    {SUGGESTIONS.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => setInput(s)}
-                        className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left text-sm text-zinc-200 hover:bg-white/10"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-5 pb-36">
-                  {messages.map((m, idx) => (
-                    <div key={idx} className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                      {m.role === "assistant" && (
-                        <div className="mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-300 text-black sm:flex">
-                          <Bot className="h-4 w-4" />
-                        </div>
-                      )}
-                      <div
-                        className={`max-w-[92%] whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-7 shadow-lg sm:max-w-[82%] ${
-                          m.role === "user"
-                            ? "bg-white text-black"
-                            : "border border-white/10 bg-[#17171b] text-zinc-100"
-                        }`}
-                      >
-                        {m.content}
-                      </div>
-                    </div>
-                  ))}
-                  {sending && (
-                    <div className="flex justify-start gap-3">
-                      <div className="mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-300 text-black sm:flex">
-                        <Bot className="h-4 w-4" />
-                      </div>
-                      <div className="rounded-3xl border border-white/10 bg-[#17171b] px-4 py-3 text-sm text-zinc-400">AI đang trả lời...</div>
-                    </div>
-                  )}
-                  <div ref={bottomRef} />
-                </div>
-              )}
+      <main className="flex min-h-svh flex-col lg:pl-[286px]">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-[#0f0f10]/85 px-4 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <button className="rounded-xl p-2 text-zinc-300 hover:bg-white/10 lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></button>
+            <div className="hidden items-center gap-2 lg:flex">
+              <Bot className="h-5 w-5 text-amber-300" />
+              <span className="font-semibold">SunnyMod Coding AI</span>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setModelOpen((v) => !v)} className="relative flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-zinc-100 hover:bg-white/10">
+              <Sparkles className="h-4 w-4 text-amber-300" /> {selectedModel.label}
+              <ChevronDown className="h-4 w-4" />
+            </button>
+            <button onClick={() => openLocked("Cài đặt đang khóa", "Cài đặt nâng cao chỉ mở trong gói Max hoặc do admin cấp riêng.")} className="rounded-2xl border border-white/10 bg-white/[0.05] p-2 text-zinc-300 hover:bg-white/10"><Settings className="h-4 w-4" /></button>
+          </div>
+        </header>
 
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 lg:left-[300px]">
-            <div className="pointer-events-auto mx-auto max-w-4xl px-3 pb-4 sm:px-5">
-              {showTools && (
-                <div className="mb-2 overflow-hidden rounded-3xl border border-white/10 bg-[#17171b] p-3 shadow-2xl">
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    <button className="rounded-2xl bg-white/5 p-3 text-left hover:bg-white/10" onClick={() => setShowModels(true)}>
-                      <Sparkles className="mb-2 h-4 w-4 text-amber-300" />
-                      <div className="text-sm font-semibold">Chọn model/gói</div>
-                      <div className="text-xs text-zinc-500">Basic, Pro, Omni, TTS</div>
-                    </button>
-                    <button className="rounded-2xl bg-white/5 p-3 text-left hover:bg-white/10">
-                      <Upload className="mb-2 h-4 w-4 text-zinc-300" />
-                      <div className="text-sm font-semibold">Upload log/file</div>
-                      <div className="text-xs text-zinc-500">Sẽ mở ở bản sau</div>
-                    </button>
-                    <button className="rounded-2xl bg-white/5 p-3 text-left hover:bg-white/10">
-                      <TerminalSquare className="mb-2 h-4 w-4 text-zinc-300" />
-                      <div className="text-sm font-semibold">Sandbox/Terminal</div>
-                      <div className="text-xs text-zinc-500">Chỉ gói Max khi admin bật</div>
-                    </button>
-                  </div>
-                  <div className="mt-3 flex gap-2 rounded-2xl bg-black/30 p-2">
-                    <Input
-                      className="border-white/10 bg-white/5 text-white placeholder:text-zinc-500"
-                      placeholder="Nhập key mở token/ngày"
-                      value={redeemCode}
-                      onChange={(e) => setRedeemCode(e.target.value)}
-                    />
-                    <Button className="rounded-xl bg-amber-300 text-black hover:bg-amber-200" onClick={redeem}>
-                      <KeyRound className="mr-2 h-4 w-4" /> Mở
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="rounded-[2rem] border border-white/10 bg-[#17171b]/95 p-2 shadow-2xl backdrop-blur">
-                <div className="flex items-end gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`h-12 w-12 shrink-0 rounded-2xl text-zinc-200 hover:bg-white/10 ${showTools ? "bg-white/10" : ""}`}
-                    onClick={() => setShowTools((v) => !v)}
-                  >
-                    <Plus className="h-5 w-5" />
-                  </Button>
-                  <Textarea
-                    className="max-h-40 min-h-[52px] flex-1 resize-none border-0 bg-transparent px-2 py-3 text-base text-white placeholder:text-zinc-500 focus-visible:ring-0"
-                    placeholder="Nhắn SunnyMod AI..."
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        send();
-                      }
-                    }}
-                  />
-                  <Button
-                    size="icon"
-                    className="h-12 w-12 shrink-0 rounded-full bg-white text-black hover:bg-zinc-200"
-                    onClick={() => send()}
-                    disabled={sending || !input.trim()}
-                  >
-                    <Send className="h-5 w-5" />
-                  </Button>
-                </div>
+        <section className="relative flex-1 overflow-y-auto px-4 pb-36 pt-8 sm:px-6">
+          {!hasStartedChat ? (
+            <div className="mx-auto flex min-h-[62svh] max-w-3xl flex-col items-center justify-center text-center">
+              <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-black shadow-2xl shadow-black/30">
+                <img src="/android-chrome-512x512.png" alt="SUNNY" className="h-10 w-10 rounded-xl object-cover" />
               </div>
-              <div className="mt-2 text-center text-[11px] text-zinc-600">
-                SunnyMod AI có thể mắc lỗi. Kiểm tra code, log và không gửi secret/token thật.
+              <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl">Bạn muốn debug gì hôm nay?</h1>
+              <p className="mt-4 max-w-xl text-base leading-7 text-zinc-500">Gửi log build, lỗi Supabase, code Android/NDK hoặc mô tả bug. Các chức năng chưa mở sẽ hiện khóa và liên hệ admin.</p>
+              {!user ? (
+                <button onClick={() => { window.location.href = getLoginUrl(); }} className="mt-6 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black hover:bg-zinc-200">
+                  Đăng nhập để dùng AI
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mx-auto max-w-4xl space-y-6">
+              {messages.map((m, idx) => (
+                <div key={idx} className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  {m.role === "assistant" ? <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-black"><Bot className="h-4 w-4" /></div> : null}
+                  <div className={`max-w-[86%] whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-6 shadow-sm ${m.role === "user" ? "bg-white text-black" : "border border-white/10 bg-white/[0.06] text-zinc-100"}`}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {sending ? <div className="ml-11 w-fit rounded-3xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-zinc-400">AI đang trả lời...</div> : null}
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </section>
+
+        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/10 bg-[#0f0f10]/90 px-3 py-3 backdrop-blur-xl lg:left-[286px]">
+          <div className="relative mx-auto max-w-3xl">
+            {plusOpen ? (
+              <div className="absolute bottom-[76px] left-0 w-[310px] rounded-3xl border border-white/10 bg-[#171718] p-2 shadow-2xl shadow-black/60">
+                <FeatureButton icon={Paperclip} label="Thêm tệp/log" desc="Khóa, chỉ mở khi admin bật" locked onClick={() => openLocked("Upload file đang khóa")} />
+                <FeatureButton icon={ImageIcon} label="Thêm ảnh" desc="Dành cho Omni/Max" locked onClick={() => openLocked("Phân tích ảnh đang khóa", "Tính năng ảnh cần gói Omni/Max hoặc admin cấp riêng.")} />
+                <FeatureButton icon={TerminalSquare} label="Sandbox / Terminal" desc="Gói Max, có giới hạn phiên" locked onClick={() => openLocked("Sandbox Terminal đang khóa", "Terminal chỉ mở cho gói cao nhất để tránh lạm dụng server.")} />
+                <FeatureButton icon={KeyRound} label="Nhập key mở token" desc="Mở quota ngày hoặc gói tạm" onClick={() => { setRedeemOpen(true); setSidebarOpen(true); setPlusOpen(false); }} />
+                <FeatureButton icon={Settings} label="Liên hệ admin" desc="Mở trang GetKey Free có link Zalo" onClick={contactAdmin} />
+              </div>
+            ) : null}
+
+            {modelOpen ? (
+              <div className="absolute bottom-[76px] right-0 w-[330px] rounded-3xl border border-white/10 bg-[#171718] p-2 shadow-2xl shadow-black/60">
+                {MODELS.map((m) => {
+                  const locked = !isAllowedByPlan(m.id, currentPlan, Boolean(user));
+                  return (
+                    <button key={m.id} onClick={() => selectModel(m.id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-white/10 ${model === m.id ? "bg-white/10" : ""}`}>
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10"><Sparkles className="h-4 w-4 text-amber-300" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-white">{m.label}</span>
+                        <span className="block truncate text-xs text-zinc-500">{m.id} · {m.desc}</span>
+                      </span>
+                      {locked ? <Lock className="h-4 w-4 text-amber-300" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            <div className="flex items-end gap-2 rounded-[2rem] border border-white/10 bg-[#19191a] p-2 shadow-2xl shadow-black/30">
+              <button onClick={() => { setPlusOpen((v) => !v); setModelOpen(false); }} className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-zinc-200 transition hover:bg-white/15"><Plus className="h-5 w-5" /></button>
+              <textarea
+                className="max-h-40 min-h-[52px] flex-1 resize-none bg-transparent px-2 py-3 text-[15px] leading-6 text-white outline-none placeholder:text-zinc-600"
+                placeholder="Hỏi SunnyMod AI hoặc dán log/code cần debug..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+              />
+              <button onClick={() => { setModelOpen((v) => !v); setPlusOpen(false); }} className="mb-1 hidden h-11 items-center gap-2 rounded-2xl bg-white/10 px-3 text-sm font-medium text-zinc-200 transition hover:bg-white/15 sm:flex">
+                Model <ChevronDown className="h-4 w-4" />
+              </button>
+              <button onClick={send} disabled={sending || !input.trim()} className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black transition hover:bg-zinc-200 disabled:opacity-40"><Send className="h-5 w-5" /></button>
+            </div>
+            <p className="mt-2 text-center text-[11px] text-zinc-600">Không dán API key/service role vào chat. SunnyMod AI có thể mắc lỗi, hãy kiểm tra lại trước khi sửa production.</p>
+          </div>
+        </div>
+      </main>
+
+      {lockedDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-[#171718] p-5 shadow-2xl shadow-black/60">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-400 text-black"><Lock className="h-5 w-5" /></div>
+              <div>
+                <h2 className="text-xl font-bold text-white">{lockedDialog.title}</h2>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">{lockedDialog.description}</p>
               </div>
             </div>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button onClick={() => setLockedDialog(null)} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-white/10">Hủy</button>
+              <button onClick={contactAdmin} className="rounded-2xl bg-amber-400 px-4 py-3 text-sm font-bold text-black hover:bg-amber-300">Liên hệ admin</button>
+            </div>
           </div>
-        </main>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
