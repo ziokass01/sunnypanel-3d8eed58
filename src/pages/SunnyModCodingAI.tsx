@@ -23,10 +23,9 @@ import { useAuth } from "@/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
 import { postFunction } from "@/lib/functions";
 import { useToast } from "@/hooks/use-toast";
-import { Button } from "@/components/ui/button";
 
 const MODELS = [
-  { id: "mimo-v2.5", label: "Chat thường", desc: "Tiết kiệm, dùng hằng ngày", tier: "basic" },
+  { id: "mimo-v2.5", label: "Chat thường", desc: "Tiết kiệm, dùng hằng ngày", tier: "free" },
   { id: "mimo-v2-pro", label: "Code tiết kiệm", desc: "Code ổn, ít tốn hơn Pro", tier: "basic" },
   { id: "mimo-v2.5-pro", label: "Code Debug Pro", desc: "Mạnh nhất cho code/debug", tier: "pro" },
   { id: "mimo-v2-omni", label: "Omni", desc: "Đa phương thức khi server hỗ trợ", tier: "max" },
@@ -35,8 +34,120 @@ const MODELS = [
 
 type Msg = { role: "user" | "assistant"; content: string };
 type LockedDialog = { title: string; description: string; action?: "contact" | "login" } | null;
+type ChatSession = {
+  id: string;
+  title: string;
+  model: string;
+  messages: Msg[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+type ChatStore = {
+  sessions: ChatSession[];
+  activeId: string;
+};
 
 const ADMIN_ZALO_URL = "https://zalo.me/84373752504";
+const CHAT_STORE_KEY = "sunny_ai_chat_sessions_v3";
+const ACTIVE_CHAT_KEY = "sunny_ai_active_chat_v3";
+const PLAN_STORE_KEY = "sunny_ai_current_plan_v1";
+
+const WELCOME_MESSAGE: Msg = {
+  role: "assistant",
+  content: "Xin chào, tôi là SunnyMod Coding AI. Hãy gửi lỗi build, log Supabase, code hoặc câu hỏi debug của bạn.",
+};
+
+function nowId() {
+  return `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function safeTitleFromMessages(messages: Msg[]) {
+  const firstUser = messages.find((m) => m.role === "user" && m.content.trim());
+  const raw = (firstUser?.content || messages.find((m) => m.content.trim())?.content || "Đoạn chat mới").replace(/\s+/g, " ").trim();
+  return raw.length > 44 ? `${raw.slice(0, 44)}…` : raw;
+}
+
+function createEmptyChat(model = "mimo-v2.5"): ChatSession {
+  const ts = Date.now();
+  return {
+    id: nowId(),
+    title: "Đoạn chat mới",
+    model,
+    messages: [WELCOME_MESSAGE],
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+function readChatStore(): ChatStore {
+  if (typeof window === "undefined") {
+    const chat = createEmptyChat();
+    return { sessions: [chat], activeId: chat.id };
+  }
+
+  try {
+    const raw = localStorage.getItem(CHAT_STORE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const sessions = Array.isArray(parsed)
+      ? parsed
+          .filter((item: any) => item?.id && Array.isArray(item.messages))
+          .map((item: any) => ({
+            id: String(item.id),
+            title: String(item.title || safeTitleFromMessages(item.messages || [])),
+            model: String(item.model || "mimo-v2.5"),
+            messages: item.messages
+              .filter((m: any) => ["user", "assistant"].includes(String(m?.role)) && typeof m?.content === "string")
+              .slice(-80),
+            createdAt: Number(item.createdAt || Date.now()),
+            updatedAt: Number(item.updatedAt || Date.now()),
+          }))
+      : [];
+
+    if (!sessions.length) {
+      const chat = createEmptyChat();
+      writeChatStore([chat], chat.id);
+      return { sessions: [chat], activeId: chat.id };
+    }
+
+    sessions.sort((a: ChatSession, b: ChatSession) => b.updatedAt - a.updatedAt);
+    const storedActive = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
+    const activeId = sessions.some((s: ChatSession) => s.id === storedActive) ? storedActive : sessions[0].id;
+    return { sessions, activeId };
+  } catch {
+    const chat = createEmptyChat();
+    return { sessions: [chat], activeId: chat.id };
+  }
+}
+
+function writeChatStore(sessions: ChatSession[], activeId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const compact = sessions
+      .filter((s) => s.messages?.length)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 35)
+      .map((s) => ({ ...s, messages: s.messages.slice(-80) }));
+    localStorage.setItem(CHAT_STORE_KEY, JSON.stringify(compact));
+    localStorage.setItem(ACTIVE_CHAT_KEY, activeId);
+  } catch {
+    // localStorage full/private mode: ignore, chat still works for current tab.
+  }
+}
+
+function readStoredPlan() {
+  if (typeof window === "undefined") return "Chưa mở gói";
+  return localStorage.getItem(PLAN_STORE_KEY) || "Chưa mở gói";
+}
+
+function writeStoredPlan(plan: string) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PLAN_STORE_KEY, plan);
+  } catch {
+    // ignore
+  }
+}
 
 function getDeviceId() {
   if (typeof window === "undefined") return "";
@@ -61,6 +172,7 @@ function isAllowedByPlan(modelId: string, planCode: string, hasUser: boolean) {
   if (plan.includes("tts")) return modelId === "mimo-v2.5-tts" || modelId === "mimo-v2.5";
   if (plan.includes("pro")) return ["mimo-v2.5", "mimo-v2-pro", "mimo-v2.5-pro"].includes(modelId);
   if (plan.includes("basic")) return ["mimo-v2.5", "mimo-v2-pro"].includes(modelId);
+  // free/trial only gets the cheap default chat model.
   return modelId === "mimo-v2.5";
 }
 
@@ -69,9 +181,6 @@ function getLoginRedirectUrl() {
   const { protocol, hostname, origin } = window.location;
   const host = hostname.toLowerCase();
 
-  // Public domain does not host the normal control-panel login flow.
-  // Send OAuth back to app-host /coding-ai so the AI page opens after login
-  // instead of falling through to /apps.
   if (host === "mityangho.id.vn" || host === "www.mityangho.id.vn") {
     return `${protocol}//app.mityangho.id.vn/coding-ai`;
   }
@@ -79,20 +188,35 @@ function getLoginRedirectUrl() {
   return `${origin}/coding-ai`;
 }
 
+function formatRelativeTime(value: number) {
+  const diff = Math.max(0, Date.now() - value);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "vừa xong";
+  if (mins < 60) return `${mins} phút trước`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit" }).format(new Date(value));
+}
+
 export function SunnyModCodingAIPage() {
-  const { session, user, loading } = useAuth();
+  const { session, user } = useAuth();
   const { toast } = useToast();
-  const [model, setModel] = useState("mimo-v2.5");
+  const initialStoreRef = useRef<ChatStore | null>(null);
+  if (!initialStoreRef.current) initialStoreRef.current = readChatStore();
+
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => initialStoreRef.current!.sessions);
+  const [activeChatId, setActiveChatId] = useState(() => initialStoreRef.current!.activeId);
+  const activeInitialChat = initialStoreRef.current.sessions.find((s) => s.id === initialStoreRef.current!.activeId) ?? initialStoreRef.current.sessions[0];
+  const [model, setModel] = useState(activeInitialChat?.model || "mimo-v2.5");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [redeemOpen, setRedeemOpen] = useState(false);
   const [redeemCode, setRedeemCode] = useState("");
-  const [currentPlan, setCurrentPlan] = useState("Chưa mở gói");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPlan, setCurrentPlan] = useState(() => readStoredPlan());
   const [lockedDialog, setLockedDialog] = useState<LockedDialog>(null);
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: "Xin chào, tôi là SunnyMod Coding AI. Hãy gửi lỗi build, log Supabase, code hoặc câu hỏi debug của bạn." },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>(() => activeInitialChat?.messages?.length ? activeInitialChat.messages : [WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
@@ -102,15 +226,40 @@ export function SunnyModCodingAIPage() {
   const token = session?.access_token ?? null;
   const selectedModel = MODELS.find((m) => m.id === model) ?? MODELS[0];
   const hasStartedChat = messages.length > 1;
+  const visibleSessions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const sorted = [...chatSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+    if (!q) return sorted;
+    return sorted.filter((s) => `${s.title} ${s.messages.map((m) => m.content).join(" ")}`.toLowerCase().includes(q));
+  }, [chatSessions, searchQuery]);
 
   useEffect(() => {
-    if (user && currentPlan === "Chưa mở gói") setCurrentPlan("free");
-    if (!user && currentPlan !== "Chưa mở gói") setCurrentPlan("Chưa mở gói");
+    if (user && currentPlan === "Chưa mở gói") {
+      setCurrentPlan("free");
+      writeStoredPlan("free");
+    }
+    if (!user && currentPlan !== "Chưa mở gói") {
+      setCurrentPlan("Chưa mở gói");
+      writeStoredPlan("Chưa mở gói");
+    }
   }, [user, currentPlan]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending]);
+
+  useEffect(() => {
+    const ts = Date.now();
+    setChatSessions((prev) => {
+      const next = prev.some((s) => s.id === activeChatId)
+        ? prev.map((s) => s.id === activeChatId
+          ? { ...s, model, messages, title: safeTitleFromMessages(messages), updatedAt: ts }
+          : s)
+        : [{ id: activeChatId, title: safeTitleFromMessages(messages), model, messages, createdAt: ts, updatedAt: ts }, ...prev];
+      writeChatStore(next, activeChatId);
+      return next;
+    });
+  }, [messages, model, activeChatId]);
 
   const openLocked = (title: string, description?: string, action: "contact" | "login" = "contact") => {
     setLockedDialog({
@@ -153,11 +302,33 @@ export function SunnyModCodingAIPage() {
   };
 
   const newChat = () => {
-    setMessages([
-      { role: "assistant", content: "Đã tạo đoạn chat mới. Gửi lỗi build, log hoặc code cần debug cho tôi." },
-    ]);
+    const chat = createEmptyChat(model);
+    const next = [chat, ...chatSessions].slice(0, 35);
+    setChatSessions(next);
+    setActiveChatId(chat.id);
+    setMessages(chat.messages);
     setInput("");
+    writeChatStore(next, chat.id);
     setSidebarOpen(false);
+  };
+
+  const selectChatSession = (chat: ChatSession) => {
+    setActiveChatId(chat.id);
+    setMessages(chat.messages?.length ? chat.messages : [WELCOME_MESSAGE]);
+    setModel(chat.model || "mimo-v2.5");
+    setSidebarOpen(false);
+  };
+
+  const deleteChatSession = (id: string) => {
+    const remaining = chatSessions.filter((s) => s.id !== id);
+    const next = remaining.length ? remaining : [createEmptyChat(model)];
+    const nextActive = id === activeChatId ? next[0].id : activeChatId;
+    setChatSessions(next);
+    setActiveChatId(nextActive);
+    const nextChat = next.find((s) => s.id === nextActive) ?? next[0];
+    setMessages(nextChat.messages);
+    setModel(nextChat.model || "mimo-v2.5");
+    writeChatStore(next, nextActive);
   };
 
   const selectModel = (nextModel: string) => {
@@ -194,6 +365,7 @@ export function SunnyModCodingAIPage() {
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "Redeem failed");
       const planCode = String(res.plan_code ?? "basic");
       setCurrentPlan(planCode);
+      writeStoredPlan(planCode);
       toast({ title: "Đã mở AI", description: `${planCode} tới ${res.expires_at ? new Date(res.expires_at).toLocaleString("vi-VN") : "hôm nay"}` });
       setRedeemCode("");
       setRedeemOpen(false);
@@ -226,7 +398,10 @@ export function SunnyModCodingAIPage() {
         messages: apiMessages,
       }, { authToken: token });
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "AI request failed");
-      if (res.plan_code) setCurrentPlan(String(res.plan_code));
+      if (res.plan_code) {
+        setCurrentPlan(String(res.plan_code));
+        writeStoredPlan(String(res.plan_code));
+      }
       setMessages((prev) => [...prev, { role: "assistant", content: String(res.answer ?? "") }]);
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: "assistant", content: `Không gọi được AI: ${e?.message ?? e}` }]);
@@ -272,20 +447,30 @@ export function SunnyModCodingAIPage() {
           </button>
           <div className="mt-3 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-400">
             <Search className="h-4 w-4" />
-            <input className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600" placeholder="Tìm kiếm đoạn chat" />
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-zinc-600" placeholder="Tìm kiếm đoạn chat" />
           </div>
         </div>
 
         <div className="mt-5 flex-1 overflow-y-auto px-3">
           <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-zinc-500">Gần đây</div>
-          <button className="flex w-full items-center gap-3 rounded-2xl bg-white/10 px-3 py-3 text-left text-sm text-zinc-100">
-            <MessageSquare className="h-4 w-4 text-zinc-400" />
-            <span className="line-clamp-1">Debug Android/Supabase</span>
-          </button>
-          <button className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm text-zinc-400 hover:bg-white/10">
-            <MessageSquare className="h-4 w-4" />
-            <span className="line-clamp-1">Phân tích log build</span>
-          </button>
+          <div className="space-y-1">
+            {visibleSessions.length ? visibleSessions.slice(0, 24).map((chat) => (
+              <div key={chat.id} className={`group flex items-center gap-2 rounded-2xl ${chat.id === activeChatId ? "bg-white/10" : "hover:bg-white/10"}`}>
+                <button onClick={() => selectChatSession(chat)} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left text-sm text-zinc-100">
+                  <MessageSquare className="h-4 w-4 shrink-0 text-zinc-400" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{chat.title || "Đoạn chat mới"}</span>
+                    <span className="block text-[11px] text-zinc-600">{formatRelativeTime(chat.updatedAt)}</span>
+                  </span>
+                </button>
+                <button onClick={() => deleteChatSession(chat.id)} className="mr-2 hidden rounded-lg p-1 text-zinc-500 hover:bg-white/10 hover:text-white group-hover:block" aria-label="Xóa chat">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )) : (
+              <div className="rounded-2xl border border-white/10 px-3 py-4 text-sm text-zinc-500">Không có đoạn chat phù hợp.</div>
+            )}
+          </div>
 
           <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.04] p-4">
             <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck className="h-4 w-4 text-amber-300" /> Gói đang có</div>
@@ -298,7 +483,7 @@ export function SunnyModCodingAIPage() {
             </button>
             {redeemOpen ? (
               <div className="mt-3 space-y-2">
-                <input value={redeemCode} onChange={(e) => setRedeemCode(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-white caret-white outline-none placeholder:text-zinc-600" style={{ color: "#fff", WebkitTextFillColor: "#fff" }} placeholder="AI-XXXXXX-XXXXXX" />
+                <input value={redeemCode} onChange={(e) => setRedeemCode(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-white caret-white outline-none placeholder:text-zinc-600" style={{ color: "#fff", WebkitTextFillColor: "#fff" }} placeholder="AI-SUNNY-XXXXXX-XXXXXX" />
                 <button onClick={redeem} className="w-full rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-black">Xác nhận key</button>
               </div>
             ) : null}
@@ -342,7 +527,7 @@ export function SunnyModCodingAIPage() {
                 <img src="/android-chrome-512x512.png" alt="SUNNY" className="h-10 w-10 rounded-xl object-cover" />
               </div>
               <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl">Bạn muốn debug gì hôm nay?</h1>
-              <p className="mt-4 max-w-xl text-base leading-7 text-zinc-500">Gửi log build, lỗi Supabase, code Android/NDK hoặc mô tả bug. Các chức năng chưa mở sẽ hiện khóa và liên hệ admin.</p>
+              <p className="mt-4 max-w-xl text-base leading-7 text-zinc-500">Gửi log build, lỗi Supabase, code Android/NDK hoặc mô tả bug. Chat sẽ tự lưu trên máy để reload/trở lại vẫn còn lịch sử.</p>
               {!user ? (
                 <button onClick={loginWithGoogle} disabled={loggingIn} className="mt-6 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black hover:bg-zinc-200 disabled:opacity-60">
                   {loggingIn ? "Đang mở Google..." : "Đăng nhập để dùng AI"}
@@ -405,7 +590,7 @@ export function SunnyModCodingAIPage() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    send();
+                    void send();
                   }
                 }}
               />

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, Filter, Trash2, Download, Plus, Image as ImageIcon } from "lucide-react";
+import { Bot, ChevronDown, Filter, Trash2, Download, Plus, Image as ImageIcon, KeyRound } from "lucide-react";
 import { getFunction, postFunction } from "@/lib/functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -382,6 +382,7 @@ function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
 
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
+  const [lastCreatedAiKey, setLastCreatedAiKey] = useState("");
 
   const initialAppCode = useMemo(() => {
     if (typeof window === "undefined") return "free-fire";
@@ -407,6 +408,45 @@ export function AdminFreeKeysPage() {
       toast({ title: "Copy failed", description: "Không thể copy. Hãy copy thủ công.", variant: "destructive" });
     }
   };
+
+
+  const createQuickAiKey = useMutation({
+    mutationFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token ?? null;
+      if (!token) throw new Error("Cần đăng nhập admin trước khi tạo key AI.");
+
+      return await postFunction<any>("/admin-ai-sunny-control", {
+        action: "create_redeem_key",
+        key: {
+          prefix: "AI-SUNNY",
+          title: "Key vượt SunnyMod AI từ trang Free keys",
+          plan_code_to_grant: "free",
+          grant_hours: 24,
+          bonus_daily_tokens: 40000,
+          bonus_daily_messages: 30,
+          max_uses_total: 1,
+          max_uses_per_day: 1,
+          daily_ip_limit: 1,
+          daily_device_limit: 1,
+          per_user_once: true,
+          require_device_id: true,
+          note: "Quick AI key created from Admin Free Keys. Signature/prefix riêng: AI-SUNNY.",
+        },
+      }, { authToken: token });
+    },
+    onSuccess: async (res: any) => {
+      const raw = String(res?.raw_code ?? "");
+      if (raw) {
+        setLastCreatedAiKey(raw);
+        try { await navigator.clipboard.writeText(raw); } catch { /* ignore */ }
+      }
+      toast({ title: "Đã tạo key AI", description: raw ? "Key AI đã tạo và copy. Người dùng nhập ở /coding-ai." : "Đã tạo key AI." });
+    },
+    onError: (e: any) => {
+      toast({ title: "Tạo key AI thất bại", description: e?.message ?? "Không tạo được key AI.", variant: "destructive" });
+    },
+  });
 
   const settingsQuery = useQuery({
     queryKey: ["free-settings"],
@@ -1669,6 +1709,49 @@ export function AdminFreeKeysPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3 text-xs md:text-sm">
+
+              <Card className="border-amber-200/70 bg-amber-50/50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <Bot className="h-5 w-5 text-amber-500" /> SunnyMod AI key vượt
+                  </CardTitle>
+                  <CardDescription>
+                    Tạo nhanh key AI riêng cho người dùng nhập ở /coding-ai. Prefix/chữ ký riêng là AI-SUNNY nên không trùng Free Fire / Find Dumps / Fake Lag.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      className="rounded-2xl"
+                      onClick={() => createQuickAiKey.mutate()}
+                      disabled={createQuickAiKey.isPending}
+                    >
+                      <KeyRound className="mr-2 h-4 w-4" />
+                      {createQuickAiKey.isPending ? "Đang tạo..." : "Tạo key AI 1 ngày / 30 tin"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="rounded-2xl"
+                      onClick={() => window.location.assign("/admin/ai?tab=keys")}
+                    >
+                      Mở quản lý AI
+                    </Button>
+                  </div>
+                  {lastCreatedAiKey ? (
+                    <div className="rounded-2xl border border-amber-200 bg-white px-3 py-3 text-sm">
+                      <div className="font-semibold text-slate-900">Key AI mới tạo, chỉ hiện lần này:</div>
+                      <div className="mt-1 break-all font-mono text-xs text-slate-800">{lastCreatedAiKey}</div>
+                      <Button type="button" size="sm" variant="outline" className="mt-2 rounded-xl" onClick={() => copyText(lastCreatedAiKey)}>
+                        Copy lại key AI
+                      </Button>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+
           <div ref={createKeyTypeRef} className="mb-4 rounded-md border p-3">
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>

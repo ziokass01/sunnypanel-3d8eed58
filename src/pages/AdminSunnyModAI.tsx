@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Bot, KeyRound, RefreshCw, ShieldCheck, TerminalSquare, Users, WalletCards } from "lucide-react";
 
