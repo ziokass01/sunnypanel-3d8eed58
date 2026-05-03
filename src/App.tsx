@@ -45,6 +45,8 @@ import { MobileGoogleStartPage } from "@/pages/MobileGoogleStart";
 import { MobileGoogleCallbackPage } from "@/pages/MobileGoogleCallback";
 import { FakeLagPortalPage } from "@/pages/FakeLagPortal";
 import { AdminFakeLagLicensesPage } from "@/pages/AdminFakeLagLicenses";
+import { AdminSunnyModAIPage } from "@/pages/AdminSunnyModAI";
+import { SunnyModCodingAIPage } from "@/pages/SunnyModCodingAI";
 const queryClient = new QueryClient();
 
 function ControlHostEntry() {
@@ -94,6 +96,7 @@ const App = () => {
               <Route path="/mobile-auth/callback" element={<MobileGoogleCallbackPage />} />
               <Route path="/free" element={<FreeLandingPage />} />
               <Route path="/fake-lag" element={<FakeLagPortalPage />} />
+              <Route path="/coding-ai" element={<SunnyModCodingAIPage />} />
               <Route path="/free/gate" element={<FreeGatePage />} />
               <Route path="/free/gat" element={<Navigate to="/free/gate" replace />} />
               <Route path="/free/claim" element={<FreeClaimPage />} />
@@ -128,6 +131,7 @@ const App = () => {
                   <Route path="/audit" element={<AuditLogsPage />} />
                   <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
                   <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
+                  <Route path="/admin/ai" element={<AdminRoute><AdminSunnyModAIPage /></AdminRoute>} />
                   <Route path="/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
                   <Route
                     path="/admin/apps/:appCode"

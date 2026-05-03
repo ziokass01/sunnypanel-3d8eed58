@@ -22,7 +22,7 @@ export function ServiceLandingPage() {
           </div>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle>Thuê Website</CardTitle>
@@ -50,6 +50,16 @@ export function ServiceLandingPage() {
             </CardHeader>
             <CardContent>
               <Button className="w-full" variant="soft" onClick={() => nav("/reset-key")}>Vào Reset Key</Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-amber-200 bg-amber-50/60">
+            <CardHeader>
+              <CardTitle>SunnyMod Coding AI</CardTitle>
+              <CardDescription>Chat AI hỗ trợ code, debug log, phân tích lỗi build Android/Supabase và nhập key mở token.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" variant="soft" onClick={() => nav("/coding-ai")}>Vào SunnyMod AI</Button>
             </CardContent>
           </Card>
         </div>
