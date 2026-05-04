@@ -174,7 +174,13 @@ Deno.serve(async (req) => {
 
   if (!keyType || !keyType.enabled) return json({ ok: false, message: "KEY_TYPE_DISABLED" });
 
-  const appCode = String((keyType as any).app_code || "free-fire").trim().toLowerCase() || "free-fire";
+  // AI_ADMIN_TEST_DETECT_BY_CODE_V2: some old rows may still have app_code null/legacy.
+  // Treat aisunny_* or AI-SUNNY signature as AI Coding so it never falls into legacy licenses insert.
+  const keyTypeCode = String((keyType as any).code || parsed.data.key_type_code || "").trim().toLowerCase();
+  const detectedKeySignature = String((keyType as any).key_signature || "").trim().toUpperCase();
+  const rawAppCode = String((keyType as any).app_code || "free-fire").trim().toLowerCase() || "free-fire";
+  const isAiCodingKeyType = rawAppCode === "ai-coding" || keyTypeCode.startsWith("aisunny") || detectedKeySignature === "AI-SUNNY";
+  const appCode = isAiCodingKeyType ? "ai-coding" : rawAppCode;
 
   const now = new Date();
   const traceId = crypto.randomUUID();

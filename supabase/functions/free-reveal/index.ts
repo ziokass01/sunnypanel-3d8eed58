@@ -49,6 +49,14 @@ function normalizeAppCode(value: unknown) {
   return code || "free-fire";
 }
 
+// AI_REVEAL_DETECT_BY_CODE_V2: tolerate old key-type rows where app_code was not updated yet.
+function isAiCodingFreeKeyType(keyTypeMeta: any, sessRow?: any) {
+  const code = String(keyTypeMeta?.code ?? sessRow?.key_type_code ?? "").trim().toLowerCase();
+  const sig = String(keyTypeMeta?.key_signature ?? "").trim().toUpperCase();
+  const app = normalizeAppCode(keyTypeMeta?.app_code ?? sessRow?.app_code ?? "");
+  return app === "ai-coding" || code.startsWith("aisunny") || sig === "AI-SUNNY";
+}
+
 function normalizeWalletKind(value: unknown) {
   const kind = String(value ?? "").trim().toLowerCase();
   return kind === "vip" ? "vip" : kind === "normal" ? "normal" : null;
@@ -873,7 +881,7 @@ Deno.serve(async (req) => {
     `ALLOW_RESET=${allowReset ? 1 : 0}`,
   ].join(";");
 
-  if (appCode === "ai-coding") {
+  if (appCode === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) {
       try {
         const issued = await issueAiSunnyRedeemKey(sess, keyTypeMeta);
         return json({ ok: true, ...issued, key_type_label: keyTypeMeta?.label ?? null, warnings }, 200);

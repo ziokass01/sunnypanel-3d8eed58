@@ -33,17 +33,20 @@ on conflict (plan_code) do update set
   updated_at = now();
 
 insert into public.licenses_free_key_types (
-  code, label, duration_seconds, enabled,
+  code, label, duration_seconds, kind, value, sort_order, enabled,
   app_code, app_label, key_signature, allow_reset,
   free_selection_mode, free_selection_expand
 ) values (
-  'aisunny_h01', 'Key thêm token AI 🧯', 86400, true,
+  'aisunny_h01', 'Key thêm token AI 🧯', 86400, 'day', 1, 901, true,
   'ai-coding', 'SunnyMod Coding AI', 'AI-SUNNY', true,
   'none', false
 )
 on conflict (code) do update set
   label = excluded.label,
   duration_seconds = excluded.duration_seconds,
+  kind = excluded.kind,
+  value = excluded.value,
+  sort_order = excluded.sort_order,
   enabled = true,
   app_code = excluded.app_code,
   app_label = excluded.app_label,

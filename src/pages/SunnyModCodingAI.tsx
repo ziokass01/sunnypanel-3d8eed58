@@ -401,9 +401,7 @@ export function SunnyModCodingAIPage() {
   const messages = activeThread.messages || [];
   const hasStartedChat = messages.some((m) => m.role === "user");
   const canUseSelectedModel = Boolean(user) && (
-    serverAllowedModels.length > 0
-      ? serverAllowedModels.includes(model)
-      : planAllowsModel(model, currentPlan, Boolean(user))
+    serverAllowedModels.includes(model) || planAllowsModel(model, currentPlan, Boolean(user))
   );
 
   useEffect(() => {
@@ -578,9 +576,7 @@ export function SunnyModCodingAIPage() {
       openLocked("Cần đăng nhập", "Bạn cần đăng nhập Google trước, sau đó nhập key hoặc dùng gói do admin cấp để mở model.", "login");
       return;
     }
-    const allowedByServer = serverAllowedModels.length > 0
-      ? serverAllowedModels.includes(nextModel)
-      : planAllowsModel(nextModel, currentPlan, Boolean(user));
+    const allowedByServer = serverAllowedModels.includes(nextModel) || planAllowsModel(nextModel, currentPlan, Boolean(user));
     if (!allowedByServer) {
       const label = MODELS.find((m) => m.id === nextModel)?.label ?? nextModel;
       openLocked(`${label} đang bị khóa`, `Model ${nextModel} cần gói phù hợp. Bạn có thể nhập key mở token/gói hoặc liên hệ admin qua Zalo.`);
