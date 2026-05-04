@@ -232,6 +232,104 @@ Deno.serve(async (req) => {
   const durationSeconds = Math.max(60, Number(keyType.duration_seconds ?? 3600));
   const expiresAt = addSecondsIso(now, durationSeconds);
 
+
+  // AI_ADMIN_TEST_FIX_V1: AI Coding free-key test must issue ai_sunny_redeem_keys,
+  // not legacy public.licenses. Otherwise Admin Test GetKey returns LICENSE_INSERT_FAILED.
+  if (appCode === "ai-coding") {
+    const pepper = Deno.env.get("AI_SUNNY_KEY_PEPPER") ?? Deno.env.get("AI_SUNNY_HASH_PEPPER") ?? "sunny-ai";
+    let planCode = "trial";
+    const planCheck = await sb.from("ai_sunny_plans").select("plan_code").eq("plan_code", planCode).maybeSingle();
+    if (planCheck.error || !planCheck.data?.plan_code) planCode = "free";
+
+    let rawKey = "";
+    let inserted: { id: string; code_mask: string } | null = null;
+    let lastAiInsertError = "";
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      rawKey = makeKey("AI-SUNNY");
+      const codeHash = await sha256Hex(`${pepper}:${rawKey}`);
+      const ins = await sb.from("ai_sunny_redeem_keys").insert({
+        code_hash: codeHash,
+        code_mask: maskKey(rawKey),
+        title: String((keyType as any).label ?? "Key thêm token AI"),
+        status: "active",
+        plan_code_to_grant: planCode,
+        grant_hours: Math.max(1, Math.ceil(durationSeconds / 3600)),
+        bonus_daily_tokens: 60000,
+        bonus_daily_messages: 30,
+        allowed_models: ["mimo-v2.5"],
+        max_uses_total: 1,
+        max_uses_per_day: 1,
+        per_user_once: true,
+        daily_ip_limit: 1,
+        daily_device_limit: 1,
+        require_device_id: true,
+        expires_at: expiresAt,
+        created_by: "free-admin-test",
+        note: `ADMIN_FREE_TEST;TRACE=${traceId};SESSION=${sessionId};KEY_TYPE=${keyType.code};APP=ai-coding`,
+      }).select("id,code_mask").single();
+      if (!ins.error && ins.data?.id) {
+        inserted = { id: String(ins.data.id), code_mask: String(ins.data.code_mask ?? maskKey(rawKey)) };
+        break;
+      }
+      lastAiInsertError = extractErrorMessage(ins.error);
+    }
+
+    if (!inserted) {
+      await sb.from("licenses_free_sessions").update({ status: "start_error", last_error: "ADMIN_TEST_AI_REDEEM_INSERT_FAILED" }).eq("session_id", sessionId);
+      await sb.from("licenses_free_security_logs").insert({
+        event_type: "admin_test_error",
+        route: "admin-free-test",
+        ip_hash: ipHash,
+        fingerprint_hash: fpHash,
+        details: { reason: "AI_REDEEM_KEY_INSERT_FAILED", message: lastAiInsertError || "unknown" },
+      });
+      return json({ ok: false, message: "AI_REDEEM_KEY_INSERT_FAILED", session_id: sessionId, detail: lastAiInsertError || undefined }, 500);
+    }
+
+    // Best-effort monitor row only. Do not fail AI key issuing if licenses_free_issues
+    // still has old legacy constraints around license_id.
+    const issueInsert = await sb.from("licenses_free_issues").insert({
+      license_id: null,
+      key_mask: inserted.code_mask,
+      created_at: now.toISOString(),
+      expires_at: expiresAt,
+      session_id: sessionId,
+      ip_hash: ipHash,
+      fingerprint_hash: fpHash,
+      ua_hash: uaHash,
+      app_code: "ai-coding",
+      key_signature: "AI-SUNNY",
+      server_redeem_key_id: inserted.id,
+    });
+    if (issueInsert.error) {
+      await sb.from("licenses_free_security_logs").insert({
+        event_type: "admin_test_warning",
+        route: "admin-free-test",
+        ip_hash: ipHash,
+        fingerprint_hash: fpHash,
+        details: { reason: "AI_ISSUE_LOG_SKIPPED", message: extractErrorMessage(issueInsert.error), ai_redeem_key_id: inserted.id },
+      });
+    }
+
+    await sb.from("licenses_free_sessions").update({
+      status: "revealed",
+      reveal_count: 1,
+      revealed_at: now.toISOString(),
+      issued_server_redeem_key_id: inserted.id,
+      issued_server_reward_mode: "ai_sunny_redeem",
+      app_code: "ai-coding",
+      selection_meta: {
+        app_code: "ai-coding",
+        reward_mode: "ai_sunny_redeem",
+        plan_code: planCode,
+        duration_seconds: durationSeconds,
+        trace_id: traceId,
+      },
+    }).eq("session_id", sessionId);
+
+    return json({ ok: true, message: "ADMIN_TEST_OK", key: rawKey, expires_at: expiresAt, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+  }
+
   // Find Dumps free key types are server-app redeem keys, not legacy rows in public.licenses.
   // Keep this branch isolated from Fake Lag and Free Fire so fd_credit/fd_package cannot hit LICENSE_INSERT_FAILED.
   if (appCode === "find-dumps") {

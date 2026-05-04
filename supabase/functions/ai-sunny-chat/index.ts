@@ -200,7 +200,41 @@ Deno.serve(async (req) => {
   if (!plan) plan = DEFAULT_FREE_PLAN;
   if (!plan.enabled) return json(403, { ok: false, code: "PLAN_DISABLED", msg: "Gói AI hiện đang bị tắt." }, origin);
 
-  const allowedModels: string[] = Array.isArray(plan.allowed_models) ? plan.allowed_models : DEFAULT_FREE_PLAN.allowed_models;
+  const allowedModels: string[] = Array.isArray(plan.allowed_models)
+    ? plan.allowed_models.map((m: unknown) => String(m).trim()).filter(Boolean)
+    : String(plan.allowed_models ?? "")
+      .split(/[\n,]+/)
+      .map((m) => m.trim())
+      .filter(Boolean);
+  if (!allowedModels.length) allowedModels.push(...DEFAULT_FREE_PLAN.allowed_models);
+
+  // AI_PROFILE_SYNC_V1: lightweight profile/capability sync for /coding-ai.
+  // This prevents the UI from keeping an old localStorage plan after admin changes
+  // the user's access in /admin/ai.
+  if (String(body?.action ?? "").trim().toLowerCase() === "profile") {
+    return json(200, {
+      ok: true,
+      action: "profile",
+      user_id: user.id,
+      email,
+      plan_code: planCode,
+      plan_label: plan.label ?? planCode,
+      access_status: access?.status ?? "free-fallback",
+      expires_at: access?.expires_at ?? null,
+      allowed_models: allowedModels,
+      sandbox_enabled: Boolean(plan.sandbox_enabled),
+      terminal_enabled: Boolean(plan.terminal_enabled),
+      tts_enabled: Boolean(plan.tts_enabled),
+      daily_token_limit: Number(access?.daily_token_limit_override ?? plan.daily_token_limit ?? 0),
+      daily_message_limit: Number(access?.daily_message_limit_override ?? plan.daily_message_limit ?? 0),
+      daily_ip_limit: Number(access?.daily_ip_limit_override ?? 0),
+      daily_device_limit: Number(access?.daily_device_limit_override ?? 0),
+      max_tokens_per_request: Number(plan.max_tokens_per_request ?? 800),
+      max_input_chars: Number(plan.max_input_chars ?? config.max_input_chars ?? 6000),
+      server_time: new Date().toISOString(),
+    }, origin);
+  }
+
   const requestedModel = String(body?.model ?? config.default_model ?? "mimo-v2.5").trim();
   const model = MODEL_ALLOW_LIST.has(requestedModel) ? requestedModel : String(config.default_model ?? "mimo-v2.5");
 

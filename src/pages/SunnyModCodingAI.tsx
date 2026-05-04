@@ -375,6 +375,8 @@ export function SunnyModCodingAIPage() {
 
   const [model, setModel] = useState("mimo-v2.5");
   const [currentPlan, setCurrentPlan] = useState("Chưa mở gói");
+  const [serverAllowedModels, setServerAllowedModels] = useState<string[]>([]);
+  const [serverPlanInfo, setServerPlanInfo] = useState<any | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState("");
   const [loadedUserKey, setLoadedUserKey] = useState("");
@@ -398,7 +400,11 @@ export function SunnyModCodingAIPage() {
   const activeThread = threads.find((t) => t.id === activeThreadId) ?? threads[0] ?? createThread();
   const messages = activeThread.messages || [];
   const hasStartedChat = messages.some((m) => m.role === "user");
-  const canUseSelectedModel = planAllowsModel(model, currentPlan, Boolean(user));
+  const canUseSelectedModel = Boolean(user) && (
+    serverAllowedModels.length > 0
+      ? serverAllowedModels.includes(model)
+      : planAllowsModel(model, currentPlan, Boolean(user))
+  );
 
   useEffect(() => {
     const loaded = readThreads(userStorageId);
@@ -440,6 +446,47 @@ export function SunnyModCodingAIPage() {
     if (!user && currentPlan !== "Chưa mở gói") setCurrentPlan("Chưa mở gói");
     localStorage.setItem(planKey(userStorageId), user ? currentPlan || "free" : "Chưa mở gói");
   }, [user, currentPlan, userStorageId]);
+
+
+  // AI_CAPABILITY_SYNC_V1: pull current plan/access from server after login and
+  // whenever tab returns to foreground. This fixes: admin set max/pro but UI still
+  // thinks user is free and keeps locking Code Debug Pro/Sandbox.
+  useEffect(() => {
+    if (!token || !user) {
+      setServerAllowedModels([]);
+      setServerPlanInfo(null);
+      return;
+    }
+    let cancelled = false;
+    const syncProfile = async () => {
+      try {
+        const res = await postFunction<any>(
+          "/ai-sunny-chat",
+          { action: "profile", device_id: deviceId },
+          { authToken: token },
+        );
+        if (cancelled || !res?.ok) return;
+        const nextPlan = String(res.plan_code || "free").toLowerCase();
+        const nextModels = Array.isArray(res.allowed_models) ? res.allowed_models.map(String).filter(Boolean) : [];
+        setCurrentPlan(nextPlan);
+        setServerAllowedModels(nextModels);
+        setServerPlanInfo(res);
+        if (typeof window !== "undefined") localStorage.setItem(planKey(userStorageId), nextPlan);
+      } catch {
+        // Keep local UI alive; actual send() will still be protected by server.
+      }
+    };
+    syncProfile();
+    const onFocus = () => syncProfile();
+    const onVisible = () => { if (document.visibilityState === "visible") syncProfile(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [token, user?.id, userStorageId, deviceId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -531,7 +578,10 @@ export function SunnyModCodingAIPage() {
       openLocked("Cần đăng nhập", "Bạn cần đăng nhập Google trước, sau đó nhập key hoặc dùng gói do admin cấp để mở model.", "login");
       return;
     }
-    if (!planAllowsModel(nextModel, currentPlan, Boolean(user))) {
+    const allowedByServer = serverAllowedModels.length > 0
+      ? serverAllowedModels.includes(nextModel)
+      : planAllowsModel(nextModel, currentPlan, Boolean(user));
+    if (!allowedByServer) {
       const label = MODELS.find((m) => m.id === nextModel)?.label ?? nextModel;
       openLocked(`${label} đang bị khóa`, `Model ${nextModel} cần gói phù hợp. Bạn có thể nhập key mở token/gói hoặc liên hệ admin qua Zalo.`);
       return;
@@ -754,7 +804,7 @@ export function SunnyModCodingAIPage() {
             {modelOpen ? (
               <div className="absolute bottom-[76px] right-0 w-[330px] rounded-3xl border border-white/10 bg-[#171718] p-2 shadow-2xl shadow-black/60">
                 {MODELS.map((m) => {
-                  const locked = !planAllowsModel(m.id, currentPlan, Boolean(user));
+                  const locked = !(serverAllowedModels.length > 0 ? serverAllowedModels.includes(m.id) : planAllowsModel(m.id, currentPlan, Boolean(user)));
                   return (
                     <button key={m.id} onClick={() => selectModel(m.id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-white/10 ${model === m.id ? "bg-white/10" : ""}`}>
                       <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10"><Sparkles className="h-4 w-4 text-amber-300" /></span>
