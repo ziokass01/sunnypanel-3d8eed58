@@ -236,7 +236,25 @@ Deno.serve(async (req) => {
   }
 
   const requestedModel = String(body?.model ?? config.default_model ?? "mimo-v2.5").trim();
-  const model = MODEL_ALLOW_LIST.has(requestedModel) ? requestedModel : String(config.default_model ?? "mimo-v2.5");
+  let model = MODEL_ALLOW_LIST.has(requestedModel) ? requestedModel : String(config.default_model ?? "mimo-v2.5");
+
+  // AI_TTS_CHAT_FALLBACK_V1:
+  // TTS models are visible in Max, but this function currently uses chat/completions.
+  // Sending a TTS model to chat/completions can return upstream HTTP 400.
+  // For normal text chat, fail-safe to a chat-capable model already allowed by the plan.
+  const modeRaw = String(body?.mode ?? "chat").slice(0, 40).toLowerCase();
+  const requestedTtsChat = modeRaw.includes("tts") || model.includes("tts");
+  if (requestedTtsChat && model.includes("tts")) {
+    const preferredChatModels = [
+      String(config.default_model ?? "mimo-v2.5"),
+      "mimo-v2.5",
+      "mimo-v2-pro",
+      "mimo-v2.5-pro",
+      String(config.pro_model ?? ""),
+    ].map((m) => m.trim()).filter(Boolean);
+    const fallbackChatModel = preferredChatModels.find((m) => MODEL_ALLOW_LIST.has(m) && allowedModels.includes(m));
+    if (fallbackChatModel) model = fallbackChatModel;
+  }
 
   if (!allowedModels.includes(model)) {
     return json(403, {
@@ -246,7 +264,7 @@ Deno.serve(async (req) => {
     }, origin);
   }
 
-  const mode = String(body?.mode ?? "chat").slice(0, 40);
+  const mode = modeRaw;
   if ((mode.includes("sandbox") || mode.includes("terminal")) && (!config.sandbox_global_enabled || !plan.sandbox_enabled || !plan.terminal_enabled)) {
     return json(403, { ok: false, code: "SANDBOX_NOT_ALLOWED", msg: "Sandbox/terminal chỉ mở cho gói Max khi admin bật." }, origin);
   }

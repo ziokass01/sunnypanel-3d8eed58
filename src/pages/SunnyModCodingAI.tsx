@@ -50,6 +50,7 @@ type RedeemStatus = "idle" | "checking" | "success" | "error";
 
 type ParsedBlock =
   | { type: "code"; lang: string; lines: string[] }
+  | { type: "math"; lines: string[] }
   | { type: "table"; lines: string[] }
   | { type: "list"; ordered: boolean; lines: string[] }
   | { type: "quote"; lines: string[] }
@@ -186,6 +187,12 @@ function planAllowsModel(modelId: string, planCode: string, hasUser: boolean) {
   return modelId === "mimo-v2.5";
 }
 
+function chatModelForSend(modelId: string) {
+  // UI có thể hiển thị TTS theo gói Max, nhưng text chat vẫn đi qua chat/completions.
+  // Không gửi model TTS vào endpoint chat để tránh upstream 400.
+  return modelId.includes("tts") ? "mimo-v2.5" : modelId;
+}
+
 function getLoginRedirectUrl() {
   if (typeof window === "undefined") return undefined;
   const { protocol, hostname, origin } = window.location;
@@ -209,6 +216,15 @@ function parseMarkdown(content: string): ParsedBlock[] {
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) code.push(lines[i++]);
       if (i < lines.length) i += 1;
       blocks.push({ type: "code", lang, lines: code });
+      continue;
+    }
+
+    if (/^\s*\\\[\s*$/.test(line)) {
+      const math: string[] = [];
+      i += 1;
+      while (i < lines.length && !/^\s*\\\]\s*$/.test(lines[i])) math.push(lines[i++]);
+      if (i < lines.length) i += 1;
+      blocks.push({ type: "math", lines: math });
       continue;
     }
 
@@ -266,7 +282,12 @@ function parseMarkdown(content: string): ParsedBlock[] {
 }
 
 function InlineText({ text }: { text: string }) {
-  const parts = String(text || "").split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  const cleanedText = String(text || "")
+    .replace(/\\\(/g, "")
+    .replace(/\\\)/g, "")
+    .replace(/^\\\[\s*$/g, "")
+    .replace(/^\\\]\s*$/g, "");
+  const parts = cleanedText.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return (
     <>
       {parts.map((part, index) => {
@@ -304,6 +325,15 @@ function MarkdownMessage({ content }: { content: string }) {
               </div>
               <pre className="max-w-full overflow-x-auto p-3 font-mono text-xs leading-5 text-zinc-100"><code>{code}</code></pre>
             </div>
+          );
+        }
+
+        if (block.type === "math") {
+          const math = block.lines.join("\n").trim();
+          return (
+            <pre key={index} className="max-w-full overflow-x-auto rounded-2xl border border-amber-400/20 bg-black/35 px-4 py-3 font-mono text-sm leading-7 text-amber-100">
+              {math || " "}
+            </pre>
           );
         }
 
@@ -635,9 +665,10 @@ export function SunnyModCodingAIPage() {
     setModelOpen(false);
 
     try {
+      const sendModel = chatModelForSend(model);
       const res = await postFunction<any>(
         "/ai-sunny-chat",
-        { model, mode: model.includes("tts") ? "tts" : "chat", device_id: deviceId, messages: sanitizeForChat(nextMessages) },
+        { model: sendModel, mode: "chat", device_id: deviceId, messages: sanitizeForChat(nextMessages) },
         { authToken: token },
       );
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "AI request failed");

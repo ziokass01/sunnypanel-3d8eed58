@@ -2,6 +2,7 @@
 -- Purpose:
 -- 1) Ensure plan allowed_models match frontend/admin expectations.
 -- 2) Ensure aisunny_h01 is configured as ai-coding free key type with reset support.
+-- 3) Fix NOT NULL columns (kind/value/sort_order) so db push does not fail on licenses_free_key_types.
 -- Safe/idempotent; only touches ai_sunny_* and the specific aisunny_h01 free-key type.
 
 insert into public.ai_sunny_plans (
@@ -55,3 +56,4 @@ on conflict (code) do update set
   free_selection_mode = excluded.free_selection_mode,
   free_selection_expand = excluded.free_selection_expand,
   updated_at = now();
+
