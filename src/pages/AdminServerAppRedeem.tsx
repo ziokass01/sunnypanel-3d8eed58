@@ -59,6 +59,7 @@ const EMPTY_DRAFT = {
 };
 
 type RedeemTab = "editor" | "admin" | "free";
+const NEW_REDEEM_SENTINEL = "__new_redeem__";
 
 export function AdminServerAppRedeemPage() {
   const { appCode = "find-dumps" } = useParams();
@@ -92,6 +93,11 @@ export function AdminServerAppRedeemPage() {
   useEffect(() => {
     if (!query.data) return;
     setGiftTabLabel(query.data.settings?.gift_tab_label || "Mã quà");
+
+    // Khi admin đang tạo mã mới thì tuyệt đối không tự chọn lại key đầu tiên.
+    // Trước đây selectedId="" làm effect hydrate key cũ, khiến lưu mã mới bị trùng primary key id.
+    if (selectedId === NEW_REDEEM_SENTINEL) return;
+
     const first = query.data.keys[0];
     const activeStillExists = query.data.keys.some((row: any) => String(row.id) === String(selectedId || ""));
     if ((!selectedId || !activeStillExists) && first) {
@@ -100,8 +106,8 @@ export function AdminServerAppRedeemPage() {
       return;
     }
     if (!query.data.keys.length) {
-      setSelectedId("");
-      setDraft({ ...EMPTY_DRAFT, redeem_key: randomRedeemCode() });
+      setSelectedId(NEW_REDEEM_SENTINEL);
+      setDraft({ ...EMPTY_DRAFT, id: "", redeem_key: randomRedeemCode() });
     }
   }, [query.data, selectedId]);
 
@@ -174,7 +180,14 @@ export function AdminServerAppRedeemPage() {
         },
         notes: draft.note || null,
       };
-      const write = await sb.from("server_app_redeem_keys").upsert(payload, { onConflict: "app_code,redeem_key" }).select("id").single();
+      const { id: payloadId, ...payloadWithoutId } = payload;
+
+      // Có id: update đúng row hiện tại, cho phép đổi redeem_key mà không insert lại id cũ.
+      // Không có id: insert row mới để DB tự sinh uuid, tránh duplicate server_app_redeem_keys_pkey.
+      const write = payloadId
+        ? await sb.from("server_app_redeem_keys").update(payloadWithoutId).eq("id", payloadId).select("id").single()
+        : await sb.from("server_app_redeem_keys").insert(payloadWithoutId).select("id").single();
+
       if (write.error) throw write.error;
       const settingsWrite = await sb.from("server_app_settings").upsert({ app_code: appCode, gift_tab_label: giftTabLabel || "Mã quà" }, { onConflict: "app_code" });
       if (settingsWrite.error) throw settingsWrite.error;
@@ -262,8 +275,8 @@ export function AdminServerAppRedeemPage() {
   };
 
   const makeNewDraft = () => {
-    setSelectedId("");
-    setDraft({ ...EMPTY_DRAFT, redeem_key: randomRedeemCode() });
+    setSelectedId(NEW_REDEEM_SENTINEL);
+    setDraft({ ...EMPTY_DRAFT, id: "", redeem_key: randomRedeemCode() });
     setActiveTab("editor");
   };
 
