@@ -24,7 +24,30 @@ async function sha256Hex(input: string) {
 function publicBase() {
   return (Deno.env.get("FREE_PUBLIC_BASE_URL") || Deno.env.get("PUBLIC_BASE_URL") || "https://mityangho.id.vn").replace(/\/+$/, "");
 }
-function renderOutbound(template: string, gateUrl: string) {
+function normalizeTemplate(template: string) {
+  return String(template || "")
+    .trim()
+    .replace(/\{\s*gate_url_enc\s*\}/gi, "{GATE_URL_ENC}")
+    .replace(/\{\s*gate_url\s*\}/gi, "{GATE_URL}");
+}
+
+function makeLinkBucket(cfg: any, passNo: number) {
+  const rotateDays = Math.max(1, Math.floor(Number(cfg.free_link4m_rotate_days ?? 7) || 7));
+  const nonce = Math.max(0, Math.floor(Number(passNo === 2 ? cfg.free_link4m_rotate_nonce_pass2 : cfg.free_link4m_rotate_nonce_pass1) || 0));
+  const bucketNo = Math.floor(Date.now() / (rotateDays * 86400_000));
+  return `v2_d${rotateDays}_n${nonce}_b${bucketNo}_p${passNo}`;
+}
+
+function stableGateUrl(cfg: any, passNo: number) {
+  const bucket = makeLinkBucket(cfg, passNo);
+  const url = new URL(`${publicBase()}/free/gate`);
+  url.searchParams.set("p", String(passNo));
+  url.searchParams.set("bucket", bucket);
+  return { url: url.toString(), bucket };
+}
+
+function renderOutbound(templateRaw: string, gateUrl: string) {
+  const template = normalizeTemplate(templateRaw);
   const enc = encodeURIComponent(gateUrl);
   if (!template) return "";
   if (template.includes("{GATE_URL_ENC}")) return template.replaceAll("{GATE_URL_ENC}", enc);
@@ -133,10 +156,23 @@ Deno.serve(async (req) => {
   const expiresAt = new Date(Date.now() + sessionTtlSeconds * 1000).toISOString();
   const outExpiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   const minDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds ?? 0) || 0);
-  const gateUrl = `${publicBase()}/free/gate?sid=${encodeURIComponent(sessionId)}&t=${encodeURIComponent(outToken)}&pass=1`;
+  // Link4M bucket fix:
+  // Gate URL không còn chứa sid/out_token riêng từng phiên.
+  // sid/out_token đã được frontend lưu localStorage trước khi chuyển ra Link4M.
+  // Vì vậy cùng rotate bucket sẽ dùng chung 1 URL đích, tránh tạo link4m mới mỗi lần Get Key.
+  const gate = stableGateUrl(cfg, 1);
+  const gateUrl = gate.url;
   const outboundTemplate = text(cfg.free_outbound_url, 4096);
   const outboundUrl = renderOutbound(outboundTemplate, gateUrl);
   if (!outboundUrl) return await deny("OUTBOUND_URL_TEMPLATE_INVALID", { gate_url: gateUrl });
+
+  const requiresDoubleGate = Boolean(keyType.requires_double_gate ?? false);
+  let pass2Gate: ReturnType<typeof stableGateUrl> | null = null;
+  let outboundUrlPass2: string | null = null;
+  if (requiresDoubleGate) {
+    pass2Gate = stableGateUrl(cfg, 2);
+    outboundUrlPass2 = renderOutbound(text(cfg.free_outbound_url_pass2 || cfg.free_outbound_url, 4096), pass2Gate.url) || null;
+  }
 
   const fullPayload: Record<string, unknown> = {
     session_id: sessionId,
@@ -183,14 +219,18 @@ Deno.serve(async (req) => {
   }
   if (inserted.error) return await deny("SESSION_CREATE_FAILED", { detail: inserted.error.message });
 
-  await logGate(db, { ...baseLog, session_id: sessionId, event_code: "start_ok", detail: { route: "free-start", app_code: appCode, trace_id: traceId, package_code: packageCode, credit_code: creditCode, wallet_kind: walletKind } });
+  await logGate(db, { ...baseLog, session_id: sessionId, event_code: "start_ok", detail: { route: "free-start", app_code: appCode, trace_id: traceId, package_code: packageCode, credit_code: creditCode, wallet_kind: walletKind, link4m_bucket: gate.bucket } });
   return json({
     ok: true,
     session_id: sessionId,
     out_token: outToken,
     outbound_url: outboundUrl,
     gate_url: gateUrl,
+    outbound_url_pass2: outboundUrlPass2,
+    gate_url_pass2: pass2Gate?.url ?? null,
+    passes_required: requiresDoubleGate ? 2 : 1,
     min_delay_seconds: minDelay,
+    min_delay_seconds_pass2: Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds_pass2 ?? 0) || 0),
     trace_id: traceId,
     expires_at: expiresAt,
   }, 200);
