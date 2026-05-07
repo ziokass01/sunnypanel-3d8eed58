@@ -45,18 +45,6 @@ const DEFAULT_FREE_PLAN = {
   tts_enabled: false,
 };
 
-function parseTextArray(value: unknown) {
-  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
-  return String(value ?? "")
-    .split(/[\n,]+/)
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
-
-function uniqAllowedModels(values: string[]) {
-  return Array.from(new Set(values.map((m) => m.trim()).filter((m) => m && MODEL_ALLOW_LIST.has(m))));
-}
-
 function dayKeyVN(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -176,15 +164,11 @@ Deno.serve(async (req) => {
     return json(403, { ok: false, code: "AI_DISABLED", msg: config.maintenance_message ?? DEFAULT_CONFIG.maintenance_message }, origin);
   }
 
-  // AI_ACCESS_STATUS_STRICT_V2:
-  // Do not filter only active rows here. ai_sunny_user_access has one row per user;
-  // if admin blocks a user, filtering by status=active makes the row disappear and
-  // the code accidentally falls back to the free plan. Load the row first, then
-  // decide fail-closed for blocked/expired statuses.
   const accessRes = await db
     .from("ai_sunny_user_access")
     .select("*")
     .eq("user_id", user.id)
+    .eq("status", "active")
     .maybeSingle();
 
   if (accessRes.error && isSchemaMissing(accessRes.error)) {
@@ -193,26 +177,10 @@ Deno.serve(async (req) => {
   if (accessRes.error) return json(500, { ok: false, code: "ACCESS_ERROR", msg: accessRes.error.message }, origin);
 
   let access = accessRes.data;
-  let accessStatus = String(access?.status ?? "").trim().toLowerCase();
-  if (accessStatus === "blocked") {
-    return json(403, {
-      ok: false,
-      code: "AI_USER_BLOCKED",
-      msg: "Tài khoản SunnyMod AI này đang bị admin khóa.",
-      access_status: "blocked",
-    }, origin);
-  }
-
   let planCode = String(access?.plan_code ?? "free").trim().toLowerCase() || "free";
 
   if (access?.expires_at && new Date(access.expires_at).getTime() < Date.now()) {
     await db.from("ai_sunny_user_access").update({ status: "expired", updated_at: new Date().toISOString() }).eq("id", access.id);
-    access = null;
-    accessStatus = "expired";
-    planCode = "free";
-  }
-
-  if (access && accessStatus && accessStatus !== "active") {
     access = null;
     planCode = "free";
   }
@@ -232,20 +200,13 @@ Deno.serve(async (req) => {
   if (!plan) plan = DEFAULT_FREE_PLAN;
   if (!plan.enabled) return json(403, { ok: false, code: "PLAN_DISABLED", msg: "Gói AI hiện đang bị tắt." }, origin);
 
-  const allowedModels: string[] = uniqAllowedModels(parseTextArray(plan.allowed_models));
+  const allowedModels: string[] = Array.isArray(plan.allowed_models)
+    ? plan.allowed_models.map((m: unknown) => String(m).trim()).filter(Boolean)
+    : String(plan.allowed_models ?? "")
+      .split(/[\n,]+/)
+      .map((m) => m.trim())
+      .filter(Boolean);
   if (!allowedModels.length) allowedModels.push(...DEFAULT_FREE_PLAN.allowed_models);
-
-  // A redeem key may grant extra/explicit models for this access row. Keep this
-  // server-side so UI and chat enforcement stay synced; localStorage cannot unlock it.
-  const accessMetadata = (access?.metadata && typeof access.metadata === "object") ? access.metadata : {};
-  const overrideModels = uniqAllowedModels([
-    ...parseTextArray((accessMetadata as any).allowed_models_override),
-    ...parseTextArray((accessMetadata as any).allowed_models),
-  ]);
-  if (overrideModels.length) {
-    allowedModels.splice(0, allowedModels.length, ...Array.from(new Set([...allowedModels, ...overrideModels])));
-  }
-
 
   // AI_PROFILE_SYNC_V1: lightweight profile/capability sync for /coding-ai.
   // This prevents the UI from keeping an old localStorage plan after admin changes
@@ -275,25 +236,7 @@ Deno.serve(async (req) => {
   }
 
   const requestedModel = String(body?.model ?? config.default_model ?? "mimo-v2.5").trim();
-  let model = MODEL_ALLOW_LIST.has(requestedModel) ? requestedModel : String(config.default_model ?? "mimo-v2.5");
-
-  // AI_TTS_CHAT_FALLBACK_V1:
-  // TTS models are visible in Max, but this function currently uses chat/completions.
-  // Sending a TTS model to chat/completions can return upstream HTTP 400.
-  // For normal text chat, fail-safe to a chat-capable model already allowed by the plan.
-  const modeRaw = String(body?.mode ?? "chat").slice(0, 40).toLowerCase();
-  const requestedTtsChat = modeRaw.includes("tts") || model.includes("tts");
-  if (requestedTtsChat && model.includes("tts")) {
-    const preferredChatModels = [
-      String(config.default_model ?? "mimo-v2.5"),
-      "mimo-v2.5",
-      "mimo-v2-pro",
-      "mimo-v2.5-pro",
-      String(config.pro_model ?? ""),
-    ].map((m) => m.trim()).filter(Boolean);
-    const fallbackChatModel = preferredChatModels.find((m) => MODEL_ALLOW_LIST.has(m) && allowedModels.includes(m));
-    if (fallbackChatModel) model = fallbackChatModel;
-  }
+  const model = MODEL_ALLOW_LIST.has(requestedModel) ? requestedModel : String(config.default_model ?? "mimo-v2.5");
 
   if (!allowedModels.includes(model)) {
     return json(403, {
@@ -303,7 +246,7 @@ Deno.serve(async (req) => {
     }, origin);
   }
 
-  const mode = modeRaw;
+  const mode = String(body?.mode ?? "chat").slice(0, 40);
   if ((mode.includes("sandbox") || mode.includes("terminal")) && (!config.sandbox_global_enabled || !plan.sandbox_enabled || !plan.terminal_enabled)) {
     return json(403, { ok: false, code: "SANDBOX_NOT_ALLOWED", msg: "Sandbox/terminal chỉ mở cho gói Max khi admin bật." }, origin);
   }

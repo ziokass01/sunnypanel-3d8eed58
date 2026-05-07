@@ -700,7 +700,7 @@ Deno.serve(async (req) => {
         code_mask: maskKey(rawKey),
         title: `${String(keyTypeMeta?.label ?? "SunnyMod AI key vượt")}`.trim(),
         status: "active",
-        plan_code_to_grant: "free",
+        plan_code_to_grant: String((keyTypeMeta?.metadata ?? {})?.plan_code_to_grant ?? "trial").trim().toLowerCase() || "trial",
         grant_hours: Math.max(1, Math.ceil(durationSeconds / 3600)),
         bonus_daily_tokens: Math.max(10000, Number((keyTypeMeta?.metadata ?? {})?.bonus_daily_tokens ?? 40000) || 40000),
         bonus_daily_messages: Math.max(5, Number((keyTypeMeta?.metadata ?? {})?.bonus_daily_messages ?? 30) || 30),
@@ -719,9 +719,43 @@ Deno.serve(async (req) => {
       if (!ins.error && ins.data?.id) { inserted = { id: String(ins.data.id), key: rawKey }; break; }
     }
     if (!inserted) throw Object.assign(new Error("AI_REDEEM_KEY_INSERT_FAILED"), { status: 500, code: "AI_REDEEM_KEY_INSERT_FAILED" });
-    await sb.from("licenses_free_sessions").update({ issued_server_redeem_key_id: inserted.id, issued_server_reward_mode: "ai_redeem", app_code: appCode, selection_meta: { app_code: appCode, reward_mode: "ai_redeem", duration_seconds: durationSeconds, trace_id: String(sessRow?.trace_id ?? "").trim() || null } }).eq("session_id", sessionId);
-    await sb.from("licenses_free_issues").insert({ license_id: null, key_mask: inserted.key, expires_at: expiresAt, session_id: sessionId, ip_hash: ipHash, fingerprint_hash: fpHash, app_code: appCode, key_signature: keySignature, server_redeem_key_id: inserted.id });
-    return { key: inserted.key, expires_at: expiresAt, allow_reset: false, app_code: appCode, key_signature: keySignature, reward_mode: "ai_redeem", created_at: issuedAt, server_redeem_key_id: inserted.id };
+
+    // AI_FREE_REVEAL_STATE_FIX_V2:
+    // AI keys are public reset-capable keys, but they live in ai_sunny_redeem_keys,
+    // not legacy licenses. Mark the session as revealed here so a later request does
+    // not stay stuck at `revealing`; monitor insert is best-effort only.
+    await sb.from("licenses_free_sessions").update({
+      status: "revealed",
+      last_error: null,
+      reveal_count: 1,
+      revealed_at: issuedAt,
+      issued_server_redeem_key_id: inserted.id,
+      issued_server_reward_mode: "ai_redeem",
+      app_code: appCode,
+      selection_meta: {
+        app_code: appCode,
+        reward_mode: "ai_redeem",
+        duration_seconds: durationSeconds,
+        trace_id: String(sessRow?.trace_id ?? "").trim() || null,
+      },
+    }).eq("session_id", sessionId);
+
+    const issueInsert = await sb.from("licenses_free_issues").insert({
+      license_id: null,
+      key_mask: inserted.key,
+      expires_at: expiresAt,
+      session_id: sessionId,
+      ip_hash: ipHash,
+      fingerprint_hash: fpHash,
+      app_code: appCode,
+      key_signature: keySignature,
+      server_redeem_key_id: inserted.id,
+    });
+    if (issueInsert.error) {
+      console.warn("AI_FREE_ISSUE_MONITOR_INSERT_FAILED_NON_FATAL", issueInsert.error);
+    }
+
+    return { key: inserted.key, expires_at: expiresAt, allow_reset: true, app_code: appCode, key_signature: keySignature, reward_mode: "ai_redeem", created_at: issuedAt, server_redeem_key_id: inserted.id };
   }
 
   // Already revealed (or in-progress) => return same key if present; otherwise auto-repair inconsistent state.
@@ -730,7 +764,7 @@ Deno.serve(async (req) => {
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
     const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
     if (existing) {
-      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: existing.server_redeem_key_id ? false : Boolean(keyTypeMeta?.allow_reset ?? true), app_code: sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire", key_signature: sess.app_code === "find-dumps" ? "FD" : keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
+      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: (sess.app_code === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) ? true : (existing.server_redeem_key_id ? false : Boolean(keyTypeMeta?.allow_reset ?? true)), app_code: sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire", key_signature: sess.app_code === "find-dumps" ? "FD" : keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
     }
 
     // Inconsistent: session says revealed/revealing but no issued key row exists.
@@ -858,7 +892,7 @@ Deno.serve(async (req) => {
     const existing = await findExistingIssuedKey();
     const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
     const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
-    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: existing.server_redeem_key_id ? false : Boolean(keyTypeMeta?.allow_reset ?? true), app_code: sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire", key_signature: sess.app_code === "find-dumps" ? "FD" : keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
+    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: (sess.app_code === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) ? true : (existing.server_redeem_key_id ? false : Boolean(keyTypeMeta?.allow_reset ?? true)), app_code: sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire", key_signature: sess.app_code === "find-dumps" ? "FD" : keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
 
     // If someone else locked it, signal in-progress; otherwise report lock failure clearly.
     if (sess.status === "revealing") {

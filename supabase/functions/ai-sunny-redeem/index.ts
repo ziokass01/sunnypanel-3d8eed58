@@ -18,6 +18,14 @@ function normalizeCode(value: string) {
   return String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
 }
 
+function parseTextArray(value: unknown) {
+  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
+  return String(value ?? "")
+    .split(/[\n,]+/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
 async function sha256Hex(value: string) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -116,6 +124,7 @@ Deno.serve(async (req) => {
   const expiresAt = new Date(Date.now() + Math.max(1, Number(keyRow.grant_hours ?? 24)) * 60 * 60 * 1000).toISOString();
   const dailyTokenOverride = Math.max(0, Number(keyRow.bonus_daily_tokens ?? 0));
   const dailyMessageOverride = Math.max(0, Number(keyRow.bonus_daily_messages ?? 0));
+  const allowedModelsOverride = parseTextArray(keyRow.allowed_models);
 
   const upsertAccess = await db
     .from("ai_sunny_user_access")
@@ -131,6 +140,12 @@ Deno.serve(async (req) => {
       expires_at: expiresAt,
       source: "redeem-key",
       note: `Redeemed ${keyRow.code_mask}`,
+      metadata: {
+        source_redeem_key_id: keyRow.id,
+        source_code_mask: keyRow.code_mask,
+        redeemed_at: new Date().toISOString(),
+        allowed_models_override: allowedModelsOverride,
+      },
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" })
     .select("*")
@@ -165,5 +180,6 @@ Deno.serve(async (req) => {
     expires_at: expiresAt,
     daily_token_limit: dailyTokenOverride,
     daily_message_limit: dailyMessageOverride,
+    allowed_models: allowedModelsOverride,
   }, origin);
 });

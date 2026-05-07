@@ -244,7 +244,7 @@ async function handleAiReset(req: Request, db: any, body: any, key: string) {
   await db.from("ai_sunny_redeem_logs").delete().eq("redeem_key_id", row.id);
   await db.from("ai_sunny_redeem_keys").update({
     used_count: 0,
-    status: newExpiresAt && new Date(newExpiresAt).getTime() <= now.getTime() ? "disabled" : "active",
+    status: newExpiresAt && new Date(newExpiresAt).getTime() <= now.getTime() ? "expired" : "active",
     expires_at: newExpiresAt ?? null,
     updated_at: new Date().toISOString(),
   }).eq("id", row.id);
@@ -266,7 +266,7 @@ async function handleAiReset(req: Request, db: any, body: any, key: string) {
     },
   });
 
-  const refreshed = { ...row, expires_at: newExpiresAt, used_count: 0, status: newExpiresAt && new Date(newExpiresAt).getTime() <= now.getTime() ? "disabled" : "active" };
+  const refreshed = { ...row, expires_at: newExpiresAt, used_count: 0, status: newExpiresAt && new Date(newExpiresAt).getTime() <= now.getTime() ? "expired" : "active" };
   return response(req, 200, buildSnapshot({
     lic: buildAiLicenseShape(key, refreshed),
     settings,

@@ -34,6 +34,18 @@ function normalizeStatus(value: unknown, fallback = "active") {
   if (["active", "blocked", "disabled", "expired"].includes(s)) return s;
   return fallback;
 }
+function normalizeUserAccessStatus(value: unknown, fallback = "active") {
+  const s = normalizeStatus(value, fallback);
+  // ai_sunny_user_access constraint: active / blocked / expired.
+  if (s === "disabled") return "blocked";
+  return ["active", "blocked", "expired"].includes(s) ? s : fallback;
+}
+function normalizeRedeemKeyStatus(value: unknown, fallback = "disabled") {
+  const s = normalizeStatus(value, fallback);
+  // ai_sunny_redeem_keys constraint: active / disabled / expired.
+  if (s === "blocked") return "disabled";
+  return ["active", "disabled", "expired"].includes(s) ? s : fallback;
+}
 function isMissingTable(error: any) {
   const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
   return msg.includes("schema cache") || msg.includes("does not exist") || msg.includes("relation") || msg.includes("could not find");
@@ -214,7 +226,7 @@ Deno.serve(async (req) => {
         user_id: userId,
         email,
         plan_code: planCode,
-        status: normalizeStatus(u.status),
+        status: normalizeUserAccessStatus(u.status),
         daily_token_limit_override: u.daily_token_limit_override === "" || u.daily_token_limit_override == null ? null : asInt(u.daily_token_limit_override, 0),
         daily_message_limit_override: u.daily_message_limit_override === "" || u.daily_message_limit_override == null ? null : asInt(u.daily_message_limit_override, 0),
         daily_ip_limit_override: u.daily_ip_limit_override === "" || u.daily_ip_limit_override == null ? null : asInt(u.daily_ip_limit_override, 0),
@@ -277,7 +289,7 @@ Deno.serve(async (req) => {
 
     if (action === "update_redeem_key_status") {
       const id = String(body?.id ?? "").trim();
-      const status = normalizeStatus(body?.status, "disabled");
+      const status = normalizeRedeemKeyStatus(body?.status, "disabled");
       if (!id) return json(400, { ok: false, code: "ID_MISSING" }, origin);
       const { data, error } = await db.from("ai_sunny_redeem_keys").update({ status, updated_at: new Date().toISOString() }).eq("id", id).select("*").single();
       if (error) throw error;

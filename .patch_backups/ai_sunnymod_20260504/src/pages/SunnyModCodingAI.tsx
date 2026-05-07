@@ -50,7 +50,6 @@ type RedeemStatus = "idle" | "checking" | "success" | "error";
 
 type ParsedBlock =
   | { type: "code"; lang: string; lines: string[] }
-  | { type: "math"; lines: string[] }
   | { type: "table"; lines: string[] }
   | { type: "list"; ordered: boolean; lines: string[] }
   | { type: "quote"; lines: string[] }
@@ -187,12 +186,6 @@ function planAllowsModel(modelId: string, planCode: string, hasUser: boolean) {
   return modelId === "mimo-v2.5";
 }
 
-function chatModelForSend(modelId: string) {
-  // UI có thể hiển thị TTS theo gói Max, nhưng text chat vẫn đi qua chat/completions.
-  // Không gửi model TTS vào endpoint chat để tránh upstream 400.
-  return modelId.includes("tts") ? "mimo-v2.5" : modelId;
-}
-
 function getLoginRedirectUrl() {
   if (typeof window === "undefined") return undefined;
   const { protocol, hostname, origin } = window.location;
@@ -216,15 +209,6 @@ function parseMarkdown(content: string): ParsedBlock[] {
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) code.push(lines[i++]);
       if (i < lines.length) i += 1;
       blocks.push({ type: "code", lang, lines: code });
-      continue;
-    }
-
-    if (/^\s*\\\[\s*$/.test(line)) {
-      const math: string[] = [];
-      i += 1;
-      while (i < lines.length && !/^\s*\\\]\s*$/.test(lines[i])) math.push(lines[i++]);
-      if (i < lines.length) i += 1;
-      blocks.push({ type: "math", lines: math });
       continue;
     }
 
@@ -282,12 +266,7 @@ function parseMarkdown(content: string): ParsedBlock[] {
 }
 
 function InlineText({ text }: { text: string }) {
-  const cleanedText = String(text || "")
-    .replace(/\\\(/g, "")
-    .replace(/\\\)/g, "")
-    .replace(/^\\\[\s*$/g, "")
-    .replace(/^\\\]\s*$/g, "");
-  const parts = cleanedText.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  const parts = String(text || "").split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return (
     <>
       {parts.map((part, index) => {
@@ -325,15 +304,6 @@ function MarkdownMessage({ content }: { content: string }) {
               </div>
               <pre className="max-w-full overflow-x-auto p-3 font-mono text-xs leading-5 text-zinc-100"><code>{code}</code></pre>
             </div>
-          );
-        }
-
-        if (block.type === "math") {
-          const math = block.lines.join("\n").trim();
-          return (
-            <pre key={index} className="max-w-full overflow-x-auto rounded-2xl border border-amber-400/20 bg-black/35 px-4 py-3 font-mono text-sm leading-7 text-amber-100">
-              {math || " "}
-            </pre>
           );
         }
 
@@ -431,9 +401,7 @@ export function SunnyModCodingAIPage() {
   const messages = activeThread.messages || [];
   const hasStartedChat = messages.some((m) => m.role === "user");
   const canUseSelectedModel = Boolean(user) && (
-    serverPlanInfo
-      ? serverAllowedModels.includes(model)
-      : planAllowsModel(model, currentPlan, Boolean(user))
+    serverAllowedModels.includes(model) || planAllowsModel(model, currentPlan, Boolean(user))
   );
 
   useEffect(() => {
@@ -502,16 +470,8 @@ export function SunnyModCodingAIPage() {
         setServerAllowedModels(nextModels);
         setServerPlanInfo(res);
         if (typeof window !== "undefined") localStorage.setItem(planKey(userStorageId), nextPlan);
-      } catch (e: any) {
-        // Fail closed for explicit server-side block. Do not let localStorage plan
-        // reopen models when admin has blocked this account.
-        if (e?.code === "AI_USER_BLOCKED") {
-          setCurrentPlan("blocked");
-          setServerAllowedModels([]);
-          setServerPlanInfo({ ok: false, access_status: "blocked", code: e.code });
-          if (typeof window !== "undefined") localStorage.removeItem(planKey(userStorageId));
-        }
-        // Keep local UI alive for routing/deploy/network issues; actual send() is still server-protected.
+      } catch {
+        // Keep local UI alive; actual send() will still be protected by server.
       }
     };
     syncProfile();
@@ -616,7 +576,7 @@ export function SunnyModCodingAIPage() {
       openLocked("Cần đăng nhập", "Bạn cần đăng nhập Google trước, sau đó nhập key hoặc dùng gói do admin cấp để mở model.", "login");
       return;
     }
-    const allowedByServer = serverPlanInfo ? serverAllowedModels.includes(nextModel) : planAllowsModel(nextModel, currentPlan, Boolean(user));
+    const allowedByServer = serverAllowedModels.includes(nextModel) || planAllowsModel(nextModel, currentPlan, Boolean(user));
     if (!allowedByServer) {
       const label = MODELS.find((m) => m.id === nextModel)?.label ?? nextModel;
       openLocked(`${label} đang bị khóa`, `Model ${nextModel} cần gói phù hợp. Bạn có thể nhập key mở token/gói hoặc liên hệ admin qua Zalo.`);
@@ -640,29 +600,8 @@ export function SunnyModCodingAIPage() {
     try {
       const res = await postFunction<any>("/ai-sunny-redeem", { code, device_id: deviceId }, { authToken: token });
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "Redeem failed");
-      let planCode = String(res.plan_code ?? "free");
-      let allowedModels = Array.isArray(res.allowed_models) ? res.allowed_models.map(String).filter(Boolean) : [];
-
-      // AI_REDEEM_PROFILE_RESYNC_V2: redeem writes DB; reload profile immediately so
-      // sidebar/model locks match server instead of stale local state.
-      try {
-        const profile = await postFunction<any>(
-          "/ai-sunny-chat",
-          { action: "profile", device_id: deviceId },
-          { authToken: token },
-        );
-        if (profile?.ok) {
-          planCode = String(profile.plan_code || planCode).toLowerCase();
-          allowedModels = Array.isArray(profile.allowed_models) ? profile.allowed_models.map(String).filter(Boolean) : allowedModels;
-          setServerPlanInfo(profile);
-        }
-      } catch {
-        // Redeem itself succeeded; profile refresh can be retried by focus/refresh.
-      }
-
+      const planCode = String(res.plan_code ?? "free");
       setCurrentPlan(planCode);
-      setServerAllowedModels(allowedModels);
-      if (typeof window !== "undefined") localStorage.setItem(planKey(userStorageId), planCode);
       setRedeemStatus("success");
       setRedeemMessage(`Đã mở gói ${planCode}. Lượt/ngày: ${res.daily_message_limit ?? "-"}, token/ngày: ${res.daily_token_limit ?? "-"}.`);
       setRedeemCode("");
@@ -696,10 +635,9 @@ export function SunnyModCodingAIPage() {
     setModelOpen(false);
 
     try {
-      const sendModel = chatModelForSend(model);
       const res = await postFunction<any>(
         "/ai-sunny-chat",
-        { model: sendModel, mode: "chat", device_id: deviceId, messages: sanitizeForChat(nextMessages) },
+        { model, mode: model.includes("tts") ? "tts" : "chat", device_id: deviceId, messages: sanitizeForChat(nextMessages) },
         { authToken: token },
       );
       if (!res?.ok) throw new Error(res?.msg ?? res?.code ?? "AI request failed");
@@ -862,7 +800,7 @@ export function SunnyModCodingAIPage() {
             {modelOpen ? (
               <div className="absolute bottom-[76px] right-0 w-[330px] rounded-3xl border border-white/10 bg-[#171718] p-2 shadow-2xl shadow-black/60">
                 {MODELS.map((m) => {
-                  const locked = !(serverPlanInfo ? serverAllowedModels.includes(m.id) : planAllowsModel(m.id, currentPlan, Boolean(user)));
+                  const locked = !(serverAllowedModels.length > 0 ? serverAllowedModels.includes(m.id) : planAllowsModel(m.id, currentPlan, Boolean(user)));
                   return (
                     <button key={m.id} onClick={() => selectModel(m.id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-white/10 ${model === m.id ? "bg-white/10" : ""}`}>
                       <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10"><Sparkles className="h-4 w-4 text-amber-300" /></span>
