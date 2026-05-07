@@ -235,6 +235,11 @@ export function buildTongQuanStats(keys: RentKey[]) {
   return { total, enabled, disabled, firstUse, soonExpired };
 }
 
+// Backward-compatible helper name used by rent-portal tests and older imports.
+// Keep buildTongQuanStats for the Vietnamese UI code, but also export the
+// English helper name so tests/imports do not break after the UI rename.
+export const buildDashboardStats = buildTongQuanStats;
+
 function calcCountdown(endAtMs: number | null) {
   if (!endAtMs) return 0;
   return Math.max(0, Math.ceil((endAtMs - Date.now()) / 1000));

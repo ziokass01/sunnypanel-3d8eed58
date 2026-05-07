@@ -67,3 +67,9 @@ Test cần làm:
 3. `/free` nhận key AI: response phải có `AI-SUNNY-...` và `allow_reset: true`.
 4. Nhập key ở `/coding-ai`: nút hiện đang kiểm tra, thành công thì sidebar/model cập nhật ngay.
 5. Reset key `AI-SUNNY-...`: dùng nhánh `ai_sunny_redeem_keys`, không tìm trong `licenses` legacy.
+
+## Test hotfix 2026-05-07 v3
+
+- Fixed `src/test/rent-portal.test.ts` failure: `buildDashboardStats is not a function`.
+- Root cause: the Rent Portal UI helper had been renamed to `buildTongQuanStats`, while the test and older imports still expected `buildDashboardStats`.
+- Safe fix: kept `buildTongQuanStats` unchanged for the current UI and exported `buildDashboardStats` as a backward-compatible alias. No rent logic, key state, or backend sync logic was changed.
