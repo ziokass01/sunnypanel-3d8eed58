@@ -1,4 +1,4 @@
-project_id = "ijvhlhdrncxtxosmnbtt"
+project_id = "uvqgpgkaxpiczasfwzgm"
 
 [functions.admin-free-block]
 verify_jwt = false
@@ -60,3 +60,9 @@ verify_jwt = false
 [functions.verify-key]
 verify_jwt = false
 
+
+[functions.fake-lag-auth]
+verify_jwt = false
+
+[functions.fake-lag-check]
+verify_jwt = false
