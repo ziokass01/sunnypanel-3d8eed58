@@ -79,6 +79,21 @@ function getFreeKeySummaryMeta(appCode?: string | null, keyType?: FreeKeyType | 
   };
 }
 
+function inferFreeAppCodeFromKeyType(keyType?: FreeKeyType | null) {
+  const direct = String(keyType?.app_code || "").trim().toLowerCase();
+  if (direct) return direct;
+
+  const code = String(keyType?.code || "").trim().toLowerCase();
+  const sig = String(keyType?.key_signature || "").trim().toUpperCase();
+
+  if (code.startsWith("ff_") || sig === "SUNNY" || sig === "FF") return "free-fire";
+  if (code.startsWith("fakelag_") || sig === "FAKELAG") return "fake-lag";
+  if (code.startsWith("fd_") || sig === "FD" || sig === "FND") return "find-dumps";
+  if (code.startsWith("aisunny") || sig === "AI-SUNNY") return "ai-coding";
+
+  return "free-fire";
+}
+
 type ResetKeySnapshot = {
   ok: boolean;
   key?: string;
@@ -255,7 +270,7 @@ export function FreeLandingPage() {
 
 
   const selectedKeyMeta = useMemo(() => (cfg?.key_types ?? []).find((item) => item.code === selected) ?? null, [cfg?.key_types, selected]);
-  const selectedAppCode = useMemo(() => String(selectedKeyMeta?.app_code || getSelectedAppCode() || "free-fire").trim() || "free-fire", [selectedKeyMeta]);
+  const selectedAppCode = useMemo(() => inferFreeAppCodeFromKeyType(selectedKeyMeta), [selectedKeyMeta]);
   const isFindDumpsSelected = selectedAppCode === "find-dumps";
   const effectiveFindDumpsKind = useMemo(() => {
     if (String(selectedKeyMeta?.default_credit_code || "").trim()) return "credit" as const;
