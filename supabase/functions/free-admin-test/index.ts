@@ -492,9 +492,15 @@ Deno.serve(async (req) => {
       ? (fakeLagRule?.key_prefix || "FAKELAG")
       : ((keyType as any).key_signature || "SUNNY"),
   );
-  const fakeLagMaxDevices = Math.max(1, Number(fakeLagRule?.max_devices_per_key ?? 1));
+  const fakeLagPublicQuotaDevices = Math.max(1, Number(fakeLagRule?.max_devices_per_key ?? 1));
   const fakeLagMaxIps = Math.max(1, Number(fakeLagRule?.max_ips_per_key ?? 1));
   const fakeLagMaxVerify = Math.max(1, Number(fakeLagRule?.max_verify_per_key ?? 1));
+  // IMPORTANT:
+  // max_devices trong public.licenses là số thiết bị/lượt app được verify cho key phát ra.
+  // Không được dùng quota lấy key public/ngày ở đây.
+  // Quota public dùng server_app_settings/free-config; key runtime dùng max_verify_per_key.
+  const fakeLagIssuedMaxDevices = fakeLagMaxVerify;
+  void fakeLagPublicQuotaDevices;
 
   let key = "";
   let licenseId = "";
@@ -507,7 +513,7 @@ Deno.serve(async (req) => {
         key,
         app_code: appCode,
         is_active: true,
-        max_devices: appCode === "fake-lag" ? fakeLagMaxDevices : 1,
+        max_devices: appCode === "fake-lag" ? fakeLagIssuedMaxDevices : 1,
         max_ips: appCode === "fake-lag" ? fakeLagMaxIps : null,
         max_verify: appCode === "fake-lag" ? fakeLagMaxVerify : null,
         expires_at: expiresAt,

@@ -215,6 +215,9 @@ export function FreeDeviceHistoryCard({
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Còn lại hôm nay</div>
             <div className="mt-1 text-2xl font-semibold text-foreground">{remainingTodayServer ?? "-"}</div>
+            <div className="text-xs text-muted-foreground">
+              quota: thiết bị {selectedQuotaFingerprint ?? "-"} / IP {selectedQuotaIp ?? "-"}
+            </div>
             <div className="text-xs text-muted-foreground">reset lúc 00:00 (GMT+7)</div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">

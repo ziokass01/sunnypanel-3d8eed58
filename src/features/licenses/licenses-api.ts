@@ -25,6 +25,7 @@ export type LicenseRow = {
   public_reset_disabled?: boolean;
   note: string | null;
   deleted_at?: string | null;
+  app_code?: string | null;
 };
 
 export type LicenseDeviceRow = {
@@ -64,10 +65,13 @@ export async function fetchLicenses(params: {
       "id,key,created_at,expires_at," +
         "start_on_first_use,duration_days,first_used_at," +
         "starts_on_first_use,duration_seconds,activated_at," +
-        "max_devices,is_active,public_reset_disabled,note,deleted_at",
+        "max_devices,is_active,public_reset_disabled,note,deleted_at,app_code",
     )
     .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+    .not("key", "ilike", "FAKELAG-%")
+    .neq("app_code", "fake-lag")
+    .order("created_at", { ascending: false })
+    .range(0, 4999);
 
   if (freeNote === "exclude") {
     // Keep NULL notes, exclude FREE% notes
