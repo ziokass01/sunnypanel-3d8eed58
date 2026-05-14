@@ -309,12 +309,29 @@ export function FreeLandingPage() {
       ? getFindDumpsFreeFlowDefaults("credit", effectiveFindDumpsCode)
       : getFindDumpsFreeFlowDefaults("package", effectiveFindDumpsCode);
   }, [cfg?.find_dumps_rewards, effectiveFindDumpsCode, effectiveFindDumpsKind, isFindDumpsSelected]);
-  // Free Fire là key gốc của tab Free Key/server admin, nên dùng quota global.
-  // Chỉ Find Dumps/Fake Lag/AI mới đọc quota theo app.
-  const selectedQuotaMeta = useMemo(
-    () => selectedAppCode === "free-fire" ? null : cfg?.free_quota_by_app?.[selectedAppCode] ?? null,
-    [cfg?.free_quota_by_app, selectedAppCode],
-  );
+  // Free Fire là key gốc của tab Free Key/server admin:
+  // - quota setup lấy từ global Free Key settings.
+  // - số đã dùng/còn lại hôm nay vẫn lấy theo bucket free-fire để không hiện "-".
+  // App riêng như Find Dumps/Fake Lag/AI mới đọc quota riêng theo app.
+  const selectedQuotaMeta = useMemo(() => {
+    const appQuota = cfg?.free_quota_by_app?.[selectedAppCode] ?? null;
+
+    if (selectedAppCode === "free-fire") {
+      if (!appQuota) return null;
+      return {
+        ...appQuota,
+        free_daily_limit_per_fingerprint: Number(cfg?.free_daily_limit_per_fingerprint ?? appQuota.free_daily_limit_per_fingerprint ?? 0),
+        free_daily_limit_per_ip: Number(cfg?.free_daily_limit_per_ip ?? appQuota.free_daily_limit_per_ip ?? 0),
+      };
+    }
+
+    return appQuota;
+  }, [
+    cfg?.free_quota_by_app,
+    cfg?.free_daily_limit_per_fingerprint,
+    cfg?.free_daily_limit_per_ip,
+    selectedAppCode,
+  ]);
   const selectedKeySummaryMeta = useMemo(() => getFreeKeySummaryMeta(selectedAppCode, selectedKeyMeta), [selectedAppCode, selectedKeyMeta]);
 
   const missingText = useMemo(() => {
