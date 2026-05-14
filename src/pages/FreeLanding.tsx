@@ -334,6 +334,16 @@ export function FreeLandingPage() {
   ]);
   const selectedKeySummaryMeta = useMemo(() => getFreeKeySummaryMeta(selectedAppCode, selectedKeyMeta), [selectedAppCode, selectedKeyMeta]);
 
+  // Card "Thiết bị hiện tại" phải hiện số còn lại theo thiết bị.
+  // Free Fire là key gốc của tab Free Key/server admin, không lấy min(IP) làm tụt về 0.
+  // IP quota vẫn hiển thị riêng bên dưới và server vẫn tự kiểm khi bấm Get Key.
+  const selectedRemainingToday = useMemo(() => {
+    if (selectedAppCode === "free-fire") {
+      return selectedQuotaMeta?.remaining_fingerprint ?? cfg?.free_quota_remaining_today ?? null;
+    }
+    return selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null;
+  }, [cfg?.free_quota_remaining_today, selectedAppCode, selectedQuotaMeta]);
+
   const missingText = useMemo(() => {
     const m = cfg?.missing ?? [];
     return m.length ? m.join(", ") : null;
@@ -424,7 +434,7 @@ export function FreeLandingPage() {
 
               <FreeDeviceHistoryCard
                 history={deviceHistory}
-                remainingTodayServer={selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null}
+                remainingTodayServer={selectedRemainingToday}
                 lastKeyExpiresAt={lastFreeKey?.expires_at ?? null}
                 selectedKeyLabel={selectedKeySummaryMeta.label}
                 selectedQuotaFingerprint={selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0}
