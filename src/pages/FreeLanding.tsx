@@ -309,7 +309,12 @@ export function FreeLandingPage() {
       ? getFindDumpsFreeFlowDefaults("credit", effectiveFindDumpsCode)
       : getFindDumpsFreeFlowDefaults("package", effectiveFindDumpsCode);
   }, [cfg?.find_dumps_rewards, effectiveFindDumpsCode, effectiveFindDumpsKind, isFindDumpsSelected]);
-  const selectedQuotaMeta = useMemo(() => cfg?.free_quota_by_app?.[selectedAppCode] ?? null, [cfg?.free_quota_by_app, selectedAppCode]);
+  // Free Fire là key gốc của tab Free Key/server admin, nên dùng quota global.
+  // Chỉ Find Dumps/Fake Lag/AI mới đọc quota theo app.
+  const selectedQuotaMeta = useMemo(
+    () => selectedAppCode === "free-fire" ? null : cfg?.free_quota_by_app?.[selectedAppCode] ?? null,
+    [cfg?.free_quota_by_app, selectedAppCode],
+  );
   const selectedKeySummaryMeta = useMemo(() => getFreeKeySummaryMeta(selectedAppCode, selectedKeyMeta), [selectedAppCode, selectedKeyMeta]);
 
   const missingText = useMemo(() => {

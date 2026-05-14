@@ -155,6 +155,17 @@ async function resolvePerAppQuotaSettings(sb: any, appCodes: string[], fallbackF
   const map: Record<string, { free_daily_limit_per_fingerprint: number; free_daily_limit_per_ip: number }> = {};
   for (const code of uniqueCodes) {
     const hit = rows.find((row: any) => String(row?.app_code ?? "").trim().toLowerCase() === code);
+
+    // Free Fire là key gốc của tab Free Key/server admin.
+    // Không đọc server_app_settings theo app để tránh row free-fire 0/0 làm web hiện sai quota.
+    if (code === "free-fire") {
+      map[code] = {
+        free_daily_limit_per_fingerprint: Math.max(0, Number(fallbackFp)),
+        free_daily_limit_per_ip: Math.max(0, Number(fallbackIp)),
+      };
+      continue;
+    }
+
     if (code === "fake-lag") {
       const syncedFpLimit = positiveLimit(hit?.free_daily_limit_per_fingerprint);
       const ruleFpLimit = positiveLimit(fakeLagRule?.max_devices_per_key);
