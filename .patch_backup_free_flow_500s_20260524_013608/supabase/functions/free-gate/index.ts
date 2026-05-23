@@ -38,20 +38,6 @@ function secondsUntil(iso: unknown) {
   return Math.ceil((ms - Date.now()) / 1000);
 }
 
-function clampSeconds(value: unknown, fallback: number, min: number, max: number) {
-  const n = Math.floor(Number(value ?? fallback));
-  const safe = Number.isFinite(n) && n > 0 ? n : fallback;
-  return Math.min(max, Math.max(min, safe));
-}
-
-function minIsoDeadline(...items: Array<string | number | Date | null | undefined>) {
-  const times = items
-    .map((item) => item instanceof Date ? item.getTime() : typeof item === "number" ? item : Date.parse(String(item ?? "")))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (!times.length) return new Date().toISOString();
-  return new Date(Math.min(...times)).toISOString();
-}
-
 async function logGate(db: any, row: Record<string, unknown>) {
   try {
     await db.from("licenses_free_gate_logs").insert(row);
@@ -173,7 +159,7 @@ Deno.serve(async (req) => {
     await updateSession(db, sessionId, {
       status: "waiting_pass2",
       out_token_hash: nextOutHash,
-      out_expires_at: minIsoDeadline(Date.now() + clampSeconds(cfg.free_session_absolute_seconds, 500, 120, 500) * 1000, s.expires_at),
+      out_expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       gate_ok_at: new Date().toISOString(),
       last_error: null,
     });
@@ -183,8 +169,7 @@ Deno.serve(async (req) => {
 
   const claimToken = "clm_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   const claimHash = await sha256Hex(claimToken);
-  const claimWindowSeconds = clampSeconds((cfg as any).free_claim_window_seconds, 180, 30, 500);
-  const claimExpiresAt = minIsoDeadline(Date.now() + claimWindowSeconds * 1000, s.expires_at);
+  const claimExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
   await updateSession(db, sessionId, {
     status: "gate_ok",
     gate_ok_at: new Date().toISOString(),

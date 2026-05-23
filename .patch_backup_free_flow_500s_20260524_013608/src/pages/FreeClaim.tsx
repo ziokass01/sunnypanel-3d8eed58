@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
-import { FreeFlowSteps, markFreeAttemptFail, markFreeSuccess } from "@/features/free/flow-ux";
+import { fetchFreeConfig, type FreeConfig } from "@/features/free/free-config";
+import { FreeNotice } from "@/features/free/FreeNotice";
+import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttemptFail, markFreeSuccess, readFreeDeviceHistory } from "@/features/free/flow-ux";
 import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -120,7 +122,7 @@ export function FreeClaimPage() {
   const metaFresh = useMemo(() => {
     const startedAtMs = Number(startMeta?.startedAtMs ?? 0);
     if (!Number.isFinite(startedAtMs) || startedAtMs <= 0) return false;
-    return Date.now() - startedAtMs <= 500 * 1000;
+    return Date.now() - startedAtMs <= 30 * 60 * 1000;
   }, [startMeta]);
 
   const claimFromUrl = useMemo(() => {
@@ -266,7 +268,10 @@ export function FreeClaimPage() {
   const [revealed, setRevealed] = useState<RevealedState | null>(null);
   const [serverDebug, setServerDebug] = useState<any>(null);
   const [copied, setCopied] = useState(false);
+  const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
 
+  const [remainingTodayServer, setRemainingTodayServer] = useState<number | null>(null);
+  const [cfg, setCfg] = useState<FreeConfig | null>(null);
 
   async function resolveByOutToken(outTok: string, debug: boolean): Promise<string | null> {
     const tok = String(outTok || "").trim();
@@ -368,6 +373,22 @@ export function FreeClaimPage() {
     };
   }, []);
 
+  // Fetch backend config to determine Turnstile requirements.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const fp = getOrCreateFingerprint();
+        const cfg = await fetchFreeConfig({ fingerprint: fp });
+        setCfg(cfg);
+        setRemainingTodayServer(cfg.free_quota_remaining_today ?? null);
+      } catch {
+        // If config cannot be fetched, fail open (do not block claim UI).
+        setCfg(null);
+        setRemainingTodayServer(null);
+      }
+    })();
+  }, []);
+
   const returnSeconds = 10;
 
   const selectedLabel = useMemo(() => {
@@ -441,6 +462,7 @@ export function FreeClaimPage() {
 
         const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
         markFreeAttemptFail(code || err.msg || "REVEAL_FAILED");
+        setDeviceHistory(readFreeDeviceHistory());
         setError(debugMode && code ? `${friendly} (${code})` : friendly);
         return;
       }
@@ -466,6 +488,7 @@ export function FreeClaimPage() {
         };
         localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
         markFreeSuccess({ keyLabel: payload.key_type, nextEligibleAt: okRes.expires_at || null });
+        setDeviceHistory(readFreeDeviceHistory());
       } catch {
         // ignore
       }
@@ -473,6 +496,7 @@ export function FreeClaimPage() {
       const code = String(e?.code || "").trim();
       const friendly = friendlyRevealError(code || e?.message || "UNAUTHORIZED");
       markFreeAttemptFail(code || e?.message || "REVEAL_FAILED");
+      setDeviceHistory(readFreeDeviceHistory());
       setError(debugMode && code ? `${friendly} (${code})` : friendly);
     } finally {
       setLoading(false);
@@ -533,10 +557,14 @@ export function FreeClaimPage() {
             <FreeFlowSteps current={4} />
           </CardHeader>
           <CardContent className="space-y-4 p-5">
+            <FreeNotice notice={cfg?.free_notice} />
+
             <div className="rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 text-sm text-muted-foreground shadow-sm">
               <div className="font-semibold text-foreground">Lưu ý</div>
               <div className="mt-1 leading-6">Nếu bạn thấy lỗi xác thực, hãy quay lại bước đầu để tạo lại phiên mới. Khi nhận thành công, bấm copy để lưu key ngay.</div>
             </div>
+
+            <FreeDeviceHistoryCard history={deviceHistory} remainingTodayServer={remainingTodayServer} />
 
             {!claimToken ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">

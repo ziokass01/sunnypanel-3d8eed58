@@ -347,7 +347,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "CLOSED" }, 200);
   }
 
-  const freeCloseDeadlineSeconds = Math.max(10, Number((settings as any)?.free_close_deadline_seconds ?? settings?.free_return_seconds ?? 60));
+  const freeReturnSeconds = Math.max(10, Number(settings?.free_return_seconds ?? 60));
 
   // FREE flow no longer uses Turnstile. Reset-key keeps its own Turnstile flow.
 
@@ -934,7 +934,7 @@ Deno.serve(async (req) => {
         last_error: null,
         revealed_at: issued.created_at,
         reveal_count: 1,
-        close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(),
+        close_deadline_at: new Date(Date.now() + freeReturnSeconds * 1000).toISOString(),
         copied_at: null,
       })
       .eq("session_id", sessionId);
@@ -1029,7 +1029,7 @@ Deno.serve(async (req) => {
       revealed_at: new Date().toISOString(),
       revealed_license_id: inserted.id,
       reveal_count: 1,
-      close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(),
+      close_deadline_at: new Date(Date.now() + freeReturnSeconds * 1000).toISOString(),
       copied_at: null,
     })
     .eq("session_id", sessionId);

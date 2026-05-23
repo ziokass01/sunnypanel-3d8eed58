@@ -123,32 +123,6 @@ function shortHash(v?: string | null, n = 10) {
   return x.length > n ? `${x.slice(0, n)}…` : x;
 }
 
-function writeFlowItem(key: string, value: string) {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function removeFlowItem(key: string) {
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-}
-
 function readLastFreeKeySnapshot(): LastFreeKey | null {
   try {
     const raw = localStorage.getItem(LAST_FREE_KEY_STORAGE);
@@ -573,29 +547,29 @@ export function FreeLandingPage() {
                       minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
                     });
                     try {
-                      writeFlowItem("free_out_token_v1", String(res.out_token));
-                      writeFlowItem("free_out_token", String(res.out_token));
+                      localStorage.setItem("free_out_token_v1", String(res.out_token));
+                      localStorage.setItem("free_out_token", String(res.out_token));
 
                       const sid = String((res as any).session_id ?? "").trim();
                       if (sid) {
-                        writeFlowItem("free_session_id_v1", sid);
-                        writeFlowItem("free_session_id", sid);
+                        localStorage.setItem("free_session_id_v1", sid);
+                        localStorage.setItem("free_session_id", sid);
                       }
 
-                      writeFlowItem("free_started_at_ms", String(Date.now()));
-                      writeFlowItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
-                      writeFlowItem("free_key_type_code", String(selected));
+                      localStorage.setItem("free_started_at_ms", String(Date.now()));
+                      localStorage.setItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
+                      localStorage.setItem("free_key_type_code", String(selected));
                       setSelectedAppCode(selectedAppCode);
                       if (isFindDumpsSelected) setFindDumpsFreeSelection(effectiveFindDumpsKind, effectiveFindDumpsCode, effectiveFindDumpsReward?.walletKind ?? null);
                       const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
-                      if (pass2Tok) writeFlowItem("free_out_token_pass2", pass2Tok);
+                      if (pass2Tok) localStorage.setItem("free_out_token_pass2", pass2Tok);
                       const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
-                      if (pass2Outbound) writeFlowItem("free_outbound_url_pass2", pass2Outbound);
+                      if (pass2Outbound) localStorage.setItem("free_outbound_url_pass2", pass2Outbound);
                     } catch {
                       // ignore
                     }
                     try {
-                      removeFlowItem("free_claim_token");
+                      localStorage.removeItem("free_claim_token");
                     } catch {
                       /* ignore */
                     }

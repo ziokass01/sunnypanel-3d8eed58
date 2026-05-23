@@ -21,11 +21,6 @@ async function sha256Hex(input: string) {
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-function clampSeconds(value: unknown, fallback: number, min: number, max: number) {
-  const n = Math.floor(Number(value ?? fallback));
-  const safe = Number.isFinite(n) && n > 0 ? n : fallback;
-  return Math.min(max, Math.max(min, safe));
-}
 function publicBase() {
   return (Deno.env.get("FREE_PUBLIC_BASE_URL") || Deno.env.get("PUBLIC_BASE_URL") || "https://mityangho.id.vn").replace(/\/+$/, "");
 }
@@ -157,10 +152,9 @@ Deno.serve(async (req) => {
   const outToken = "out_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   const outHash = await sha256Hex(outToken);
   const nowIso = new Date().toISOString();
-  const sessionTtlSeconds = clampSeconds(cfg.free_session_absolute_seconds, 500, 120, 500);
+  const sessionTtlSeconds = Math.max(600, Number(cfg.free_return_seconds ?? 1800) || 1800);
   const expiresAt = new Date(Date.now() + sessionTtlSeconds * 1000).toISOString();
-  // out_token không được sống lâu hơn session chính. Sau 500s backend gate/reveal sẽ fail và không phát key.
-  const outExpiresAt = expiresAt;
+  const outExpiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   const minDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds ?? 0) || 0);
   // Link4M bucket fix:
   // Gate URL không còn chứa sid/out_token riêng từng phiên.
@@ -225,7 +219,7 @@ Deno.serve(async (req) => {
   }
   if (inserted.error) return await deny("SESSION_CREATE_FAILED", { detail: inserted.error.message });
 
-  await logGate(db, { ...baseLog, session_id: sessionId, event_code: "start_ok", detail: { route: "free-start", app_code: appCode, trace_id: traceId, package_code: packageCode, credit_code: creditCode, wallet_kind: walletKind, link4m_bucket: gate.bucket, session_ttl_seconds: sessionTtlSeconds } });
+  await logGate(db, { ...baseLog, session_id: sessionId, event_code: "start_ok", detail: { route: "free-start", app_code: appCode, trace_id: traceId, package_code: packageCode, credit_code: creditCode, wallet_kind: walletKind, link4m_bucket: gate.bucket } });
   return json({
     ok: true,
     session_id: sessionId,
@@ -239,6 +233,5 @@ Deno.serve(async (req) => {
     min_delay_seconds_pass2: Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds_pass2 ?? 0) || 0),
     trace_id: traceId,
     expires_at: expiresAt,
-    session_ttl_seconds: sessionTtlSeconds,
   }, 200);
 });

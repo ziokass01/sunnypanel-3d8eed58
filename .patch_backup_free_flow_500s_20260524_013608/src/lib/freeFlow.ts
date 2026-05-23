@@ -12,53 +12,13 @@ function storageKey(appCode?: string | null) {
   return `sunny_free_flow_v1:${normalized}`;
 }
 
-function readStorage(key: string) {
-  try {
-    const v = sessionStorage.getItem(key);
-    if (v) return v;
-  } catch {
-    // ignore
-  }
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: string) {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function removeStorage(key: string) {
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-}
-
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
 export function readBundle(appCode?: string | null): FreeFlowBundle | null {
   try {
-    const raw = readStorage(storageKey(appCode));
+    const raw = localStorage.getItem(storageKey(appCode));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<FreeFlowBundle> | null;
     if (!parsed || parsed.version !== 1) return null;
@@ -112,7 +72,7 @@ export function writeBundle(
 
     if (!next.session_id || !next.out_token) return;
 
-    writeStorage(storageKey(appCode), JSON.stringify(next));
+    localStorage.setItem(storageKey(appCode), JSON.stringify(next));
   } catch {
     // ignore
   }
@@ -120,13 +80,13 @@ export function writeBundle(
 
 export function clearBundle(appCode?: string | null): void {
   try {
-    removeStorage(storageKey(appCode));
+    localStorage.removeItem(storageKey(appCode));
   } catch {
     // ignore
   }
 }
 
-export function isFresh(bundle: FreeFlowBundle, maxAgeMs = 500 * 1000): boolean {
+export function isFresh(bundle: FreeFlowBundle, maxAgeMs = 30 * 60 * 1000): boolean {
   const age = Date.now() - Number(bundle.created_at || 0);
   return Number.isFinite(age) && age >= 0 && age <= maxAgeMs;
 }

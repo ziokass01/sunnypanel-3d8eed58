@@ -260,9 +260,6 @@ Deno.serve(async (req) => {
     const free_link4m_rotate_nonce_pass1 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass1 ?? 0));
     const free_link4m_rotate_nonce_pass2 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass2 ?? 0));
     const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
-    const free_session_absolute_seconds = Math.min(500, Math.max(120, Number((settings as any)?.free_session_absolute_seconds ?? 500) || 500));
-    const free_claim_window_seconds = Math.min(500, Math.max(30, Number((settings as any)?.free_claim_window_seconds ?? 180) || 180));
-    const free_close_deadline_seconds = Math.max(10, Number((settings as any)?.free_close_deadline_seconds ?? free_return_seconds) || free_return_seconds);
     const free_daily_limit_per_fingerprint = Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
     const free_daily_limit_per_ip = Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0));
     const free_gate_require_ip_match = Boolean((settings as any)?.free_gate_require_ip_match ?? true);
@@ -479,9 +476,6 @@ Deno.serve(async (req) => {
       free_gate_antibypass_enabled,
       free_gate_antibypass_seconds,
       free_return_seconds,
-      free_session_absolute_seconds,
-      free_claim_window_seconds,
-      free_close_deadline_seconds,
       free_daily_limit_per_fingerprint: requestedQuota?.free_daily_limit_per_fingerprint ?? free_daily_limit_per_fingerprint,
       free_daily_limit_per_ip: requestedQuota?.free_daily_limit_per_ip ?? free_daily_limit_per_ip,
       free_gate_require_ip_match,

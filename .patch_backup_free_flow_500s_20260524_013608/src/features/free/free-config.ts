@@ -83,9 +83,6 @@ export type FreeConfig = {
   free_min_delay_seconds: number;
   free_min_delay_seconds_pass2?: number;
   free_return_seconds: number;
-  free_session_absolute_seconds?: number;
-  free_claim_window_seconds?: number;
-  free_close_deadline_seconds?: number;
   free_daily_limit_per_fingerprint: number;
   free_daily_limit_per_ip?: number;
   free_gate_require_ip_match?: boolean;

@@ -13,8 +13,6 @@ type GateNextPass2 = { ok: true; next: "PASS2"; out_token: string; outbound_url:
 type GateNextClaim = { ok: true; next: "CLAIM"; claim_token: string; claim_url?: string | null };
 type GateOk = GateNextPass2 | GateNextClaim;
 type GateErr = { ok: false; msg: string; code?: string; detail?: any };
-type ResolveOk = { ok: true; session_id: string };
-type ResolveErr = { ok: false; msg: string; code?: string; detail?: any };
 
 function friendlyGateError(msg: string) {
   const m = String(msg || "").trim();
@@ -42,41 +40,6 @@ function pad2(n: number) {
   return String(Math.max(0, Math.floor(n))).padStart(2, "0");
 }
 
-function readFlowItem(key: string) {
-  try {
-    const v = sessionStorage.getItem(key);
-    if (v) return v;
-  } catch {
-    // ignore
-  }
-  try {
-    return localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-}
-
-function writeFlowItem(key: string, value: string) {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function persistGateFlow(sessionId: string, outToken: string) {
-  if (!sessionId || !outToken) return;
-  writeFlowItem("free_out_token_v1", outToken);
-  writeFlowItem("free_out_token", outToken);
-  writeFlowItem("free_session_id_v1", sessionId);
-  writeFlowItem("free_session_id", sessionId);
-}
-
 export function FreeGatePage() {
   const nav = useNavigate();
   const [sp] = useSearchParams();
@@ -100,7 +63,7 @@ export function FreeGatePage() {
     if (tFromQuery) return tFromQuery;
     try {
       if (pass === 2) {
-        const pass2a = readFlowItem("free_out_token_pass2").trim();
+        const pass2a = (localStorage.getItem("free_out_token_pass2") || "").trim();
         if (pass2a) return pass2a;
       }
     } catch {
@@ -109,12 +72,12 @@ export function FreeGatePage() {
     const fromPrimary = (getOutToken() || "").trim();
     if (fromPrimary) return fromPrimary;
     try {
-      const fb1 = readFlowItem("free_out_token_v1").trim();
+      const fb1 = (localStorage.getItem("free_out_token_v1") || "").trim();
       if (fb1) return fb1;
-      const fb2 = readFlowItem("free_out_token").trim();
+      const fb2 = (localStorage.getItem("free_out_token") || "").trim();
       if (fb2) return fb2;
       if (pass === 2) {
-        const pass2b = readFlowItem("free_out_token_pass2").trim();
+        const pass2b = (localStorage.getItem("free_out_token_pass2") || "").trim();
         if (pass2b) return pass2b;
       }
     } catch {
@@ -128,18 +91,15 @@ export function FreeGatePage() {
     const b = readBundle();
     if (b?.session_id) return b.session_id;
     try {
-      const s1 = readFlowItem("free_session_id_v1").trim();
+      const s1 = (localStorage.getItem("free_session_id_v1") || "").trim();
       if (s1) return s1;
-      const s2 = readFlowItem("free_session_id").trim();
+      const s2 = (localStorage.getItem("free_session_id") || "").trim();
       if (s2) return s2;
     } catch {
       // ignore
     }
     return "";
   }, [sidFromQuery]);
-
-  const [resolvedSessionId, setResolvedSessionId] = useState<string>("");
-  const effectiveSessionId = useMemo(() => (sessionId || resolvedSessionId || "").trim(), [sessionId, resolvedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,33 +120,9 @@ export function FreeGatePage() {
     };
   }, []);
 
-  async function resolveSessionIdByOutToken(tok: string) {
-    const cleanTok = String(tok || "").trim();
-    if (!cleanTok) return "";
-
-    try {
-      const res = await postFunction<ResolveOk | ResolveErr>("/free-resolve", { out_token: cleanTok });
-      if (!(res as ResolveOk).ok) return "";
-
-      const sid = String((res as ResolveOk).session_id || "").trim();
-      if (!sid) return "";
-
-      setResolvedSessionId(sid);
-      persistGateFlow(sid, cleanTok);
-      writeBundle({ session_id: sid, out_token: cleanTok });
-      return sid;
-    } catch {
-      return "";
-    }
-  }
-
   async function gateOnce() {
     const tok = outToken;
-    let sid = effectiveSessionId;
-
-    if (!sid && tok) {
-      sid = await resolveSessionIdByOutToken(tok);
-    }
+    const sid = sessionId;
 
     if (!tok || !sid) {
       setStatus("error");
@@ -195,10 +131,13 @@ export function FreeGatePage() {
       return;
     }
 
-    // Persist token/sid for reload flows. sessionStorage is read first to avoid multi-tab overwrites; localStorage remains a compatibility fallback.
+    // Persist token/sid for reload flows
     try {
       setOutToken(tok);
-      persistGateFlow(sid, tok);
+      localStorage.setItem("free_out_token_v1", tok);
+      localStorage.setItem("free_out_token", tok);
+      localStorage.setItem("free_session_id_v1", sid);
+      localStorage.setItem("free_session_id", sid);
     } catch {
       // ignore
     }
@@ -228,7 +167,7 @@ export function FreeGatePage() {
           // so Link4M pass2 can stay fixed and we do not depend on generating a new token here.
           let nextTok = String(ok.out_token || "").trim();
           try {
-            if (!nextTok) nextTok = readFlowItem("free_out_token_pass2").trim();
+            if (!nextTok) nextTok = String(localStorage.getItem("free_out_token_pass2") || "").trim();
           } catch {
             // ignore
           }
@@ -236,7 +175,10 @@ export function FreeGatePage() {
             setOutToken(nextTok);
             writeBundle({ session_id: sid, out_token: nextTok });
             try {
-              persistGateFlow(sid, nextTok);
+              localStorage.setItem("free_out_token_v1", nextTok);
+              localStorage.setItem("free_out_token", nextTok);
+              localStorage.setItem("free_session_id_v1", sid);
+              localStorage.setItem("free_session_id", sid);
             } catch {
               // ignore
             }
@@ -244,7 +186,7 @@ export function FreeGatePage() {
           setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
           let outbound = "";
           try {
-            outbound = readFlowItem("free_outbound_url_pass2").trim();
+            outbound = String(localStorage.getItem("free_outbound_url_pass2") || "").trim();
           } catch {
             // ignore
           }
@@ -264,7 +206,7 @@ export function FreeGatePage() {
         // CLAIM
         const claim = String(ok.claim_token || "").trim();
         try {
-          writeFlowItem("free_claim_token", claim);
+          localStorage.setItem("free_claim_token", claim);
         } catch {
           // ignore
         }
@@ -295,10 +237,10 @@ export function FreeGatePage() {
   }
 
   useEffect(() => {
-    const sid = effectiveSessionId;
+    const sid = sessionId;
     const tok = outToken;
 
-    if (!tok) {
+    if (!sid || !tok) {
       setStatus("error");
       setMessage("Vượt link không thành công. Hãy quay lại trang Get Key🔑 và làm lại.");
       return;
@@ -341,7 +283,7 @@ export function FreeGatePage() {
 
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configReady, gateAntiBypassEnabled, pass, effectiveSessionId, outToken]);
+  }, [configReady, gateAntiBypassEnabled, pass, sessionId, outToken]);
 
   return (
     <div className="min-h-svh bg-background">
@@ -376,22 +318,20 @@ export function FreeGatePage() {
               </div>
             </div>
 
-            {debugMode ? (
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border bg-background/70 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">{status === "error" ? "Thất bại" : status === "countdown" ? "Đang chờ" : "Đang xử lý"}</div>
-                </div>
-                <div className="rounded-2xl border bg-background/70 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Loại phiên</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">{pass === 2 ? "VIP / Pass 2" : "Normal / Pass 1"}</div>
-                </div>
-                <div className="rounded-2xl border bg-background/70 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tiếp theo</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">{status === "error" ? "Quay lại Get Key" : "Tự chuyển bước"}</div>
-                </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border bg-background/70 p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{status === "error" ? "Thất bại" : status === "countdown" ? "Đang chờ" : "Đang xử lý"}</div>
               </div>
-            ) : null}
+              <div className="rounded-2xl border bg-background/70 p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Loại phiên</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{pass === 2 ? "VIP / Pass 2" : "Normal / Pass 1"}</div>
+              </div>
+              <div className="rounded-2xl border bg-background/70 p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tiếp theo</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{status === "error" ? "Quay lại Get Key" : "Tự chuyển bước"}</div>
+              </div>
+            </div>
 
             {status === "error" ? (
               <Button className="h-12 w-full rounded-2xl text-base font-semibold" variant="secondary" onClick={() => nav("/free", { replace: true })}>

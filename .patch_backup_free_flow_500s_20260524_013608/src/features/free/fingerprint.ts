@@ -12,46 +12,6 @@ function randomBase64Url(bytesLen = 18) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function readFlowStorage(key: string) {
-  try {
-    const v = sessionStorage.getItem(key);
-    if (v) return v;
-  } catch {
-    // ignore
-  }
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeFlowStorage(key: string, value: string) {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function removeFlowStorage(key: string) {
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-}
-
 export function getOrCreateFingerprint(): string {
   try {
     const existing = localStorage.getItem(FREE_FP_KEY);
@@ -67,7 +27,7 @@ export function getOrCreateFingerprint(): string {
 
 export function setOutToken(tok: string) {
   try {
-    writeFlowStorage(FREE_OUT_TOKEN_KEY, tok);
+    localStorage.setItem(FREE_OUT_TOKEN_KEY, tok);
   } catch {
     // ignore
   }
@@ -75,7 +35,7 @@ export function setOutToken(tok: string) {
 
 export function getOutToken(): string {
   try {
-    return readFlowStorage(FREE_OUT_TOKEN_KEY);
+    return localStorage.getItem(FREE_OUT_TOKEN_KEY) ?? "";
   } catch {
     return "";
   }
@@ -83,8 +43,8 @@ export function getOutToken(): string {
 
 export function clearFreeFlowStorage() {
   try {
-    removeFlowStorage(FREE_OUT_TOKEN_KEY);
-    removeFlowStorage(FREE_KEY_TYPE_CODE_KEY);
+    localStorage.removeItem(FREE_OUT_TOKEN_KEY);
+    localStorage.removeItem(FREE_KEY_TYPE_CODE_KEY);
   } catch {
     // ignore
   }
@@ -128,7 +88,7 @@ export function getSelectedKeyTypeCode(): string {
 
 export function setFreeStartMeta(data: { startedAtMs: number; minDelaySeconds: number; pass?: number; passesRequired?: number; minDelaySecondsPass2?: number }) {
   try {
-    writeFlowStorage(FREE_START_META_KEY, JSON.stringify(data));
+    localStorage.setItem(FREE_START_META_KEY, JSON.stringify(data));
   } catch {
     // ignore
   }
@@ -136,7 +96,7 @@ export function setFreeStartMeta(data: { startedAtMs: number; minDelaySeconds: n
 
 export function getFreeStartMeta(): { startedAtMs: number; minDelaySeconds: number; pass?: number; passesRequired?: number; minDelaySecondsPass2?: number } | null {
   try {
-    const raw = readFlowStorage(FREE_START_META_KEY);
+    const raw = localStorage.getItem(FREE_START_META_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { startedAtMs?: number; minDelaySeconds?: number };
     const startedAtMs = Number(parsed.startedAtMs ?? 0);
