@@ -98,24 +98,28 @@ export function FreeGatePage() {
 
   const outToken = useMemo(() => {
     if (tFromQuery) return tFromQuery;
-    try {
-      if (pass === 2) {
-        const pass2a = readFlowItem("free_out_token_pass2").trim();
-        if (pass2a) return pass2a;
-      }
-    } catch {
-      // ignore
-    }
+
+    // VIP pass2 bugfix:
+    // Older builds stored a separate `free_out_token_pass2`. Current backend does not pre-issue
+    // that token at /free-start; pass1 rotates the live token and stores it in the primary slots.
+    // Therefore primary/current token must win. Legacy pass2 slot is only a last-resort fallback,
+    // otherwise a stale token from a previous VIP attempt causes OUT_TOKEN_MISMATCH at step 3/4.
     const fromPrimary = (getOutToken() || "").trim();
     if (fromPrimary) return fromPrimary;
+
     try {
+      const bundleTok = String(readBundle()?.out_token || "").trim();
+      if (bundleTok) return bundleTok;
+
       const fb1 = readFlowItem("free_out_token_v1").trim();
       if (fb1) return fb1;
+
       const fb2 = readFlowItem("free_out_token").trim();
       if (fb2) return fb2;
+
       if (pass === 2) {
-        const pass2b = readFlowItem("free_out_token_pass2").trim();
-        if (pass2b) return pass2b;
+        const legacyPass2 = readFlowItem("free_out_token_pass2").trim();
+        if (legacyPass2) return legacyPass2;
       }
     } catch {
       // ignore
@@ -237,6 +241,7 @@ export function FreeGatePage() {
             writeBundle({ session_id: sid, out_token: nextTok });
             try {
               persistGateFlow(sid, nextTok);
+              writeFlowItem("free_out_token_pass2", nextTok);
             } catch {
               // ignore
             }
