@@ -221,6 +221,19 @@ function createEmptyDownloadCard(): DownloadCardEditorItem {
   });
 }
 
+function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
+  if (provider === "link4m") return "https://link4m.co/api-shorten/v2";
+  if (provider === "traffic68") return "https://traffic68.com/api/quicklink/st";
+  if (provider === "nhapma") return "https://service.nhapma.com/api";
+  if (provider === "layma") return "https://api.layma.net/api/admin/shortlink/quicklink";
+  return "";
+}
+
+function normalizeProviderApi(row: ShortlinkProviderRow) {
+  const provider = row.provider || "custom";
+  return row.api_url_template ?? defaultShortlinkApi(provider);
+}
+
 function buildDownloadCardsFromSettings(settings?: Partial<SettingsRow> | null): DownloadCardEditorItem[] {
   const rawCards = Array.isArray((settings as any)?.free_download_cards) ? (settings as any)?.free_download_cards : [];
   const cards = rawCards
@@ -494,17 +507,12 @@ export function AdminFreeKeysPage() {
   const providersQuery = useQuery({
     queryKey: ["free-shortlink-providers"],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("licenses_free_shortlink_providers")
-        .select("*")
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true });
-      if (error) {
-        const msg = String(error?.message || error?.details || "").toLowerCase();
-        if (msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find")) return [] as ShortlinkProviderRow[];
-        throw error;
-      }
-      return (data ?? []) as ShortlinkProviderRow[];
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) return [] as ShortlinkProviderRow[];
+      const data = await postFunction<any>("/admin-free-shortlinks", { action: "list" }, { authToken: token });
+      if (data?.ok === false) throw new Error(data?.msg || data?.code || "PROVIDERS_LOAD_FAILED");
+      return (data?.providers ?? []) as ShortlinkProviderRow[];
     },
   });
 
@@ -550,7 +558,7 @@ export function AdminFreeKeysPage() {
     setProviderDrafts(rows.map((row) => ({
       ...row,
       api_token_secret: row.api_token_secret ?? "",
-      api_url_template: row.api_url_template ?? "",
+      api_url_template: normalizeProviderApi(row),
       note: row.note ?? "",
     })));
   }, [providersQuery.data]);
@@ -559,10 +567,10 @@ export function AdminFreeKeysPage() {
     const nextOrder = (providerDrafts.reduce((max, row) => Math.max(max, Number(row.sort_order ?? 0)), 0) || 0) + 10;
     setProviderDrafts((prev) => [...prev, {
       id: `tmp_${Date.now()}`,
-      name: "",
+      name: "Link4M",
       provider: "link4m",
       api_token_secret: "",
-      api_url_template: "",
+      api_url_template: defaultShortlinkApi("link4m"),
       enabled: true,
       pass_scope: "both",
       sort_order: nextOrder,
@@ -791,49 +799,38 @@ export function AdminFreeKeysPage() {
           ...row,
           name: String(row.name ?? "").trim(),
           provider: row.provider || "custom",
-          api_token_secret: String(row.api_token_secret ?? "").trim() || null,
-          api_url_template: String(row.api_url_template ?? "").trim() || null,
+          api_token_secret: String(row.api_token_secret ?? "").trim(),
+          api_url_template: String(row.api_url_template ?? "").trim(),
           pass_scope: row.pass_scope || "both",
           enabled: Boolean(row.enabled),
           sort_order: (index + 1) * 10,
-          note: String(row.note ?? "").trim() || null,
+          note: String(row.note ?? "").trim(),
         }))
         .filter((row) => row.name || row.api_token_secret || row.api_url_template || row.provider === "none");
 
-      for (const row of cleaned) {
-        const payload = {
-          name: row.name || row.provider.toUpperCase(),
-          provider: row.provider,
-          api_token_secret: row.api_token_secret,
-          api_url_template: row.api_url_template,
-          enabled: row.enabled,
-          pass_scope: row.pass_scope,
-          sort_order: row.sort_order,
-          note: row.note,
-        };
-
-        if (String(row.id).startsWith("tmp_")) {
-          const { error } = await (supabase as any).from("licenses_free_shortlink_providers").insert(payload);
-          if (error) throw error;
-        } else {
-          const { error } = await (supabase as any).from("licenses_free_shortlink_providers").update(payload).eq("id", row.id);
-          if (error) throw error;
+      for (const [idx, row] of cleaned.entries()) {
+        if (row.provider !== "none") {
+          if (!row.api_url_template) throw new Error(`Dòng ${idx + 1}: thiếu ô API.`);
+          if (!/^https?:\/\//i.test(row.api_url_template)) throw new Error(`Dòng ${idx + 1}: API phải bắt đầu bằng http/https.`);
+          if (!row.api_token_secret) throw new Error(`Dòng ${idx + 1}: thiếu ô Token.`);
         }
       }
 
-      const { error: modeErr } = await (supabase as any)
-        .from("licenses_free_settings")
-        .upsert({
-          id: 1,
-          free_shortlink_mode: shortlinkMode,
-          free_gate_token_life_seconds: Math.max(60, Math.min(1800, Math.floor(Number(gateTokenLifeSeconds) || 600))),
-        }, { onConflict: "id" });
-      if (modeErr) throw modeErr;
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("ADMIN_AUTH_REQUIRED");
 
+      const data = await postFunction<any>("/admin-free-shortlinks", {
+        action: "save",
+        providers: cleaned,
+        free_shortlink_mode: shortlinkMode,
+        free_gate_token_life_seconds: Math.max(60, Math.min(1800, Math.floor(Number(gateTokenLifeSeconds) || 600))),
+      }, { authToken: token });
+      if (data?.ok === false) throw new Error(data?.msg || data?.code || "PROVIDER_SAVE_FAILED");
       return true;
     },
     onSuccess: async () => {
-      toast({ title: "Saved", description: "Danh sách API/token rút gọn và chế độ chọn link đã cập nhật." });
+      toast({ title: "Saved", description: "Đã lưu API + Token rút gọn. Reload trang vẫn còn dữ liệu." });
       await Promise.all([providersQuery.refetch(), settingsQuery.refetch()]);
     },
     onError: (e: any) => {
@@ -843,13 +840,18 @@ export function AdminFreeKeysPage() {
 
   const deleteProvider = useMutation({
     mutationFn: async (id: string) => {
-      if (String(id).startsWith("tmp_")) return true;
-      const { error } = await (supabase as any).from("licenses_free_shortlink_providers").delete().eq("id", id);
-      if (error) throw error;
+      if (String(id).startsWith("tmp_")) {
+        setProviderDrafts((prev) => prev.filter((row) => row.id !== id));
+        return true;
+      }
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("ADMIN_AUTH_REQUIRED");
+      const data = await postFunction<any>("/admin-free-shortlinks", { action: "delete", id }, { authToken: token });
+      if (data?.ok === false) throw new Error(data?.msg || data?.code || "PROVIDER_DELETE_FAILED");
       return true;
     },
-    onSuccess: async (_ok, id) => {
-      setProviderDrafts((prev) => prev.filter((row) => row.id !== id));
+    onSuccess: async () => {
       toast({ title: "Deleted", description: "Đã xóa provider rút gọn." });
       await providersQuery.refetch();
     },
@@ -1561,7 +1563,7 @@ export function AdminFreeKeysPage() {
               <div>
                 <div className="font-medium">API / Token rút gọn dùng cho Free Key</div>
                 <div className="text-xs text-muted-foreground">
-                  Flow mới: mỗi lượt Get Key sinh 1 gate token riêng, backend chọn provider đang bật rồi mới rút gọn. API token không trả ra public /free-config.
+                  Flow mới: mỗi lượt Get Key sinh 1 gate token riêng. Mỗi dòng bắt buộc có 2 ô API + Token; backend giữ token server-side, không trả ra public /free-config.
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1602,8 +1604,8 @@ export function AdminFreeKeysPage() {
                   <TableRow>
                     <TableHead className="min-w-[140px]">Tên</TableHead>
                     <TableHead className="min-w-[130px]">Provider</TableHead>
-                    <TableHead className="min-w-[190px]">API token</TableHead>
-                    <TableHead className="min-w-[260px]">API URL custom</TableHead>
+                    <TableHead className="min-w-[220px]">Token</TableHead>
+                    <TableHead className="min-w-[310px]">API</TableHead>
                     <TableHead className="min-w-[110px]">Pass</TableHead>
                     <TableHead className="min-w-[80px]">Bật</TableHead>
                     <TableHead className="min-w-[140px]">Thứ tự</TableHead>
@@ -1618,7 +1620,16 @@ export function AdminFreeKeysPage() {
                         {row.last_error ? <div className="mt-1 text-[11px] text-destructive">{row.last_error}</div> : null}
                       </TableCell>
                       <TableCell>
-                        <Select value={row.provider} onValueChange={(v) => updateProviderDraft(row.id, { provider: v as ShortlinkProviderRow["provider"] })}>
+                        <Select value={row.provider} onValueChange={(v) => {
+                          const provider = v as ShortlinkProviderRow["provider"];
+                          const currentApi = String(row.api_url_template ?? "").trim();
+                          const knownDefaults = [defaultShortlinkApi("link4m"), defaultShortlinkApi("traffic68"), defaultShortlinkApi("nhapma"), defaultShortlinkApi("layma")];
+                          updateProviderDraft(row.id, {
+                            provider,
+                            name: row.name || (provider === "link4m" ? "Link4M" : provider === "traffic68" ? "Traffic68" : provider === "nhapma" ? "NhapMa" : provider === "layma" ? "LayMa" : row.name),
+                            api_url_template: !currentApi || knownDefaults.includes(currentApi) ? defaultShortlinkApi(provider) : currentApi,
+                          });
+                        }}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="link4m">Link4M</SelectItem>
@@ -1631,11 +1642,11 @@ export function AdminFreeKeysPage() {
                         </Select>
                       </TableCell>
                       <TableCell>
-                        <Input value={row.api_token_secret ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_token_secret: e.target.value })} placeholder="Dán token API" />
+                        <Input value={row.api_token_secret ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_token_secret: e.target.value })} placeholder="VD: 68b34de2680eb7758e19a22a" />
                       </TableCell>
                       <TableCell>
-                        <Input value={row.api_url_template ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_url_template: e.target.value })} placeholder="Custom: https://...{token}...{url_enc}" />
-                        <div className="mt-1 text-[11px] text-muted-foreground">Hỗ trợ: {"{token}"}, {"{url}"}, {"{url_enc}"}. Link4M/NhapMa/LayMa có thể để trống để dùng URL mặc định.</div>
+                        <Input value={row.api_url_template ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_url_template: e.target.value })} placeholder="VD: https://link4m.co/api-shorten/v2" />
+                        <div className="mt-1 text-[11px] text-muted-foreground">Bắt buộc điền API base như https://link4m.co/api-shorten/v2. Nếu là custom template có thể dùng {"{token}"}, {"{url}"}, {"{url_enc}"}.</div>
                       </TableCell>
                       <TableCell>
                         <Select value={row.pass_scope} onValueChange={(v) => updateProviderDraft(row.id, { pass_scope: v as ShortlinkProviderRow["pass_scope"] })}>
@@ -1665,7 +1676,7 @@ export function AdminFreeKeysPage() {
                   )) : (
                     <TableRow>
                       <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
-                        Chưa có provider. Bấm “Thêm API” để thêm Link4M hoặc web rút gọn khác.
+                        Chưa có API/token. Bấm “Thêm API” rồi điền API + Token, sau đó bấm Lưu API/token.
                       </TableCell>
                     </TableRow>
                   )}
