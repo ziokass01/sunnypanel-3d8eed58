@@ -229,9 +229,36 @@ function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
   return "";
 }
 
+function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
+  const api = String(rawApi ?? "").trim();
+  const token = String(rawToken ?? "").trim();
+  if (!api) return { api, token };
+
+  // Hỗ trợ dữ liệu cũ dạng: https://link4m.co/st?api=TOKEN&url={GATE_URL_ENC}
+  // UI mới cần tách thành 2 ô: API base + Token.
+  try {
+    const u = new URL(api);
+    const extracted = token || u.searchParams.get("api") || u.searchParams.get("token") || u.searchParams.get("tokenUser") || "";
+    const hasTargetUrl = u.searchParams.has("url") || u.searchParams.has("u") || u.searchParams.has("link") || u.searchParams.has("target");
+    const hasCredential = u.searchParams.has("api") || u.searchParams.has("token") || u.searchParams.has("tokenUser");
+    if (hasTargetUrl || hasCredential) {
+      return { api: `${u.origin}${u.pathname}`, token: extracted.trim() };
+    }
+  } catch {
+    // Không phải URL đầy đủ thì giữ nguyên để user sửa tay.
+  }
+
+  return { api, token };
+}
+
 function normalizeProviderApi(row: ShortlinkProviderRow) {
   const provider = row.provider || "custom";
-  return row.api_url_template ?? defaultShortlinkApi(provider);
+  const parsed = parseLegacyShortlinkApi(row.api_url_template, row.api_token_secret);
+  return parsed.api || defaultShortlinkApi(provider);
+}
+
+function normalizeProviderToken(row: ShortlinkProviderRow) {
+  return parseLegacyShortlinkApi(row.api_url_template, row.api_token_secret).token;
 }
 
 function buildDownloadCardsFromSettings(settings?: Partial<SettingsRow> | null): DownloadCardEditorItem[] {
@@ -557,7 +584,7 @@ export function AdminFreeKeysPage() {
     const rows = providersQuery.data ?? [];
     setProviderDrafts(rows.map((row) => ({
       ...row,
-      api_token_secret: row.api_token_secret ?? "",
+      api_token_secret: normalizeProviderToken(row),
       api_url_template: normalizeProviderApi(row),
       note: row.note ?? "",
     })));
@@ -795,21 +822,27 @@ export function AdminFreeKeysPage() {
   const saveProviders = useMutation({
     mutationFn: async () => {
       const cleaned = providerDrafts
-        .map((row, index) => ({
-          ...row,
-          name: String(row.name ?? "").trim(),
-          provider: row.provider || "custom",
-          api_token_secret: String(row.api_token_secret ?? "").trim(),
-          api_url_template: String(row.api_url_template ?? "").trim(),
-          pass_scope: row.pass_scope || "both",
-          enabled: Boolean(row.enabled),
-          sort_order: (index + 1) * 10,
-          note: String(row.note ?? "").trim(),
-        }))
-        .filter((row) => row.name || row.api_token_secret || row.api_url_template || row.provider === "none");
+        .map((row, index) => {
+          const parsed = parseLegacyShortlinkApi(row.api_url_template, row.api_token_secret);
+          return {
+            ...row,
+            name: String(row.name ?? "").trim(),
+            provider: row.provider || "custom",
+            api_token_secret: parsed.token,
+            api_url_template: parsed.api,
+            pass_scope: row.pass_scope || "both",
+            enabled: Boolean(row.enabled),
+            sort_order: (index + 1) * 10,
+            note: String(row.note ?? "").trim(),
+          };
+        })
+        .filter((row) => row.provider === "none" || row.name || row.api_token_secret || row.api_url_template)
+        // Dòng cũ/legacy bị thiếu API hoặc Token thì bỏ qua thay vì chặn lưu toàn bộ bảng.
+        // Muốn dùng dòng nào thì bật và điền đủ 2 ô API + Token cho dòng đó.
+        .filter((row) => row.provider === "none" || row.enabled || (row.api_url_template && row.api_token_secret));
 
       for (const [idx, row] of cleaned.entries()) {
-        if (row.provider !== "none") {
+        if (row.provider !== "none" && row.enabled) {
           if (!row.api_url_template) throw new Error(`Dòng ${idx + 1}: thiếu ô API.`);
           if (!/^https?:\/\//i.test(row.api_url_template)) throw new Error(`Dòng ${idx + 1}: API phải bắt đầu bằng http/https.`);
           if (!row.api_token_secret) throw new Error(`Dòng ${idx + 1}: thiếu ô Token.`);

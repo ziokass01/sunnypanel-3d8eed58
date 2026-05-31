@@ -31,17 +31,34 @@ function defaultApiFor(provider: string) {
   return "";
 }
 
+function parseLegacyApi(rawApi: unknown, rawToken: unknown = "") {
+  const api = trim(rawApi, 4096);
+  const token = trim(rawToken, 4096);
+  if (!api) return { api, token };
+  try {
+    const u = new URL(api);
+    const extracted = token || u.searchParams.get("api") || u.searchParams.get("token") || u.searchParams.get("tokenUser") || "";
+    const hasTargetUrl = u.searchParams.has("url") || u.searchParams.has("u") || u.searchParams.has("link") || u.searchParams.has("target");
+    const hasCredential = u.searchParams.has("api") || u.searchParams.has("token") || u.searchParams.has("tokenUser");
+    if (hasTargetUrl || hasCredential) return { api: `${u.origin}${u.pathname}`, token: trim(extracted, 4096) };
+  } catch {
+    // Keep invalid/manual text unchanged so the UI can show a clear validation error.
+  }
+  return { api, token };
+}
+
 function normalizeProvider(row: any, index: number) {
   const provider = PROVIDERS.has(trim(row?.provider, 32).toLowerCase()) ? trim(row?.provider, 32).toLowerCase() : "custom";
   const pass_scope = PASS_SCOPES.has(trim(row?.pass_scope, 16).toLowerCase()) ? trim(row?.pass_scope, 16).toLowerCase() : "both";
   const name = trim(row?.name, 128) || providerName(provider);
-  const api_token_secret = trim(row?.api_token_secret, 4096);
-  const api_url_template = trim(row?.api_url_template, 4096) || defaultApiFor(provider);
+  const parsed = parseLegacyApi(row?.api_url_template, row?.api_token_secret);
+  const api_token_secret = parsed.token;
+  const api_url_template = parsed.api || defaultApiFor(provider);
   const note = trim(row?.note, 512) || null;
   const enabled = row?.enabled !== false;
   const sort_order = (index + 1) * 10;
 
-  if (provider !== "none") {
+  if (provider !== "none" && enabled) {
     if (!api_url_template) throw new Error(`MISSING_API_ROW_${index + 1}`);
     if (!/^https?:\/\//i.test(api_url_template)) throw new Error(`API_MUST_BE_HTTPS_ROW_${index + 1}`);
     if (!api_token_secret) throw new Error(`MISSING_TOKEN_ROW_${index + 1}`);
