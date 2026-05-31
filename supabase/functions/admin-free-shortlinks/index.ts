@@ -86,7 +86,11 @@ Deno.serve(async (req) => {
       .select("*")
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
-    if (providers.error) return json({ ok: false, code: "PROVIDERS_LOAD_FAILED", msg: providers.error.message }, 500);
+    if (providers.error) {
+      const msg = String(providers.error.message || "");
+      const code = /schema cache|could not find|does not exist/i.test(msg) ? "DB_MIGRATION_REQUIRED" : "PROVIDERS_LOAD_FAILED";
+      return json({ ok: false, code, msg }, 500);
+    }
 
     const settings = await db
       .from("licenses_free_settings")
@@ -122,7 +126,11 @@ Deno.serve(async (req) => {
       const result = row.id
         ? await db.from("licenses_free_shortlink_providers").update(payload).eq("id", row.id)
         : await db.from("licenses_free_shortlink_providers").insert(payload);
-      if (result.error) return json({ ok: false, code: "PROVIDER_SAVE_FAILED", msg: result.error.message }, 500);
+      if (result.error) {
+        const msg = String(result.error.message || "");
+        const code = /schema cache|could not find|does not exist/i.test(msg) ? "DB_MIGRATION_REQUIRED" : "PROVIDER_SAVE_FAILED";
+        return json({ ok: false, code, msg }, 500);
+      }
     }
 
     const mode = MODES.has(trim(body.free_shortlink_mode, 32).toLowerCase()) ? trim(body.free_shortlink_mode, 32).toLowerCase() : "round_robin";
@@ -130,7 +138,11 @@ Deno.serve(async (req) => {
     const settings = await db
       .from("licenses_free_settings")
       .upsert({ id: 1, free_shortlink_mode: mode, free_gate_token_life_seconds: life }, { onConflict: "id" });
-    if (settings.error) return json({ ok: false, code: "SETTINGS_SAVE_FAILED", msg: settings.error.message }, 500);
+    if (settings.error) {
+      const msg = String(settings.error.message || "");
+      const code = /schema cache|could not find|does not exist/i.test(msg) ? "DB_MIGRATION_REQUIRED" : "SETTINGS_SAVE_FAILED";
+      return json({ ok: false, code, msg }, 500);
+    }
 
     return json({ ok: true, saved: cleaned.length });
   }
