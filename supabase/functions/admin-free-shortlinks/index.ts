@@ -42,7 +42,7 @@ function parseLegacyApi(rawApi: unknown, rawToken: unknown = "") {
     const hasCredential = u.searchParams.has("api") || u.searchParams.has("token") || u.searchParams.has("tokenUser");
     if (hasTargetUrl || hasCredential) return { api: `${u.origin}${u.pathname}`, token: trim(extracted, 4096) };
   } catch {
-    // Keep invalid/manual text unchanged so the UI can show a clear validation error.
+    // Keep manual text unchanged. Invalid legacy rows are skipped/deleted during save.
   }
   return { api, token };
 }
@@ -53,16 +53,11 @@ function normalizeProvider(row: any, index: number) {
   const name = trim(row?.name, 128) || providerName(provider);
   const parsed = parseLegacyApi(row?.api_url_template, row?.api_token_secret);
   const api_token_secret = parsed.token;
-  const api_url_template = parsed.api || defaultApiFor(provider);
+  const api_url_template = provider === "none" ? "" : (parsed.api || defaultApiFor(provider));
   const note = trim(row?.note, 512) || null;
   const enabled = row?.enabled !== false;
   const sort_order = (index + 1) * 10;
-
-  if (provider !== "none" && enabled) {
-    if (!api_url_template) throw new Error(`MISSING_API_ROW_${index + 1}`);
-    if (!/^https?:\/\//i.test(api_url_template)) throw new Error(`API_MUST_BE_HTTPS_ROW_${index + 1}`);
-    if (!api_token_secret) throw new Error(`MISSING_TOKEN_ROW_${index + 1}`);
-  }
+  const valid = provider === "none" || (!!api_token_secret && /^https?:\/\//i.test(api_url_template));
 
   return {
     id: isUuid(row?.id) ? String(row.id) : null,
@@ -74,6 +69,7 @@ function normalizeProvider(row: any, index: number) {
     pass_scope,
     sort_order,
     note,
+    valid,
   };
 }
 
@@ -124,9 +120,20 @@ Deno.serve(async (req) => {
 
   if (action === "save") {
     const rows = Array.isArray(body.providers) ? body.providers : [];
-    const cleaned = rows
+    const normalized = rows
       .map((row, index) => normalizeProvider(row, index))
       .filter((row) => row.provider === "none" || row.name || row.api_token_secret || row.api_url_template);
+
+    // Dọn các dòng legacy hỏng đang làm UI báo "Dòng 1: thiếu ô Token".
+    // Dòng hợp lệ bắt buộc vẫn là 2 ô: API + Token.
+    const invalidExistingIds = normalized
+      .filter((row) => !row.valid && row.id)
+      .map((row) => row.id as string);
+    if (invalidExistingIds.length) {
+      await db.from("licenses_free_shortlink_providers").delete().in("id", invalidExistingIds);
+    }
+
+    const cleaned = normalized.filter((row) => row.valid);
 
     for (const row of cleaned) {
       const payload = {
@@ -161,7 +168,7 @@ Deno.serve(async (req) => {
       return json({ ok: false, code, msg }, 500);
     }
 
-    return json({ ok: true, saved: cleaned.length });
+    return json({ ok: true, saved: cleaned.length, skipped_invalid: normalized.length - cleaned.length });
   }
 
   if (action === "delete") {
