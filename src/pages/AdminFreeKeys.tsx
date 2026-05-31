@@ -34,6 +34,12 @@ type SettingsRow = {
   free_session_waiting_limit?: number;
   free_link4m_rotate_nonce_pass1?: number;
   free_link4m_rotate_nonce_pass2?: number;
+  free_shortlink_mode?: "round_robin" | "random";
+  free_shortlink_last_provider_id_pass1?: string | null;
+  free_shortlink_last_provider_id_pass2?: string | null;
+  free_shortlink_next_index_pass1?: number;
+  free_shortlink_next_index_pass2?: number;
+  free_gate_token_life_seconds?: number;
   free_enabled: boolean;
   free_disabled_message: string;
   free_min_delay_seconds: number;
@@ -68,6 +74,23 @@ type SettingsRow = {
   free_external_download_icon_url?: string | null;
   updated_at: string;
   updated_by: string | null;
+};
+
+type ShortlinkProviderRow = {
+  id: string;
+  name: string;
+  provider: "custom" | "link4m" | "traffic68" | "nhapma" | "layma" | "none";
+  api_token_secret: string | null;
+  api_url_template: string | null;
+  enabled: boolean;
+  pass_scope: "both" | "pass1" | "pass2";
+  sort_order: number;
+  last_used_at?: string | null;
+  last_error?: string | null;
+  fail_count?: number | null;
+  note?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type KeyTypeRow = {
@@ -368,6 +391,12 @@ const NEW_FREE_SETTINGS_COLUMNS = [
   "free_external_download_badge",
   "free_external_download_icon_url",
   "free_download_cards",
+  "free_shortlink_mode",
+  "free_shortlink_last_provider_id_pass1",
+  "free_shortlink_last_provider_id_pass2",
+  "free_shortlink_next_index_pass1",
+  "free_shortlink_next_index_pass2",
+  "free_gate_token_life_seconds",
 ] as const;
 
 function isMissingFreeSettingsColumnError(error: any) {
@@ -462,12 +491,31 @@ export function AdminFreeKeysPage() {
     },
   });
 
+  const providersQuery = useQuery({
+    queryKey: ["free-shortlink-providers"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("licenses_free_shortlink_providers")
+        .select("*")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (error) {
+        const msg = String(error?.message || error?.details || "").toLowerCase();
+        if (msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find")) return [] as ShortlinkProviderRow[];
+        throw error;
+      }
+      return (data ?? []) as ShortlinkProviderRow[];
+    },
+  });
+
   const [outboundUrl, setOutboundUrl] = useState("");
   const [outboundUrlPass2, setOutboundUrlPass2] = useState("");
   const [rotateDays, setRotateDays] = useState(7);
   const [sessionWaitingLimit, setSessionWaitingLimit] = useState(2);
   const [rotateNoncePass1, setRotateNoncePass1] = useState(0);
   const [rotateNoncePass2, setRotateNoncePass2] = useState(0);
+  const [shortlinkMode, setShortlinkMode] = useState<"round_robin" | "random">("round_robin");
+  const [gateTokenLifeSeconds, setGateTokenLifeSeconds] = useState(600);
 
   const [freeEnabled, setFreeEnabled] = useState(true);
   const [disabledMessage, setDisabledMessage] = useState("Trang GetKey đang tạm đóng.");
@@ -495,6 +543,49 @@ export function AdminFreeKeysPage() {
   const [noticeMode, setNoticeMode] = useState<"modal" | "inline">("modal");
   const [noticeClosable, setNoticeClosable] = useState(true);
   const [noticeShowOnce, setNoticeShowOnce] = useState(false);
+  const [providerDrafts, setProviderDrafts] = useState<ShortlinkProviderRow[]>([]);
+
+  useEffect(() => {
+    const rows = providersQuery.data ?? [];
+    setProviderDrafts(rows.map((row) => ({
+      ...row,
+      api_token_secret: row.api_token_secret ?? "",
+      api_url_template: row.api_url_template ?? "",
+      note: row.note ?? "",
+    })));
+  }, [providersQuery.data]);
+
+  const addProviderDraft = () => {
+    const nextOrder = (providerDrafts.reduce((max, row) => Math.max(max, Number(row.sort_order ?? 0)), 0) || 0) + 10;
+    setProviderDrafts((prev) => [...prev, {
+      id: `tmp_${Date.now()}`,
+      name: "",
+      provider: "link4m",
+      api_token_secret: "",
+      api_url_template: "",
+      enabled: true,
+      pass_scope: "both",
+      sort_order: nextOrder,
+      note: "",
+    }]);
+  };
+
+  const updateProviderDraft = (id: string, patch: Partial<ShortlinkProviderRow>) => {
+    setProviderDrafts((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+
+  const moveProviderDraft = (id: string, dir: -1 | 1) => {
+    setProviderDrafts((prev) => {
+      const idx = prev.findIndex((row) => row.id === id);
+      const target = idx + dir;
+      if (idx < 0 || target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[idx];
+      next[idx] = next[target];
+      next[target] = tmp;
+      return next.map((row, index) => ({ ...row, sort_order: (index + 1) * 10 }));
+    });
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -517,6 +608,8 @@ export function AdminFreeKeysPage() {
     setSessionWaitingLimit(Number((s as any).free_session_waiting_limit ?? 2));
     setRotateNoncePass1(Number((s as any).free_link4m_rotate_nonce_pass1 ?? 0));
     setRotateNoncePass2(Number((s as any).free_link4m_rotate_nonce_pass2 ?? 0));
+    setShortlinkMode(String((s as any).free_shortlink_mode ?? "round_robin") === "random" ? "random" : "round_robin");
+    setGateTokenLifeSeconds(Math.max(60, Number((s as any).free_gate_token_life_seconds ?? 600)));
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
     setMinDelayEnabled(Boolean((s as any).free_min_delay_enabled ?? true));
@@ -623,6 +716,8 @@ export function AdminFreeKeysPage() {
         free_session_waiting_limit: Math.max(1, Math.floor(Number(sessionWaitingLimit) || 2)),
         free_link4m_rotate_nonce_pass1: Math.max(0, Math.floor(Number(rotateNoncePass1) || 0)),
         free_link4m_rotate_nonce_pass2: Math.max(0, Math.floor(Number(rotateNoncePass2) || 0)),
+        free_shortlink_mode: shortlinkMode,
+        free_gate_token_life_seconds: Math.max(60, Math.min(1800, Math.floor(Number(gateTokenLifeSeconds) || 600))),
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
         free_min_delay_enabled: Boolean(minDelayEnabled),
@@ -686,6 +781,80 @@ export function AdminFreeKeysPage() {
     },
     onError: (e: any) => {
       toast({ title: "Save failed", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  const saveProviders = useMutation({
+    mutationFn: async () => {
+      const cleaned = providerDrafts
+        .map((row, index) => ({
+          ...row,
+          name: String(row.name ?? "").trim(),
+          provider: row.provider || "custom",
+          api_token_secret: String(row.api_token_secret ?? "").trim() || null,
+          api_url_template: String(row.api_url_template ?? "").trim() || null,
+          pass_scope: row.pass_scope || "both",
+          enabled: Boolean(row.enabled),
+          sort_order: (index + 1) * 10,
+          note: String(row.note ?? "").trim() || null,
+        }))
+        .filter((row) => row.name || row.api_token_secret || row.api_url_template || row.provider === "none");
+
+      for (const row of cleaned) {
+        const payload = {
+          name: row.name || row.provider.toUpperCase(),
+          provider: row.provider,
+          api_token_secret: row.api_token_secret,
+          api_url_template: row.api_url_template,
+          enabled: row.enabled,
+          pass_scope: row.pass_scope,
+          sort_order: row.sort_order,
+          note: row.note,
+        };
+
+        if (String(row.id).startsWith("tmp_")) {
+          const { error } = await (supabase as any).from("licenses_free_shortlink_providers").insert(payload);
+          if (error) throw error;
+        } else {
+          const { error } = await (supabase as any).from("licenses_free_shortlink_providers").update(payload).eq("id", row.id);
+          if (error) throw error;
+        }
+      }
+
+      const { error: modeErr } = await (supabase as any)
+        .from("licenses_free_settings")
+        .upsert({
+          id: 1,
+          free_shortlink_mode: shortlinkMode,
+          free_gate_token_life_seconds: Math.max(60, Math.min(1800, Math.floor(Number(gateTokenLifeSeconds) || 600))),
+        }, { onConflict: "id" });
+      if (modeErr) throw modeErr;
+
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Saved", description: "Danh sách API/token rút gọn và chế độ chọn link đã cập nhật." });
+      await Promise.all([providersQuery.refetch(), settingsQuery.refetch()]);
+    },
+    onError: (e: any) => {
+      toast({ title: "Lưu API/token thất bại", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  const deleteProvider = useMutation({
+    mutationFn: async (id: string) => {
+      if (String(id).startsWith("tmp_")) return true;
+      const { error } = await (supabase as any).from("licenses_free_shortlink_providers").delete().eq("id", id);
+      if (error) throw error;
+      return true;
+    },
+    onSuccess: async (_ok, id) => {
+      setProviderDrafts((prev) => prev.filter((row) => row.id !== id));
+      toast({ title: "Deleted", description: "Đã xóa provider rút gọn." });
+      await providersQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Xóa provider thất bại", description: e?.message ?? "Error", variant: "destructive" });
     },
   });
 
@@ -1387,9 +1556,131 @@ export function AdminFreeKeysPage() {
             <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
           </div>
 
+          <div className="space-y-4 rounded-md border p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="font-medium">API / Token rút gọn dùng cho Free Key</div>
+                <div className="text-xs text-muted-foreground">
+                  Flow mới: mỗi lượt Get Key sinh 1 gate token riêng, backend chọn provider đang bật rồi mới rút gọn. API token không trả ra public /free-config.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={addProviderDraft}>
+                  <Plus className="mr-2 h-4 w-4" /> Thêm API
+                </Button>
+                <Button type="button" size="sm" onClick={() => saveProviders.mutate()} disabled={saveProviders.isPending}>
+                  Lưu API/token
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => providersQuery.refetch()} disabled={providersQuery.isFetching}>
+                  Reload
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Chế độ chọn link</div>
+                <Select value={shortlinkMode} onValueChange={(v) => setShortlinkMode(v === "random" ? "random" : "round_robin")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="round_robin">Luân phiên theo thứ tự</SelectItem>
+                    <SelectItem value="random">Random nhưng tránh trùng liền kề</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="text-xs text-muted-foreground">Luân phiên sẽ chạy 1→2→3 rồi quay lại 1; random sẽ loại provider vừa dùng nếu còn provider khác.</div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Token sống sau khi đủ delay (giây)</div>
+                <Input type="number" value={gateTokenLifeSeconds} onChange={(e) => setGateTokenLifeSeconds(Number(e.target.value))} min={60} max={1800} />
+                <div className="text-xs text-muted-foreground">Ví dụ delay 60s + sống 600s: qua gate trước 60s sẽ chết, sau 10 phút token cũng hết tác dụng.</div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[140px]">Tên</TableHead>
+                    <TableHead className="min-w-[130px]">Provider</TableHead>
+                    <TableHead className="min-w-[190px]">API token</TableHead>
+                    <TableHead className="min-w-[260px]">API URL custom</TableHead>
+                    <TableHead className="min-w-[110px]">Pass</TableHead>
+                    <TableHead className="min-w-[80px]">Bật</TableHead>
+                    <TableHead className="min-w-[140px]">Thứ tự</TableHead>
+                    <TableHead className="min-w-[110px]">Xóa</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {providerDrafts.length ? providerDrafts.map((row, index) => (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        <Input value={row.name ?? ""} onChange={(e) => updateProviderDraft(row.id, { name: e.target.value })} placeholder="VD: Link4M chính" />
+                        {row.last_error ? <div className="mt-1 text-[11px] text-destructive">{row.last_error}</div> : null}
+                      </TableCell>
+                      <TableCell>
+                        <Select value={row.provider} onValueChange={(v) => updateProviderDraft(row.id, { provider: v as ShortlinkProviderRow["provider"] })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="link4m">Link4M</SelectItem>
+                            <SelectItem value="traffic68">Traffic68</SelectItem>
+                            <SelectItem value="nhapma">NhapMa</SelectItem>
+                            <SelectItem value="layma">LayMa</SelectItem>
+                            <SelectItem value="custom">Custom</SelectItem>
+                            <SelectItem value="none">Không rút gọn</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input value={row.api_token_secret ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_token_secret: e.target.value })} placeholder="Dán token API" />
+                      </TableCell>
+                      <TableCell>
+                        <Input value={row.api_url_template ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_url_template: e.target.value })} placeholder="Custom: https://...{token}...{url_enc}" />
+                        <div className="mt-1 text-[11px] text-muted-foreground">Hỗ trợ: {"{token}"}, {"{url}"}, {"{url_enc}"}. Link4M/NhapMa/LayMa có thể để trống để dùng URL mặc định.</div>
+                      </TableCell>
+                      <TableCell>
+                        <Select value={row.pass_scope} onValueChange={(v) => updateProviderDraft(row.id, { pass_scope: v as ShortlinkProviderRow["pass_scope"] })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="both">Cả 2</SelectItem>
+                            <SelectItem value="pass1">Pass1</SelectItem>
+                            <SelectItem value="pass2">Pass2</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Switch checked={Boolean(row.enabled)} onCheckedChange={(v) => updateProviderDraft(row.id, { enabled: v })} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={() => moveProviderDraft(row.id, -1)} disabled={index === 0}>↑</Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => moveProviderDraft(row.id, 1)} disabled={index === providerDrafts.length - 1}>↓</Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button type="button" variant="destructive" size="sm" onClick={() => deleteProvider.mutate(row.id)} disabled={deleteProvider.isPending}>
+                          <Trash2 className="mr-2 h-4 w-4" /> Xóa
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
+                        Chưa có provider. Bấm “Thêm API” để thêm Link4M hoặc web rút gọn khác.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="rounded-md bg-muted/50 p-3 text-xs leading-6 text-muted-foreground">
+              Khi người dùng bấm Get Key, backend chỉ chọn provider có trạng thái bật. Với key VIP 2-pass, Pass2 sẽ ưu tiên provider khác Pass1 nếu còn lựa chọn khác.
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <div className="text-sm font-medium">Link4M outbound URL (https)</div>
+              <div className="text-sm font-medium">Link4M outbound URL legacy/fallback (https)</div>
               <Input
                 value={outboundUrl}
                 onChange={(e) => setOutboundUrl(e.target.value)}
@@ -1397,7 +1688,7 @@ export function AdminFreeKeysPage() {
                 inputMode="url"
               />
               <div className="text-xs text-muted-foreground">
-                Đây là link Link4M outbound. Hệ thống sẽ tự build URL dẫn về Gate bằng template:
+                Chỉ dùng làm fallback nếu bảng API/token rút gọn ở trên chưa có provider nào bật. Hệ thống mới ưu tiên provider động trước.
                 <div className="mt-1 font-mono text-xs">
                   • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
                 </div>
@@ -1406,7 +1697,7 @@ export function AdminFreeKeysPage() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-sm font-medium">Link4M outbound URL Pass2 (VIP)</div>
+                <div className="text-sm font-medium">Link4M outbound URL Pass2 legacy/fallback (VIP)</div>
                 <Input
                   value={outboundUrlPass2}
                   onChange={(e) => setOutboundUrlPass2(e.target.value)}
@@ -1414,12 +1705,12 @@ export function AdminFreeKeysPage() {
                   inputMode="url"
                 />
                 <div className="text-xs text-muted-foreground">
-                  Nếu trống: hệ thống sẽ dùng lại outbound Pass1. Nên dùng placeholder <span className="font-mono">{"{GATE_URL_ENC}"}</span>.
+                  Fallback cũ cho Pass2 nếu chưa setup provider động. Nếu trống: hệ thống dùng lại fallback Pass1.
                 </div>
               </div>
 
               <div className="space-y-2">
-                <div className="text-sm font-medium">Rotate days (Link4M bucket)</div>
+                <div className="text-sm font-medium">Rotate days legacy bucket</div>
                 <Input
                   type="number"
                   value={rotateDays}
@@ -1427,7 +1718,7 @@ export function AdminFreeKeysPage() {
                   min={1}
                 />
                 <div className="text-xs text-muted-foreground">
-                  Trong cùng 1 bucket, Link4M Pass1/Pass2 sẽ giữ nguyên link cố định. Hết số ngày này hệ thống mới tự đổi link mới.
+                  Chỉ còn tác dụng cho fallback cũ. Flow mới dùng gate token riêng từng lượt nên không phụ thuộc bucket cố định nữa.
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(1)} disabled={rotateNow.isPending}>Rotate pass1 now</Button>

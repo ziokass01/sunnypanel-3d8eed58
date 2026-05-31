@@ -246,9 +246,10 @@ Deno.serve(async (req) => {
     }
 
     const rawOutbound = settings?.free_outbound_url;
-    const free_outbound_url = String(rawOutbound ?? "").trim() || "https://link4m.com/PkY7X";
-    const rawOutboundPass2 = (settings as any)?.free_outbound_url_pass2;
-    const free_outbound_url_pass2 = String(rawOutboundPass2 ?? "").trim() || free_outbound_url;
+    // Do not expose shortener API/token templates to public clients.
+    // free-start builds shortlinks server-side from licenses_free_shortlink_providers.
+    const legacy_free_outbound_url = String(rawOutbound ?? "").trim();
+    const legacy_free_outbound_url_pass2 = String((settings as any)?.free_outbound_url_pass2 ?? "").trim() || legacy_free_outbound_url;
     const free_enabled = Boolean(settings?.free_enabled ?? true);
     const free_disabled_message = settings?.free_disabled_message ?? "Trang GetKey đang tạm đóng.";
     const free_min_delay_seconds = Math.max(0, Number(settings?.free_min_delay_seconds ?? 0));
@@ -260,8 +261,10 @@ Deno.serve(async (req) => {
     const free_link4m_rotate_nonce_pass1 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass1 ?? 0));
     const free_link4m_rotate_nonce_pass2 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass2 ?? 0));
     const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
-    const free_session_absolute_seconds = Math.min(500, Math.max(120, Number((settings as any)?.free_session_absolute_seconds ?? 500) || 500));
-    const free_claim_window_seconds = Math.min(500, Math.max(30, Number((settings as any)?.free_claim_window_seconds ?? 180) || 180));
+    const free_gate_token_life_seconds = Math.min(1800, Math.max(60, Number((settings as any)?.free_gate_token_life_seconds ?? 600) || 600));
+    const free_shortlink_mode = String((settings as any)?.free_shortlink_mode ?? "round_robin").trim() === "random" ? "random" : "round_robin";
+    const free_session_absolute_seconds = Math.min(3600, Math.max(120, Number((settings as any)?.free_session_absolute_seconds ?? 900) || 900));
+    const free_claim_window_seconds = Math.min(900, Math.max(30, Number((settings as any)?.free_claim_window_seconds ?? 180) || 180));
     const free_close_deadline_seconds = Math.max(10, Number((settings as any)?.free_close_deadline_seconds ?? free_return_seconds) || free_return_seconds);
     const free_daily_limit_per_fingerprint = Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1));
     const free_daily_limit_per_ip = Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0));
@@ -362,8 +365,19 @@ Deno.serve(async (req) => {
 
     const turnstile_enabled = false;
 
+    let free_shortlink_provider_count = 0;
+    try {
+      const { count } = await sb
+        .from("licenses_free_shortlink_providers")
+        .select("id", { count: "exact", head: true })
+        .eq("enabled", true);
+      free_shortlink_provider_count = Number(count ?? 0);
+    } catch {
+      free_shortlink_provider_count = 0;
+    }
+
     const missing: string[] = [];
-    if (!free_outbound_url) missing.push("free_outbound_url");
+    if (free_shortlink_provider_count <= 0 && !legacy_free_outbound_url) missing.push("shortlink_provider");
     if (!keyTypes?.length) missing.push("no_key_types_enabled");
     if (!baseUrl) missing.push("public_base_url");
 
@@ -468,14 +482,17 @@ Deno.serve(async (req) => {
       destination_gate_url,
       free_enabled,
       free_disabled_message,
-      free_outbound_url,
+      free_outbound_url: null,
       free_min_delay_seconds,
       free_min_delay_seconds_pass2,
       free_link4m_rotate_days,
       free_session_waiting_limit,
       free_link4m_rotate_nonce_pass1,
       free_link4m_rotate_nonce_pass2,
-      free_outbound_url_pass2,
+      free_outbound_url_pass2: null,
+      free_shortlink_provider_count,
+      free_shortlink_mode,
+      free_gate_token_life_seconds,
       free_gate_antibypass_enabled,
       free_gate_antibypass_seconds,
       free_return_seconds,

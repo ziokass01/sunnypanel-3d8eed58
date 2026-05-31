@@ -351,11 +351,11 @@ export function FreeClaimPage() {
   }, [hasBareClaimKey, claimFromUrl, tokenSource, clearAllFreeStorage]);
 
   useEffect(() => {
-    if (!claimToken) return;
-    if (!outToken) {
-      setError("Lỗi thiếu xác thực. Hãy quay lại Get Key 🔑 rồi vượt lại.");
-    }
-  }, [claimToken, outToken]);
+    // Tokenized free-key flow may arrive with claim_token only.
+    // Legacy flow still keeps out_token when available, but it is no longer mandatory here.
+    if (!claimToken || outToken || !debugMode) return;
+    setServerDebug((prev: any) => ({ ...(prev ?? {}), note: "TOKENIZED_CLAIM_NO_OUT_TOKEN" }));
+  }, [claimToken, outToken, debugMode]);
 
   useEffect(() => {
     // noindex for claim page
@@ -378,16 +378,11 @@ export function FreeClaimPage() {
   const canVerify = useMemo(() => {
     if (revealed) return false;
     if (!claimToken) return false;
-    if (!outToken) return false;
     return !loading;
-  }, [claimToken, outToken, revealed, loading]);
+  }, [claimToken, revealed, loading]);
 
   async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
-    if (!outToken) {
-      setError("Thiếu token (t). Hãy quay lại Get Key và đi đúng flow Link4M → Gate.");
-      return;
-    }
     if (loading || revealed) return;
 
     setLoading(true);
@@ -399,7 +394,7 @@ export function FreeClaimPage() {
 
       let sid = String(opts?.forceSid ?? "").trim() || effectiveSessionId;
       if (!sid) {
-        const resolved = await resolveByOutToken(outToken, debugMode);
+        const resolved = outToken ? await resolveByOutToken(outToken, debugMode) : "";
         if (resolved) sid = resolved;
       }
 
@@ -421,7 +416,7 @@ export function FreeClaimPage() {
         // If session not found, try to resolve session_id again and retry ONCE with the new sid.
         if (code === "SESSION_NOT_FOUND") {
           const currentSid = sid;
-          const nextSid = await resolveByOutToken(outToken, debugMode);
+          const nextSid = outToken ? await resolveByOutToken(outToken, debugMode) : "";
 
           if (!nextSid) {
             // Hard stop: clear stale FREE storage so user won't get stuck in a loop.
@@ -480,7 +475,7 @@ export function FreeClaimPage() {
   }
 
   useEffect(() => {
-    if (!claimToken || !outToken) return;
+    if (!claimToken) return;
     if (revealed) return;
     void revealOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -548,13 +543,10 @@ export function FreeClaimPage() {
               </div>
             ) : null}
 
-            {claimToken && !outToken ? (
+            {claimToken && !outToken && debugMode ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
-                <div className="text-sm font-semibold">Thiếu xác thực</div>
-                <div className="text-sm text-muted-foreground">Liên kết hiện tại chưa đủ thông tin. Hãy quay lại trang Get Key 🔑 rồi vượt lại đúng flow.</div>
-                <Button variant="secondary" className="h-11 w-full rounded-2xl" onClick={() => nav("/free", { replace: true })}>
-                  Quay lại Get Key 🔑
-                </Button>
+                <div className="text-sm font-semibold">Tokenized claim</div>
+                <div className="text-sm text-muted-foreground">Flow mới chỉ cần claim_token; out_token legacy không bắt buộc.</div>
               </div>
             ) : null}
 

@@ -271,7 +271,7 @@ async function verifyTurnstile(secret: string, token: string, remoteIp?: string)
 
 const BodySchema = z.object({
   claim_token: z.string().min(8).max(512),
-  out_token: z.string().min(8).max(256),
+  out_token: z.string().min(0).max(512).optional().default(""),
   session_id: z.string().uuid().optional(),
   fingerprint: z.string().min(6).max(128),
   app_code: z.string().min(2).max(64).optional(),
@@ -399,7 +399,7 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
       )
       .eq("claim_token_hash", claimHash)
       .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
@@ -412,7 +412,7 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
       )
       .eq("session_id", requestedSessionId)
       .maybeSingle();
@@ -424,7 +424,7 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
       )
       .eq("claim_token_hash", claimHash)
       .maybeSingle();
@@ -436,7 +436,7 @@ Deno.serve(async (req) => {
     const q = await sb
       .from("licenses_free_sessions")
       .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id",
+        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
       )
       .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
       .maybeSingle();
@@ -810,15 +810,21 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
-  // Require a matching out_token. VIP pass2 may legitimately use out_token_hash_pass2 instead of out_token_hash.
+  // Require a matching out_token for legacy flows. Tokenized gate flow may reveal by claim_token only,
+  // because claim_token is only minted after /free/gate accepted the single-use gate token.
+  const isTokenizedGateFlow = String((sess as any).gate_flow_version ?? "").trim() === "tokenized_v1";
   const acceptedOutHashes = [String((sess as any).out_token_hash || "").trim(), String((sess as any).out_token_hash_pass2 || "").trim()].filter(Boolean);
-  if (acceptedOutHashes.length > 0) {
+  if (acceptedOutHashes.length > 0 && !isTokenizedGateFlow) {
     if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
     if (!acceptedOutHashes.includes(outHash)) {
       await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "OUT_TOKEN_MISMATCH", detail: { accepted_out_hash_slots: acceptedOutHashes.length }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
       await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
       return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
     }
+  } else if (acceptedOutHashes.length > 0 && isTokenizedGateFlow && outHash && !acceptedOutHashes.includes(outHash)) {
+    // If a tokenized client sends an out_token, it must still match; but absence is allowed.
+    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "OUT_TOKEN_MISMATCH", detail: { tokenized: true, accepted_out_hash_slots: acceptedOutHashes.length }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length, tokenized: true } : undefined }, 200);
   }
 
   // Daily quota by Vietnam calendar day (00:00 Asia/Ho_Chi_Minh)

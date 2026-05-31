@@ -9,8 +9,8 @@ import { FreeFlowSteps, markFreeAttemptFail } from "@/features/free/flow-ux";
 import { readBundle, writeBundle } from "@/lib/freeFlow";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
-type GateNextPass2 = { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number };
-type GateNextClaim = { ok: true; next: "CLAIM"; claim_token: string; claim_url?: string | null };
+type GateNextPass2 = { ok: true; next: "PASS2"; out_token?: string; outbound_url: string; gate_url?: string | null; min_delay_seconds: number; gate_token_life_seconds?: number };
+type GateNextClaim = { ok: true; next: "CLAIM"; session_id?: string; claim_token: string; claim_url?: string | null };
 type GateOk = GateNextPass2 | GateNextClaim;
 type GateErr = { ok: false; msg: string; code?: string; detail?: any };
 type ResolveOk = { ok: true; session_id: string };
@@ -94,7 +94,9 @@ export function FreeGatePage() {
   }, [sp]);
 
   const sidFromQuery = useMemo(() => (sp.get("sid") || "").trim(), [sp]);
-  const tFromQuery = useMemo(() => (sp.get("t") || "").trim(), [sp]);
+  const rawTFromQuery = useMemo(() => (sp.get("t") || "").trim(), [sp]);
+  const gateTokenFromQuery = useMemo(() => (rawTFromQuery.startsWith("gt_") ? rawTFromQuery : ""), [rawTFromQuery]);
+  const tFromQuery = useMemo(() => (gateTokenFromQuery ? "" : rawTFromQuery), [gateTokenFromQuery, rawTFromQuery]);
 
   const outToken = useMemo(() => {
     if (tFromQuery) return tFromQuery;
@@ -186,23 +188,28 @@ export function FreeGatePage() {
 
   async function gateOnce() {
     const tok = outToken;
+    const gateTok = gateTokenFromQuery;
     let sid = effectiveSessionId;
 
-    if (!sid && tok) {
+    // Tokenized flow: URL /free/gate?t=gt_... is authoritative and does not need localStorage/out_token.
+    // Legacy flow: keep old session_id + out_token path for existing links.
+    if (!gateTok && !sid && tok) {
       sid = await resolveSessionIdByOutToken(tok);
     }
 
-    if (!tok || !sid) {
+    if ((!gateTok && !tok) || (!gateTok && !sid)) {
       setStatus("error");
       setMessage("Thiếu phiên. Hãy quay lại trang Get Key🔑 và làm lại.");
       window.setTimeout(() => nav("/free", { replace: true }), 1200);
       return;
     }
 
-    // Persist token/sid for reload flows. sessionStorage is read first to avoid multi-tab overwrites; localStorage remains a compatibility fallback.
+    // Persist legacy token/sid for reload flows. Tokenized gate_token is single-use and should not become the out_token.
     try {
-      setOutToken(tok);
-      persistGateFlow(sid, tok);
+      if (tok && sid) {
+        setOutToken(tok);
+        persistGateFlow(sid, tok);
+      }
     } catch {
       // ignore
     }
@@ -217,8 +224,9 @@ export function FreeGatePage() {
 
       const res = await postFunction<GateOk | GateErr>("/free-gate", {
         pass,
-        session_id: sid,
-        out_token: tok,
+        session_id: sid || undefined,
+        out_token: tok || undefined,
+        gate_token: gateTok || undefined,
         fingerprint: fp,
         referrer,
         current_url,
@@ -232,7 +240,7 @@ export function FreeGatePage() {
           // so Link4M pass2 can stay fixed and we do not depend on generating a new token here.
           let nextTok = String(ok.out_token || "").trim();
           try {
-            if (!nextTok) nextTok = readFlowItem("free_out_token_pass2").trim();
+            if (!nextTok && !gateTok) nextTok = readFlowItem("free_out_token_pass2").trim();
           } catch {
             // ignore
           }
@@ -247,14 +255,13 @@ export function FreeGatePage() {
             }
           }
           setFreeStartMeta({ startedAtMs: Date.now(), minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)), pass: 2, passesRequired: 2 });
-          let outbound = "";
-          try {
-            outbound = readFlowItem("free_outbound_url_pass2").trim();
-          } catch {
-            // ignore
-          }
+          let outbound = String(ok.outbound_url || "").trim();
           if (!outbound) {
-            outbound = String(ok.outbound_url || "").trim();
+            try {
+              outbound = readFlowItem("free_outbound_url_pass2").trim();
+            } catch {
+              // ignore
+            }
           }
           if (!outbound) {
             setStatus("error");
@@ -273,7 +280,13 @@ export function FreeGatePage() {
         } catch {
           // ignore
         }
-        writeBundle({ session_id: sid, out_token: tok, claim_token: claim });
+        const claimSid = String((ok as GateNextClaim).session_id || sid || "").trim();
+        if (claimSid && tok) {
+          writeBundle({ session_id: claimSid, out_token: tok, claim_token: claim });
+        } else if (claimSid) {
+          writeFlowItem("free_session_id_v1", claimSid);
+          writeFlowItem("free_session_id", claimSid);
+        }
 
         const base = String(ok.claim_url || `${window.location.origin}/free/claim`);
         const url = new URL(base, window.location.origin);
@@ -302,8 +315,9 @@ export function FreeGatePage() {
   useEffect(() => {
     const sid = effectiveSessionId;
     const tok = outToken;
+    const gateTok = gateTokenFromQuery;
 
-    if (!tok) {
+    if (!gateTok && !tok) {
       setStatus("error");
       setMessage("Vượt link không thành công. Hãy quay lại trang Get Key🔑 và làm lại.");
       return;
@@ -313,7 +327,7 @@ export function FreeGatePage() {
 
     // Global anti-bypass mode: do NOT wait locally on /free/gate.
     // Entering gate too early must fail on backend immediately for all passes.
-    if (pass === 2 || gateAntiBypassEnabled) {
+    if (gateTok || pass === 2 || gateAntiBypassEnabled) {
       setStatus("working");
       setMessage(pass === 2 ? "Đang xác thực key 🔑 VIP💰…" : "Đang xác thực key ⏳…");
       void gateOnce();
@@ -346,7 +360,7 @@ export function FreeGatePage() {
 
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configReady, gateAntiBypassEnabled, pass, effectiveSessionId, outToken]);
+  }, [configReady, gateAntiBypassEnabled, pass, effectiveSessionId, outToken, gateTokenFromQuery]);
 
   return (
     <div className="min-h-svh bg-background">
