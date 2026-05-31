@@ -1724,57 +1724,9 @@ export function AdminFreeKeysPage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <div className="text-sm font-medium">Link4M outbound URL legacy/fallback (https)</div>
-              <Input
-                value={outboundUrl}
-                onChange={(e) => setOutboundUrl(e.target.value)}
-                placeholder="https://link4m.co/st?api=YOUR_TOKEN&url=..."
-                inputMode="url"
-              />
-              <div className="text-xs text-muted-foreground">
-                Chỉ dùng làm fallback nếu bảng API/token rút gọn ở trên chưa có provider nào bật. Hệ thống mới ưu tiên provider động trước.
-                <div className="mt-1 font-mono text-xs">
-                  • Dùng <span className="font-semibold">{`{GATE_URL}`}</span> (raw) hoặc <span className="font-semibold">{`{GATE_URL_ENC}`}</span> (encode)
-                </div>
-                <div className="mt-1 font-mono text-xs">Ví dụ: https://link4m.co/st?api=YOUR_TOKEN&url={"{GATE_URL_ENC}"}</div>
-                <div className="mt-1">Với Link4M: bạn nên dùng placeholder. Riêng link Quick Link dạng <span className="font-mono">/st?api=...&amp;url=...</span> thì backend sẽ tự thay tham số <span className="font-mono">url=...</span> bằng Gate URL.</div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Link4M outbound URL Pass2 legacy/fallback (VIP)</div>
-                <Input
-                  value={outboundUrlPass2}
-                  onChange={(e) => setOutboundUrlPass2(e.target.value)}
-                  placeholder="https://link4m.co/st?api=YOUR_TOKEN_PASS2&url=..."
-                  inputMode="url"
-                />
-                <div className="text-xs text-muted-foreground">
-                  Fallback cũ cho Pass2 nếu chưa setup provider động. Nếu trống: hệ thống dùng lại fallback Pass1.
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Rotate days legacy bucket</div>
-                <Input
-                  type="number"
-                  value={rotateDays}
-                  onChange={(e) => setRotateDays(Number(e.target.value))}
-                  min={1}
-                />
-                <div className="text-xs text-muted-foreground">
-                  Chỉ còn tác dụng cho fallback cũ. Flow mới dùng gate token riêng từng lượt nên không phụ thuộc bucket cố định nữa.
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(1)} disabled={rotateNow.isPending}>Rotate pass1 now</Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => rotateNow.mutate(2)} disabled={rotateNow.isPending}>Rotate pass2 now</Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
-                <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
-                <div className="text-xs text-muted-foreground">Nếu 1 thiết bị tạo quá nhiều phiên đang chờ trong 15 phút, hệ thống sẽ chặn tạo thêm.</div>
-              </div>
+              <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
+              <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
+              <div className="text-xs text-muted-foreground">Nếu 1 thiết bị tạo quá nhiều phiên đang chờ trong 15 phút, hệ thống sẽ chặn tạo thêm.</div>
             </div>
 
             <div className="space-y-2">
