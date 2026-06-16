@@ -27,6 +27,9 @@ function json(data: unknown, status = 200) {
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json",
+      "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
     },
   });
 }
@@ -431,20 +434,20 @@ Deno.serve(async (req) => {
     return dSecs ?? dDays;
   })();
 
-  // Only enforce expiry once activated (or for standard keys)
-  if (!(startsOnFirstUse && !firstUsedAt)) {
-    if (licRow.expires_at) {
-      const exp = new Date(licRow.expires_at);
-      if (exp.getTime() < now.getTime()) {
-        await db.from("audit_logs").insert({
-          action: "VERIFY",
-          license_key: key,
-          detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
-        });
+  // Fail-closed expiry: if expires_at exists and is in the past, reject it even
+  // when start_on_first_use=true and first_used_at is still NULL.
+  // Countdown keys that should start on first use must have expires_at = NULL until activation.
+  if (licRow.expires_at) {
+    const exp = new Date(licRow.expires_at);
+    if (!Number.isFinite(exp.getTime()) || exp.getTime() <= now.getTime()) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
+      });
 
-        await maybeInsertEnumerationAlert(db, ip, key);
-        return json({ ok: false, msg: "KEY_EXPIRED" });
-      }
+      await maybeInsertEnumerationAlert(db, ip, key);
+      return json({ ok: false, msg: "KEY_EXPIRED" });
     }
   }
 

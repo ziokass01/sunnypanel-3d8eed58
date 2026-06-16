@@ -28,6 +28,9 @@ function json(data, status, origin, env) {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
       ...corsHeaders(origin, env),
     },
   });
@@ -190,6 +193,9 @@ export default {
     const responseHeaders = new Headers(corsHeaders(origin, env));
     const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
     responseHeaders.set("Content-Type", contentType);
+    responseHeaders.set("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
+    responseHeaders.set("Pragma", "no-cache");
+    responseHeaders.set("Expires", "0");
     responseHeaders.set("X-Gateway-Project", trimTrailingSlash(env.ACTIVE_SUPABASE_URL || env.UPSTREAM_SUPABASE_URL || "") || "custom-functions-base");
 
     const lowerContentType = String(contentType || "").toLowerCase();
