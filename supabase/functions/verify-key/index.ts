@@ -4,7 +4,7 @@ import { z } from "npm:zod@3";
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig, x-build-id",
+    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -19,11 +19,7 @@ const inputSchema = z.object({
   // Optional friendly label for display in admin panel only.
   // IMPORTANT: device limit/enforcement MUST rely on `device` (stable id) only.
   device_name: z.string().trim().min(1).max(128).optional(),
-  build_id: z.string().trim().min(1).max(80).optional(),
 });
-
-const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v31-ac-20260616").trim();
-const SERVER_SIG_ALG = "HMAC-SHA256-V1";
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -31,9 +27,6 @@ function json(data: unknown, status = 200) {
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json",
-      "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
-      "Pragma": "no-cache",
-      "Expires": "0",
     },
   });
 }
@@ -64,29 +57,6 @@ async function hmacSha256Hex(secret: string, message: string) {
     new TextEncoder().encode(message),
   );
   return toHex(sig);
-}
-
-function signedResponseCanonical(args: {
-  nonce: string;
-  key: string;
-  device: string;
-  build_id: string;
-  ok: true;
-  remaining_seconds: number;
-  expires_at: string | null;
-  server_time: string;
-}) {
-  return [
-    "v1",
-    args.nonce,
-    args.key,
-    args.device,
-    args.build_id,
-    "true",
-    String(args.remaining_seconds),
-    args.expires_at ?? "",
-    args.server_time,
-  ].join("\n");
 }
 
 function timingSafeEqualHex(a: string, b: string) {
@@ -341,19 +311,6 @@ Deno.serve(async (req) => {
   const key = parsed.data.key.trim().toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
-  const buildId = (parsed.data.build_id ?? req.headers.get("x-build-id") ?? "").trim();
-  const reqNonce = req.headers.get("x-nonce") ?? "";
-
-  // Anti old APK / fake URL server: only the current signed build can pass.
-  // This does not depend on APK signature, so virtual-space/lib-transfer flow can still work.
-  if (!adminBypass && (!buildId || buildId !== REQUIRED_BUILD_ID)) {
-    await db.from("audit_logs").insert({
-      action: "VERIFY",
-      license_key: key,
-      detail: { ip, device, ok: false, msg: "APP_UPDATE_REQUIRED", reason: "BAD_BUILD_ID", build_id: buildId },
-    });
-    return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
-  }
 
   // 0) IP-only rate limit (in parallel with key+ip)
   // This helps even when attackers rotate keys.
@@ -474,20 +431,20 @@ Deno.serve(async (req) => {
     return dSecs ?? dDays;
   })();
 
-  // Fail-closed expiry: if expires_at exists and is in the past, reject it even
-  // when start_on_first_use=true and first_used_at is still NULL.
-  // Countdown keys that should start on first use must have expires_at = NULL until activation.
-  if (licRow.expires_at) {
-    const exp = new Date(licRow.expires_at);
-    if (!Number.isFinite(exp.getTime()) || exp.getTime() <= now.getTime()) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: key,
-        detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
-      });
+  // Only enforce expiry once activated (or for standard keys)
+  if (!(startsOnFirstUse && !firstUsedAt)) {
+    if (licRow.expires_at) {
+      const exp = new Date(licRow.expires_at);
+      if (exp.getTime() < now.getTime()) {
+        await db.from("audit_logs").insert({
+          action: "VERIFY",
+          license_key: key,
+          detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
+        });
 
-      await maybeInsertEnumerationAlert(db, ip, key);
-      return json({ ok: false, msg: "KEY_EXPIRED" });
+        await maybeInsertEnumerationAlert(db, ip, key);
+        return json({ ok: false, msg: "KEY_EXPIRED" });
+      }
     }
   }
 
@@ -708,32 +665,13 @@ Deno.serve(async (req) => {
         })()
       : null;
 
-  const serverTimeIso = now.toISOString();
-  const signedRemainingSeconds = typeof remainingSeconds === "number" ? remainingSeconds : 0;
-  const okBody: Record<string, unknown> = {
+  return json({
     ok: true,
     msg: "OK",
     expires_at: effectiveExpiresAt,
     max_devices: licRow.max_devices,
     started,
-    remaining_seconds: signedRemainingSeconds,
-    server_time: serverTimeIso,
-    build_id: buildId,
-    server_sig_alg: SERVER_SIG_ALG,
-  };
-
-  const responseSecret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
-  const responseCanonical = signedResponseCanonical({
-    nonce: reqNonce,
-    key,
-    device,
-    build_id: buildId,
-    ok: true,
-    remaining_seconds: signedRemainingSeconds,
-    expires_at: effectiveExpiresAt,
-    server_time: serverTimeIso,
+    remaining_seconds: remainingSeconds,
+    server_time: now.toISOString(),
   });
-  okBody.server_sig = await hmacSha256Hex(responseSecret, responseCanonical);
-
-  return json(okBody);
 });
