@@ -4,7 +4,7 @@ import { z } from "npm:zod@3";
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig",
+    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig, x-build-id",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -19,7 +19,30 @@ const inputSchema = z.object({
   // Optional friendly label for display in admin panel only.
   // IMPORTANT: device limit/enforcement MUST rely on `device` (stable id) only.
   device_name: z.string().trim().min(1).max(128).optional(),
+  build_id: z.string().trim().min(1).max(80).optional(),
 });
+
+const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v31-ac-20260616").trim();
+const SERVER_SIG_ALG = "HMAC-SHA256-V1";
+
+function envInt(name: string, fallback: number, min = 1, max = 100000) {
+  const raw = (Deno.env.get(name) ?? "").trim();
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+// Tunable from Supabase Edge Function secrets. Defaults are lenient enough for testing,
+// but still stop render-loop spam.
+const VERIFY_IP_RATE_LIMIT = envInt("VERIFY_IP_RATE_LIMIT", 300, 30, 5000);
+const VERIFY_IP_RATE_WINDOW_SECONDS = envInt("VERIFY_IP_RATE_WINDOW_SECONDS", 60, 10, 3600);
+const VERIFY_KEY_RATE_LIMIT = envInt("VERIFY_KEY_RATE_LIMIT", 60, 5, 1000);
+const VERIFY_KEY_RATE_WINDOW_SECONDS = envInt("VERIFY_KEY_RATE_WINDOW_SECONDS", 300, 60, 3600);
+const VERIFY_NEW_DEVICE_LIMIT = envInt("VERIFY_NEW_DEVICE_LIMIT", 20, 1, 200);
+const VERIFY_NEW_DEVICE_WINDOW_SECONDS = envInt("VERIFY_NEW_DEVICE_WINDOW_SECONDS", 3600, 60, 86400);
+const VERIFY_ENUM_FAILURE_5M_LIMIT = envInt("VERIFY_ENUM_FAILURE_5M_LIMIT", 80, 10, 10000);
+const VERIFY_ENUM_DISTINCT_10M_LIMIT = envInt("VERIFY_ENUM_DISTINCT_10M_LIMIT", 100, 10, 10000);
+const VERIFY_ENUM_BLOCK_MINUTES = envInt("VERIFY_ENUM_BLOCK_MINUTES", 15, 1, 1440);
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -27,6 +50,9 @@ function json(data: unknown, status = 200) {
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json",
+      "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
     },
   });
 }
@@ -57,6 +83,29 @@ async function hmacSha256Hex(secret: string, message: string) {
     new TextEncoder().encode(message),
   );
   return toHex(sig);
+}
+
+function signedResponseCanonical(args: {
+  nonce: string;
+  key: string;
+  device: string;
+  build_id: string;
+  ok: true;
+  remaining_seconds: number;
+  expires_at: string | null;
+  server_time: string;
+}) {
+  return [
+    "v1",
+    args.nonce,
+    args.key,
+    args.device,
+    args.build_id,
+    "true",
+    String(args.remaining_seconds),
+    args.expires_at ?? "",
+    args.server_time,
+  ].join("\n");
 }
 
 function timingSafeEqualHex(a: string, b: string) {
@@ -113,7 +162,7 @@ async function maybeInsertEnumerationAlert(
   const failure5m = Number(row.failure_5m ?? 0);
   const distinct10m = Number(row.distinct_keys_10m ?? 0);
 
-  if (failure5m <= 20 && distinct10m <= 30) return;
+  if (failure5m <= VERIFY_ENUM_FAILURE_5M_LIMIT && distinct10m <= VERIFY_ENUM_DISTINCT_10M_LIMIT) return;
 
   await db.from("security_alerts").insert({
     kind: "ENUMERATION",
@@ -122,7 +171,7 @@ async function maybeInsertEnumerationAlert(
     meta: {
       failure_5m: failure5m,
       distinct_keys_10m: distinct10m,
-      thresholds: { failure_5m: 20, distinct_keys_10m: 30 },
+      thresholds: { failure_5m: VERIFY_ENUM_FAILURE_5M_LIMIT, distinct_keys_10m: VERIFY_ENUM_DISTINCT_10M_LIMIT },
     },
   });
 
@@ -130,7 +179,7 @@ async function maybeInsertEnumerationAlert(
   // Response contract remains unchanged; callers will see RATE_LIMIT.
   try {
     const now = new Date();
-    const blockMinutes = 30;
+    const blockMinutes = VERIFY_ENUM_BLOCK_MINUTES;
     const newUntil = new Date(now.getTime() + blockMinutes * 60 * 1000).toISOString();
 
     const existing = await db
@@ -211,7 +260,7 @@ Deno.serve(async (req) => {
         license_key: "",
         detail: { ip, ok: false, msg: "RATE_LIMIT", reason: "IP_BLOCKED" },
       });
-      return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+      return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)) }, 429);
     }
   }
 
@@ -311,11 +360,24 @@ Deno.serve(async (req) => {
   const key = parsed.data.key.trim().toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
+  const buildId = (parsed.data.build_id ?? req.headers.get("x-build-id") ?? "").trim();
+  const reqNonce = req.headers.get("x-nonce") ?? "";
+
+  // Anti old APK / fake URL server: only the current signed build can pass.
+  // This does not depend on APK signature, so virtual-space/lib-transfer flow can still work.
+  if (!adminBypass && (!buildId || buildId !== REQUIRED_BUILD_ID)) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: { ip, device, ok: false, msg: "APP_UPDATE_REQUIRED", reason: "BAD_BUILD_ID", build_id: buildId },
+    });
+    return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
+  }
 
   // 0) IP-only rate limit (in parallel with key+ip)
   // This helps even when attackers rotate keys.
-  const IP_RATE_LIMIT = 180;
-  const IP_RATE_WINDOW_SECONDS = 60;
+  const IP_RATE_LIMIT = VERIFY_IP_RATE_LIMIT;
+  const IP_RATE_WINDOW_SECONDS = VERIFY_IP_RATE_WINDOW_SECONDS;
   const ipRl = await db.rpc("check_ip_rate_limit", {
     p_ip: ip,
     p_limit: IP_RATE_LIMIT,
@@ -337,13 +399,12 @@ Deno.serve(async (req) => {
     });
 
     await maybeInsertEnumerationAlert(db, ip, key);
-    return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+    return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: IP_RATE_WINDOW_SECONDS }, 429);
   }
 
   // 1) Rate limit (key + ip) - light
-  const RATE_WINDOW_MIN = 5;
-  const RATE_LIMIT = 30;
-  const RATE_WINDOW_SECONDS = RATE_WINDOW_MIN * 60;
+  const RATE_LIMIT = VERIFY_KEY_RATE_LIMIT;
+  const RATE_WINDOW_SECONDS = VERIFY_KEY_RATE_WINDOW_SECONDS;
   const rl = await db.rpc("check_rate_limit", {
     p_key: key,
     p_ip: ip,
@@ -361,7 +422,7 @@ Deno.serve(async (req) => {
     });
 
     await maybeInsertEnumerationAlert(db, ip, key);
-    return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+    return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: RATE_WINDOW_SECONDS }, 429);
   }
 
   // 2) Fetch license
@@ -431,20 +492,20 @@ Deno.serve(async (req) => {
     return dSecs ?? dDays;
   })();
 
-  // Only enforce expiry once activated (or for standard keys)
-  if (!(startsOnFirstUse && !firstUsedAt)) {
-    if (licRow.expires_at) {
-      const exp = new Date(licRow.expires_at);
-      if (exp.getTime() < now.getTime()) {
-        await db.from("audit_logs").insert({
-          action: "VERIFY",
-          license_key: key,
-          detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
-        });
+  // Fail-closed expiry: if expires_at exists and is in the past, reject it even
+  // when start_on_first_use=true and first_used_at is still NULL.
+  // Countdown keys that should start on first use must have expires_at = NULL until activation.
+  if (licRow.expires_at) {
+    const exp = new Date(licRow.expires_at);
+    if (!Number.isFinite(exp.getTime()) || exp.getTime() <= now.getTime()) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: { ip, device, ok: false, msg: "KEY_EXPIRED" },
+      });
 
-        await maybeInsertEnumerationAlert(db, ip, key);
-        return json({ ok: false, msg: "KEY_EXPIRED" });
-      }
+      await maybeInsertEnumerationAlert(db, ip, key);
+      return json({ ok: false, msg: "KEY_EXPIRED" });
     }
   }
 
@@ -470,8 +531,8 @@ Deno.serve(async (req) => {
   if (!existing.data) {
     // 3.1) Anti "device slot burning": throttle *new* device registrations per key.
     // If this triggers, we return RATE_LIMIT (contract unchanged).
-    const NEW_DEVICE_LIMIT = 10;
-    const NEW_DEVICE_WINDOW_SECONDS = 3600;
+    const NEW_DEVICE_LIMIT = VERIFY_NEW_DEVICE_LIMIT;
+    const NEW_DEVICE_WINDOW_SECONDS = VERIFY_NEW_DEVICE_WINDOW_SECONDS;
     const nd = await db.rpc("check_new_device_rate_limit", {
       p_key: key,
       p_limit: NEW_DEVICE_LIMIT,
@@ -493,7 +554,7 @@ Deno.serve(async (req) => {
       });
 
       await maybeInsertEnumerationAlert(db, ip, key);
-      return json({ ok: false, msg: "RATE_LIMIT" }, 429);
+      return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: NEW_DEVICE_WINDOW_SECONDS }, 429);
     }
 
     const count = await db
@@ -665,13 +726,32 @@ Deno.serve(async (req) => {
         })()
       : null;
 
-  return json({
+  const serverTimeIso = now.toISOString();
+  const signedRemainingSeconds = typeof remainingSeconds === "number" ? remainingSeconds : 0;
+  const okBody: Record<string, unknown> = {
     ok: true,
     msg: "OK",
     expires_at: effectiveExpiresAt,
     max_devices: licRow.max_devices,
     started,
-    remaining_seconds: remainingSeconds,
-    server_time: now.toISOString(),
+    remaining_seconds: signedRemainingSeconds,
+    server_time: serverTimeIso,
+    build_id: buildId,
+    server_sig_alg: SERVER_SIG_ALG,
+  };
+
+  const responseSecret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
+  const responseCanonical = signedResponseCanonical({
+    nonce: reqNonce,
+    key,
+    device,
+    build_id: buildId,
+    ok: true,
+    remaining_seconds: signedRemainingSeconds,
+    expires_at: effectiveExpiresAt,
+    server_time: serverTimeIso,
   });
+  okBody.server_sig = await hmacSha256Hex(responseSecret, responseCanonical);
+
+  return json(okBody);
 });
