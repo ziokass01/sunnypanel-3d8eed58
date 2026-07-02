@@ -22,6 +22,7 @@ import { LicensesTrashPage } from "@/pages/LicensesTrash";
 import { AuditLogsPage } from "@/pages/AuditLogs";
 import { FreeLandingPage } from "@/pages/FreeLanding";
 import { FreeGatePage } from "@/pages/FreeGate";
+import { FreeLink4MBridgePage } from "@/pages/FreeLink4MBridge";
 import { FreeClaimPage } from "@/pages/FreeClaim";
 import { AdminFreeKeysPage } from "@/pages/AdminFreeKeys";
 import { AdminServerAppsPage } from "@/pages/AdminServerApps";
@@ -97,6 +98,7 @@ const App = () => {
               <Route path="/free" element={<FreeLandingPage />} />
               <Route path="/fake-lag" element={<FakeLagPortalPage />} />
               <Route path="/coding-ai" element={<SunnyModCodingAIPage />} />
+              <Route path="/free/link4m-bridge" element={<FreeLink4MBridgePage />} />
               <Route path="/free/gate" element={<FreeGatePage />} />
               <Route path="/free/gat" element={<Navigate to="/free/gate" replace />} />
               <Route path="/free/claim" element={<FreeClaimPage />} />
