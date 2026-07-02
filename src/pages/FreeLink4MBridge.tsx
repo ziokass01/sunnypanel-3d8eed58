@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { clearLink4MClientBridge, readLink4MClientBridge } from "@/features/free/link4m-client-bridge";
+import { clearLink4MClientBridge, readLink4MClientBridge, saveLink4MClientBridge } from "@/features/free/link4m-client-bridge";
 
 interface Link4MWindow extends Window {
   link4m_url?: string;
@@ -17,7 +17,25 @@ const LINK4M_HOST_RE = /(^|\.)link4m\.(co|com)$/i;
 
 export function FreeLink4MBridgePage() {
   const nav = useNavigate();
-  const payload = useMemo(() => readLink4MClientBridge(), []);
+  const payload = useMemo(() => {
+    const stored = readLink4MClientBridge();
+    if (stored) return stored;
+    try {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const encoded = String(params.get("payload") ?? "").trim();
+      if (!encoded) return null;
+      const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+      const binary = atob(padded);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const parsed = JSON.parse(new TextDecoder().decode(bytes));
+      if (!saveLink4MClientBridge(parsed)) return null;
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return readLink4MClientBridge();
+    } catch {
+      return null;
+    }
+  }, []);
   const targetRef = useRef<HTMLAnchorElement | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(payload ? "loading" : "error");
   const [attempt, setAttempt] = useState(0);
