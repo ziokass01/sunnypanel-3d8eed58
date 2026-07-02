@@ -103,12 +103,8 @@ function safeProviderError(error: unknown) {
 }
 
 function shortlinkStrictProviderEnabled() {
-  // Older deployments may still have FREE_SHORTLINK_FAIL_OPEN=false saved as
-  // a secret. That stale flag must not keep the whole Free Key flow broken when
-  // Link4M is blocked by Cloudflare. Strict mode now requires an explicit new
-  // secret: FREE_SHORTLINK_STRICT_PROVIDER=true.
-  const raw = Deno.env.get("FREE_SHORTLINK_STRICT_PROVIDER");
-  return ["1", "true", "yes", "on"].includes(String(raw ?? "").trim().toLowerCase());
+  // The Free Key flow must never bypass the configured shortener.
+  return true;
 }
 
 async function fetchProviderResponse(url: string, headers: Record<string, string>) {
@@ -217,10 +213,16 @@ async function shortenWithProvider(provider: any, gateUrl: string) {
     // Traffic68 quicklink is itself the outbound URL in the reference implementation.
     return requestUrl;
   }
-  if (kind === "link4m") {
-    const base = apiUrl || "https://link4m.co/api-shorten/v2";
-    requestUrl = renderTemplate(base.includes("{url") || base.includes("{token") ? base : `${base}${base.includes("?") ? "&" : "?"}api={token}&url={url_enc}`, gateUrl, token);
-  } else if (kind === "nhapma") {
+  if (kind === "link4m" || /(^|\.)link4m\.(co|com)(\/|$)/i.test(rawApiUrl)) {
+  if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
+  // Supabase Edge IPs are currently receiving Cloudflare HTML from
+  // Link4M's API. Move only Link4M shortening into the official
+  // browser Full Page Script; the gate itself remains mandatory.
+  const bridge = new URL(`${publicBase()}/free/link4m-bridge`);
+  bridge.searchParams.set("api", token);
+  bridge.searchParams.set("url", gateUrl);
+  return bridge.toString();
+} else if (kind === "nhapma") {
     const base = apiUrl || "https://service.nhapma.com/api";
     requestUrl = renderTemplate(base.includes("{url") || base.includes("{token") ? base : `${base}${base.includes("?") ? "&" : "?"}token={token}&url={url_enc}`, gateUrl, token);
   } else if (kind === "layma") {
