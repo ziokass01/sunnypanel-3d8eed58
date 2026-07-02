@@ -1,0 +1,82 @@
+name: Patch Link4M st runtime
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/link4m-st-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Replace Link4M Edge API call with browser st quicklink
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          paths = [
+              Path('supabase/functions/free-start/index.ts'),
+              Path('supabase/functions/free-gate/index.ts'),
+          ]
+
+          pattern = re.compile(
+              r'  if \(kind === "link4m" \|\| /\(\^\|\\\.\)link4m\\\.\(co\|com\)\(\\\/\|\$\)/i\.test\(rawApiUrl\)\) \{.*?\n\} else if \(kind === "nhapma"\) \{',
+              re.S,
+          )
+
+          replacement = '''  if (kind === "link4m" || /(^|\\.)link4m\\.(co|com)(\\/|$)/i.test(rawApiUrl)) {
+            if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
+            // Link4M's server API is challenged when called from Supabase Edge.
+            // /st is Link4M's browser quicklink endpoint: it receives the unique,
+            // single-use gate URL and keeps the external Link4M step mandatory.
+            const outbound = new URL("https://link4m.co/st");
+            outbound.searchParams.set("api", token);
+            outbound.searchParams.set("url", gateUrl);
+            return outbound.toString();
+          } else if (kind === "nhapma") {'''
+
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+              text, count = pattern.subn(replacement, text, count=1)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one Link4M branch, found {count}')
+              required = [
+                  'new URL("https://link4m.co/st")',
+                  'outbound.searchParams.set("api", token)',
+                  'outbound.searchParams.set("url", gateUrl)',
+                  'return outbound.toString()',
+              ]
+              for needle in required:
+                  if needle not in text:
+                      raise SystemExit(f'{path}: missing {needle}')
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify source formatting and frontend build
+        run: |
+          git diff --check
+          npm ci --ignore-scripts
+          npm run build
+          npx --yes deno@latest check \
+            supabase/functions/free-start/index.ts \
+            supabase/functions/free-gate/index.ts
+
+      - name: Commit verified runtime fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/free-start/index.ts supabase/functions/free-gate/index.ts
+          git commit -m "Use Link4M st quicklink for single-use gate tokens"
+          git push origin HEAD:main
