@@ -26,8 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pin both the action channel and CLI version. This avoids the unauthenticated
-      # "resolve latest release" request that was hitting GitHub API rate limits.
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
         with:
@@ -98,7 +96,8 @@ jobs:
             VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
             TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
             TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}" \
-            RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}"
+            RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}" \
+            FREE_SHORTLINK_STRICT_PROVIDER="true"
 
       - name: Warn if db push failed
         if: ${{ github.event.inputs.run_db_push == 'true' && steps.db_push.outcome == 'failure' }}
