@@ -75,18 +75,73 @@ function renderTemplate(templateRaw: string, gateUrl: string, apiToken: string) 
     .replaceAll("{url}", gateUrl)
     .replaceAll("{token}", encodeURIComponent(apiToken));
 }
+
+function normalizeProviderApiBase(kind: string, rawApi: string) {
+  let api = String(rawApi || "").trim();
+  if (!api) return "";
+  if (kind !== "link4m") return api;
+
+  // Link4M currently documents /api-shorten/v2. Older admin rows often contain
+  // /api-shorten or /api-shorten/; normalize those without touching token/url templates.
+  api = api.replace(/(https?:\/\/[^/?#]*link4m\.(?:co|com)\/api-shorten)\/?(?=([?#]|$))/i, "$1/v2");
+  api = api.replace(/(\/api-shorten\/v2)\/+([?#]|$)/i, "$1$2");
+  return api;
+}
+
+function safeProviderError(error: unknown) {
+  return String((error as any)?.message ?? error ?? "SHORTLINK_FAILED")
+    .replace(/([?&](?:api|token|tokenUser)=)[^&\s]+/gi, "$1***")
+    .slice(0, 300);
+}
 async function readJsonOrText(url: string) {
-  const res = await fetch(url, { headers: { "accept": "application/json,text/plain,*/*", "user-agent": "SunnyPanel-FreeKey/1.0" } });
-  const raw = await res.text();
-  let data: any = null;
-  try { data = JSON.parse(raw); } catch { data = null; }
-  if (!res.ok) throw new Error(data?.message || data?.error || raw.slice(0, 180) || `HTTP_${res.status}`);
-  return { data, raw };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "accept": "application/json,text/plain,*/*",
+        "user-agent": "SunnyPanel-FreeKey/1.1",
+        "cache-control": "no-cache",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const raw = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch { data = null; }
+    if (!res.ok) throw new Error(data?.message || data?.error || raw.slice(0, 180) || `HTTP_${res.status}`);
+    return { data, raw };
+  } catch (error) {
+    if ((error as any)?.name === "AbortError") throw new Error("SHORTLINK_TIMEOUT");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 function extractShortUrl(data: any, raw: string) {
-  const candidates = [data?.shortenedUrl, data?.short_url, data?.url, data?.html, data?.short, data?.result, data?.data?.shortenedUrl, data?.data?.url, raw];
+  const candidates = [
+    data?.shortenedUrl,
+    data?.shortenedURL,
+    data?.shortened_url,
+    data?.shortUrl,
+    data?.short_url,
+    data?.url,
+    data?.html,
+    data?.short,
+    data?.result?.shortenedUrl,
+    data?.result?.shortened_url,
+    data?.result?.url,
+    data?.result,
+    data?.data?.shortenedUrl,
+    data?.data?.shortenedURL,
+    data?.data?.shortened_url,
+    data?.data?.shortUrl,
+    data?.data?.short_url,
+    data?.data?.url,
+    raw,
+  ];
   for (const c of candidates) {
-    const v = String(c ?? "").trim();
+    const v = String(c ?? "").trim().replace(/^['"]|['"]$/g, "");
     if (/^https?:\/\//i.test(v)) return v;
   }
   return "";
@@ -94,7 +149,8 @@ function extractShortUrl(data: any, raw: string) {
 async function shortenWithProvider(provider: any, gateUrl: string) {
   const kind = text(provider?.provider || "custom", 32).toLowerCase() || "custom";
   const token = text(provider?.api_token_secret, 4096);
-  const apiUrl = text(provider?.api_url_template, 4096);
+  const rawApiUrl = text(provider?.api_url_template, 4096);
+  const apiUrl = normalizeProviderApiBase(kind, rawApiUrl);
   if (kind === "none") return gateUrl;
 
   let requestUrl = "";
@@ -177,6 +233,78 @@ async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: strin
   }
   return selected;
 }
+
+async function providerCandidates(db: any, cfg: any, passNo: number, selected: any, avoidId?: string | null) {
+  let providers: any[] = [];
+  try { providers = await loadProviders(db, passNo); } catch { providers = []; }
+  if (avoidId && providers.length > 1) {
+    const filtered = providers.filter((p) => String(p.id) !== String(avoidId));
+    if (filtered.length) providers = filtered;
+  }
+  const out: any[] = [];
+  const seen = new Set<string>();
+  const push = (provider: any) => {
+    if (!provider) return;
+    const key = provider?.id
+      ? `id:${String(provider.id)}`
+      : `cfg:${text(provider?.provider, 32)}:${text(provider?.api_url_template, 512)}:${text(provider?.api_token_secret, 64)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(provider);
+  };
+  push(selected);
+  for (const provider of providers) push(provider);
+  if (!out.length) {
+    const fallback = fallbackProviderFromSettings(cfg, passNo);
+    if (fallback) push(fallback);
+  }
+  return out;
+}
+
+async function markProviderFailure(db: any, provider: any, error: unknown) {
+  if (!provider?.id) return;
+  try {
+    await db.from("licenses_free_shortlink_providers").update({
+      last_error: safeProviderError(error),
+      fail_count: Math.max(0, Number(provider?.fail_count ?? 0)) + 1,
+    }).eq("id", provider.id);
+  } catch { /* ignore */ }
+}
+
+async function markProviderSuccess(db: any, provider: any, passNo: number) {
+  if (!provider?.id) return;
+  try {
+    await db.from("licenses_free_shortlink_providers").update({
+      last_used_at: new Date().toISOString(),
+      last_error: null,
+      fail_count: 0,
+    }).eq("id", provider.id);
+  } catch { /* ignore */ }
+  const patch: Record<string, unknown> = passNo === 2
+    ? { free_shortlink_last_provider_id_pass2: provider.id }
+    : { free_shortlink_last_provider_id_pass1: provider.id };
+  try { await db.from("licenses_free_settings").update(patch).eq("id", 1); } catch { /* ignore */ }
+}
+
+async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: string, avoidId?: string | null) {
+  const selected = await chooseProvider(db, cfg, passNo, avoidId);
+  const candidates = await providerCandidates(db, cfg, passNo, selected, avoidId);
+  const failures: string[] = [];
+  for (const provider of candidates) {
+    try {
+      const outboundUrl = await shortenWithProvider(provider, gateUrl);
+      if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
+      await markProviderSuccess(db, provider, passNo);
+      return { provider, outboundUrl };
+    } catch (error) {
+      const message = safeProviderError(error);
+      failures.push(`${text(provider?.name || provider?.provider || "provider", 80)}: ${message}`);
+      await markProviderFailure(db, provider, error);
+    }
+  }
+  throw new Error(`ALL_SHORTLINK_PROVIDERS_FAILED${failures.length ? ` | ${failures.join(" | ")}` : ""}`);
+}
+
 async function createNextGateToken(db: any, cfg: any, session: any, passNo: 1 | 2, hashes: { ipHash: string; uaHash: string; fpHash: string }) {
   const gateToken = randomToken("gt");
   const gateHash = await sha256Hex(gateToken);
@@ -186,9 +314,10 @@ async function createNextGateToken(db: any, cfg: any, session: any, passNo: 1 | 
   const activateAfterAt = new Date(nowMs + delay * 1000).toISOString();
   const gateExpiresAt = new Date(nowMs + (delay + gateLifeSeconds) * 1000).toISOString();
   const avoidId = passNo === 2 ? text(session?.provider_id_pass1, 64) : null;
-  const provider = await chooseProvider(db, cfg, passNo, avoidId);
   const gateUrl = gateUrlFromToken(gateToken, passNo);
-  const outboundUrl = await shortenWithProvider(provider, gateUrl);
+  const shortened = await shortenWithFailover(db, cfg, passNo, gateUrl, avoidId);
+  const provider = shortened.provider;
+  const outboundUrl = shortened.outboundUrl;
   const ins = await db.from("licenses_free_gate_tokens").insert({
     session_id: session.session_id,
     pass_no: passNo,
@@ -203,9 +332,6 @@ async function createNextGateToken(db: any, cfg: any, session: any, passNo: 1 | 
     fingerprint_hash: hashes.fpHash || hashes.ipHash,
   });
   if (ins.error) throw ins.error;
-  if (provider?.id) {
-    try { await db.from("licenses_free_shortlink_providers").update({ last_used_at: new Date().toISOString(), last_error: null }).eq("id", provider.id); } catch { /* ignore */ }
-  }
   return { gateToken, gateUrl, outboundUrl, provider, delay, gateLifeSeconds, gateExpiresAt, activateAfterAt };
 }
 async function loadSession(db: any, sessionId: string) {

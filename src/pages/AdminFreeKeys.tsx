@@ -229,6 +229,22 @@ function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
   return "";
 }
 
+function normalizeShortlinkApiBase(provider: ShortlinkProviderRow["provider"], rawApi: unknown) {
+  let api = String(rawApi ?? "").trim();
+  if (!api) return defaultShortlinkApi(provider);
+  if (provider === "link4m") {
+    api = api.replace(/(https?:\/\/[^/?#]*link4m\.(?:co|com)\/api-shorten)\/?(?=([?#]|$))/i, "$1/v2");
+    api = api.replace(/(\/api-shorten\/v2)\/+([?#]|$)/i, "$1$2");
+  }
+  return api;
+}
+
+function visibleSessionError(value: unknown) {
+  const code = String(value ?? "").trim();
+  if (!code || /^AUTO_CLOSE_(?:STALE_PENDING|OLD_SAME_FP)(?:_|$)/i.test(code)) return "";
+  return code;
+}
+
 function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
   const api = String(rawApi ?? "").trim();
   const token = String(rawToken ?? "").trim();
@@ -254,7 +270,7 @@ function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
 function normalizeProviderApi(row: ShortlinkProviderRow) {
   const provider = row.provider || "custom";
   const parsed = parseLegacyShortlinkApi(row.api_url_template, row.api_token_secret);
-  return parsed.api || defaultShortlinkApi(provider);
+  return normalizeShortlinkApiBase(provider, parsed.api);
 }
 
 function normalizeProviderToken(row: ShortlinkProviderRow) {
@@ -829,7 +845,7 @@ export function AdminFreeKeysPage() {
             name: String(row.name ?? "").trim(),
             provider: row.provider || "custom",
             api_token_secret: parsed.token,
-            api_url_template: parsed.api,
+            api_url_template: normalizeShortlinkApiBase(row.provider || "custom", parsed.api),
             pass_scope: row.pass_scope || "both",
             enabled: Boolean(row.enabled),
             sort_order: (index + 1) * 10,
@@ -2498,7 +2514,7 @@ export function AdminFreeKeysPage() {
                   <div>Reveal: {s.reveal_count}</div>
                   <div>IP: <span className="font-mono">{shortText(s.ip_hash, 12)}</span></div>
                   <div>FP: <span className="font-mono">{shortText(s.fingerprint_hash, 12)}</span></div>
-                  <div className="truncate">Error: {s.last_error ?? "-"}</div>
+                  <div className="truncate">Error: {visibleSessionError(s.last_error) || "-"}</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? ""; if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason }); }}>Block IP</Button>
@@ -2536,7 +2552,7 @@ export function AdminFreeKeysPage() {
                     <TableCell>{s.reveal_count}</TableCell>
                     <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
                     <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
-                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
+                    <TableCell className="text-xs">{visibleSessionError(s.last_error)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button

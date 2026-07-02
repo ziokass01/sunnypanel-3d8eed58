@@ -506,19 +506,26 @@ Deno.serve(async (req) => {
   let licenseId = "";
   let lastLicenseInsertError = "";
   for (let attempt = 0; attempt < 12; attempt++) {
-    key = makeKey(appCode === "fake-lag" ? keySignature : keySignature);
+    // Keep Admin Test identical to the real free-reveal path:
+    // Free Fire licenses always use SUNNY-..., while Fake Lag uses its configured prefix.
+    key = makeKey(appCode === "fake-lag" ? keySignature : "SUNNY");
+    const licensePayload: Record<string, unknown> = {
+      key,
+      app_code: appCode,
+      is_active: true,
+      max_devices: appCode === "fake-lag" ? fakeLagIssuedMaxDevices : 1,
+      expires_at: expiresAt,
+      note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature};RULE_SOURCE=${appCode === "fake-lag" ? "server_app_fake_lag" : "admin_free"}`,
+    };
+    // Some deployed schemas define max_ips/max_verify as NOT NULL. Do not send NULL
+    // for normal Free Fire rows; let database defaults apply instead.
+    if (appCode === "fake-lag") {
+      licensePayload.max_ips = fakeLagMaxIps;
+      licensePayload.max_verify = fakeLagMaxVerify;
+    }
     const insLic = await sb
       .from("licenses")
-      .insert({
-        key,
-        app_code: appCode,
-        is_active: true,
-        max_devices: appCode === "fake-lag" ? fakeLagIssuedMaxDevices : 1,
-        max_ips: appCode === "fake-lag" ? fakeLagMaxIps : null,
-        max_verify: appCode === "fake-lag" ? fakeLagMaxVerify : null,
-        expires_at: expiresAt,
-        note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature};RULE_SOURCE=${appCode === "fake-lag" ? "server_app_fake_lag" : "admin_free"}`,
-      })
+      .insert(licensePayload)
       .select("id")
       .single();
     if (!insLic.error && insLic.data?.id) {

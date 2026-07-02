@@ -31,6 +31,16 @@ function defaultApiFor(provider: string) {
   return "";
 }
 
+function normalizeApiBase(provider: string, rawApi: unknown) {
+  let api = trim(rawApi, 4096);
+  if (!api) return defaultApiFor(provider);
+  if (provider === "link4m") {
+    api = api.replace(/(https?:\/\/[^/?#]*link4m\.(?:co|com)\/api-shorten)\/?(?=([?#]|$))/i, "$1/v2");
+    api = api.replace(/(\/api-shorten\/v2)\/+([?#]|$)/i, "$1$2");
+  }
+  return api;
+}
+
 function parseLegacyApi(rawApi: unknown, rawToken: unknown = "") {
   const api = trim(rawApi, 4096);
   const token = trim(rawToken, 4096);
@@ -53,7 +63,7 @@ function normalizeProvider(row: any, index: number) {
   const name = trim(row?.name, 128) || providerName(provider);
   const parsed = parseLegacyApi(row?.api_url_template, row?.api_token_secret);
   const api_token_secret = parsed.token;
-  const api_url_template = parsed.api || defaultApiFor(provider);
+  const api_url_template = normalizeApiBase(provider, parsed.api);
   const note = trim(row?.note, 512) || null;
   const enabled = row?.enabled !== false;
   const sort_order = (index + 1) * 10;

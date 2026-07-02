@@ -999,18 +999,22 @@ Deno.serve(async (req) => {
   let inserted: { id: string; key: string } | null = null;
   for (let attempt = 0; attempt < 12; attempt++) {
     const key = makeKey(appCode === "fake-lag" ? fakeLagPrefix : "SUNNY");
+    const licensePayload: Record<string, unknown> = {
+      key,
+      is_active: true,
+      max_devices: 1,
+      expires_at,
+      note: appCode === "fake-lag" ? `${freeNote};RULE_SOURCE=server_app_fake_lag` : freeNote,
+      app_code: appCode,
+    };
+    // Avoid explicit NULL for deployments where these compatibility columns are NOT NULL.
+    if (appCode === "fake-lag") {
+      licensePayload.max_ips = 1;
+      licensePayload.max_verify = fakeLagMaxVerify;
+    }
     const ins = await sb
       .from("licenses")
-      .insert({
-        key,
-        is_active: true,
-        max_devices: 1,
-        max_ips: null,
-        max_verify: appCode === "fake-lag" ? fakeLagMaxVerify : null,
-        expires_at,
-        note: appCode === "fake-lag" ? `${freeNote};RULE_SOURCE=server_app_fake_lag` : freeNote,
-        app_code: appCode,
-      })
+      .insert(licensePayload)
       .select("id,key")
       .single();
     if (!ins.error && ins.data?.id) {
