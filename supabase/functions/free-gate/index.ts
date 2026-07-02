@@ -114,21 +114,13 @@ function safeProviderError(error: unknown) {
     .slice(0, 300);
 }
 
-function isTransientShortlinkFailure(message: string) {
-  const value = String(message || "").toUpperCase();
-  return value.includes("LINK4M_CLOUDFLARE_CHALLENGE")
-    || value.includes("SHORTLINK_PROVIDER_HTML_RESPONSE")
-    || value.includes("SHORTLINK_TIMEOUT")
-    || value.includes("FETCH_FAILED")
-    || value.includes("NETWORK")
-    || value.includes("HTTP_429")
-    || /HTTP_5\d\d/.test(value);
-}
-
-function shortlinkFailOpenEnabled() {
-  const raw = Deno.env.get("FREE_SHORTLINK_FAIL_OPEN");
-  if (raw == null || !String(raw).trim()) return true;
-  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
+function shortlinkStrictProviderEnabled() {
+  // Older deployments may still have FREE_SHORTLINK_FAIL_OPEN=false saved as
+  // a secret. That stale flag must not keep the whole Free Key flow broken when
+  // Link4M is blocked by Cloudflare. Strict mode now requires an explicit new
+  // secret: FREE_SHORTLINK_STRICT_PROVIDER=true.
+  const raw = Deno.env.get("FREE_SHORTLINK_STRICT_PROVIDER");
+  return ["1", "true", "yes", "on"].includes(String(raw ?? "").trim().toLowerCase());
 }
 
 async function fetchProviderResponse(url: string, headers: Record<string, string>) {
@@ -269,7 +261,7 @@ async function loadProviders(db: any, passNo: number) {
 function fallbackProviderFromSettings(cfg: any, passNo: number) {
   const template = text(passNo === 2 ? (cfg.free_outbound_url_pass2 || cfg.free_outbound_url) : cfg.free_outbound_url, 4096);
   if (!template) return null;
-  return { id: null, name: passNo === 2 ? "Legacy Pass2" : "Legacy Pass1", provider: "custom", api_url_template: template, api_token_secret: "", pass_scope: passNo === 2 ? "pass2" : "pass1", sort_order: 9999 };
+  return { id: null, name: passNo === 2 ? "Legacy Pass2" : "Legacy Pass1", provider: "custom", api_url_template: template, api_token_secret: "", pass_scope: passNo === 2 ? "pass2" : "pass1", sort_order: 9999, source: "settings_legacy" };
 }
 async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: string | null) {
   let providers: any[] = [];
@@ -356,10 +348,27 @@ async function markProviderSuccess(db: any, provider: any, passNo: number) {
 }
 
 async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: string, avoidId?: string | null) {
-  const selected = await chooseProvider(db, cfg, passNo, avoidId);
-  const candidates = await providerCandidates(db, cfg, passNo, selected, avoidId);
   const failures: string[] = [];
-  const normalizedFailures: string[] = [];
+  let selected: any = null;
+  let candidates: any[] = [];
+
+  try {
+    selected = await chooseProvider(db, cfg, passNo, avoidId);
+    candidates = await providerCandidates(db, cfg, passNo, selected, avoidId);
+  } catch (error) {
+    const message = safeProviderError(error);
+    failures.push(`provider-config: ${message}`);
+    if (!shortlinkStrictProviderEnabled()) {
+      return {
+        provider: { id: null, name: "Direct emergency fallback", provider: "none" },
+        outboundUrl: gateUrl,
+        degraded: true,
+        failures,
+      };
+    }
+    throw error;
+  }
+
   for (const provider of candidates) {
     try {
       const outboundUrl = await shortenWithProvider(provider, gateUrl);
@@ -368,14 +377,14 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
       return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
       const message = safeProviderError(error);
-      normalizedFailures.push(message);
       failures.push(`${text(provider?.name || provider?.provider || "provider", 80)}: ${message}`);
       await markProviderFailure(db, provider, error);
     }
   }
 
-  const allTransient = normalizedFailures.length > 0 && normalizedFailures.every(isTransientShortlinkFailure);
-  if (allTransient && shortlinkFailOpenEnabled()) {
+  // Apply the same continuity rule to Pass 2. A failed shortener must not kill
+  // an otherwise valid session after the user has already completed Pass 1.
+  if (!shortlinkStrictProviderEnabled()) {
     return {
       provider: { id: null, name: "Direct emergency fallback", provider: "none" },
       outboundUrl: gateUrl,

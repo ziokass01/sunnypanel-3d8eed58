@@ -530,6 +530,11 @@ export function FreeLandingPage() {
                         markFreeAttemptFail(r.code);
                         setDeviceHistory(readFreeDeviceHistory());
                         setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+                      } else if (r.code === "SHORTLINK_CREATE_FAILED") {
+                        markFreeAttemptFail(r.code);
+                        setDeviceHistory(readFreeDeviceHistory());
+                        const detail = String(r.detail ?? "").trim();
+                        setErr(detail ? `${r.code}: ${detail}` : r.code);
                       } else {
                         markFreeAttemptFail(r.code || r.msg || "START_FAILED");
                         setDeviceHistory(readFreeDeviceHistory());
