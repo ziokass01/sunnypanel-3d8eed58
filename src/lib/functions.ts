@@ -18,19 +18,46 @@ function getFunctionUrl(baseUrl: string, path: string) {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-function getPrimaryFunctionsBaseUrl() {
+function normalizeFunctionPath(path: string) {
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+const DIRECT_SUPABASE_FUNCTIONS = new Set([
+  "/free-config",
+  "/free-start",
+  "/free-gate",
+  "/free-reveal",
+  "/free-resolve",
+  "/free-close",
+]);
+
+function shouldPreferDirectSupabase(path?: string) {
+  if (!path) return false;
+  return DIRECT_SUPABASE_FUNCTIONS.has(normalizeFunctionPath(path));
+}
+
+function getPrimaryFunctionsBaseUrl(path?: string) {
+  // Free Key is stateful and must use the same Supabase project as the current
+  // frontend/auth/database. A stale public API gateway can otherwise forward
+  // free-start/free-gate to an older project and surface obsolete Link4M HTML
+  // errors even though the current project has already been fixed.
+  if (shouldPreferDirectSupabase(path)) {
+    return getSupabaseFunctionsBaseUrl() ?? getPublicApiBaseUrl();
+  }
   return getPublicApiBaseUrl() ?? getSupabaseFunctionsBaseUrl();
 }
 
-function getFallbackFunctionsBaseUrl(primaryBaseUrl?: string) {
-  const direct = getSupabaseFunctionsBaseUrl();
-  if (!direct) return undefined;
-  if (primaryBaseUrl && direct === primaryBaseUrl) return undefined;
-  return direct;
+function getFallbackFunctionsBaseUrl(primaryBaseUrl?: string, path?: string) {
+  const fallback = shouldPreferDirectSupabase(path)
+    ? getPublicApiBaseUrl()
+    : getSupabaseFunctionsBaseUrl();
+  if (!fallback) return undefined;
+  if (primaryBaseUrl && fallback === primaryBaseUrl) return undefined;
+  return fallback;
 }
 
-export function getFunctionsBaseUrl() {
-  const primary = getPrimaryFunctionsBaseUrl();
+export function getFunctionsBaseUrl(path?: string) {
+  const primary = getPrimaryFunctionsBaseUrl(path);
   if (primary) return primary;
   throw new Error("Missing backend URL");
 }
@@ -46,10 +73,6 @@ function getAnonJwt() {
   if (!anonJwt) return undefined;
   const parts = anonJwt.split(".");
   return parts.length === 3 ? anonJwt : undefined;
-}
-
-function normalizeFunctionPath(path: string) {
-  return path.startsWith("/") ? path : `/${path}`;
 }
 
 function isRentUserFunction(path: string) {
@@ -148,8 +171,8 @@ async function invokeJson<T>(opts: {
   const anonKey = getAnonKey();
   if (!anonKey) throw new Error("Missing backend anon key");
 
-  const primaryBaseUrl = getFunctionsBaseUrl();
-  const fallbackBaseUrl = getFallbackFunctionsBaseUrl(primaryBaseUrl);
+  const primaryBaseUrl = getFunctionsBaseUrl(opts.path);
+  const fallbackBaseUrl = getFallbackFunctionsBaseUrl(primaryBaseUrl, opts.path);
   const pathCandidates = opts.path === "/admin-free-test" ? [opts.path, "/free-admin-test"] : [opts.path];
   const attemptUrls: string[] = [];
   const problems: RequestError[] = [];
