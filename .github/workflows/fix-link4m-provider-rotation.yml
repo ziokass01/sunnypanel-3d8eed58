@@ -40,7 +40,7 @@ jobs:
           ]
 
           pattern = re.compile(
-              r'''  let requestUrl = "";\n.*?\n  \} else if \(kind === "nhapma"\) \{''',
+              r'''  let requestUrl = "";\n.*?\n\s*\} else if \(kind === "nhapma"\) \{''',
               re.S,
           )
 
