@@ -24,8 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # setup-cli@v1 + version: latest can fail while resolving the latest release
-      # under GitHub API rate limits. v2 + a pinned CLI version avoids that lookup.
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
         with:
@@ -81,4 +79,5 @@ jobs:
             VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
             TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
             TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}" \
-            RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}"
+            RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}" \
+            FREE_SHORTLINK_STRICT_PROVIDER="true"
