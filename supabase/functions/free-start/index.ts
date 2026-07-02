@@ -215,13 +215,13 @@ async function shortenWithProvider(provider: any, gateUrl: string) {
   }
   if (kind === "link4m" || /(^|\.)link4m\.(co|com)(\/|$)/i.test(rawApiUrl)) {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
-  // Supabase Edge IPs are currently receiving Cloudflare HTML from
-  // Link4M's API. Move only Link4M shortening into the official
-  // browser Full Page Script; the gate itself remains mandatory.
-  const bridge = new URL(`${publicBase()}/free/link4m-bridge`);
-  bridge.searchParams.set("api", token);
-  bridge.searchParams.set("url", gateUrl);
-  return bridge.toString();
+  // Link4M's server API is challenged when called from Supabase Edge.
+  // /st is Link4M's browser quicklink endpoint: it receives the unique,
+  // single-use gate URL and keeps the external Link4M step mandatory.
+  const outbound = new URL("https://link4m.co/st");
+  outbound.searchParams.set("api", token);
+  outbound.searchParams.set("url", gateUrl);
+  return outbound.toString();
 } else if (kind === "nhapma") {
     const base = apiUrl || "https://service.nhapma.com/api";
     requestUrl = renderTemplate(base.includes("{url") || base.includes("{token") ? base : `${base}${base.includes("?") ? "&" : "?"}token={token}&url={url_enc}`, gateUrl, token);
