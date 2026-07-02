@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - docs/link4m-provider-rotation-trigger.txt
 
 permissions:
   contents: write
@@ -16,6 +14,7 @@ concurrency:
 
 jobs:
   patch-test-deploy:
+    if: ${{ hashFiles('docs/link4m-provider-rotation-trigger.txt') != '' }}
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
