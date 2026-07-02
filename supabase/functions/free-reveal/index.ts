@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveClientIp } from "../_shared/client-ip.ts";
+import { insertLicenseCompat } from "../_shared/license-insert.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -997,38 +998,59 @@ Deno.serve(async (req) => {
   const fakeLagMaxVerify = Math.max(1, Number(fakeLagRule?.max_verify_per_key ?? 1));
 
   let inserted: { id: string; key: string } | null = null;
+  let lastLicenseInsertError = "";
+  let lastLicenseInsertAttempts: Array<{ variant: string; code: string; message: string }> = [];
   for (let attempt = 0; attempt < 12; attempt++) {
     const key = makeKey(appCode === "fake-lag" ? fakeLagPrefix : "SUNNY");
-    const licensePayload: Record<string, unknown> = {
+    const result = await insertLicenseCompat(sb, {
       key,
-      is_active: true,
-      max_devices: 1,
-      expires_at,
+      appCode,
+      expiresAt: expires_at,
+      maxDevices: appCode === "fake-lag" ? fakeLagMaxVerify : 1,
+      maxIps: 1,
+      maxVerify: appCode === "fake-lag" ? fakeLagMaxVerify : 1,
       note: appCode === "fake-lag" ? `${freeNote};RULE_SOURCE=server_app_fake_lag` : freeNote,
-      app_code: appCode,
-    };
-    // Avoid explicit NULL for deployments where these compatibility columns are NOT NULL.
-    if (appCode === "fake-lag") {
-      licensePayload.max_ips = 1;
-      licensePayload.max_verify = fakeLagMaxVerify;
-    }
-    const ins = await sb
-      .from("licenses")
-      .insert(licensePayload)
-      .select("id,key")
-      .single();
-    if (!ins.error && ins.data?.id) {
-      inserted = { id: ins.data.id, key: ins.data.key };
+    });
+
+    lastLicenseInsertAttempts = result.attempts;
+    lastLicenseInsertError = result.errorDetail || "";
+
+    if (result.ok && result.data?.id) {
+      inserted = { id: result.data.id, key: result.data.key };
       break;
     }
+
+    if (!result.duplicate) break;
   }
 
   if (!inserted) {
     await sb
       .from("licenses_free_sessions")
-      .update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "INSERT_FAILED" })
+      .update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "LICENSE_INSERT_FAILED" })
       .eq("session_id", sessionId);
-    return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+
+    await insertGateLog(sb, {
+      session_id: sessionId,
+      key_type_code: String(sess.key_type_code ?? "") || null,
+      pass_no: Number((sess as any).current_pass ?? 1) || 1,
+      event_code: "license_insert_failed",
+      detail: {
+        app_code: appCode,
+        message: lastLicenseInsertError || "unknown",
+        attempts: lastLicenseInsertAttempts,
+      },
+      fingerprint_hash: fpHash,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
+    });
+
+    return json({
+      ok: false,
+      code: "LICENSE_INSERT_FAILED",
+      msg: "SERVER_ERROR",
+      trace_id: String((sess as any).trace_id ?? "").trim() || null,
+    }, 500);
   }
 
   await sb

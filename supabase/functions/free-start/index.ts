@@ -76,35 +76,112 @@ function normalizeProviderApiBase(kind: string, rawApi: string) {
   return api;
 }
 
+function isCloudflareChallenge(raw: string) {
+  const value = String(raw || "").toLowerCase();
+  return value.includes("<title>just a moment")
+    || value.includes("challenge-platform")
+    || value.includes("cf-chl-")
+    || value.includes("cloudflare ray id")
+    || value.includes("enable javascript and cookies to continue");
+}
+
+function isHtmlResponse(raw: string, contentType = "") {
+  const value = String(raw || "").trim().toLowerCase();
+  const type = String(contentType || "").toLowerCase();
+  return type.includes("text/html") || value.startsWith("<!doctype html") || value.startsWith("<html");
+}
+
 function safeProviderError(error: unknown) {
-  return String((error as any)?.message ?? error ?? "SHORTLINK_FAILED")
+  const raw = String((error as any)?.message ?? error ?? "SHORTLINK_FAILED");
+  if (isCloudflareChallenge(raw)) return "LINK4M_CLOUDFLARE_CHALLENGE";
+  if (isHtmlResponse(raw)) return "SHORTLINK_PROVIDER_HTML_RESPONSE";
+  return raw
     .replace(/([?&](?:api|token|tokenUser)=)[^&\s]+/gi, "$1***")
+    .replace(/\s+/g, " ")
+    .trim()
     .slice(0, 300);
 }
-async function readJsonOrText(url: string) {
+
+function isTransientShortlinkFailure(message: string) {
+  const value = String(message || "").toUpperCase();
+  return value.includes("LINK4M_CLOUDFLARE_CHALLENGE")
+    || value.includes("SHORTLINK_PROVIDER_HTML_RESPONSE")
+    || value.includes("SHORTLINK_TIMEOUT")
+    || value.includes("FETCH_FAILED")
+    || value.includes("NETWORK")
+    || value.includes("HTTP_429")
+    || /HTTP_5\d\d/.test(value);
+}
+
+function shortlinkFailOpenEnabled() {
+  const raw = Deno.env.get("FREE_SHORTLINK_FAIL_OPEN");
+  if (raw == null || !String(raw).trim()) return true;
+  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
+}
+
+async function fetchProviderResponse(url: string, headers: Record<string, string>) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
     const res = await fetch(url, {
-      headers: {
-        "accept": "application/json,text/plain,*/*",
-        "user-agent": "SunnyPanel-FreeKey/1.1",
-        "cache-control": "no-cache",
-      },
+      headers,
       redirect: "follow",
       signal: controller.signal,
     });
     const raw = await res.text();
     let data: any = null;
     try { data = JSON.parse(raw); } catch { data = null; }
-    if (!res.ok) throw new Error(data?.message || data?.error || raw.slice(0, 180) || `HTTP_${res.status}`);
-    return { data, raw };
+    return { res, data, raw };
   } catch (error) {
     if ((error as any)?.name === "AbortError") throw new Error("SHORTLINK_TIMEOUT");
-    throw error;
+    throw new Error(`SHORTLINK_FETCH_FAILED: ${String((error as any)?.message ?? error)}`);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function readJsonOrText(url: string, providerKind = "custom") {
+  const common = {
+    "accept": "application/json,text/plain,*/*",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+  };
+  const profiles: Array<Record<string, string>> = providerKind === "link4m"
+    ? [
+      {
+        ...common,
+        "user-agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        "referer": "https://my.link4m.com/",
+      },
+      {
+        ...common,
+        "user-agent": "SunnyPanel-FreeKey/1.2",
+      },
+    ]
+    : [{ ...common, "user-agent": "SunnyPanel-FreeKey/1.2" }];
+
+  let lastError: Error | null = null;
+  for (const headers of profiles) {
+    const { res, data, raw } = await fetchProviderResponse(url, headers);
+    const contentType = res.headers.get("content-type") || "";
+
+    if (isCloudflareChallenge(raw)) {
+      lastError = new Error("LINK4M_CLOUDFLARE_CHALLENGE");
+      continue;
+    }
+    if (isHtmlResponse(raw, contentType) && !data) {
+      lastError = new Error("SHORTLINK_PROVIDER_HTML_RESPONSE");
+      continue;
+    }
+    if (!res.ok) {
+      const reason = String(data?.message || data?.error || `HTTP_${res.status}`).trim();
+      throw new Error(reason || `HTTP_${res.status}`);
+    }
+    return { data, raw };
+  }
+
+  throw lastError ?? new Error("SHORTLINK_RESPONSE_INVALID");
 }
 function extractShortUrl(data: any, raw: string) {
   const candidates = [
@@ -164,10 +241,19 @@ async function shortenWithProvider(provider: any, gateUrl: string) {
   if (!requestUrl) throw new Error("SHORTLINK_TEMPLATE_INVALID");
   if (!token && /\{token\}|api=|token=|tokenUser=/i.test(apiUrl || requestUrl)) throw new Error("SHORTLINK_TOKEN_MISSING");
 
-  // If admin intentionally configured a browser quick-link template, allow it to be returned directly.
-  if (/\/st\?/i.test(requestUrl) && !/api-shorten|\/api(\/|\?|$)|format=json/i.test(requestUrl)) return requestUrl;
+  // A manually-created short URL can be used as a static fallback. This is
+  // intentionally treated as a browser destination, not fetched by the Edge
+  // Function (fetching it would follow the redirect and return HTML).
+  const isApiRequest = /api-shorten|\/api(\/|\?|$)|format=json|[?&](?:api|token|tokenUser)=/i.test(requestUrl);
+  const hasTemplateToken = /\{(?:url|url_enc|token)\}/i.test(requestUrl);
+  if ((kind === "custom" || kind === "link4m") && /^https?:\/\//i.test(requestUrl) && !isApiRequest && !hasTemplateToken) {
+    return requestUrl;
+  }
 
-  const { data, raw } = await readJsonOrText(requestUrl);
+  // If admin intentionally configured a browser quick-link template, allow it to be returned directly.
+  if (/\/st\?/i.test(requestUrl) && !isApiRequest) return requestUrl;
+
+  const { data, raw } = await readJsonOrText(requestUrl, kind);
   const shortUrl = extractShortUrl(data, raw);
   if (!shortUrl) throw new Error(String(data?.message || data?.error || "SHORTLINK_RESPONSE_INVALID"));
   return shortUrl;
@@ -261,10 +347,11 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   };
   push(selected);
   for (const provider of providers) push(provider);
-  if (!out.length) {
-    const fallback = fallbackProviderFromSettings(cfg, passNo);
-    if (fallback) push(fallback);
-  }
+  // Keep the legacy/static outbound URL as the final candidate even when the
+  // provider table has rows. It is useful as a non-API fallback when Link4M
+  // blocks server-side API traffic with a Cloudflare challenge.
+  const fallback = fallbackProviderFromSettings(cfg, passNo);
+  if (fallback) push(fallback);
   return out;
 }
 
@@ -298,18 +385,34 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   const selected = await chooseProvider(db, cfg, passNo);
   const candidates = await providerCandidates(db, cfg, passNo, selected);
   const failures: string[] = [];
+  const normalizedFailures: string[] = [];
   for (const provider of candidates) {
     try {
       const outboundUrl = await shortenWithProvider(provider, gateUrl);
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
       await markProviderSuccess(db, provider, passNo);
-      return { provider, outboundUrl };
+      return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
       const message = safeProviderError(error);
+      normalizedFailures.push(message);
       failures.push(`${text(provider?.name || provider?.provider || "provider", 80)}: ${message}`);
       await markProviderFailure(db, provider, error);
     }
   }
+
+  // Emergency continuity mode: only fail open for transient provider/network
+  // failures. Invalid tokens and explicit API validation errors still fail
+  // closed so misconfiguration is not silently hidden.
+  const allTransient = normalizedFailures.length > 0 && normalizedFailures.every(isTransientShortlinkFailure);
+  if (allTransient && shortlinkFailOpenEnabled()) {
+    return {
+      provider: { id: null, name: "Direct emergency fallback", provider: "none" },
+      outboundUrl: gateUrl,
+      degraded: true,
+      failures,
+    };
+  }
+
   throw new Error(`ALL_SHORTLINK_PROVIDERS_FAILED${failures.length ? ` | ${failures.join(" | ")}` : ""}`);
 }
 
@@ -401,19 +504,31 @@ Deno.serve(async (req) => {
   const sessionTtlSeconds = Math.max(configuredSessionTtl, neededTtl);
   const expiresAt = new Date(nowMs + sessionTtlSeconds * 1000).toISOString();
   const outExpiresAt = expiresAt;
-  const activateAfterAt = new Date(nowMs + minDelay * 1000).toISOString();
+  let effectiveMinDelay = minDelay;
+  let activateAfterAt = new Date(nowMs + minDelay * 1000).toISOString();
   const gateExpiresAt = new Date(nowMs + (minDelay + gateLifeSeconds) * 1000).toISOString();
 
   let provider: any;
   let gateUrl = "";
   let outboundUrl = "";
+  let shortlinkDegraded = false;
+  let shortlinkFailures: string[] = [];
   try {
     gateUrl = gateUrlFromToken(gateToken, 1);
     const shortened = await shortenWithFailover(db, cfg, 1, gateUrl);
     provider = shortened.provider;
     outboundUrl = shortened.outboundUrl;
+    shortlinkDegraded = Boolean(shortened.degraded);
+    shortlinkFailures = Array.isArray(shortened.failures) ? shortened.failures : [];
+    if (shortlinkDegraded) {
+      // The direct emergency URL does not contain an external shortener delay.
+      // Activate it immediately so opening /free/gate cannot burn the token as
+      // GATE_TOO_EARLY. The degraded state is logged and returned to the UI.
+      effectiveMinDelay = 0;
+      activateAfterAt = nowIso;
+    }
   } catch (error) {
-    return await deny("SHORTLINK_CREATE_FAILED", { detail: String((error as any)?.message ?? error) });
+    return await deny("SHORTLINK_CREATE_FAILED", { detail: safeProviderError(error) });
   }
   if (!outboundUrl) return await deny("OUTBOUND_URL_TEMPLATE_INVALID", { gate_url: gateUrl });
 
@@ -488,7 +603,7 @@ Deno.serve(async (req) => {
     ...baseLog,
     session_id: sessionId,
     pass_no: 1,
-    event_code: "start_ok_tokenized",
+    event_code: shortlinkDegraded ? "start_ok_tokenized_degraded" : "start_ok_tokenized",
     detail: {
       route: "free-start",
       app_code: appCode,
@@ -499,9 +614,11 @@ Deno.serve(async (req) => {
       provider_id: provider?.id ?? null,
       provider_name: provider?.name ?? null,
       provider_kind: provider?.provider ?? null,
+      shortlink_degraded: shortlinkDegraded,
+      shortlink_failures: shortlinkFailures.length ? shortlinkFailures : undefined,
       session_ttl_seconds: sessionTtlSeconds,
       gate_life_seconds: gateLifeSeconds,
-      min_delay_seconds: minDelay,
+      min_delay_seconds: effectiveMinDelay,
     },
   });
 
@@ -514,8 +631,10 @@ Deno.serve(async (req) => {
     gate_url: gateUrl,
     outbound_url_pass2: null,
     gate_url_pass2: null,
+    shortlink_degraded: shortlinkDegraded,
+    shortlink_failures: shortlinkFailures.length ? shortlinkFailures : undefined,
     passes_required: requiresDoubleGate ? 2 : 1,
-    min_delay_seconds: minDelay,
+    min_delay_seconds: effectiveMinDelay,
     min_delay_seconds_pass2: Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds_pass2 ?? minDelay) || 0),
     gate_token_life_seconds: gateLifeSeconds,
     trace_id: traceId,

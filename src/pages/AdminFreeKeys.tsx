@@ -192,7 +192,18 @@ type AdminTestResult = {
   fp_hash?: string | null;
   session_id?: string | null;
   message?: string;
+  detail?: string;
+  insert_attempts?: Array<{ variant?: string; code?: string; message?: string }>;
 };
+
+function friendlyShortlinkError(value?: string | null) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/<title>just a moment|challenge-platform|cf-chl-|cloudflare ray id|<!doctype html/i.test(raw)) {
+    return "LINK4M_CLOUDFLARE_CHALLENGE";
+  }
+  return raw.length > 180 ? `${raw.slice(0, 180)}…` : raw;
+}
 
 function nextDownloadCardId() {
   return `dl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -229,22 +240,6 @@ function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
   return "";
 }
 
-function normalizeShortlinkApiBase(provider: ShortlinkProviderRow["provider"], rawApi: unknown) {
-  let api = String(rawApi ?? "").trim();
-  if (!api) return defaultShortlinkApi(provider);
-  if (provider === "link4m") {
-    api = api.replace(/(https?:\/\/[^/?#]*link4m\.(?:co|com)\/api-shorten)\/?(?=([?#]|$))/i, "$1/v2");
-    api = api.replace(/(\/api-shorten\/v2)\/+([?#]|$)/i, "$1$2");
-  }
-  return api;
-}
-
-function visibleSessionError(value: unknown) {
-  const code = String(value ?? "").trim();
-  if (!code || /^AUTO_CLOSE_(?:STALE_PENDING|OLD_SAME_FP)(?:_|$)/i.test(code)) return "";
-  return code;
-}
-
 function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
   const api = String(rawApi ?? "").trim();
   const token = String(rawToken ?? "").trim();
@@ -270,7 +265,7 @@ function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
 function normalizeProviderApi(row: ShortlinkProviderRow) {
   const provider = row.provider || "custom";
   const parsed = parseLegacyShortlinkApi(row.api_url_template, row.api_token_secret);
-  return normalizeShortlinkApiBase(provider, parsed.api);
+  return parsed.api || defaultShortlinkApi(provider);
 }
 
 function normalizeProviderToken(row: ShortlinkProviderRow) {
@@ -845,7 +840,7 @@ export function AdminFreeKeysPage() {
             name: String(row.name ?? "").trim(),
             provider: row.provider || "custom",
             api_token_secret: parsed.token,
-            api_url_template: normalizeShortlinkApiBase(row.provider || "custom", parsed.api),
+            api_url_template: parsed.api,
             pass_scope: row.pass_scope || "both",
             enabled: Boolean(row.enabled),
             sort_order: (index + 1) * 10,
@@ -1170,7 +1165,14 @@ export function AdminFreeKeysPage() {
     onError: (e: any) => {
       const code = String(e?.code ?? "").trim();
       const msg = String(e?.message ?? "Error");
-      setAdminTestDebug((prev) => (prev ? { ...prev, error: msg } : { payload: null, error: msg }));
+      const responseJson = e?.context?.json && typeof e.context.json === "object" ? e.context.json : null;
+      const detail = String(responseJson?.detail ?? "").trim();
+      const debugError = detail ? `${msg}: ${detail}` : msg;
+      setAdminTestDebug((prev) => ({
+        payload: prev?.payload ?? null,
+        response: responseJson ?? prev?.response,
+        error: debugError,
+      }));
 
       if (code === "ADMIN_AUTH_REQUIRED" || msg === "ADMIN_AUTH_REQUIRED") {
         toast({
@@ -1188,7 +1190,7 @@ export function AdminFreeKeysPage() {
           ? `${msg}. Gợi ý: (1) CORS/OPTIONS bị chặn, (2) deploy sai tên function (/admin-free-test vs /free-admin-test), (3) backend URL/project mismatch.`
           : msg.includes("MISCONFIG")
             ? `${msg} (gợi ý: kiểm tra migration FREE_RATE_LIMIT đã apply)`
-            : msg,
+            : debugError,
         variant: "destructive",
       });
     },
@@ -1666,7 +1668,7 @@ export function AdminFreeKeysPage() {
                     <TableRow key={row.id}>
                       <TableCell>
                         <Input value={row.name ?? ""} onChange={(e) => updateProviderDraft(row.id, { name: e.target.value })} placeholder="VD: Link4M chính" />
-                        {row.last_error ? <div className="mt-1 text-[11px] text-destructive">{row.last_error}</div> : null}
+                        {row.last_error ? <div className="mt-1 break-words text-[11px] text-destructive">{friendlyShortlinkError(row.last_error)}</div> : null}
                       </TableCell>
                       <TableCell>
                         <Select value={row.provider} onValueChange={(v) => {
@@ -2479,6 +2481,12 @@ export function AdminFreeKeysPage() {
             <div className="rounded-md border p-3 text-sm space-y-1">
               <div>Result: {adminTestResult.ok ? "OK" : "FAILED"}</div>
               <div>Message: {adminTestResult.message || "-"}</div>
+              {adminTestResult.detail ? <div className="break-words text-destructive">Detail: {adminTestResult.detail}</div> : null}
+              {adminTestResult.insert_attempts?.length ? (
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border p-2 text-xs">
+                  {JSON.stringify(adminTestResult.insert_attempts, null, 2)}
+                </pre>
+              ) : null}
               <div>Key: {adminTestResult.key || "-"}</div>
               <div>Expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
               <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>
@@ -2514,7 +2522,7 @@ export function AdminFreeKeysPage() {
                   <div>Reveal: {s.reveal_count}</div>
                   <div>IP: <span className="font-mono">{shortText(s.ip_hash, 12)}</span></div>
                   <div>FP: <span className="font-mono">{shortText(s.fingerprint_hash, 12)}</span></div>
-                  <div className="truncate">Error: {visibleSessionError(s.last_error) || "-"}</div>
+                  <div className="truncate">Error: {s.last_error ?? "-"}</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("Lý do block IP (optional):", "manual block") ?? ""; if (s.ip_hash) blockIp.mutate({ ipHash: s.ip_hash, reason }); }}>Block IP</Button>
@@ -2552,7 +2560,7 @@ export function AdminFreeKeysPage() {
                     <TableCell>{s.reveal_count}</TableCell>
                     <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
                     <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
-                    <TableCell className="text-xs">{visibleSessionError(s.last_error)}</TableCell>
+                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button

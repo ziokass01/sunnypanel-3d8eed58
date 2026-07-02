@@ -88,35 +88,103 @@ function normalizeProviderApiBase(kind: string, rawApi: string) {
   return api;
 }
 
+function isCloudflareChallenge(raw: string) {
+  const value = String(raw || "").toLowerCase();
+  return value.includes("<title>just a moment")
+    || value.includes("challenge-platform")
+    || value.includes("cf-chl-")
+    || value.includes("cloudflare ray id")
+    || value.includes("enable javascript and cookies to continue");
+}
+
+function isHtmlResponse(raw: string, contentType = "") {
+  const value = String(raw || "").trim().toLowerCase();
+  const type = String(contentType || "").toLowerCase();
+  return type.includes("text/html") || value.startsWith("<!doctype html") || value.startsWith("<html");
+}
+
 function safeProviderError(error: unknown) {
-  return String((error as any)?.message ?? error ?? "SHORTLINK_FAILED")
+  const raw = String((error as any)?.message ?? error ?? "SHORTLINK_FAILED");
+  if (isCloudflareChallenge(raw)) return "LINK4M_CLOUDFLARE_CHALLENGE";
+  if (isHtmlResponse(raw)) return "SHORTLINK_PROVIDER_HTML_RESPONSE";
+  return raw
     .replace(/([?&](?:api|token|tokenUser)=)[^&\s]+/gi, "$1***")
+    .replace(/\s+/g, " ")
+    .trim()
     .slice(0, 300);
 }
-async function readJsonOrText(url: string) {
+
+function isTransientShortlinkFailure(message: string) {
+  const value = String(message || "").toUpperCase();
+  return value.includes("LINK4M_CLOUDFLARE_CHALLENGE")
+    || value.includes("SHORTLINK_PROVIDER_HTML_RESPONSE")
+    || value.includes("SHORTLINK_TIMEOUT")
+    || value.includes("FETCH_FAILED")
+    || value.includes("NETWORK")
+    || value.includes("HTTP_429")
+    || /HTTP_5\d\d/.test(value);
+}
+
+function shortlinkFailOpenEnabled() {
+  const raw = Deno.env.get("FREE_SHORTLINK_FAIL_OPEN");
+  if (raw == null || !String(raw).trim()) return true;
+  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
+}
+
+async function fetchProviderResponse(url: string, headers: Record<string, string>) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const res = await fetch(url, {
-      headers: {
-        "accept": "application/json,text/plain,*/*",
-        "user-agent": "SunnyPanel-FreeKey/1.1",
-        "cache-control": "no-cache",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
+    const res = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
     const raw = await res.text();
     let data: any = null;
     try { data = JSON.parse(raw); } catch { data = null; }
-    if (!res.ok) throw new Error(data?.message || data?.error || raw.slice(0, 180) || `HTTP_${res.status}`);
-    return { data, raw };
+    return { res, data, raw };
   } catch (error) {
     if ((error as any)?.name === "AbortError") throw new Error("SHORTLINK_TIMEOUT");
-    throw error;
+    throw new Error(`SHORTLINK_FETCH_FAILED: ${String((error as any)?.message ?? error)}`);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function readJsonOrText(url: string, providerKind = "custom") {
+  const common = {
+    "accept": "application/json,text/plain,*/*",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+  };
+  const profiles: Array<Record<string, string>> = providerKind === "link4m"
+    ? [
+      {
+        ...common,
+        "user-agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        "referer": "https://my.link4m.com/",
+      },
+      { ...common, "user-agent": "SunnyPanel-FreeKey/1.2" },
+    ]
+    : [{ ...common, "user-agent": "SunnyPanel-FreeKey/1.2" }];
+
+  let lastError: Error | null = null;
+  for (const headers of profiles) {
+    const { res, data, raw } = await fetchProviderResponse(url, headers);
+    const contentType = res.headers.get("content-type") || "";
+    if (isCloudflareChallenge(raw)) {
+      lastError = new Error("LINK4M_CLOUDFLARE_CHALLENGE");
+      continue;
+    }
+    if (isHtmlResponse(raw, contentType) && !data) {
+      lastError = new Error("SHORTLINK_PROVIDER_HTML_RESPONSE");
+      continue;
+    }
+    if (!res.ok) {
+      const reason = String(data?.message || data?.error || `HTTP_${res.status}`).trim();
+      throw new Error(reason || `HTTP_${res.status}`);
+    }
+    return { data, raw };
+  }
+  throw lastError ?? new Error("SHORTLINK_RESPONSE_INVALID");
 }
 function extractShortUrl(data: any, raw: string) {
   const candidates = [
@@ -172,7 +240,10 @@ async function shortenWithProvider(provider: any, gateUrl: string) {
   }
   if (!requestUrl) throw new Error("SHORTLINK_TEMPLATE_INVALID");
   if (/\/st\?/i.test(requestUrl) && !/api-shorten|\/api(\/|\?|$)|format=json/i.test(requestUrl)) return requestUrl;
-  const { data, raw } = await readJsonOrText(requestUrl);
+  if (kind === "custom" && /^https?:\/\//i.test(requestUrl) && !/[?&](api|token|tokenUser|url|u|link|target)=/i.test(requestUrl)) {
+    return requestUrl;
+  }
+  const { data, raw } = await readJsonOrText(requestUrl, kind);
   const shortUrl = extractShortUrl(data, raw);
   if (!shortUrl) throw new Error(String(data?.message || data?.error || "SHORTLINK_RESPONSE_INVALID"));
   return shortUrl;
@@ -254,10 +325,8 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   };
   push(selected);
   for (const provider of providers) push(provider);
-  if (!out.length) {
-    const fallback = fallbackProviderFromSettings(cfg, passNo);
-    if (fallback) push(fallback);
-  }
+  const fallback = fallbackProviderFromSettings(cfg, passNo);
+  if (fallback) push(fallback);
   return out;
 }
 
@@ -290,34 +359,50 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   const selected = await chooseProvider(db, cfg, passNo, avoidId);
   const candidates = await providerCandidates(db, cfg, passNo, selected, avoidId);
   const failures: string[] = [];
+  const normalizedFailures: string[] = [];
   for (const provider of candidates) {
     try {
       const outboundUrl = await shortenWithProvider(provider, gateUrl);
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
       await markProviderSuccess(db, provider, passNo);
-      return { provider, outboundUrl };
+      return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
       const message = safeProviderError(error);
+      normalizedFailures.push(message);
       failures.push(`${text(provider?.name || provider?.provider || "provider", 80)}: ${message}`);
       await markProviderFailure(db, provider, error);
     }
   }
+
+  const allTransient = normalizedFailures.length > 0 && normalizedFailures.every(isTransientShortlinkFailure);
+  if (allTransient && shortlinkFailOpenEnabled()) {
+    return {
+      provider: { id: null, name: "Direct emergency fallback", provider: "none" },
+      outboundUrl: gateUrl,
+      degraded: true,
+      failures,
+    };
+  }
+
   throw new Error(`ALL_SHORTLINK_PROVIDERS_FAILED${failures.length ? ` | ${failures.join(" | ")}` : ""}`);
 }
 
 async function createNextGateToken(db: any, cfg: any, session: any, passNo: 1 | 2, hashes: { ipHash: string; uaHash: string; fpHash: string }) {
   const gateToken = randomToken("gt");
   const gateHash = await sha256Hex(gateToken);
-  const delay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : (passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) ?? 0) || 0);
+  const configuredDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : (passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) ?? 0) || 0);
   const gateLifeSeconds = clampSeconds(cfg.free_gate_token_life_seconds ?? session?.gate_token_life_seconds, 600, 60, 1800);
   const nowMs = Date.now();
-  const activateAfterAt = new Date(nowMs + delay * 1000).toISOString();
-  const gateExpiresAt = new Date(nowMs + (delay + gateLifeSeconds) * 1000).toISOString();
   const avoidId = passNo === 2 ? text(session?.provider_id_pass1, 64) : null;
   const gateUrl = gateUrlFromToken(gateToken, passNo);
   const shortened = await shortenWithFailover(db, cfg, passNo, gateUrl, avoidId);
   const provider = shortened.provider;
   const outboundUrl = shortened.outboundUrl;
+  const degraded = Boolean(shortened.degraded);
+  const failures = Array.isArray(shortened.failures) ? shortened.failures : [];
+  const delay = degraded ? 0 : configuredDelay;
+  const activateAfterAt = new Date(nowMs + delay * 1000).toISOString();
+  const gateExpiresAt = new Date(nowMs + (delay + gateLifeSeconds) * 1000).toISOString();
   const ins = await db.from("licenses_free_gate_tokens").insert({
     session_id: session.session_id,
     pass_no: passNo,
@@ -332,7 +417,7 @@ async function createNextGateToken(db: any, cfg: any, session: any, passNo: 1 | 
     fingerprint_hash: hashes.fpHash || hashes.ipHash,
   });
   if (ins.error) throw ins.error;
-  return { gateToken, gateUrl, outboundUrl, provider, delay, gateLifeSeconds, gateExpiresAt, activateAfterAt };
+  return { gateToken, gateUrl, outboundUrl, provider, delay, gateLifeSeconds, gateExpiresAt, activateAfterAt, degraded, failures };
 }
 async function loadSession(db: any, sessionId: string) {
   const { data, error } = await db.from("licenses_free_sessions").select("*").eq("session_id", sessionId).maybeSingle();
@@ -470,8 +555,28 @@ Deno.serve(async (req) => {
         provider_id_pass2: next.provider?.id ?? null,
         last_error: null,
       });
-      await logGate(db, { ...baseLog, event_code: "pass1_ok_tokenized", detail: { ...(baseLog.detail as any), next: "PASS2", provider_id: next.provider?.id ?? null, provider_name: next.provider?.name ?? null } });
-      return json({ ok: true, next: "PASS2", outbound_url: next.outboundUrl, gate_url: next.gateUrl, min_delay_seconds: next.delay, gate_token_life_seconds: next.gateLifeSeconds }, 200);
+      await logGate(db, {
+        ...baseLog,
+        event_code: next.degraded ? "pass1_ok_tokenized_degraded" : "pass1_ok_tokenized",
+        detail: {
+          ...(baseLog.detail as any),
+          next: "PASS2",
+          provider_id: next.provider?.id ?? null,
+          provider_name: next.provider?.name ?? null,
+          shortlink_degraded: Boolean(next.degraded),
+          shortlink_failures: next.failures?.length ? next.failures : undefined,
+        },
+      });
+      return json({
+        ok: true,
+        next: "PASS2",
+        outbound_url: next.outboundUrl,
+        gate_url: next.gateUrl,
+        min_delay_seconds: next.delay,
+        gate_token_life_seconds: next.gateLifeSeconds,
+        shortlink_degraded: Boolean(next.degraded),
+        shortlink_failures: next.failures?.length ? next.failures : undefined,
+      }, 200);
     }
 
     const lock = await db.from("licenses_free_gate_tokens")
@@ -545,7 +650,16 @@ Deno.serve(async (req) => {
     try { next = await createNextGateToken(db, cfg, session, 2, { ipHash, uaHash, fpHash }); }
     catch (error) { return await deny("PASS2_SHORTLINK_FAILED", { detail: String((error as any)?.message ?? error) }); }
     await updateSession(db, sessionId, { status: "waiting_pass2", passes_required: 2, passes_completed: 1, current_pass: 2, pass1_ok_at: new Date().toISOString(), gate_ok_at: new Date().toISOString(), provider_id_pass2: next.provider?.id ?? null, last_error: null });
-    return json({ ok: true, next: "PASS2", outbound_url: next.outboundUrl, gate_url: next.gateUrl, min_delay_seconds: next.delay, gate_token_life_seconds: next.gateLifeSeconds }, 200);
+    return json({
+      ok: true,
+      next: "PASS2",
+      outbound_url: next.outboundUrl,
+      gate_url: next.gateUrl,
+      min_delay_seconds: next.delay,
+      gate_token_life_seconds: next.gateLifeSeconds,
+      shortlink_degraded: Boolean(next.degraded),
+      shortlink_failures: next.failures?.length ? next.failures : undefined,
+    }, 200);
   }
 
   const claimToken = randomToken("clm");

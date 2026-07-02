@@ -36,7 +36,7 @@ function toHostname(raw: string): string | null {
   }
 }
 
-function parseAllowedOrigins(raw: string | null): Set<string> {
+function parseAllowedOrigins(raw: string | null | undefined): Set<string> {
   const hosts = new Set<string>();
   for (const entry of String(raw ?? "").split(",")) {
     const trimmed = entry.trim();

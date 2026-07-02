@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
 import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
+import { insertLicenseCompat } from "../_shared/license-insert.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -505,34 +506,33 @@ Deno.serve(async (req) => {
   let key = "";
   let licenseId = "";
   let lastLicenseInsertError = "";
+  let lastLicenseInsertAttempts: Array<{ variant: string; code: string; message: string }> = [];
   for (let attempt = 0; attempt < 12; attempt++) {
     // Keep Admin Test identical to the real free-reveal path:
     // Free Fire licenses always use SUNNY-..., while Fake Lag uses its configured prefix.
     key = makeKey(appCode === "fake-lag" ? keySignature : "SUNNY");
-    const licensePayload: Record<string, unknown> = {
+    const insertedLicense = await insertLicenseCompat(sb, {
       key,
-      app_code: appCode,
-      is_active: true,
-      max_devices: appCode === "fake-lag" ? fakeLagIssuedMaxDevices : 1,
-      expires_at: expiresAt,
+      appCode,
+      expiresAt,
+      maxDevices: appCode === "fake-lag" ? fakeLagIssuedMaxDevices : 1,
+      maxIps: appCode === "fake-lag" ? fakeLagMaxIps : 1,
+      maxVerify: appCode === "fake-lag" ? fakeLagMaxVerify : 1,
       note: `ADMIN_FREE_TEST_${String(keyType.code).toUpperCase()};APP=${appCode};SIG=${keySignature};RULE_SOURCE=${appCode === "fake-lag" ? "server_app_fake_lag" : "admin_free"}`,
-    };
-    // Some deployed schemas define max_ips/max_verify as NOT NULL. Do not send NULL
-    // for normal Free Fire rows; let database defaults apply instead.
-    if (appCode === "fake-lag") {
-      licensePayload.max_ips = fakeLagMaxIps;
-      licensePayload.max_verify = fakeLagMaxVerify;
-    }
-    const insLic = await sb
-      .from("licenses")
-      .insert(licensePayload)
-      .select("id")
-      .single();
-    if (!insLic.error && insLic.data?.id) {
-      licenseId = insLic.data.id;
+    });
+
+    lastLicenseInsertAttempts = insertedLicense.attempts;
+    lastLicenseInsertError = insertedLicense.errorDetail || "";
+
+    if (insertedLicense.ok && insertedLicense.data?.id) {
+      licenseId = insertedLicense.data.id;
+      key = insertedLicense.data.key;
       break;
     }
-    lastLicenseInsertError = extractErrorMessage(insLic.error);
+
+    // Only a random-key collision can be fixed by generating another key.
+    // A schema/constraint error would repeat identically and must not spam DB.
+    if (!insertedLicense.duplicate) break;
   }
 
   if (!licenseId) {
@@ -545,7 +545,11 @@ Deno.serve(async (req) => {
       route: "admin-free-test",
       ip_hash: ipHash,
       fingerprint_hash: fpHash,
-      details: { reason: "LICENSE_INSERT_FAILED", message: lastLicenseInsertError || "unknown" },
+      details: {
+        reason: "LICENSE_INSERT_FAILED",
+        message: lastLicenseInsertError || "unknown",
+        attempts: lastLicenseInsertAttempts,
+      },
     });
     return json(
       {
@@ -554,8 +558,9 @@ Deno.serve(async (req) => {
         session_id: sessionId,
         detail: (lastLicenseInsertError || "") +
           (isFreeSchemaMissing({ message: lastLicenseInsertError })
-            ? " | Thiếu migration: 20260206150000_free_schema_runtime_fix.sql"
+            ? " | Database schema chưa đồng bộ; hãy chạy migration mới nhất."
             : ""),
+        insert_attempts: lastLicenseInsertAttempts,
       },
       500,
     );
