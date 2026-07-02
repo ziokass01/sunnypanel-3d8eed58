@@ -1,0 +1,98 @@
+name: Patch Link4M runtime safely
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/link4m-hotfix-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch only Link4M runtime branches
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          targets = [
+              Path('supabase/functions/free-start/index.ts'),
+              Path('supabase/functions/free-gate/index.ts'),
+          ]
+
+          strict_pattern = re.compile(
+              r'function shortlinkStrictProviderEnabled\(\) \{.*?\n\}',
+              re.S,
+          )
+          strict_replacement = '''function shortlinkStrictProviderEnabled() {
+            // The Free Key flow must never bypass the configured shortener.
+            return true;
+          }'''
+
+          link4m_pattern = re.compile(
+              r'  if \(kind === "link4m"\) \{.*?\n  \} else if \(kind === "nhapma"\) \{',
+              re.S,
+          )
+          link4m_replacement = '''  if (kind === "link4m" || /(^|\\.)link4m\\.(co|com)(\\/|$)/i.test(rawApiUrl)) {
+            if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
+            // Supabase Edge IPs are currently receiving Cloudflare HTML from
+            // Link4M's API. Move only Link4M shortening into the official
+            // browser Full Page Script; the gate itself remains mandatory.
+            const bridge = new URL(`${publicBase()}/free/link4m-bridge`);
+            bridge.searchParams.set("api", token);
+            bridge.searchParams.set("url", gateUrl);
+            return bridge.toString();
+          } else if (kind === "nhapma") {'''
+
+          for path in targets:
+              content = path.read_text(encoding='utf-8')
+
+              content, strict_count = strict_pattern.subn(strict_replacement, content, count=1)
+              if strict_count != 1:
+                  raise SystemExit(f'{path}: strict-mode patch count was {strict_count}, expected 1')
+
+              content, link4m_count = link4m_pattern.subn(link4m_replacement, content, count=1)
+              if link4m_count != 1:
+                  raise SystemExit(f'{path}: Link4M branch patch count was {link4m_count}, expected 1')
+
+              path.write_text(content, encoding='utf-8')
+
+          for path in targets:
+              content = path.read_text(encoding='utf-8')
+              required = [
+                  'return true;',
+                  '/free/link4m-bridge',
+                  'bridge.searchParams.set("api", token);',
+                  'bridge.searchParams.set("url", gateUrl);',
+              ]
+              for needle in required:
+                  if needle not in content:
+                      raise SystemExit(f'{path}: verification failed for {needle}')
+              if 'return gateUrl;' not in content:
+                  raise SystemExit(f'{path}: unexpected source shape; refusing broad rewrite')
+          PY
+
+      - name: Build frontend
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Commit verified runtime patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/free-start/index.ts supabase/functions/free-gate/index.ts
+          git diff --cached --check
+          git commit -m "Fix Link4M Cloudflare challenge at runtime"
+          git push origin HEAD:main
