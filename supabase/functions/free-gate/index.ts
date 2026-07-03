@@ -209,21 +209,32 @@ async function shortenWithProvider(provider: any, gateUrl: string) {
   const apiUrl = normalizeProviderApiBase(kind, rawApiUrl);
   if (kind === "none") return gateUrl;
 
-  let requestUrl = "";
-  if (kind === "traffic68") {
-    const base = apiUrl || "https://traffic68.com/api/quicklink/st";
-    return `${base}${base.includes("?") ? "&" : "?"}api=${encodeURIComponent(token)}&url=${encodeURIComponent(gateUrl)}`;
-  }
-  if (kind === "link4m" || /(^|\.)link4m\.(co|com)(\/|$)/i.test(rawApiUrl)) {
+  const providerHint = [
+  kind,
+  text(provider?.name, 128),
+  text(provider?.note, 512),
+  rawApiUrl,
+  apiUrl,
+].join(" ").toLowerCase();
+const isLink4M = providerHint.includes("link4m");
+
+let requestUrl = "";
+if (isLink4M) {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
-  // Link4M's server API is challenged when called from Supabase Edge.
-  // /st is Link4M's browser quicklink endpoint: it receives the unique,
-  // single-use gate URL and keeps the external Link4M step mandatory.
+  // Several legacy Link4M rows were saved under another provider kind.
+  // Detect them by all row metadata before traffic68/custom handling so
+  // round-robin cannot alternate between a working /st row and an old
+  // server-side api-shorten row that Cloudflare challenges.
   const outbound = new URL("https://link4m.co/st");
   outbound.searchParams.set("api", token);
   outbound.searchParams.set("url", gateUrl);
   return outbound.toString();
-} else if (kind === "nhapma") {
+}
+if (kind === "traffic68") {
+  const base = apiUrl || "https://traffic68.com/api/quicklink/st";
+  return `${base}${base.includes("?") ? "&" : "?"}api=${encodeURIComponent(token)}&url=${encodeURIComponent(gateUrl)}`;
+}
+if (kind === "nhapma") {
     const base = apiUrl || "https://service.nhapma.com/api";
     requestUrl = renderTemplate(base.includes("{url") || base.includes("{token") ? base : `${base}${base.includes("?") ? "&" : "?"}token={token}&url={url_enc}`, gateUrl, token);
   } else if (kind === "layma") {
