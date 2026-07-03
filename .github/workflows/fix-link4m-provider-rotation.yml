@@ -95,6 +95,9 @@ jobs:
               path.write_text(patched, encoding='utf-8')
           PY
 
+      - name: Install JavaScript dependencies for Deno npm imports
+        run: npm ci --ignore-scripts
+
       - name: Verify changed functions
         run: |
           set -euo pipefail
