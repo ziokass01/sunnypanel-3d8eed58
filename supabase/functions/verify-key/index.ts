@@ -22,9 +22,12 @@ const inputSchema = z.object({
   build_id: z.string().trim().min(1).max(80).optional(),
 });
 
-const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v32-ac-20260721").trim();
+const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v33-ac-20260721").trim();
 const SERVER_SIG_ALG = "ECDSA-P256-SHA256-V2";
-const SERVER_KEY_ID = "sunny-p256-2026-07-a";
+const SERVER_KEY_ID = (
+  Deno.env.get("VERIFY_RESPONSE_ECDSA_KEY_ID") ??
+  "sunny-p256-2026-07-b"
+).trim();
 
 function envInt(name: string, fallback: number, min = 1, max = 100000) {
   const raw = (Deno.env.get(name) ?? "").trim();
