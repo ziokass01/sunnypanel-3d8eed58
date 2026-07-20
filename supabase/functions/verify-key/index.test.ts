@@ -27,11 +27,12 @@ async function hmacSha256Hex(secret: string, message: string) {
 }
 
 async function callVerify(params: { key: string; device: string; device_name?: string }) {
+  const REQUIRED_BUILD_ID = Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v31-ac-20260616";
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("VITE_SUPABASE_URL");
-  const VERIFY_HMAC_SECRET = Deno.env.get("VERIFY_HMAC_SECRET");
+  const VERIFY_HMAC_SECRET = Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? Deno.env.get("VERIFY_HMAC_SECRET");
   assert(SUPABASE_URL, "Missing SUPABASE_URL/VITE_SUPABASE_URL");
   // Note: Some CI/test runners don't expose secrets to Deno tests.
-  // In that case, we can't compute HMAC signatures and will rely on manual/admin-bypass testing.
+  // In that case, the integration test is skipped; the public endpoint has no admin bypass.
   if (!VERIFY_HMAC_SECRET) {
     return { status: 200, json: { ok: false, msg: "SKIPPED_NO_SECRET" } };
   }
@@ -39,7 +40,7 @@ async function callVerify(params: { key: string; device: string; device_name?: s
   const url = `${SUPABASE_URL}/functions/v1/verify-key`;
   const ts = String(Math.floor(Date.now() / 1000));
   const nonce = crypto.randomUUID();
-  const body = JSON.stringify(params);
+  const body = JSON.stringify({ ...params, build_id: REQUIRED_BUILD_ID });
   const bodyHash = await sha256Hex(body);
   const canonical = `${ts}.${nonce}.${bodyHash}`;
   const sig = await hmacSha256Hex(VERIFY_HMAC_SECRET, canonical);
@@ -51,6 +52,7 @@ async function callVerify(params: { key: string; device: string; device_name?: s
       "x-ts": ts,
       "x-nonce": nonce,
       "x-sig": sig,
+      "x-build-id": REQUIRED_BUILD_ID,
     },
     body,
   });
@@ -69,6 +71,14 @@ Deno.test("verify-key: fixed expiry license still works", async () => {
   assertEquals(r.json.msg, "OK");
   assertEquals(typeof r.json.server_time, "string");
   assertEquals(typeof r.json.remaining_seconds, "number");
+  assertEquals(r.json.server_sig_alg, "ECDSA-P256-SHA256-V2");
+  assertEquals(r.json.server_key_id, "sunny-p256-2026-07-a");
+  assertEquals(typeof r.json.server_sig, "string");
+  assertEquals(typeof r.json.session_id, "string");
+  assertEquals(typeof r.json.session_expires_at, "string");
+  assertEquals(typeof r.json.feature_seed, "string");
+  assertEquals(typeof r.json.key_hash, "string");
+  assertEquals(typeof r.json.device_hash, "string");
   assertEquals(r.json.started, false);
 });
 
@@ -85,6 +95,9 @@ Deno.test("verify-key: start-on-first-use activates after device checks", async 
   assertEquals(r1.json.started, true);
   assertEquals(typeof r1.json.expires_at, "string");
   assertEquals(typeof r1.json.remaining_seconds, "number");
+  assertEquals(r1.json.server_sig_alg, "ECDSA-P256-SHA256-V2");
+  assertEquals(r1.json.server_key_id, "sunny-p256-2026-07-a");
+  assertEquals(typeof r1.json.server_sig, "string");
   assert(r1.json.remaining_seconds <= 86400);
 
   // Second verify with the same device should still work

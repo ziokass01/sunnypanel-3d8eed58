@@ -23,7 +23,8 @@ const inputSchema = z.object({
 });
 
 const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v31-ac-20260616").trim();
-const SERVER_SIG_ALG = "HMAC-SHA256-V1";
+const SERVER_SIG_ALG = "ECDSA-P256-SHA256-V2";
+const SERVER_KEY_ID = "sunny-p256-2026-07-a";
 
 function envInt(name: string, fallback: number, min = 1, max = 100000) {
   const raw = (Deno.env.get(name) ?? "").trim();
@@ -43,6 +44,8 @@ const VERIFY_NEW_DEVICE_WINDOW_SECONDS = envInt("VERIFY_NEW_DEVICE_WINDOW_SECOND
 const VERIFY_ENUM_FAILURE_5M_LIMIT = envInt("VERIFY_ENUM_FAILURE_5M_LIMIT", 80, 10, 10000);
 const VERIFY_ENUM_DISTINCT_10M_LIMIT = envInt("VERIFY_ENUM_DISTINCT_10M_LIMIT", 100, 10, 10000);
 const VERIFY_ENUM_BLOCK_MINUTES = envInt("VERIFY_ENUM_BLOCK_MINUTES", 15, 1, 1440);
+// Client polls every 12 minutes and rejects sessions longer than 30 minutes.
+const VERIFY_SESSION_TTL_SECONDS = envInt("VERIFY_SESSION_TTL_SECONDS", 900, 180, 1800);
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -57,10 +60,17 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function toHex(bytes: ArrayBuffer) {
-  return Array.from(new Uint8Array(bytes))
+function toHex(bytes: ArrayBuffer | Uint8Array) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return Array.from(data)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (const value of bytes) binary += String.fromCharCode(value);
+  return btoa(binary);
 }
 
 async function sha256Hex(input: string) {
@@ -85,26 +95,120 @@ async function hmacSha256Hex(secret: string, message: string) {
   return toHex(sig);
 }
 
-function signedResponseCanonical(args: {
+function normalizePem(raw: string) {
+  return raw.trim().replace(/\\n/g, "\n");
+}
+
+function pemToDer(pem: string, expectedLabel: string) {
+  const normalized = normalizePem(pem);
+  const begin = `-----BEGIN ${expectedLabel}-----`;
+  const end = `-----END ${expectedLabel}-----`;
+  if (!normalized.includes(begin) || !normalized.includes(end)) {
+    throw new Error(`BAD_PEM_${expectedLabel.replace(/ /g, "_")}`);
+  }
+  const body = normalized
+    .replace(begin, "")
+    .replace(end, "")
+    .replace(/\s+/g, "");
+  const binary = atob(body);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function derInteger(raw: Uint8Array) {
+  let first = 0;
+  while (first < raw.length - 1 && raw[first] === 0) first++;
+  let value = raw.slice(first);
+  if ((value[0] & 0x80) !== 0) {
+    const padded = new Uint8Array(value.length + 1);
+    padded[0] = 0;
+    padded.set(value, 1);
+    value = padded;
+  }
+  const out = new Uint8Array(2 + value.length);
+  out[0] = 0x02;
+  out[1] = value.length;
+  out.set(value, 2);
+  return out;
+}
+
+// WebCrypto returns an IEEE-P1363 r||s signature on Deno/Node. OpenSSL's
+// ECDSA_verify in the native client expects ASN.1 DER, so convert it here.
+function p1363ToDer(signature: Uint8Array) {
+  if (signature.length !== 64) return signature;
+  const r = derInteger(signature.slice(0, 32));
+  const s = derInteger(signature.slice(32, 64));
+  const out = new Uint8Array(2 + r.length + s.length);
+  out[0] = 0x30;
+  out[1] = r.length + s.length;
+  out.set(r, 2);
+  out.set(s, 2 + r.length);
+  return out;
+}
+
+let signingKeyPromise: Promise<CryptoKey> | null = null;
+
+function getSigningKey() {
+  if (signingKeyPromise) return signingKeyPromise;
+  signingKeyPromise = (async () => {
+    const privatePem = (Deno.env.get("VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM") ?? "").trim();
+    if (!privatePem) throw new Error("ECDSA_PRIVATE_KEY_MISSING");
+    const pkcs8 = pemToDer(privatePem, "PRIVATE KEY");
+    return await crypto.subtle.importKey(
+      "pkcs8",
+      pkcs8,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+  })();
+  return signingKeyPromise;
+}
+
+async function ecdsaP256SignDerBase64(message: string) {
+  const key = await getSigningKey();
+  const raw = new Uint8Array(await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    new TextEncoder().encode(message),
+  ));
+  return bytesToBase64(p1363ToDer(raw));
+}
+
+function randomHex(byteLength: number) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return toHex(bytes);
+}
+
+function signedResponseCanonicalV2(args: {
   nonce: string;
-  key: string;
-  device: string;
+  request_body_hash: string;
+  key_hash: string;
+  device_hash: string;
   build_id: string;
-  ok: true;
   remaining_seconds: number;
   expires_at: string | null;
   server_time: string;
+  session_id: string;
+  session_expires_at: string;
+  feature_seed: string;
 }) {
   return [
-    "v1",
+    "v2",
     args.nonce,
-    args.key,
-    args.device,
+    args.request_body_hash,
+    args.key_hash,
+    args.device_hash,
     args.build_id,
     "true",
     String(args.remaining_seconds),
     args.expires_at ?? "",
     args.server_time,
+    args.session_id,
+    args.session_expires_at,
+    args.feature_seed,
   ].join("\n");
 }
 
@@ -226,42 +330,32 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  // Optional admin-only bypass for testing/ops:
-  // If an authenticated admin calls this endpoint with Authorization: Bearer <JWT>,
-  // we skip the HMAC/nonce checks but keep all business logic (device limit, expiry, etc.).
-  let adminBypass = false;
-  const authHeader = req.headers.get("authorization") ?? "";
-  if (authHeader.toLowerCase().startsWith("bearer ")) {
-    const token = authHeader.slice("bearer ".length).trim();
-    if (token) {
-      const userRes = await db.auth.getUser(token);
-      const userId = userRes.data.user?.id ?? null;
-      if (!userRes.error && userId) {
-        const roleRes = await db.rpc("has_role" as any, { _user_id: userId, _role: "admin" } as any);
-        adminBypass = !roleRes.error && Boolean(roleRes.data);
-      }
-    }
-  }
-
   // --- Early blocklist check (auto-blocked IPs) ---
   // Keep contract unchanged: return RATE_LIMIT.
-  if (!adminBypass) {
-    const blk = await db
-      .from("blocked_ips")
-      .select("blocked_until")
-      .eq("ip", ip)
-      .maybeSingle();
+  const blk = await db
+    .from("blocked_ips")
+    .select("blocked_until")
+    .eq("ip", ip)
+    .maybeSingle();
 
-    const untilIso = blk.data?.blocked_until ?? null;
-    const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
-    if (untilMs && untilMs > now.getTime()) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: "",
-        detail: { ip, ok: false, msg: "RATE_LIMIT", reason: "IP_BLOCKED" },
-      });
-      return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)) }, 429);
-    }
+  if (blk.error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "SERVER_ERROR", reason: "BLOCKLIST_LOOKUP_FAILED" },
+    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
+
+  const untilIso = blk.data?.blocked_until ?? null;
+  const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
+  if (untilMs && untilMs > now.getTime()) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "RATE_LIMIT", reason: "IP_BLOCKED" },
+    });
+    return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)) }, 429);
   }
 
   // --- HMAC-signed requests (anti-enumeration) ---
@@ -269,79 +363,81 @@ Deno.serve(async (req) => {
   // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
   // Sig: HMAC_SHA256_HEX(VERIFY_HMAC_SECRET, canonical)
   const rawBody = await req.text();
+  const requestBodyHash = await sha256Hex(rawBody);
 
-  if (!adminBypass) {
-    const ts = req.headers.get("x-ts") ?? "";
-    const nonce = req.headers.get("x-nonce") ?? "";
-    const sig = req.headers.get("x-sig") ?? "";
+  const ts = req.headers.get("x-ts") ?? "";
+  const nonce = req.headers.get("x-nonce") ?? "";
+  const sig = req.headers.get("x-sig") ?? "";
 
-    if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: "",
-        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_HEADERS" },
-      });
-      // Don't leak key status; keep HTTP 200 as requested.
-      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-    }
-
-    const secret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
-    if (!secret) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: "",
-        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "MISCONFIGURED" },
-      });
-      // Misconfigured backend; still don't leak any key status.
-      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-    }
-
-    const bodyHash = await sha256Hex(rawBody);
-    const canonical = `${ts}.${nonce}.${bodyHash}`;
-    const expected = await hmacSha256Hex(secret, canonical);
-    if (!timingSafeEqualHex(expected, sig)) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: "",
-        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_SIG" },
-      });
-      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-    }
-
-    // --- Anti-replay ---
-    // Enforce timestamp window: abs(now_unix_seconds - x-ts) <= 300
-    const nowUnix = Math.floor(now.getTime() / 1000);
-    const tsNum = Number(ts);
-    if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: "",
-        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "TS_WINDOW" },
-      });
-      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-    }
-
-    // Store nonce with TTL 10 minutes; reject replays on conflict.
-    const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
-    const nonceInsert = await db.from("request_nonces").insert({
-      nonce,
-      ts: Math.trunc(tsNum),
-      expires_at: nonceExpiresAt,
+  if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_HEADERS" },
     });
-    if (nonceInsert.error) {
-      await db.from("audit_logs").insert({
-        action: "VERIFY",
-        license_key: "",
-        detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "NONCE_REPLAY" },
-      });
-      // Conflict (duplicate nonce) or any DB error: fail closed but generic.
-      return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-    }
+    // Don't leak key status; keep HTTP 200 as requested.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
 
-    // Lightweight cleanup (best-effort)
-    if (Math.random() < 0.02) {
-      await db.from("request_nonces").delete().lt("expires_at", now.toISOString());
-    }
+  const secret = (
+    Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ??
+    Deno.env.get("VERIFY_HMAC_SECRET") ??
+    ""
+  ).trim();
+  if (!secret) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "MISCONFIGURED" },
+    });
+    // Misconfigured backend; still don't leak any key status.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  const canonical = `${ts}.${nonce}.${requestBodyHash}`;
+  const expected = await hmacSha256Hex(secret, canonical);
+  if (!timingSafeEqualHex(expected, sig)) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_SIG" },
+    });
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // --- Anti-replay ---
+  // Enforce timestamp window: abs(now_unix_seconds - x-ts) <= 300
+  const nowUnix = Math.floor(now.getTime() / 1000);
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "TS_WINDOW" },
+    });
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // Store nonce with TTL 10 minutes; reject replays on conflict.
+  const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  const nonceInsert = await db.from("request_nonces").insert({
+    nonce,
+    ts: Math.trunc(tsNum),
+    expires_at: nonceExpiresAt,
+  });
+  if (nonceInsert.error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "NONCE_REPLAY" },
+    });
+    // Conflict (duplicate nonce) or any DB error: fail closed but generic.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // Lightweight cleanup (best-effort)
+  if (Math.random() < 0.02) {
+    await db.from("request_nonces").delete().lt("expires_at", now.toISOString());
   }
 
   let body: unknown;
@@ -360,12 +456,14 @@ Deno.serve(async (req) => {
   const key = parsed.data.key.trim().toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
-  const buildId = (parsed.data.build_id ?? req.headers.get("x-build-id") ?? "").trim();
+  const bodyBuildId = (parsed.data.build_id ?? "").trim();
+  const headerBuildId = (req.headers.get("x-build-id") ?? "").trim();
+  const buildId = bodyBuildId;
   const reqNonce = req.headers.get("x-nonce") ?? "";
 
-  // Anti old APK / fake URL server: only the current signed build can pass.
-  // This does not depend on APK signature, so virtual-space/lib-transfer flow can still work.
-  if (!adminBypass && (!buildId || buildId !== REQUIRED_BUILD_ID)) {
+  // Bind the authenticated request body and gateway header to the exact same build.
+  // This still works in virtual spaces because it does not rely on APK signatures.
+  if (!bodyBuildId || !headerBuildId || bodyBuildId !== headerBuildId || bodyBuildId !== REQUIRED_BUILD_ID) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: key,
@@ -383,7 +481,15 @@ Deno.serve(async (req) => {
     p_limit: IP_RATE_LIMIT,
     p_window_seconds: IP_RATE_WINDOW_SECONDS,
   });
-  const ipAllowed = ipRl.error ? true : Boolean(ipRl.data?.[0]?.allowed);
+  if (ipRl.error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: { ip, device, ok: false, msg: "SERVER_ERROR", reason: "IP_RATE_LIMIT_RPC_FAILED" },
+    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
+  const ipAllowed = Boolean(ipRl.data?.[0]?.allowed);
   if (!ipAllowed) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
@@ -412,8 +518,16 @@ Deno.serve(async (req) => {
     p_window_seconds: RATE_WINDOW_SECONDS,
   });
 
-  // If rate-limit bookkeeping fails, don't lock out legitimate users.
-  const allowed = rl.error ? true : Boolean(rl.data?.[0]?.allowed);
+  // Security-sensitive endpoint: rate-limit bookkeeping fails closed.
+  if (rl.error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: { ip, device, ok: false, msg: "SERVER_ERROR", reason: "KEY_RATE_LIMIT_RPC_FAILED" },
+    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
+  const allowed = Boolean(rl.data?.[0]?.allowed);
   if (!allowed) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
@@ -538,7 +652,15 @@ Deno.serve(async (req) => {
       p_limit: NEW_DEVICE_LIMIT,
       p_window_seconds: NEW_DEVICE_WINDOW_SECONDS,
     });
-    const ndAllowed = nd.error ? true : Boolean(nd.data?.[0]?.allowed);
+    if (nd.error) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: { ip, device, ok: false, msg: "SERVER_ERROR", reason: "NEW_DEVICE_RATE_LIMIT_RPC_FAILED" },
+      });
+      return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+    }
+    const ndAllowed = Boolean(nd.data?.[0]?.allowed);
     if (!ndAllowed) {
       await db.from("audit_logs").insert({
         action: "VERIFY",
@@ -562,6 +684,14 @@ Deno.serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .eq("license_id", licRow.id);
 
+    if (count.error) {
+      await db.from("audit_logs").insert({
+        action: "VERIFY",
+        license_key: key,
+        detail: { ip, device, ok: false, msg: "SERVER_ERROR", reason: "DEVICE_COUNT_FAILED" },
+      });
+      return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+    }
     const used = count.count ?? 0;
     if (used >= (licRow.max_devices ?? 1)) {
       await db.from("audit_logs").insert({
@@ -704,7 +834,74 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 5) Audit log
+  const remainingSeconds = effectiveExpiresAt
+    ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000))
+    : startsOnFirstUse && !started
+      ? (() => {
+          return typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
+        })()
+      : null;
+
+  const serverEpoch = Math.floor(now.getTime() / 1000);
+  const serverTime = String(serverEpoch);
+  const sessionExpiresAt = String(serverEpoch + VERIFY_SESSION_TTL_SECONDS);
+  const signedRemainingSeconds = typeof remainingSeconds === "number" ? remainingSeconds : 0;
+  const keyHash = await sha256Hex(key);
+  const deviceHash = await sha256Hex(device);
+  const sessionId = crypto.randomUUID();
+  const featureSeed = randomHex(32);
+
+  const okBody: Record<string, unknown> = {
+    ok: true,
+    msg: "OK",
+    expires_at: effectiveExpiresAt,
+    max_devices: licRow.max_devices,
+    started,
+    remaining_seconds: signedRemainingSeconds,
+    server_time: serverTime,
+    build_id: buildId,
+    server_sig_alg: SERVER_SIG_ALG,
+    server_key_id: SERVER_KEY_ID,
+    key_hash: keyHash,
+    device_hash: deviceHash,
+    session_id: sessionId,
+    session_expires_at: sessionExpiresAt,
+    feature_seed: featureSeed,
+  };
+
+  const responseCanonical = signedResponseCanonicalV2({
+    nonce: reqNonce,
+    request_body_hash: requestBodyHash,
+    key_hash: keyHash,
+    device_hash: deviceHash,
+    build_id: buildId,
+    remaining_seconds: signedRemainingSeconds,
+    expires_at: effectiveExpiresAt,
+    server_time: serverTime,
+    session_id: sessionId,
+    session_expires_at: sessionExpiresAt,
+    feature_seed: featureSeed,
+  });
+
+  try {
+    okBody.server_sig = await ecdsaP256SignDerBase64(responseCanonical);
+  } catch (error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: {
+        ip,
+        device,
+        ok: false,
+        msg: "SERVER_ERROR",
+        reason: "ECDSA_SIGN_FAILED",
+        error: String(error instanceof Error ? error.message : error),
+      },
+    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
+
+  // Record success only after a valid server signature was produced.
   await db.from("audit_logs").insert({
     action: "VERIFY",
     license_key: key,
@@ -715,43 +912,11 @@ Deno.serve(async (req) => {
       ok: true,
       license_id: licRow.id,
       device_row: up.data?.id ?? null,
+      server_sig_alg: SERVER_SIG_ALG,
+      server_key_id: SERVER_KEY_ID,
+      session_id_prefix: sessionId.slice(0, 8),
     },
   });
-
-  const remainingSeconds = effectiveExpiresAt
-    ? Math.max(0, Math.floor((new Date(effectiveExpiresAt).getTime() - now.getTime()) / 1000))
-    : startsOnFirstUse && !started
-      ? (() => {
-          return typeof effectiveDurationSeconds === "number" ? effectiveDurationSeconds : null;
-        })()
-      : null;
-
-  const serverTimeIso = now.toISOString();
-  const signedRemainingSeconds = typeof remainingSeconds === "number" ? remainingSeconds : 0;
-  const okBody: Record<string, unknown> = {
-    ok: true,
-    msg: "OK",
-    expires_at: effectiveExpiresAt,
-    max_devices: licRow.max_devices,
-    started,
-    remaining_seconds: signedRemainingSeconds,
-    server_time: serverTimeIso,
-    build_id: buildId,
-    server_sig_alg: SERVER_SIG_ALG,
-  };
-
-  const responseSecret = (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
-  const responseCanonical = signedResponseCanonical({
-    nonce: reqNonce,
-    key,
-    device,
-    build_id: buildId,
-    ok: true,
-    remaining_seconds: signedRemainingSeconds,
-    expires_at: effectiveExpiresAt,
-    server_time: serverTimeIso,
-  });
-  okBody.server_sig = await hmacSha256Hex(responseSecret, responseCanonical);
 
   return json(okBody);
 });

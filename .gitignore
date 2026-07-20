@@ -51,3 +51,9 @@ virbox/*.run
 virbox/output/*.apk
 virbox/output/*.aab
 virbox/output/*.zip
+
+# Sunny verify-key signing material - never commit
+sunny_server_private_*.pem
+*ecdsa*private*.pem
+supabase/.env.verify-key.local
+supabase/VERIFY_KEY_SECRETS.local

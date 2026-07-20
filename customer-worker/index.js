@@ -15,7 +15,7 @@ function corsHeaders(origin, env) {
   const allowOrigin = allowedOrigin(origin, env);
   const headers = {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig,x-fp,x-admin-key,x-rent-token",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig,x-build-id,x-fp,x-admin-key,x-rent-token",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -120,6 +120,9 @@ function buildForwardHeaders(req, env, fnName = "") {
 
   const xSig = req.headers.get("x-sig");
   if (xSig) headers.set("x-sig", xSig);
+
+  const xBuildId = req.headers.get("x-build-id");
+  if (xBuildId) headers.set("x-build-id", xBuildId);
 
   const clientInfo = req.headers.get("X-Client-Info");
   if (clientInfo) headers.set("X-Client-Info", clientInfo);
