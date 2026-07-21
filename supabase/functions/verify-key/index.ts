@@ -4,7 +4,7 @@ import { z } from "npm:zod@3";
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig, x-build-id",
+    "authorization, x-client-info, apikey, content-type, x-ts, x-nonce, x-sig, x-build-id, x-gateway-ts, x-gateway-nonce, x-gateway-ip, x-gateway-body-sha256, x-gateway-signature",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -20,14 +20,21 @@ const inputSchema = z.object({
   // IMPORTANT: device limit/enforcement MUST rely on `device` (stable id) only.
   device_name: z.string().trim().min(1).max(128).optional(),
   build_id: z.string().trim().min(1).max(80).optional(),
+  product_id: z.string().trim().min(1).max(80).optional(),
+  device_public_key: z.string().trim().min(40).max(2048).optional(),
+  device_proof: z.string().trim().min(40).max(2048).optional(),
+  device_proof_alg: z.literal("SHA256withECDSA").optional(),
 });
 
-const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v33-ac-20260721").trim();
-const SERVER_SIG_ALG = "ECDSA-P256-SHA256-V2";
+const REQUIRED_BUILD_ID = (Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v34-ac-20260721").trim();
+const PRODUCT_ID = (Deno.env.get("VERIFY_PRODUCT_ID") ?? "sunny-free-fire").trim();
+const SERVER_SIG_ALG = "ECDSA-P256-SHA256-V3";
 const SERVER_KEY_ID = (
   Deno.env.get("VERIFY_RESPONSE_ECDSA_KEY_ID") ??
   "sunny-p256-2026-07-b"
 ).trim();
+const VERIFY_REQUIRE_GATEWAY = (Deno.env.get("VERIFY_REQUIRE_GATEWAY") ?? "1").trim() !== "0";
+const VERIFY_REQUIRE_DEVICE_KEY = (Deno.env.get("VERIFY_REQUIRE_DEVICE_KEY") ?? "0").trim() === "1";
 
 function envInt(name: string, fallback: number, min = 1, max = 100000) {
   const raw = (Deno.env.get(name) ?? "").trim();
@@ -185,34 +192,150 @@ function randomHex(byteLength: number) {
   return toHex(bytes);
 }
 
-function signedResponseCanonicalV2(args: {
+function signedResponseCanonicalV3(args: {
   nonce: string;
   request_body_hash: string;
   key_hash: string;
   device_hash: string;
   build_id: string;
+  product_id: string;
   remaining_seconds: number;
   expires_at: string | null;
+  max_devices: number;
+  started: boolean;
   server_time: string;
   session_id: string;
   session_expires_at: string;
+  session_generation: string;
+  exp_generation: string;
+  build_not_before: string;
+  build_expires_at: string;
+  capability_nonce: string;
+  capability_expires_at: string;
   feature_seed: string;
+  device_key_bound: boolean;
 }) {
   return [
-    "v2",
+    "v3",
     args.nonce,
     args.request_body_hash,
     args.key_hash,
     args.device_hash,
     args.build_id,
+    args.product_id,
     "true",
     String(args.remaining_seconds),
     args.expires_at ?? "",
+    String(args.max_devices),
+    args.started ? "true" : "false",
     args.server_time,
     args.session_id,
     args.session_expires_at,
+    args.session_generation,
+    args.exp_generation,
+    args.build_not_before,
+    args.build_expires_at,
+    args.capability_nonce,
+    args.capability_expires_at,
     args.feature_seed,
+    args.device_key_bound ? "true" : "false",
   ].join("\n");
+}
+
+async function importP256PublicKey(spkiBase64: string) {
+  const binary = atob(spkiBase64);
+  const der = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) der[i] = binary.charCodeAt(i);
+  return await crypto.subtle.importKey(
+    "spki",
+    der,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"],
+  );
+}
+
+function derEcdsaToP1363(der: Uint8Array) {
+  if (der.length < 8 || der[0] !== 0x30 || der[1] !== der.length - 2) return null;
+  let offset = 2;
+  const readInteger = () => {
+    if (offset + 2 > der.length || der[offset++] !== 0x02) return null;
+    const length = der[offset++];
+    if (length < 1 || offset + length > der.length) return null;
+    let value = der.slice(offset, offset + length);
+    offset += length;
+    while (value.length > 32 && value[0] === 0) value = value.slice(1);
+    if (value.length > 32) return null;
+    const output = new Uint8Array(32);
+    output.set(value, 32 - value.length);
+    return output;
+  };
+  const r = readInteger();
+  const ss = readInteger();
+  if (!r || !ss || offset !== der.length) return null;
+  const output = new Uint8Array(64);
+  output.set(r, 0);
+  output.set(ss, 32);
+  return output;
+}
+
+async function verifyDeviceProof(
+  publicKeySpkiBase64: string,
+  payload: string,
+  signatureDerBase64: string,
+) {
+  try {
+    const key = await importP256PublicKey(publicKeySpkiBase64);
+    const binary = atob(signatureDerBase64);
+    const der = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) der[i] = binary.charCodeAt(i);
+    const p1363 = derEcdsaToP1363(der);
+    if (!p1363) return false;
+    return await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      key,
+      p1363,
+      new TextEncoder().encode(payload),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function verifyGateway(req: Request, rawBody: string) {
+  const gatewaySecret = (Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET") ?? "").trim();
+  if (!gatewaySecret) {
+    return VERIFY_REQUIRE_GATEWAY
+      ? { ok: false, reason: "GATEWAY_SECRET_MISSING", ip: "" }
+      : { ok: true, reason: "GATEWAY_DISABLED", ip: getClientIp(req) };
+  }
+
+  const ts = (req.headers.get("x-gateway-ts") ?? "").trim();
+  const nonce = (req.headers.get("x-gateway-nonce") ?? "").trim();
+  const ip = (req.headers.get("x-gateway-ip") ?? "").trim();
+  const bodyHash = (req.headers.get("x-gateway-body-sha256") ?? "").trim().toLowerCase();
+  const signature = (req.headers.get("x-gateway-signature") ?? "").trim().toLowerCase();
+  if (!isValidTs(ts) || !isValidNonce(nonce) || !ip || !isValidSigHex(bodyHash) || !isValidSigHex(signature)) {
+    return { ok: false, reason: "GATEWAY_HEADERS_BAD", ip: "" };
+  }
+
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const tsNumber = Number(ts);
+  if (!Number.isFinite(tsNumber) || Math.abs(nowUnix - tsNumber) > 120) {
+    return { ok: false, reason: "GATEWAY_TS_WINDOW", ip: "" };
+  }
+
+  const expectedBodyHash = await sha256Hex(rawBody);
+  if (!timingSafeEqualHex(expectedBodyHash, bodyHash)) {
+    return { ok: false, reason: "GATEWAY_BODY_HASH_BAD", ip: "" };
+  }
+
+  const canonical = ["v1", req.method.toUpperCase(), "verify-key", ts, nonce, ip, bodyHash].join("\n");
+  const expected = await hmacSha256Hex(gatewaySecret, canonical);
+  if (!timingSafeEqualHex(expected, signature)) {
+    return { ok: false, reason: "GATEWAY_SIGNATURE_BAD", ip: "" };
+  }
+  return { ok: true, reason: "OK", ip };
 }
 
 function timingSafeEqualHex(a: string, b: string) {
@@ -323,7 +446,12 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
 
-  const ip = getClientIp(req);
+  const rawBody = await req.text();
+  const gateway = await verifyGateway(req, rawBody);
+  if (!gateway.ok) {
+    return json({ ok: false, msg: "GATEWAY_REQUIRED" }, 403);
+  }
+  const ip = gateway.ip;
   const now = new Date();
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -365,7 +493,6 @@ Deno.serve(async (req) => {
   // Require x-ts, x-nonce, x-sig.
   // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
   // Sig: HMAC_SHA256_HEX(VERIFY_HMAC_SECRET, canonical)
-  const rawBody = await req.text();
   const requestBodyHash = await sha256Hex(rawBody);
 
   const ts = req.headers.get("x-ts") ?? "";
@@ -382,11 +509,9 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
-  const secret = (
-    Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ??
-    Deno.env.get("VERIFY_HMAC_SECRET") ??
-    ""
-  ).trim();
+  // Request HMAC is anti-spam/anti-enumeration only. It is not a trusted
+  // device identity because its secret exists in the client process.
+  const secret = (Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? "").trim();
   if (!secret) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
@@ -462,16 +587,33 @@ Deno.serve(async (req) => {
   const bodyBuildId = (parsed.data.build_id ?? "").trim();
   const headerBuildId = (req.headers.get("x-build-id") ?? "").trim();
   const buildId = bodyBuildId;
+  const productId = (parsed.data.product_id ?? "").trim();
   const reqNonce = req.headers.get("x-nonce") ?? "";
 
   // Bind the authenticated request body and gateway header to the exact same build.
   // This still works in virtual spaces because it does not rely on APK signatures.
-  if (!bodyBuildId || !headerBuildId || bodyBuildId !== headerBuildId || bodyBuildId !== REQUIRED_BUILD_ID) {
+  if (!bodyBuildId || !headerBuildId || bodyBuildId !== headerBuildId || bodyBuildId !== REQUIRED_BUILD_ID || productId !== PRODUCT_ID) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: key,
       detail: { ip, device, ok: false, msg: "APP_UPDATE_REQUIRED", reason: "BAD_BUILD_ID", build_id: buildId },
     });
+    return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
+  }
+
+  const buildRow = await db
+    .from("security_client_builds")
+    .select("build_id,product_id,is_active,not_before,expires_at,exp_generation")
+    .eq("build_id", buildId)
+    .eq("product_id", productId)
+    .maybeSingle();
+  if (buildRow.error || !buildRow.data || !buildRow.data.is_active) {
+    return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
+  }
+  const buildNotBeforeMs = new Date(buildRow.data.not_before).getTime();
+  const buildExpiresAtMs = new Date(buildRow.data.expires_at).getTime();
+  if (!Number.isFinite(buildNotBeforeMs) || !Number.isFinite(buildExpiresAtMs) ||
+      now.getTime() + 300000 < buildNotBeforeMs || now.getTime() >= buildExpiresAtMs) {
     return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
   }
 
@@ -626,10 +768,31 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 3) Device limit logic
+  // 3) Device-key proof and device limit logic.
+  const submittedPublicKey = (parsed.data.device_public_key ?? "").trim();
+  const submittedProof = (parsed.data.device_proof ?? "").trim();
+  const submittedProofAlg = (parsed.data.device_proof_alg ?? "").trim();
+  const hasProofEnvelope = Boolean(submittedPublicKey && submittedProof && submittedProofAlg === "SHA256withECDSA");
+  const deviceProofPayload = [
+    "sunny-device-proof-v1",
+    ts,
+    nonce,
+    await sha256Hex(key),
+    await sha256Hex(device),
+    buildId,
+    productId,
+  ].join("\n");
+  const proofValid = hasProofEnvelope
+    ? await verifyDeviceProof(submittedPublicKey, deviceProofPayload, submittedProof)
+    : false;
+  if ((VERIFY_REQUIRE_DEVICE_KEY && !proofValid) || (hasProofEnvelope && !proofValid)) {
+    return json({ ok: false, msg: "DEVICE_KEY_REQUIRED" }, 200);
+  }
+  const submittedPublicKeyHash = proofValid ? await sha256Hex(submittedPublicKey) : "";
+
   const existing = await db
     .from("license_devices")
-    .select("id")
+    .select("id,device_public_key_sha256")
     .eq("license_id", licRow.id)
     .eq("device_id", device)
     .maybeSingle();
@@ -643,6 +806,11 @@ Deno.serve(async (req) => {
 
     await maybeInsertEnumerationAlert(db, ip, key);
     return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+  }
+
+  const existingDeviceKeyHash = String(existing.data?.device_public_key_sha256 ?? "").trim();
+  if (existingDeviceKeyHash && (!proofValid || !timingSafeEqualHex(existingDeviceKeyHash, submittedPublicKeyHash))) {
+    return json({ ok: false, msg: "DEVICE_KEY_MISMATCH" }, 200);
   }
 
   if (!existing.data) {
@@ -717,6 +885,11 @@ Deno.serve(async (req) => {
   };
   if (typeof deviceName === "string" && deviceName.trim().length > 0) {
     upsertPayload.device_name = deviceName.trim();
+  }
+  if (proofValid && !existingDeviceKeyHash) {
+    upsertPayload.device_public_key_spki = submittedPublicKey;
+    upsertPayload.device_public_key_sha256 = submittedPublicKeyHash;
+    upsertPayload.device_key_bound_at = now.toISOString();
   }
 
   const up = await db
@@ -853,37 +1026,74 @@ Deno.serve(async (req) => {
   const deviceHash = await sha256Hex(device);
   const sessionId = crypto.randomUUID();
   const featureSeed = randomHex(32);
+  const capabilityNonce = randomHex(32);
+  const capabilityExpiresAt = sessionExpiresAt;
+  const maxDevices = Number(licRow.max_devices ?? 1);
+  const deviceKeyBound = Boolean(existingDeviceKeyHash || (proofValid && submittedPublicKeyHash));
+
+  const lease = await db.rpc("issue_sunny_v34_lease", {
+    p_license_id: licRow.id,
+    p_device_id: device,
+    p_build_id: buildId,
+    p_product_id: productId,
+  });
+  const leaseRow: any = Array.isArray(lease.data) ? lease.data[0] : lease.data;
+  if (lease.error || !leaseRow) {
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
+  const sessionGeneration = String(leaseRow.session_generation);
+  const expGeneration = String(leaseRow.exp_generation);
+  const buildNotBefore = String(leaseRow.build_not_before);
+  const buildExpiresAt = String(leaseRow.build_expires_at);
 
   const okBody: Record<string, unknown> = {
     ok: true,
     msg: "OK",
     expires_at: effectiveExpiresAt,
-    max_devices: licRow.max_devices,
+    max_devices: maxDevices,
     started,
     remaining_seconds: signedRemainingSeconds,
     server_time: serverTime,
     build_id: buildId,
+    product_id: productId,
     server_sig_alg: SERVER_SIG_ALG,
     server_key_id: SERVER_KEY_ID,
     key_hash: keyHash,
     device_hash: deviceHash,
     session_id: sessionId,
     session_expires_at: sessionExpiresAt,
+    session_generation: sessionGeneration,
+    exp_generation: expGeneration,
+    build_not_before: buildNotBefore,
+    build_expires_at: buildExpiresAt,
+    capability_nonce: capabilityNonce,
+    capability_expires_at: capabilityExpiresAt,
     feature_seed: featureSeed,
+    device_key_bound: deviceKeyBound,
   };
 
-  const responseCanonical = signedResponseCanonicalV2({
+  const responseCanonical = signedResponseCanonicalV3({
     nonce: reqNonce,
     request_body_hash: requestBodyHash,
     key_hash: keyHash,
     device_hash: deviceHash,
     build_id: buildId,
+    product_id: productId,
     remaining_seconds: signedRemainingSeconds,
     expires_at: effectiveExpiresAt,
+    max_devices: maxDevices,
+    started,
     server_time: serverTime,
     session_id: sessionId,
     session_expires_at: sessionExpiresAt,
+    session_generation: sessionGeneration,
+    exp_generation: expGeneration,
+    build_not_before: buildNotBefore,
+    build_expires_at: buildExpiresAt,
+    capability_nonce: capabilityNonce,
+    capability_expires_at: capabilityExpiresAt,
     feature_seed: featureSeed,
+    device_key_bound: deviceKeyBound,
   });
 
   try {

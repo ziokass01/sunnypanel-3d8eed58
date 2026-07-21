@@ -2,6 +2,34 @@ function trimTrailingSlash(value) {
   return String(value ?? "").trim().replace(/\/+$/, "");
 }
 
+
+function toHex(bytes) {
+  return Array.from(new Uint8Array(bytes))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256HexBytes(bytes) {
+  return toHex(await crypto.subtle.digest("SHA-256", bytes));
+}
+
+async function hmacSha256Hex(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return toHex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+}
+
+function randomHex(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
 function allowedOrigin(origin, env) {
   const raw = String(env.ALLOWED_ORIGINS ?? "").trim();
   if (!raw) return origin || "*";
@@ -100,9 +128,6 @@ function buildForwardHeaders(req, env, fnName = "") {
   const auth = req.headers.get("Authorization");
   if (auth) headers.set("Authorization", auth);
 
-  // The rent customer portal uses its own session JWT. When it is sent as
-  // x-rent-token, translate it back to Authorization only inside the trusted
-  // gateway hop so the Edge Function can read the old Bearer format.
   const rentToken = (req.headers.get("x-rent-token") || "").trim();
   if (rentToken && fnName === "rent-user") headers.set("Authorization", `Bearer ${rentToken}`);
 
@@ -111,41 +136,47 @@ function buildForwardHeaders(req, env, fnName = "") {
 
   const hmac = req.headers.get("Hmac");
   if (hmac) headers.set("Hmac", hmac);
+  for (const name of ["x-ts", "x-nonce", "x-sig", "x-build-id", "X-Client-Info", "x-fp", "x-admin-key"]) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
+  }
 
-  const xTs = req.headers.get("x-ts");
-  if (xTs) headers.set("x-ts", xTs);
-
-  const xNonce = req.headers.get("x-nonce");
-  if (xNonce) headers.set("x-nonce", xNonce);
-
-  const xSig = req.headers.get("x-sig");
-  if (xSig) headers.set("x-sig", xSig);
-
-  const xBuildId = req.headers.get("x-build-id");
-  if (xBuildId) headers.set("x-build-id", xBuildId);
-
-  const clientInfo = req.headers.get("X-Client-Info");
-  if (clientInfo) headers.set("X-Client-Info", clientInfo);
-
-  const fp = req.headers.get("x-fp");
-  if (fp) headers.set("x-fp", fp);
-
-  const adminKey = req.headers.get("x-admin-key");
-  if (adminKey) headers.set("x-admin-key", adminKey);
-
-  const forwardedFor = req.headers.get("CF-Connecting-IP") || req.headers.get("X-Forwarded-For");
-  if (forwardedFor) headers.set("X-Forwarded-For", forwardedFor);
-
+  // Never forward client-controlled gateway identity headers.
+  for (const name of [
+    "x-gateway-ts", "x-gateway-nonce", "x-gateway-ip",
+    "x-gateway-body-sha256", "x-gateway-signature",
+  ]) headers.delete(name);
   return headers;
 }
 
 async function forwardRequest(req, upstreamUrl, env, fnName = "") {
   const method = req.method.toUpperCase();
   const headers = buildForwardHeaders(req, env, fnName);
-  const init = { method, headers };
+  let bodyBytes = new ArrayBuffer(0);
   if (method !== "GET" && method !== "HEAD") {
-    init.body = await req.arrayBuffer();
+    bodyBytes = await req.arrayBuffer();
   }
+
+  if (fnName === "verify-key") {
+    const secret = String(env.GATEWAY_SHARED_SECRET || "").trim();
+    if (!secret) throw new Error("GATEWAY_SHARED_SECRET_MISSING");
+    const realIp = String(req.headers.get("CF-Connecting-IP") || "").trim();
+    if (!realIp) throw new Error("CF_CONNECTING_IP_MISSING");
+    const ts = String(Math.floor(Date.now() / 1000));
+    const nonce = randomHex(16);
+    const bodyHash = await sha256HexBytes(bodyBytes);
+    const canonical = ["v1", method, fnName, ts, nonce, realIp, bodyHash].join("\n");
+    const signature = await hmacSha256Hex(secret, canonical);
+    headers.set("x-gateway-ts", ts);
+    headers.set("x-gateway-nonce", nonce);
+    headers.set("x-gateway-ip", realIp);
+    headers.set("x-gateway-body-sha256", bodyHash);
+    headers.set("x-gateway-signature", signature);
+    headers.set("X-Forwarded-For", realIp);
+  }
+
+  const init = { method, headers };
+  if (method !== "GET" && method !== "HEAD") init.body = bodyBytes;
   return await fetch(upstreamUrl, init);
 }
 
@@ -162,9 +193,9 @@ export default {
     if (route.kind === "health") {
       return json({
         ok: true,
-        service: "fixed-api-gateway",
+        service: "fixed-api-gateway-v34",
         public_api_base_url: trimTrailingSlash(env.PUBLIC_API_BASE_URL || `${url.origin}/api`),
-        active_functions_base_url: resolveFunctionsBase(env) || null,
+        gateway_auth: Boolean(String(env.GATEWAY_SHARED_SECRET || "").trim()),
       }, 200, origin, env);
     }
 
