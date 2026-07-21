@@ -1020,7 +1020,9 @@ Deno.serve(async (req) => {
 
   const serverEpoch = Math.floor(now.getTime() / 1000);
   const serverTime = String(serverEpoch);
-  const sessionExpiresAt = String(serverEpoch + VERIFY_SESSION_TTL_SECONDS);
+  const sessionExpiresAtValue =
+    serverEpoch + VERIFY_SESSION_TTL_SECONDS;
+  const sessionExpiresAt = String(sessionExpiresAtValue);
   const signedRemainingSeconds = typeof remainingSeconds === "number" ? remainingSeconds : 0;
   const keyHash = await sha256Hex(key);
   const deviceHash = await sha256Hex(device);
@@ -1041,10 +1043,52 @@ Deno.serve(async (req) => {
   if (lease.error || !leaseRow) {
     return json({ ok: false, msg: "SERVER_ERROR" }, 503);
   }
-  const sessionGeneration = String(leaseRow.session_generation);
-  const expGeneration = String(leaseRow.exp_generation);
-  const buildNotBefore = String(leaseRow.build_not_before);
-  const buildExpiresAt = String(leaseRow.build_expires_at);
+  const sessionGenerationValue =
+    Number(leaseRow.session_generation);
+  const expGenerationValue =
+    Number(leaseRow.exp_generation);
+  const buildNotBeforeValue =
+    Number(leaseRow.build_not_before);
+  const buildExpiresAtValue =
+    Number(leaseRow.build_expires_at);
+
+  if (
+    !Number.isSafeInteger(sessionGenerationValue) ||
+    sessionGenerationValue <= 0 ||
+    !Number.isSafeInteger(expGenerationValue) ||
+    expGenerationValue <= 0 ||
+    !Number.isSafeInteger(buildNotBeforeValue) ||
+    buildNotBeforeValue <= 0 ||
+    !Number.isSafeInteger(buildExpiresAtValue) ||
+    buildExpiresAtValue <= 0 ||
+    buildExpiresAtValue <= buildNotBeforeValue
+  ) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: {
+        ip,
+        device,
+        ok: false,
+        msg: "SERVER_ERROR",
+        reason: "LEASE_FIELDS_INVALID",
+      },
+    });
+
+    return json({
+      ok: false,
+      msg: "SERVER_ERROR",
+    }, 503);
+  }
+
+  const sessionGeneration =
+    String(sessionGenerationValue);
+  const expGeneration =
+    String(expGenerationValue);
+  const buildNotBefore =
+    String(buildNotBeforeValue);
+  const buildExpiresAt =
+    String(buildExpiresAtValue);
 
   const okBody: Record<string, unknown> = {
     ok: true,
@@ -1061,13 +1105,13 @@ Deno.serve(async (req) => {
     key_hash: keyHash,
     device_hash: deviceHash,
     session_id: sessionId,
-    session_expires_at: sessionExpiresAt,
-    session_generation: sessionGeneration,
-    exp_generation: expGeneration,
-    build_not_before: buildNotBefore,
-    build_expires_at: buildExpiresAt,
+    session_expires_at: sessionExpiresAtValue,
+    session_generation: sessionGenerationValue,
+    exp_generation: expGenerationValue,
+    build_not_before: buildNotBeforeValue,
+    build_expires_at: buildExpiresAtValue,
     capability_nonce: capabilityNonce,
-    capability_expires_at: capabilityExpiresAt,
+    capability_expires_at: sessionExpiresAtValue,
     feature_seed: featureSeed,
     device_key_bound: deviceKeyBound,
   };
