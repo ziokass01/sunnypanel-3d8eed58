@@ -57,6 +57,20 @@ const VERIFY_ENUM_BLOCK_MINUTES = envInt("VERIFY_ENUM_BLOCK_MINUTES", 15, 1, 144
 // Client polls every 12 minutes and rejects sessions longer than 30 minutes.
 const VERIFY_SESSION_TTL_SECONDS = envInt("VERIFY_SESSION_TTL_SECONDS", 900, 180, 1800);
 
+function isUnstableDeviceId(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "unknown_device" ||
+    normalized === "unknown" ||
+    normalized === "null" ||
+    normalized === "undefined" ||
+    normalized === "9774d56d682e549c"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -584,6 +598,19 @@ Deno.serve(async (req) => {
   const key = parsed.data.key.trim().toUpperCase();
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
+  if (isUnstableDeviceId(device)) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: {
+        ip,
+        ok: false,
+        msg: "DEVICE_ID_UNSTABLE",
+        reason: "PLACEHOLDER_DEVICE_ID",
+      },
+    });
+    return json({ ok: false, msg: "DEVICE_ID_UNSTABLE" }, 200);
+  }
   const bodyBuildId = (parsed.data.build_id ?? "").trim();
   const headerBuildId = (req.headers.get("x-build-id") ?? "").trim();
   const buildId = bodyBuildId;
@@ -865,14 +892,27 @@ Deno.serve(async (req) => {
     }
     const used = count.count ?? 0;
     if (used >= (licRow.max_devices ?? 1)) {
+      const maxDevices = Number(licRow.max_devices ?? 1);
       await db.from("audit_logs").insert({
         action: "VERIFY",
         license_key: key,
-        detail: { ip, device, ok: false, msg: "DEVICE_LIMIT" },
+        detail: {
+          ip,
+          device,
+          ok: false,
+          msg: "DEVICE_LIMIT",
+          used_devices: used,
+          max_devices: maxDevices,
+        },
       });
 
       await maybeInsertEnumerationAlert(db, ip, key);
-      return json({ ok: false, msg: "DEVICE_LIMIT" });
+      return json({
+        ok: false,
+        msg: "DEVICE_LIMIT",
+        used_devices: used,
+        max_devices: maxDevices,
+      });
     }
   }
 
