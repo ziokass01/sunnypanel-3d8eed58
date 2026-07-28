@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+
+  "name": "sunnypanel",
+  "main": "index.js",
+  "compatibility_date": "2026-07-21",
+
+  "workers_dev": true,
+
+  "route": {
+    "pattern": "mityangho.id.vn/api/*",
+    "zone_name": "mityangho.id.vn"
+  },
+
+  "keep_vars": true
+}
