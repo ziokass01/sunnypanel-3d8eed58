@@ -34,7 +34,7 @@ type SettingsRow = {
   free_session_waiting_limit?: number;
   free_link4m_rotate_nonce_pass1?: number;
   free_link4m_rotate_nonce_pass2?: number;
-  free_shortlink_mode?: "round_robin" | "random";
+  free_shortlink_mode?: "round_robin" | "random" | "priority_failover";
   free_shortlink_last_provider_id_pass1?: string | null;
   free_shortlink_last_provider_id_pass2?: string | null;
   free_shortlink_next_index_pass1?: number;
@@ -79,7 +79,7 @@ type SettingsRow = {
 type ShortlinkProviderRow = {
   id: string;
   name: string;
-  provider: "custom" | "link4m" | "traffic68" | "nhapma" | "layma" | "none";
+  provider: "custom" | "link4m" | "gtraffic" | "traffic68" | "nhapma" | "layma" | "none";
   api_token_secret: string | null;
   api_url_template: string | null;
   enabled: boolean;
@@ -88,6 +88,8 @@ type ShortlinkProviderRow = {
   last_used_at?: string | null;
   last_error?: string | null;
   fail_count?: number | null;
+  quota_remaining?: number | null;
+  quota_date?: string | null;
   note?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -202,6 +204,9 @@ function friendlyShortlinkError(value?: string | null) {
   if (/<title>just a moment|challenge-platform|cf-chl-|cloudflare ray id|<!doctype html/i.test(raw)) {
     return "LINK4M_CLOUDFLARE_CHALLENGE";
   }
+  if (/GTRAFFIC_DAILY_QUOTA_EXHAUSTED|hết lượt|hết hạn mức/i.test(raw)) {
+    return "GTraffic đã hết lượt hôm nay; hệ thống đang dùng link kế tiếp và sẽ tự thử lại sau 00:00.";
+  }
   return raw.length > 180 ? `${raw.slice(0, 180)}…` : raw;
 }
 
@@ -234,10 +239,21 @@ function createEmptyDownloadCard(): DownloadCardEditorItem {
 
 function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
   if (provider === "link4m") return "https://link4m.co/api-shorten/v2";
+  if (provider === "gtraffic") return "https://manager.gtraffic.io/api/cong-khai/tao-lien-ket";
   if (provider === "traffic68") return "https://traffic68.com/api/quicklink/st";
   if (provider === "nhapma") return "https://service.nhapma.com/api";
   if (provider === "layma") return "https://api.layma.net/api/admin/shortlink/quicklink";
   return "";
+}
+
+function shortlinkProviderName(provider: ShortlinkProviderRow["provider"]) {
+  if (provider === "link4m") return "Link4M";
+  if (provider === "gtraffic") return "GTraffic";
+  if (provider === "traffic68") return "Traffic68";
+  if (provider === "nhapma") return "NhapMa";
+  if (provider === "layma") return "LayMa";
+  if (provider === "none") return "Không rút gọn";
+  return "Custom";
 }
 
 function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
@@ -249,9 +265,9 @@ function parseLegacyShortlinkApi(rawApi: unknown, rawToken: unknown = "") {
   // UI mới cần tách thành 2 ô: API base + Token.
   try {
     const u = new URL(api);
-    const extracted = token || u.searchParams.get("api") || u.searchParams.get("token") || u.searchParams.get("tokenUser") || "";
+    const extracted = token || u.searchParams.get("apikey") || u.searchParams.get("api") || u.searchParams.get("token") || u.searchParams.get("tokenUser") || "";
     const hasTargetUrl = u.searchParams.has("url") || u.searchParams.has("u") || u.searchParams.has("link") || u.searchParams.has("target");
-    const hasCredential = u.searchParams.has("api") || u.searchParams.has("token") || u.searchParams.has("tokenUser");
+    const hasCredential = u.searchParams.has("apikey") || u.searchParams.has("api") || u.searchParams.has("token") || u.searchParams.has("tokenUser");
     if (hasTargetUrl || hasCredential) {
       return { api: `${u.origin}${u.pathname}`, token: extracted.trim() };
     }
@@ -560,7 +576,7 @@ export function AdminFreeKeysPage() {
   const [sessionWaitingLimit, setSessionWaitingLimit] = useState(2);
   const [rotateNoncePass1, setRotateNoncePass1] = useState(0);
   const [rotateNoncePass2, setRotateNoncePass2] = useState(0);
-  const [shortlinkMode, setShortlinkMode] = useState<"round_robin" | "random">("round_robin");
+  const [shortlinkMode, setShortlinkMode] = useState<"round_robin" | "random" | "priority_failover">("round_robin");
   const [gateTokenLifeSeconds, setGateTokenLifeSeconds] = useState(600);
 
   const [freeEnabled, setFreeEnabled] = useState(true);
@@ -605,10 +621,10 @@ export function AdminFreeKeysPage() {
     const nextOrder = (providerDrafts.reduce((max, row) => Math.max(max, Number(row.sort_order ?? 0)), 0) || 0) + 10;
     setProviderDrafts((prev) => [...prev, {
       id: `tmp_${Date.now()}`,
-      name: "Link4M",
-      provider: "link4m",
+      name: "GTraffic",
+      provider: "gtraffic",
       api_token_secret: "",
-      api_url_template: defaultShortlinkApi("link4m"),
+      api_url_template: defaultShortlinkApi("gtraffic"),
       enabled: true,
       pass_scope: "both",
       sort_order: nextOrder,
@@ -654,7 +670,14 @@ export function AdminFreeKeysPage() {
     setSessionWaitingLimit(Number((s as any).free_session_waiting_limit ?? 2));
     setRotateNoncePass1(Number((s as any).free_link4m_rotate_nonce_pass1 ?? 0));
     setRotateNoncePass2(Number((s as any).free_link4m_rotate_nonce_pass2 ?? 0));
-    setShortlinkMode(String((s as any).free_shortlink_mode ?? "round_robin") === "random" ? "random" : "round_robin");
+    const configuredShortlinkMode = String((s as any).free_shortlink_mode ?? "round_robin");
+    if (configuredShortlinkMode === "random") {
+      setShortlinkMode("random");
+    } else if (configuredShortlinkMode === "priority_failover") {
+      setShortlinkMode("priority_failover");
+    } else {
+      setShortlinkMode("round_robin");
+    }
     setGateTokenLifeSeconds(Math.max(60, Number((s as any).free_gate_token_life_seconds ?? 600)));
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
@@ -1633,14 +1656,23 @@ export function AdminFreeKeysPage() {
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <div className="text-sm font-medium">Chế độ chọn link</div>
-                <Select value={shortlinkMode} onValueChange={(v) => setShortlinkMode(v === "random" ? "random" : "round_robin")}>
+                <Select value={shortlinkMode} onValueChange={(v) => {
+                  if (v === "random") {
+                    setShortlinkMode("random");
+                  } else if (v === "priority_failover") {
+                    setShortlinkMode("priority_failover");
+                  } else {
+                    setShortlinkMode("round_robin");
+                  }
+                }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="round_robin">Luân phiên theo thứ tự</SelectItem>
                     <SelectItem value="random">Random nhưng tránh trùng liền kề</SelectItem>
+                    <SelectItem value="priority_failover">Ưu tiên theo thứ tự, hết lượt mới chuyển</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="text-xs text-muted-foreground">Luân phiên sẽ chạy 1→2→3 rồi quay lại 1; random sẽ loại provider vừa dùng nếu còn provider khác.</div>
+                <div className="text-xs text-muted-foreground">Chế độ ưu tiên sẽ dùng dòng đầu tiên cho tới khi lỗi hoặc hết lượt trong ngày, sau đó mới chuyển xuống dòng kế tiếp. Sau 00:00 giờ Việt Nam, provider hết lượt được thử lại tự động.</div>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-medium">Token sống sau khi đủ delay (giây)</div>
@@ -1669,21 +1701,27 @@ export function AdminFreeKeysPage() {
                       <TableCell>
                         <Input value={row.name ?? ""} onChange={(e) => updateProviderDraft(row.id, { name: e.target.value })} placeholder="VD: Link4M chính" />
                         {row.last_error ? <div className="mt-1 break-words text-[11px] text-destructive">{friendlyShortlinkError(row.last_error)}</div> : null}
+                        {row.provider === "gtraffic" && row.quota_date ? (
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            GTraffic {row.quota_date}: còn {row.quota_remaining ?? "chưa rõ"} lượt
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <Select value={row.provider} onValueChange={(v) => {
                           const provider = v as ShortlinkProviderRow["provider"];
                           const currentApi = String(row.api_url_template ?? "").trim();
-                          const knownDefaults = [defaultShortlinkApi("link4m"), defaultShortlinkApi("traffic68"), defaultShortlinkApi("nhapma"), defaultShortlinkApi("layma")];
+                          const knownDefaults = [defaultShortlinkApi("link4m"), defaultShortlinkApi("gtraffic"), defaultShortlinkApi("traffic68"), defaultShortlinkApi("nhapma"), defaultShortlinkApi("layma")];
                           updateProviderDraft(row.id, {
                             provider,
-                            name: row.name || (provider === "link4m" ? "Link4M" : provider === "traffic68" ? "Traffic68" : provider === "nhapma" ? "NhapMa" : provider === "layma" ? "LayMa" : row.name),
+                            name: row.name || shortlinkProviderName(provider),
                             api_url_template: !currentApi || knownDefaults.includes(currentApi) ? defaultShortlinkApi(provider) : currentApi,
                           });
                         }}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="link4m">Link4M</SelectItem>
+                            <SelectItem value="gtraffic">GTraffic</SelectItem>
                             <SelectItem value="traffic68">Traffic68</SelectItem>
                             <SelectItem value="nhapma">NhapMa</SelectItem>
                             <SelectItem value="layma">LayMa</SelectItem>

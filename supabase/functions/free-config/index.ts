@@ -262,7 +262,13 @@ Deno.serve(async (req) => {
     const free_link4m_rotate_nonce_pass2 = Math.max(0, Number((settings as any)?.free_link4m_rotate_nonce_pass2 ?? 0));
     const free_return_seconds = Math.max(10, Number(settings?.free_return_seconds ?? 10));
     const free_gate_token_life_seconds = Math.min(1800, Math.max(60, Number((settings as any)?.free_gate_token_life_seconds ?? 600) || 600));
-    const free_shortlink_mode = String((settings as any)?.free_shortlink_mode ?? "round_robin").trim() === "random" ? "random" : "round_robin";
+    const rawShortlinkMode = String((settings as any)?.free_shortlink_mode ?? "round_robin").trim();
+    let free_shortlink_mode = "round_robin";
+    if (rawShortlinkMode === "random") {
+      free_shortlink_mode = "random";
+    } else if (rawShortlinkMode === "priority_failover") {
+      free_shortlink_mode = "priority_failover";
+    }
     const free_session_absolute_seconds = Math.min(3600, Math.max(120, Number((settings as any)?.free_session_absolute_seconds ?? 900) || 900));
     const free_claim_window_seconds = Math.min(900, Math.max(30, Number((settings as any)?.free_claim_window_seconds ?? 180) || 180));
     const free_close_deadline_seconds = Math.max(10, Number((settings as any)?.free_close_deadline_seconds ?? free_return_seconds) || free_return_seconds);
@@ -331,7 +337,7 @@ Deno.serve(async (req) => {
     }
 
     const appCodes = [...new Set((keyTypes ?? []).map((k: any) => String(k?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire"))];
-    let findDumpsRewards: Record<string, any> = {};
+    const findDumpsRewards: Record<string, any> = {};
     if ((requestedAppCode && requestedAppCode === "find-dumps") || appCodes.includes("find-dumps")) {
       const { data: rewardRows, error: rewardErr } = await sb
         .from("server_app_reward_packages")

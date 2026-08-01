@@ -1,4 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  buildGtrafficApiUrl,
+  isQuotaExhaustedError,
+  normalizeShortlinkMode,
+  parseGtrafficResponse,
+  providerIsExhaustedToday,
+  type ProviderShortenResult,
+  vietnamDate,
+} from "../_shared/gtraffic.ts";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -108,7 +117,7 @@ function safeProviderError(error: unknown) {
   if (isCloudflareChallenge(raw)) return "LINK4M_CLOUDFLARE_CHALLENGE";
   if (isHtmlResponse(raw)) return "SHORTLINK_PROVIDER_HTML_RESPONSE";
   return raw
-    .replace(/([?&](?:api|token|tokenUser)=)[^&\s]+/gi, "$1***")
+    .replace(/([?&](?:apikey|api|token|tokenUser)=)[^&\s]+/gi, "$1***")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 300);
@@ -202,12 +211,13 @@ function extractShortUrl(data: any, raw: string) {
   }
   return "";
 }
+
 async function shortenWithProvider(provider: any, gateUrl: string) {
   const kind = text(provider?.provider || "custom", 32).toLowerCase() || "custom";
   const token = text(provider?.api_token_secret, 4096);
   const rawApiUrl = text(provider?.api_url_template, 4096);
   const apiUrl = normalizeProviderApiBase(kind, rawApiUrl);
-  if (kind === "none") return gateUrl;
+  if (kind === "none") return { outboundUrl: gateUrl } satisfies ProviderShortenResult;
 
   const providerHint = [
   kind,
@@ -228,11 +238,20 @@ if (isLink4M) {
   const outbound = new URL("https://link4m.co/st");
   outbound.searchParams.set("api", token);
   outbound.searchParams.set("url", gateUrl);
-  return outbound.toString();
+  return { outboundUrl: outbound.toString() } satisfies ProviderShortenResult;
+}
+if (kind === "gtraffic") {
+  if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
+  const endpoint = buildGtrafficApiUrl(apiUrl, token, gateUrl);
+  const { data } = await readJsonOrText(endpoint, kind);
+  const shortBaseUrl = Deno.env.get("GTRAFFIC_SHORT_BASE_URL") || "https://gtraffic.io";
+  return parseGtrafficResponse(data, shortBaseUrl);
 }
 if (kind === "traffic68") {
   const base = apiUrl || "https://traffic68.com/api/quicklink/st";
-  return `${base}${base.includes("?") ? "&" : "?"}api=${encodeURIComponent(token)}&url=${encodeURIComponent(gateUrl)}`;
+  return {
+    outboundUrl: `${base}${base.includes("?") ? "&" : "?"}api=${encodeURIComponent(token)}&url=${encodeURIComponent(gateUrl)}`,
+  } satisfies ProviderShortenResult;
 }
 if (kind === "nhapma") {
     const base = apiUrl || "https://service.nhapma.com/api";
@@ -244,14 +263,14 @@ if (kind === "nhapma") {
     requestUrl = renderTemplate(apiUrl, gateUrl, token);
   }
   if (!requestUrl) throw new Error("SHORTLINK_TEMPLATE_INVALID");
-  if (/\/st\?/i.test(requestUrl) && !/api-shorten|\/api(\/|\?|$)|format=json/i.test(requestUrl)) return requestUrl;
-  if (kind === "custom" && /^https?:\/\//i.test(requestUrl) && !/[?&](api|token|tokenUser|url|u|link|target)=/i.test(requestUrl)) {
-    return requestUrl;
+  if (/\/st\?/i.test(requestUrl) && !/api-shorten|\/api(\/|\?|$)|format=json/i.test(requestUrl)) return { outboundUrl: requestUrl } satisfies ProviderShortenResult;
+  if (kind === "custom" && /^https?:\/\//i.test(requestUrl) && !/[?&](apikey|api|token|tokenUser|url|u|link|target)=/i.test(requestUrl)) {
+    return { outboundUrl: requestUrl } satisfies ProviderShortenResult;
   }
   const { data, raw } = await readJsonOrText(requestUrl, kind);
   const shortUrl = extractShortUrl(data, raw);
   if (!shortUrl) throw new Error(String(data?.message || data?.error || "SHORTLINK_RESPONSE_INVALID"));
-  return shortUrl;
+  return { outboundUrl: shortUrl } satisfies ProviderShortenResult;
 }
 async function logGate(db: any, row: Record<string, unknown>) {
   try { await db.from("licenses_free_gate_logs").insert(row); } catch { /* ignore */ }
@@ -284,14 +303,21 @@ async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: strin
     if (fb) return fb;
     throw new Error("SHORTLINK_PROVIDER_MISSING");
   }
-  if (avoidId && providers.length > 1) {
+  const mode = normalizeShortlinkMode(cfg.free_shortlink_mode);
+  if (mode !== "priority_failover" && avoidId && providers.length > 1) {
     const filtered = providers.filter((p) => String(p.id) !== String(avoidId));
     if (filtered.length) providers = filtered;
   }
-  const mode = text(cfg.free_shortlink_mode || "round_robin", 32).toLowerCase() === "random" ? "random" : "round_robin";
   const lastId = text(passNo === 2 ? cfg.free_shortlink_last_provider_id_pass2 : cfg.free_shortlink_last_provider_id_pass1, 64);
   let selected: any;
-  if (mode === "random") {
+  if (mode === "priority_failover") {
+    selected = providers.find((provider) => !providerIsExhaustedToday(provider));
+    if (!selected) {
+      const fallback = fallbackProviderFromSettings(cfg, passNo);
+      if (fallback) return fallback;
+      throw new Error("ALL_SHORTLINK_PROVIDERS_EXHAUSTED_TODAY");
+    }
+  } else if (mode === "random") {
     let pool = providers;
     if (lastId && providers.length > 1) pool = providers.filter((p) => String(p.id) !== lastId);
     selected = pool[Math.floor(Math.random() * pool.length)] ?? providers[0];
@@ -313,7 +339,8 @@ async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: strin
 async function providerCandidates(db: any, cfg: any, passNo: number, selected: any, avoidId?: string | null) {
   let providers: any[] = [];
   try { providers = await loadProviders(db, passNo); } catch { providers = []; }
-  if (avoidId && providers.length > 1) {
+  const mode = normalizeShortlinkMode(cfg.free_shortlink_mode);
+  if (mode !== "priority_failover" && avoidId && providers.length > 1) {
     const filtered = providers.filter((p) => String(p.id) !== String(avoidId));
     if (filtered.length) providers = filtered;
   }
@@ -321,6 +348,7 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   const seen = new Set<string>();
   const push = (provider: any) => {
     if (!provider) return;
+    if (mode === "priority_failover" && providerIsExhaustedToday(provider)) return;
     const key = provider?.id
       ? `id:${String(provider.id)}`
       : `cfg:${text(provider?.provider, 32)}:${text(provider?.api_url_template, 512)}:${text(provider?.api_token_secret, 64)}`;
@@ -337,22 +365,32 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
 
 async function markProviderFailure(db: any, provider: any, error: unknown) {
   if (!provider?.id) return;
+  const patch: Record<string, unknown> = {
+    last_error: safeProviderError(error),
+    fail_count: Math.max(0, Number(provider?.fail_count ?? 0)) + 1,
+  };
+  if (text(provider?.provider, 32).toLowerCase() === "gtraffic" && isQuotaExhaustedError(error)) {
+    patch.quota_remaining = 0;
+    patch.quota_date = vietnamDate();
+  }
   try {
-    await db.from("licenses_free_shortlink_providers").update({
-      last_error: safeProviderError(error),
-      fail_count: Math.max(0, Number(provider?.fail_count ?? 0)) + 1,
-    }).eq("id", provider.id);
+    await db.from("licenses_free_shortlink_providers").update(patch).eq("id", provider.id);
   } catch { /* ignore */ }
 }
 
-async function markProviderSuccess(db: any, provider: any, passNo: number) {
+async function markProviderSuccess(db: any, provider: any, passNo: number, result: ProviderShortenResult) {
   if (!provider?.id) return;
+  const providerPatch: Record<string, unknown> = {
+    last_used_at: new Date().toISOString(),
+    last_error: null,
+    fail_count: 0,
+  };
+  if (text(provider?.provider, 32).toLowerCase() === "gtraffic" && result.quotaRemaining !== null && result.quotaRemaining !== undefined) {
+    providerPatch.quota_remaining = result.quotaRemaining;
+    providerPatch.quota_date = result.quotaDate || vietnamDate();
+  }
   try {
-    await db.from("licenses_free_shortlink_providers").update({
-      last_used_at: new Date().toISOString(),
-      last_error: null,
-      fail_count: 0,
-    }).eq("id", provider.id);
+    await db.from("licenses_free_shortlink_providers").update(providerPatch).eq("id", provider.id);
   } catch { /* ignore */ }
   const patch: Record<string, unknown> = passNo === 2
     ? { free_shortlink_last_provider_id_pass2: provider.id }
@@ -384,9 +422,10 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
 
   for (const provider of candidates) {
     try {
-      const outboundUrl = await shortenWithProvider(provider, gateUrl);
+      const result = await shortenWithProvider(provider, gateUrl);
+      const outboundUrl = result.outboundUrl;
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
-      await markProviderSuccess(db, provider, passNo);
+      await markProviderSuccess(db, provider, passNo, result);
       return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
       const message = safeProviderError(error);

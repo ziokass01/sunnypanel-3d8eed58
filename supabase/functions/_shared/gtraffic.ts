@@ -1,0 +1,79 @@
+export type ProviderShortenResult = {
+  outboundUrl: string;
+  quotaRemaining?: number | null;
+  quotaDate?: string | null;
+};
+
+export function vietnamDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  return `${year}-${month}-${day}`;
+}
+
+export function normalizeShortlinkMode(value: unknown) {
+  const mode = String(value ?? "round_robin").trim().toLowerCase().slice(0, 32);
+  if (mode === "random") return "random";
+  if (mode === "priority_failover") return "priority_failover";
+  return "round_robin";
+}
+
+export function providerIsExhaustedToday(provider: any, today = vietnamDate()) {
+  if (String(provider?.provider ?? "").trim().toLowerCase() !== "gtraffic") return false;
+  if (String(provider?.quota_date ?? "").trim() !== today) return false;
+  if (provider?.quota_remaining === null || provider?.quota_remaining === undefined || provider?.quota_remaining === "") return false;
+  const remaining = Number(provider?.quota_remaining);
+  return Number.isFinite(remaining) && remaining <= 0;
+}
+
+export function isQuotaExhaustedError(error: unknown) {
+  const message = String((error as any)?.message ?? error ?? "").toLowerCase();
+  return message.includes("daily limit")
+    || message.includes("http_429")
+    || message.includes("too many requests")
+    || message.includes("quota")
+    || message.includes("remaining: 0")
+    || message.includes("remaining=0")
+    || message.includes("hết lượt")
+    || message.includes("hết hạn mức")
+    || message.includes("sử dụng hết")
+    || (message.includes("vượt quá") && message.includes("lượt"));
+}
+
+export function parseQuotaRemaining(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const remaining = Number(value);
+  if (!Number.isFinite(remaining)) return null;
+  return Math.max(0, Math.floor(remaining));
+}
+
+export function buildGtrafficApiUrl(apiUrl: string, apiToken: string, gateUrl: string) {
+  const endpoint = new URL(apiUrl || "https://manager.gtraffic.io/api/cong-khai/tao-lien-ket");
+  endpoint.searchParams.set("apikey", apiToken);
+  endpoint.searchParams.set("url", gateUrl);
+  return endpoint.toString();
+}
+
+export function parseGtrafficResponse(data: any, shortBaseUrl = "https://gtraffic.io", today = vietnamDate()): ProviderShortenResult {
+  const quotaRemaining = parseQuotaRemaining(data?.remaining ?? data?.data?.remaining);
+  const id = String(data?.id ?? data?.data?.id ?? "").trim().slice(0, 128);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    if (quotaRemaining === 0) throw new Error("GTRAFFIC_DAILY_QUOTA_EXHAUSTED");
+    const reason = String(data?.message ?? data?.error ?? "GTRAFFIC_RESPONSE_INVALID").trim().slice(0, 300);
+    throw new Error(reason || "GTRAFFIC_RESPONSE_INVALID");
+  }
+
+  const base = String(shortBaseUrl || "https://gtraffic.io").trim().replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(base)) throw new Error("GTRAFFIC_SHORT_BASE_INVALID");
+  return {
+    outboundUrl: `${base}/${encodeURIComponent(id)}`,
+    quotaRemaining,
+    quotaDate: today,
+  };
+}
