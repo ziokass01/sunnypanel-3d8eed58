@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGtrafficApiUrl,
+  buildGtrafficBrowserUrl,
+  isGtrafficBlockedResponse,
+  isGtrafficEdgeIpBlock,
   isQuotaExhaustedError,
   normalizeShortlinkMode,
+  orderedProvidersForPass,
   parseGtrafficResponse,
   providerIsExhaustedToday,
   vietnamDate,
@@ -33,6 +37,18 @@ describe("GTraffic shortlink provider", () => {
     });
   });
 
+  it("builds the browser bridge used when GTraffic blocks the Edge server IP", () => {
+    const gateUrl = "https://mityangho.id.vn/free/gate?t=abc&p=2";
+    const requestUrl = new URL(buildGtrafficBrowserUrl("https://gtraffic.io/st", "test-token", gateUrl));
+    expect(requestUrl.origin + requestUrl.pathname).toBe("https://gtraffic.io/st");
+    expect(requestUrl.searchParams.get("apikey")).toBe("test-token");
+    expect(requestUrl.searchParams.get("url")).toBe(gateUrl);
+    expect(isGtrafficEdgeIpBlock(new Error("GTRAFFIC_EDGE_IP_BLOCKED"))).toBe(true);
+    expect(isGtrafficEdgeIpBlock(new Error("HTTP_403"))).toBe(false);
+    expect(isGtrafficBlockedResponse(403, { block: true })).toBe(true);
+    expect(isGtrafficBlockedResponse(403, { message: "invalid token" })).toBe(false);
+  });
+
   it("rejects a response without a valid short id", () => {
     expect(() => parseGtrafficResponse({ message: "invalid token" })).toThrow("invalid token");
   });
@@ -59,5 +75,25 @@ describe("GTraffic shortlink provider", () => {
     expect(normalizeShortlinkMode("random")).toBe("random");
     expect(normalizeShortlinkMode("priority_failover")).toBe("priority_failover");
     expect(normalizeShortlinkMode("unknown")).toBe("round_robin");
+  });
+
+  it("uses the absolute admin row order independently for Pass1 and Pass2", () => {
+    const rows = [
+      { id: "top", enabled: true, pass_scope: "both", sort_order: 10, created_at: "2026-08-01T00:00:00Z" },
+      { id: "pass1-lower", enabled: true, pass_scope: "pass1", sort_order: 20, created_at: "2026-08-01T00:00:01Z" },
+      { id: "pass2-lower", enabled: true, pass_scope: "pass2", sort_order: 30, created_at: "2026-08-01T00:00:02Z" },
+    ];
+    expect(orderedProvidersForPass(rows, 1).map((row) => row.id)).toEqual(["top", "pass1-lower"]);
+    expect(orderedProvidersForPass(rows, 2).map((row) => row.id)).toEqual(["top", "pass2-lower"]);
+  });
+
+  it("maps separate Pass1 and Pass2 rows exactly as arranged", () => {
+    const rows = [
+      { id: "link4m-pass1", enabled: true, pass_scope: "pass1", sort_order: 10 },
+      { id: "gtraffic-pass2", enabled: true, pass_scope: "pass2", sort_order: 20 },
+      { id: "fallback-both", enabled: true, pass_scope: "both", sort_order: 30 },
+    ];
+    expect(orderedProvidersForPass(rows, 1).map((row) => row.id)).toEqual(["link4m-pass1", "fallback-both"]);
+    expect(orderedProvidersForPass(rows, 2).map((row) => row.id)).toEqual(["gtraffic-pass2", "fallback-both"]);
   });
 });

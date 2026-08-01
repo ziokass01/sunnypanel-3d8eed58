@@ -1,8 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   buildGtrafficApiUrl,
+  buildGtrafficBrowserUrl,
+  isGtrafficBlockedResponse,
+  isGtrafficEdgeIpBlock,
   isQuotaExhaustedError,
   normalizeShortlinkMode,
+  orderedProvidersForPass,
   parseGtrafficResponse,
   providerIsExhaustedToday,
   type ProviderShortenResult,
@@ -176,6 +180,9 @@ async function readJsonOrText(url: string, providerKind = "custom") {
       continue;
     }
     if (!res.ok) {
+      if (providerKind === "gtraffic" && isGtrafficBlockedResponse(res.status, data)) {
+        throw new Error("GTRAFFIC_EDGE_IP_BLOCKED");
+      }
       const reason = String(data?.message || data?.error || `HTTP_${res.status}`).trim();
       throw new Error(reason || `HTTP_${res.status}`);
     }
@@ -243,9 +250,19 @@ if (isLink4M) {
 if (kind === "gtraffic") {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
   const endpoint = buildGtrafficApiUrl(apiUrl, token, gateUrl);
-  const { data } = await readJsonOrText(endpoint, kind);
-  const shortBaseUrl = Deno.env.get("GTRAFFIC_SHORT_BASE_URL") || "https://gtraffic.io";
-  return parseGtrafficResponse(data, shortBaseUrl);
+  try {
+    const { data } = await readJsonOrText(endpoint, kind);
+    const shortBaseUrl = Deno.env.get("GTRAFFIC_SHORT_BASE_URL") || "https://gtraffic.io";
+    return parseGtrafficResponse(data, shortBaseUrl);
+  } catch (error) {
+    if (!isGtrafficEdgeIpBlock(error)) throw error;
+    const browserBaseUrl = Deno.env.get("GTRAFFIC_BROWSER_BASE_URL") || "https://gtraffic.io/st";
+    return {
+      outboundUrl: buildGtrafficBrowserUrl(browserBaseUrl, token, gateUrl),
+      quotaDate: vietnamDate(),
+      browserBridge: true,
+    } satisfies ProviderShortenResult;
+  }
 }
 if (kind === "traffic68") {
   const base = apiUrl || "https://traffic68.com/api/quicklink/st";
@@ -280,22 +297,21 @@ async function updateSession(db: any, sessionId: string, patch: Record<string, u
   return !error;
 }
 async function loadProviders(db: any, passNo: number) {
-  const scopes = passNo === 2 ? ["both", "pass2"] : ["both", "pass1"];
   const res = await db.from("licenses_free_shortlink_providers")
     .select("*")
     .eq("enabled", true)
-    .in("pass_scope", scopes)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   if (res.error) throw res.error;
-  return (res.data ?? []) as any[];
+  return orderedProvidersForPass((res.data ?? []) as any[], passNo);
 }
 function fallbackProviderFromSettings(cfg: any, passNo: number) {
   const template = text(passNo === 2 ? (cfg.free_outbound_url_pass2 || cfg.free_outbound_url) : cfg.free_outbound_url, 4096);
   if (!template) return null;
+  if (/api-shorten|manager\.gtraffic\.io|\{token\}|[?&](?:apikey|api|token|tokenUser)=/i.test(template)) return null;
   return { id: null, name: passNo === 2 ? "Legacy Pass2" : "Legacy Pass1", provider: "custom", api_url_template: template, api_token_secret: "", pass_scope: passNo === 2 ? "pass2" : "pass1", sort_order: 9999, source: "settings_legacy" };
 }
-async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: string | null) {
+async function chooseProvider(db: any, cfg: any, passNo: number) {
   let providers: any[] = [];
   try { providers = await loadProviders(db, passNo); } catch { providers = []; }
   if (!providers.length) {
@@ -304,10 +320,6 @@ async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: strin
     throw new Error("SHORTLINK_PROVIDER_MISSING");
   }
   const mode = normalizeShortlinkMode(cfg.free_shortlink_mode);
-  if (mode !== "priority_failover" && avoidId && providers.length > 1) {
-    const filtered = providers.filter((p) => String(p.id) !== String(avoidId));
-    if (filtered.length) providers = filtered;
-  }
   const lastId = text(passNo === 2 ? cfg.free_shortlink_last_provider_id_pass2 : cfg.free_shortlink_last_provider_id_pass1, 64);
   let selected: any;
   if (mode === "priority_failover") {
@@ -336,14 +348,10 @@ async function chooseProvider(db: any, cfg: any, passNo: number, avoidId?: strin
   return selected;
 }
 
-async function providerCandidates(db: any, cfg: any, passNo: number, selected: any, avoidId?: string | null) {
+async function providerCandidates(db: any, cfg: any, passNo: number, selected: any) {
   let providers: any[] = [];
   try { providers = await loadProviders(db, passNo); } catch { providers = []; }
   const mode = normalizeShortlinkMode(cfg.free_shortlink_mode);
-  if (mode !== "priority_failover" && avoidId && providers.length > 1) {
-    const filtered = providers.filter((p) => String(p.id) !== String(avoidId));
-    if (filtered.length) providers = filtered;
-  }
   const out: any[] = [];
   const seen = new Set<string>();
   const push = (provider: any) => {
@@ -358,9 +366,38 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   };
   push(selected);
   for (const provider of providers) push(provider);
-  const fallback = fallbackProviderFromSettings(cfg, passNo);
-  if (fallback) push(fallback);
   return out;
+}
+
+async function reserveGtrafficBridgeQuota(db: any, provider: any) {
+  const today = vietnamDate();
+  const configuredLimit = Math.floor(Number(Deno.env.get("GTRAFFIC_DAILY_LIMIT") || 1000));
+  const dailyLimit = Number.isFinite(configuredLimit) ? Math.max(1, configuredLimit) : 1000;
+
+  if (provider?.id) {
+    try {
+      const reserved = await db.rpc("licenses_reserve_gtraffic_quota", {
+        p_provider_id: provider.id,
+        p_quota_date: today,
+        p_daily_limit: dailyLimit,
+      });
+      if (!reserved.error) {
+        const row = Array.isArray(reserved.data) ? reserved.data[0] : reserved.data;
+        return {
+          allowed: row?.allowed === true,
+          remaining: Math.max(0, Number(row?.remaining ?? 0) || 0),
+          quotaDate: today,
+        };
+      }
+    } catch {
+      // Compatibility fallback for a deployment where the new RPC is not live yet.
+    }
+  }
+
+  const sameDay = String(provider?.quota_date ?? "") === today;
+  const savedRemaining = Number(provider?.quota_remaining);
+  const before = sameDay && Number.isFinite(savedRemaining) ? Math.max(0, Math.floor(savedRemaining)) : dailyLimit;
+  return { allowed: before > 0, remaining: Math.max(0, before - 1), quotaDate: today };
 }
 
 async function markProviderFailure(db: any, provider: any, error: unknown) {
@@ -398,14 +435,14 @@ async function markProviderSuccess(db: any, provider: any, passNo: number, resul
   try { await db.from("licenses_free_settings").update(patch).eq("id", 1); } catch { /* ignore */ }
 }
 
-async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: string, avoidId?: string | null) {
+async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: string) {
   const failures: string[] = [];
   let selected: any = null;
   let candidates: any[] = [];
 
   try {
-    selected = await chooseProvider(db, cfg, passNo, avoidId);
-    candidates = await providerCandidates(db, cfg, passNo, selected, avoidId);
+    selected = await chooseProvider(db, cfg, passNo);
+    candidates = await providerCandidates(db, cfg, passNo, selected);
   } catch (error) {
     const message = safeProviderError(error);
     failures.push(`provider-config: ${message}`);
@@ -423,6 +460,12 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   for (const provider of candidates) {
     try {
       const result = await shortenWithProvider(provider, gateUrl);
+      if (result.browserBridge) {
+        const quota = await reserveGtrafficBridgeQuota(db, provider);
+        if (!quota.allowed) throw new Error("GTRAFFIC_DAILY_QUOTA_EXHAUSTED");
+        result.quotaRemaining = quota.remaining;
+        result.quotaDate = quota.quotaDate;
+      }
       const outboundUrl = result.outboundUrl;
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
       await markProviderSuccess(db, provider, passNo, result);
@@ -454,9 +497,8 @@ async function createNextGateToken(db: any, cfg: any, session: any, passNo: 1 | 
   const configuredDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : (passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) ?? 0) || 0);
   const gateLifeSeconds = clampSeconds(cfg.free_gate_token_life_seconds ?? session?.gate_token_life_seconds, 600, 60, 1800);
   const nowMs = Date.now();
-  const avoidId = passNo === 2 ? text(session?.provider_id_pass1, 64) : null;
   const gateUrl = gateUrlFromToken(gateToken, passNo);
-  const shortened = await shortenWithFailover(db, cfg, passNo, gateUrl, avoidId);
+  const shortened = await shortenWithFailover(db, cfg, passNo, gateUrl);
   const provider = shortened.provider;
   const outboundUrl = shortened.outboundUrl;
   const degraded = Boolean(shortened.degraded);

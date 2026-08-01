@@ -1,8 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   buildGtrafficApiUrl,
+  buildGtrafficBrowserUrl,
+  isGtrafficBlockedResponse,
+  isGtrafficEdgeIpBlock,
   isQuotaExhaustedError,
   normalizeShortlinkMode,
+  orderedProvidersForPass,
   parseGtrafficResponse,
   providerIsExhaustedToday,
   type ProviderShortenResult,
@@ -172,6 +176,9 @@ async function readJsonOrText(url: string, providerKind = "custom") {
       continue;
     }
     if (!res.ok) {
+      if (providerKind === "gtraffic" && isGtrafficBlockedResponse(res.status, data)) {
+        throw new Error("GTRAFFIC_EDGE_IP_BLOCKED");
+      }
       const reason = String(data?.message || data?.error || `HTTP_${res.status}`).trim();
       throw new Error(reason || `HTTP_${res.status}`);
     }
@@ -240,9 +247,19 @@ if (isLink4M) {
 if (kind === "gtraffic") {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
   const endpoint = buildGtrafficApiUrl(apiUrl, token, gateUrl);
-  const { data } = await readJsonOrText(endpoint, kind);
-  const shortBaseUrl = Deno.env.get("GTRAFFIC_SHORT_BASE_URL") || "https://gtraffic.io";
-  return parseGtrafficResponse(data, shortBaseUrl);
+  try {
+    const { data } = await readJsonOrText(endpoint, kind);
+    const shortBaseUrl = Deno.env.get("GTRAFFIC_SHORT_BASE_URL") || "https://gtraffic.io";
+    return parseGtrafficResponse(data, shortBaseUrl);
+  } catch (error) {
+    if (!isGtrafficEdgeIpBlock(error)) throw error;
+    const browserBaseUrl = Deno.env.get("GTRAFFIC_BROWSER_BASE_URL") || "https://gtraffic.io/st";
+    return {
+      outboundUrl: buildGtrafficBrowserUrl(browserBaseUrl, token, gateUrl),
+      quotaDate: vietnamDate(),
+      browserBridge: true,
+    } satisfies ProviderShortenResult;
+  }
 }
 if (kind === "traffic68") {
   const base = apiUrl || "https://traffic68.com/api/quicklink/st";
@@ -303,19 +320,18 @@ async function closeStale(db: any, ipHash: string, fpHash: string) {
   void ipHash;
 }
 async function loadProviders(db: any, passNo: number) {
-  const scopes = passNo === 2 ? ["both", "pass2"] : ["both", "pass1"];
   const res = await db.from("licenses_free_shortlink_providers")
     .select("*")
     .eq("enabled", true)
-    .in("pass_scope", scopes)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   if (res.error) throw res.error;
-  return (res.data ?? []) as any[];
+  return orderedProvidersForPass((res.data ?? []) as any[], passNo);
 }
 function fallbackProviderFromSettings(cfg: any, passNo: number) {
   const template = text(passNo === 2 ? (cfg.free_outbound_url_pass2 || cfg.free_outbound_url) : cfg.free_outbound_url, 4096);
   if (!template) return null;
+  if (/api-shorten|manager\.gtraffic\.io|\{token\}|[?&](?:apikey|api|token|tokenUser)=/i.test(template)) return null;
   return { id: null, name: passNo === 2 ? "Legacy Pass2" : "Legacy Pass1", provider: "custom", api_url_template: template, api_token_secret: "", pass_scope: passNo === 2 ? "pass2" : "pass1", sort_order: 9999, source: "settings_legacy" };
 }
 async function chooseProvider(db: any, cfg: any, passNo: number) {
@@ -378,12 +394,38 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   };
   push(selected);
   for (const provider of providers) push(provider);
-  // Keep the legacy/static outbound URL as the final candidate even when the
-  // provider table has rows. It is useful as a non-API fallback when Link4M
-  // blocks server-side API traffic with a Cloudflare challenge.
-  const fallback = fallbackProviderFromSettings(cfg, passNo);
-  if (fallback) push(fallback);
   return out;
+}
+
+async function reserveGtrafficBridgeQuota(db: any, provider: any) {
+  const today = vietnamDate();
+  const configuredLimit = Math.floor(Number(Deno.env.get("GTRAFFIC_DAILY_LIMIT") || 1000));
+  const dailyLimit = Number.isFinite(configuredLimit) ? Math.max(1, configuredLimit) : 1000;
+
+  if (provider?.id) {
+    try {
+      const reserved = await db.rpc("licenses_reserve_gtraffic_quota", {
+        p_provider_id: provider.id,
+        p_quota_date: today,
+        p_daily_limit: dailyLimit,
+      });
+      if (!reserved.error) {
+        const row = Array.isArray(reserved.data) ? reserved.data[0] : reserved.data;
+        return {
+          allowed: row?.allowed === true,
+          remaining: Math.max(0, Number(row?.remaining ?? 0) || 0),
+          quotaDate: today,
+        };
+      }
+    } catch {
+      // Compatibility fallback for a deployment where the new RPC is not live yet.
+    }
+  }
+
+  const sameDay = String(provider?.quota_date ?? "") === today;
+  const savedRemaining = Number(provider?.quota_remaining);
+  const before = sameDay && Number.isFinite(savedRemaining) ? Math.max(0, Math.floor(savedRemaining)) : dailyLimit;
+  return { allowed: before > 0, remaining: Math.max(0, before - 1), quotaDate: today };
 }
 
 async function markProviderFailure(db: any, provider: any, error: unknown) {
@@ -447,6 +489,12 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   for (const provider of candidates) {
     try {
       const result = await shortenWithProvider(provider, gateUrl);
+      if (result.browserBridge) {
+        const quota = await reserveGtrafficBridgeQuota(db, provider);
+        if (!quota.allowed) throw new Error("GTRAFFIC_DAILY_QUOTA_EXHAUSTED");
+        result.quotaRemaining = quota.remaining;
+        result.quotaDate = quota.quotaDate;
+      }
       const outboundUrl = result.outboundUrl;
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
       await markProviderSuccess(db, provider, passNo, result);
@@ -458,11 +506,7 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
     }
   }
 
-  // Final continuity candidate. It is reached only after every configured
-  // shortener failed. This prevents a stale legacy URL, an invalid extra row,
-  // or Link4M's Cloudflare challenge from leaving the page stuck at
-  // SHORTLINK_CREATE_FAILED. Set FREE_SHORTLINK_STRICT_PROVIDER=true only when
-  // the owner intentionally wants provider failure to stop the flow.
+  // Every candidate follows the visible admin row order for this pass.
   if (!shortlinkStrictProviderEnabled()) {
     return {
       provider: { id: null, name: "Direct emergency fallback", provider: "none" },

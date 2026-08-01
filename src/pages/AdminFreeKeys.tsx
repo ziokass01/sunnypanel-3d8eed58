@@ -1672,7 +1672,7 @@ export function AdminFreeKeysPage() {
                     <SelectItem value="priority_failover">Ưu tiên theo thứ tự, hết lượt mới chuyển</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="text-xs text-muted-foreground">Chế độ ưu tiên sẽ dùng dòng đầu tiên cho tới khi lỗi hoặc hết lượt trong ngày, sau đó mới chuyển xuống dòng kế tiếp. Sau 00:00 giờ Việt Nam, provider hết lượt được thử lại tự động.</div>
+                <div className="text-xs text-muted-foreground">Chế độ ưu tiên luôn xét từ trên xuống cho từng Pass. Dòng “Cả 2” đứng đầu sẽ được dùng cho cả Pass1 và Pass2; dòng Pass1/Pass2 phía dưới không được giành ưu tiên. Chỉ khi dòng trên lỗi hoặc hết lượt trong ngày mới chuyển xuống. Sau 00:00 giờ Việt Nam, GTraffic được tính lại 1.000 lượt và thử lại tự động.</div>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-medium">Token sống sau khi đủ delay (giây)</div>
@@ -1774,7 +1774,7 @@ export function AdminFreeKeysPage() {
             </div>
 
             <div className="rounded-md bg-muted/50 p-3 text-xs leading-6 text-muted-foreground">
-              Khi người dùng bấm Get Key, backend chỉ chọn provider có trạng thái bật. Với key VIP 2-pass, Pass2 sẽ ưu tiên provider khác Pass1 nếu còn lựa chọn khác.
+              Thứ tự bảng là thứ tự ưu tiên thật. Ví dụ: dòng 1 Link4M–Pass1, dòng 2 GTraffic–Pass2 thì lượt vượt thứ nhất dùng Link4M và lượt vượt thứ hai dùng GTraffic. Nếu dòng 1 là “Cả 2”, cả hai lượt đều dùng dòng 1 cho tới khi dòng đó lỗi hoặc hết lượt.
             </div>
           </div>
 

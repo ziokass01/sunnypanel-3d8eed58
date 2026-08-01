@@ -2,6 +2,7 @@ export type ProviderShortenResult = {
   outboundUrl: string;
   quotaRemaining?: number | null;
   quotaDate?: string | null;
+  browserBridge?: boolean;
 };
 
 export function vietnamDate(now = new Date()) {
@@ -58,6 +59,39 @@ export function buildGtrafficApiUrl(apiUrl: string, apiToken: string, gateUrl: s
   endpoint.searchParams.set("apikey", apiToken);
   endpoint.searchParams.set("url", gateUrl);
   return endpoint.toString();
+}
+
+export function buildGtrafficBrowserUrl(browserUrl: string, apiToken: string, gateUrl: string) {
+  const endpoint = new URL(browserUrl || "https://gtraffic.io/st");
+  endpoint.searchParams.set("apikey", apiToken);
+  endpoint.searchParams.set("url", gateUrl);
+  return endpoint.toString();
+}
+
+export function isGtrafficEdgeIpBlock(error: unknown) {
+  const message = String((error as any)?.message ?? error ?? "").trim().toUpperCase();
+  return message.includes("GTRAFFIC_EDGE_IP_BLOCKED");
+}
+
+export function isGtrafficBlockedResponse(status: number, data: any) {
+  return status === 403 && data?.block === true;
+}
+
+export function providerSupportsPass(provider: any, passNo: number) {
+  const scope = String(provider?.pass_scope ?? "both").trim().toLowerCase();
+  if (scope === "both") return true;
+  if (passNo === 2) return scope === "pass2";
+  return scope === "pass1";
+}
+
+export function orderedProvidersForPass(providers: any[], passNo: number) {
+  return [...providers]
+    .filter((provider) => provider?.enabled !== false && providerSupportsPass(provider, passNo))
+    .sort((left, right) => {
+      const orderDiff = Number(left?.sort_order ?? 0) - Number(right?.sort_order ?? 0);
+      if (orderDiff !== 0) return orderDiff;
+      return String(left?.created_at ?? "").localeCompare(String(right?.created_at ?? ""));
+    });
 }
 
 export function parseGtrafficResponse(data: any, shortBaseUrl = "https://gtraffic.io", today = vietnamDate()): ProviderShortenResult {
