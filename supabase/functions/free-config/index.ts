@@ -269,6 +269,7 @@ Deno.serve(async (req) => {
     } else if (rawShortlinkMode === "priority_failover") {
       free_shortlink_mode = "priority_failover";
     }
+    const free_secondary_enabled = Boolean((settings as any)?.free_secondary_enabled ?? true);
     const free_session_absolute_seconds = Math.min(3600, Math.max(120, Number((settings as any)?.free_session_absolute_seconds ?? 900) || 900));
     const free_claim_window_seconds = Math.min(900, Math.max(30, Number((settings as any)?.free_claim_window_seconds ?? 180) || 180));
     const free_close_deadline_seconds = Math.max(10, Number((settings as any)?.free_close_deadline_seconds ?? free_return_seconds) || free_return_seconds);
@@ -498,6 +499,7 @@ Deno.serve(async (req) => {
       free_outbound_url_pass2: null,
       free_shortlink_provider_count,
       free_shortlink_mode,
+      free_secondary_enabled,
       free_gate_token_life_seconds,
       free_gate_antibypass_enabled,
       free_gate_antibypass_seconds,

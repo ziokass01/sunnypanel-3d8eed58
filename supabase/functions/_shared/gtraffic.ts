@@ -5,6 +5,8 @@ export type ProviderShortenResult = {
   browserBridge?: boolean;
 };
 
+export type ShortlinkChannel = "primary" | "secondary";
+
 export function vietnamDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -84,9 +86,12 @@ export function providerSupportsPass(provider: any, passNo: number) {
   return scope === "pass1";
 }
 
-export function orderedProvidersForPass(providers: any[], passNo: number) {
+export function orderedProvidersForPass(providers: any[], passNo: number, channel: ShortlinkChannel = "primary") {
   return [...providers]
-    .filter((provider) => provider?.enabled !== false && providerSupportsPass(provider, passNo))
+    .filter((provider) => (
+      providerSupportsPass(provider, passNo)
+      && (channel === "primary" ? provider?.enabled !== false : provider?.secondary_enabled === true)
+    ))
     .sort((left, right) => {
       const orderDiff = Number(left?.sort_order ?? 0) - Number(right?.sort_order ?? 0);
       if (orderDiff !== 0) return orderDiff;

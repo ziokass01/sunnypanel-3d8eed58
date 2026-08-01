@@ -35,6 +35,8 @@ type SettingsRow = {
   free_link4m_rotate_nonce_pass1?: number;
   free_link4m_rotate_nonce_pass2?: number;
   free_shortlink_mode?: "round_robin" | "random" | "priority_failover";
+  free_secondary_shortlink_mode?: "round_robin" | "random" | "priority_failover";
+  free_secondary_enabled?: boolean;
   free_shortlink_last_provider_id_pass1?: string | null;
   free_shortlink_last_provider_id_pass2?: string | null;
   free_shortlink_next_index_pass1?: number;
@@ -83,6 +85,7 @@ type ShortlinkProviderRow = {
   api_token_secret: string | null;
   api_url_template: string | null;
   enabled: boolean;
+  secondary_enabled?: boolean;
   pass_scope: "both" | "pass1" | "pass2";
   sort_order: number;
   last_used_at?: string | null;
@@ -459,6 +462,8 @@ const NEW_FREE_SETTINGS_COLUMNS = [
   "free_external_download_icon_url",
   "free_download_cards",
   "free_shortlink_mode",
+  "free_secondary_shortlink_mode",
+  "free_secondary_enabled",
   "free_shortlink_last_provider_id_pass1",
   "free_shortlink_last_provider_id_pass2",
   "free_shortlink_next_index_pass1",
@@ -577,6 +582,8 @@ export function AdminFreeKeysPage() {
   const [rotateNoncePass1, setRotateNoncePass1] = useState(0);
   const [rotateNoncePass2, setRotateNoncePass2] = useState(0);
   const [shortlinkMode, setShortlinkMode] = useState<"round_robin" | "random" | "priority_failover">("round_robin");
+  const [secondaryShortlinkMode, setSecondaryShortlinkMode] = useState<"round_robin" | "random" | "priority_failover">("priority_failover");
+  const [secondaryEnabled, setSecondaryEnabled] = useState(true);
   const [gateTokenLifeSeconds, setGateTokenLifeSeconds] = useState(600);
 
   const [freeEnabled, setFreeEnabled] = useState(true);
@@ -626,6 +633,7 @@ export function AdminFreeKeysPage() {
       api_token_secret: "",
       api_url_template: defaultShortlinkApi("gtraffic"),
       enabled: true,
+      secondary_enabled: false,
       pass_scope: "both",
       sort_order: nextOrder,
       note: "",
@@ -678,6 +686,15 @@ export function AdminFreeKeysPage() {
     } else {
       setShortlinkMode("round_robin");
     }
+    const configuredSecondaryMode = String((s as any).free_secondary_shortlink_mode ?? "priority_failover");
+    if (configuredSecondaryMode === "random") {
+      setSecondaryShortlinkMode("random");
+    } else if (configuredSecondaryMode === "round_robin") {
+      setSecondaryShortlinkMode("round_robin");
+    } else {
+      setSecondaryShortlinkMode("priority_failover");
+    }
+    setSecondaryEnabled(Boolean((s as any).free_secondary_enabled ?? true));
     setGateTokenLifeSeconds(Math.max(60, Number((s as any).free_gate_token_life_seconds ?? 600)));
     setFreeEnabled(Boolean(s.free_enabled));
     setDisabledMessage(s.free_disabled_message ?? "Trang GetKey đang tạm đóng.");
@@ -786,6 +803,8 @@ export function AdminFreeKeysPage() {
         free_link4m_rotate_nonce_pass1: Math.max(0, Math.floor(Number(rotateNoncePass1) || 0)),
         free_link4m_rotate_nonce_pass2: Math.max(0, Math.floor(Number(rotateNoncePass2) || 0)),
         free_shortlink_mode: shortlinkMode,
+        free_secondary_shortlink_mode: secondaryShortlinkMode,
+        free_secondary_enabled: Boolean(secondaryEnabled),
         free_gate_token_life_seconds: Math.max(60, Math.min(1800, Math.floor(Number(gateTokenLifeSeconds) || 600))),
         free_enabled: Boolean(freeEnabled),
         free_disabled_message: disabledMessage.trim() || "Trang GetKey đang tạm đóng.",
@@ -866,6 +885,7 @@ export function AdminFreeKeysPage() {
             api_url_template: parsed.api,
             pass_scope: row.pass_scope || "both",
             enabled: Boolean(row.enabled),
+            secondary_enabled: Boolean(row.secondary_enabled),
             sort_order: (index + 1) * 10,
             note: String(row.note ?? "").trim(),
           };
@@ -873,10 +893,10 @@ export function AdminFreeKeysPage() {
         .filter((row) => row.provider === "none" || row.name || row.api_token_secret || row.api_url_template)
         // Dòng cũ/legacy bị thiếu API hoặc Token thì bỏ qua thay vì chặn lưu toàn bộ bảng.
         // Muốn dùng dòng nào thì bật và điền đủ 2 ô API + Token cho dòng đó.
-        .filter((row) => row.provider === "none" || row.enabled || (row.api_url_template && row.api_token_secret));
+        .filter((row) => row.provider === "none" || row.enabled || row.secondary_enabled || (row.api_url_template && row.api_token_secret));
 
       for (const [idx, row] of cleaned.entries()) {
-        if (row.provider !== "none" && row.enabled) {
+        if (row.provider !== "none" && (row.enabled || row.secondary_enabled)) {
           if (!row.api_url_template) throw new Error(`Dòng ${idx + 1}: thiếu ô API.`);
           if (!/^https?:\/\//i.test(row.api_url_template)) throw new Error(`Dòng ${idx + 1}: API phải bắt đầu bằng http/https.`);
           if (!row.api_token_secret) throw new Error(`Dòng ${idx + 1}: thiếu ô Token.`);
@@ -891,6 +911,8 @@ export function AdminFreeKeysPage() {
         action: "save",
         providers: cleaned,
         free_shortlink_mode: shortlinkMode,
+        free_secondary_shortlink_mode: secondaryShortlinkMode,
+        free_secondary_enabled: Boolean(secondaryEnabled),
         free_gate_token_life_seconds: Math.max(60, Math.min(1800, Math.floor(Number(gateTokenLifeSeconds) || 600))),
       }, { authToken: token });
       if (data?.ok === false) throw new Error(data?.msg || data?.code || "PROVIDER_SAVE_FAILED");
@@ -1624,12 +1646,21 @@ export function AdminFreeKeysPage() {
             </CollapsibleContent>
           </Collapsible>
 
-          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-            <div>
-              <div className="font-medium">Bật/tắt trang GetKey</div>
-              <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div>
+                <div className="font-medium">Bật/tắt Get Key chính</div>
+                <div className="text-xs text-muted-foreground">Tắt: người dùng không thể lấy key.</div>
+              </div>
+              <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
             </div>
-            <Switch checked={freeEnabled} onCheckedChange={setFreeEnabled} />
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div>
+                <div className="font-medium">Bật/tắt Get Key phụ</div>
+                <div className="text-xs text-muted-foreground">Chỉ dùng các dòng đã bật ở cột “Key phụ”.</div>
+              </div>
+              <Switch checked={secondaryEnabled} onCheckedChange={setSecondaryEnabled} />
+            </div>
           </div>
 
           <div className="space-y-4 rounded-md border p-4">
@@ -1653,9 +1684,9 @@ export function AdminFreeKeysPage() {
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 lg:grid-cols-3">
               <div className="space-y-2">
-                <div className="text-sm font-medium">Chế độ chọn link</div>
+                <div className="text-sm font-medium">Chế độ chọn link Get Key chính</div>
                 <Select value={shortlinkMode} onValueChange={(v) => {
                   if (v === "random") {
                     setShortlinkMode("random");
@@ -1672,7 +1703,23 @@ export function AdminFreeKeysPage() {
                     <SelectItem value="priority_failover">Ưu tiên theo thứ tự, hết lượt mới chuyển</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="text-xs text-muted-foreground">Chế độ ưu tiên luôn xét từ trên xuống cho từng Pass. Dòng “Cả 2” đứng đầu sẽ được dùng cho cả Pass1 và Pass2; dòng Pass1/Pass2 phía dưới không được giành ưu tiên. Chỉ khi dòng trên lỗi hoặc hết lượt trong ngày mới chuyển xuống. Sau 00:00 giờ Việt Nam, GTraffic được tính lại 1.000 lượt và thử lại tự động.</div>
+                <div className="text-xs text-muted-foreground">Get Key chính xét các dòng đang bật và vẫn giữ đúng thứ tự Pass1/Pass2 đã cấu hình.</div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Chế độ chọn link Get Key phụ</div>
+                <Select value={secondaryShortlinkMode} onValueChange={(v) => {
+                  if (v === "random") setSecondaryShortlinkMode("random");
+                  else if (v === "round_robin") setSecondaryShortlinkMode("round_robin");
+                  else setSecondaryShortlinkMode("priority_failover");
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="round_robin">Luân phiên theo thứ tự</SelectItem>
+                    <SelectItem value="random">Random nhưng tránh trùng liền kề</SelectItem>
+                    <SelectItem value="priority_failover">Ưu tiên theo thứ tự, lỗi mới chuyển</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="text-xs text-muted-foreground">Chỉ xét những API được bật ở cột “Key phụ”. Nếu không có dòng hợp lệ, nút phụ sẽ báo “Link phụ chưa sẵn sàng”.</div>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-medium">Token sống sau khi đủ delay (giây)</div>
@@ -1690,7 +1737,8 @@ export function AdminFreeKeysPage() {
                     <TableHead className="min-w-[220px]">Token</TableHead>
                     <TableHead className="min-w-[310px]">API</TableHead>
                     <TableHead className="min-w-[110px]">Pass</TableHead>
-                    <TableHead className="min-w-[80px]">Bật</TableHead>
+                    <TableHead className="min-w-[95px]">Key chính</TableHead>
+                    <TableHead className="min-w-[95px]">Key phụ</TableHead>
                     <TableHead className="min-w-[140px]">Thứ tự</TableHead>
                     <TableHead className="min-w-[110px]">Xóa</TableHead>
                   </TableRow>
@@ -1701,11 +1749,6 @@ export function AdminFreeKeysPage() {
                       <TableCell>
                         <Input value={row.name ?? ""} onChange={(e) => updateProviderDraft(row.id, { name: e.target.value })} placeholder="VD: Link4M chính" />
                         {row.last_error ? <div className="mt-1 break-words text-[11px] text-destructive">{friendlyShortlinkError(row.last_error)}</div> : null}
-                        {row.provider === "gtraffic" && row.quota_date ? (
-                          <div className="mt-1 text-[11px] text-muted-foreground">
-                            GTraffic {row.quota_date}: còn {row.quota_remaining ?? "chưa rõ"} lượt
-                          </div>
-                        ) : null}
                       </TableCell>
                       <TableCell>
                         <Select value={row.provider} onValueChange={(v) => {
@@ -1751,6 +1794,13 @@ export function AdminFreeKeysPage() {
                         <Switch checked={Boolean(row.enabled)} onCheckedChange={(v) => updateProviderDraft(row.id, { enabled: v })} />
                       </TableCell>
                       <TableCell>
+                        <Switch
+                          checked={Boolean(row.secondary_enabled)}
+                          onCheckedChange={(v) => updateProviderDraft(row.id, { secondary_enabled: v })}
+                          aria-label={`Dùng ${row.name || "API"} cho Get Key phụ`}
+                        />
+                      </TableCell>
+                      <TableCell>
                         <div className="flex gap-2">
                           <Button type="button" variant="outline" size="sm" onClick={() => moveProviderDraft(row.id, -1)} disabled={index === 0}>↑</Button>
                           <Button type="button" variant="outline" size="sm" onClick={() => moveProviderDraft(row.id, 1)} disabled={index === providerDrafts.length - 1}>↓</Button>
@@ -1764,7 +1814,7 @@ export function AdminFreeKeysPage() {
                     </TableRow>
                   )) : (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
                         Chưa có API/token. Bấm “Thêm API” rồi điền API + Token, sau đó bấm Lưu API/token.
                       </TableCell>
                     </TableRow>
@@ -1774,7 +1824,7 @@ export function AdminFreeKeysPage() {
             </div>
 
             <div className="rounded-md bg-muted/50 p-3 text-xs leading-6 text-muted-foreground">
-              Thứ tự bảng là thứ tự ưu tiên thật. Ví dụ: dòng 1 Link4M–Pass1, dòng 2 GTraffic–Pass2 thì lượt vượt thứ nhất dùng Link4M và lượt vượt thứ hai dùng GTraffic. Nếu dòng 1 là “Cả 2”, cả hai lượt đều dùng dòng 1 cho tới khi dòng đó lỗi hoặc hết lượt.
+              Thứ tự bảng là thứ tự ưu tiên thật cho từng chế độ. Với GTraffic, hãy đặt “Điều hướng khi hết mã” thành “Đi tới liên kết gốc”. Nếu một người quay về quá sớm, chỉ phiên của người đó chuyển xuống provider dự phòng; GTraffic vẫn tiếp tục phục vụ những người khác.
             </div>
           </div>
 

@@ -65,6 +65,16 @@ describe("GTraffic shortlink provider", () => {
     expect(providerIsExhaustedToday(provider, "2026-08-02")).toBe(false);
   });
 
+  it("does not globally skip GTraffic because another session returned early", () => {
+    const provider = {
+      provider: "gtraffic",
+      quota_remaining: 993,
+      quota_date: "2026-08-01",
+      unavailable_until: "2099-01-01T00:00:00.000Z",
+    };
+    expect(providerIsExhaustedToday(provider, "2026-08-01")).toBe(false);
+  });
+
   it("uses the Vietnam calendar date around UTC midnight", () => {
     expect(vietnamDate(new Date("2026-08-01T16:59:59Z"))).toBe("2026-08-01");
     expect(vietnamDate(new Date("2026-08-01T17:00:00Z"))).toBe("2026-08-02");
@@ -95,5 +105,15 @@ describe("GTraffic shortlink provider", () => {
     ];
     expect(orderedProvidersForPass(rows, 1).map((row) => row.id)).toEqual(["link4m-pass1", "fallback-both"]);
     expect(orderedProvidersForPass(rows, 2).map((row) => row.id)).toEqual(["gtraffic-pass2", "fallback-both"]);
+  });
+
+  it("keeps Get Key phụ in its own explicitly enabled provider pool", () => {
+    const rows = [
+      { id: "gtraffic-main", enabled: true, secondary_enabled: false, pass_scope: "both", sort_order: 10 },
+      { id: "link4m-secondary", enabled: true, secondary_enabled: true, pass_scope: "both", sort_order: 20 },
+      { id: "disabled-secondary", enabled: false, secondary_enabled: true, pass_scope: "both", sort_order: 30 },
+    ];
+    expect(orderedProvidersForPass(rows, 1, "primary").map((row) => row.id)).toEqual(["gtraffic-main", "link4m-secondary"]);
+    expect(orderedProvidersForPass(rows, 1, "secondary").map((row) => row.id)).toEqual(["link4m-secondary", "disabled-secondary"]);
   });
 });

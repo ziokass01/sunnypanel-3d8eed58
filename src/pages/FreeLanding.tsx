@@ -378,9 +378,177 @@ export function FreeLandingPage() {
   const debugMode = useMemo(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "1", []);
 
 
-  const isClosed = cfg ? !cfg.free_enabled : false;
   const hasTypes = Boolean(cfg?.key_types?.length);
   const canGet = hasTypes && !loading && !missingText;
+
+  async function startKey(linkChannel: "primary" | "secondary") {
+    if (linkChannel === "secondary" && cfg?.free_secondary_enabled === false) {
+      toast({ title: "Link phụ chưa sẵn sàng" });
+      return;
+    }
+    if (linkChannel === "primary" && cfg?.free_enabled === false) {
+      setShowClosedDialog(true);
+      return;
+    }
+
+    if (!selected) return;
+
+    clearBundle(selectedAppCode);
+    markFreeAttempt();
+    setDeviceHistory(readFreeDeviceHistory());
+
+    setLoading(true);
+    setErr(null);
+    try {
+      const fp = getOrCreateFingerprint();
+      const testMode = debugMode && getFreeTestMode();
+      const session = testMode ? await supabase.auth.getSession() : null;
+      if (testMode && !session?.data?.session?.access_token) {
+        setErr("Test mode yêu cầu đăng nhập admin.");
+        return;
+      }
+
+      const res = await postFunction<StartOk | StartErr>(
+        "/free-start",
+        {
+          key_type_code: selected,
+          app_code: selectedAppCode,
+          package_code: isFindDumpsSelected && effectiveFindDumpsKind === "package" ? effectiveFindDumpsCode : null,
+          credit_code: isFindDumpsSelected && effectiveFindDumpsKind === "credit" ? effectiveFindDumpsCode : null,
+          wallet_kind: isFindDumpsSelected && effectiveFindDumpsKind === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
+          fingerprint: fp,
+          link_channel: linkChannel,
+          test_mode: testMode,
+        },
+        {
+          authToken: testMode ? session?.data?.session?.access_token ?? null : null,
+          headers: {
+            "x-fp": fp,
+          },
+        },
+      );
+
+      if (!res.ok) {
+        const r = res as StartErr;
+        if (r.code === "SECONDARY_SHORTLINK_NOT_READY") {
+          markFreeAttemptFail(r.code);
+          setDeviceHistory(readFreeDeviceHistory());
+          toast({ title: "Link phụ chưa sẵn sàng" });
+          return;
+        }
+        if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
+          markFreeAttemptFail(r.code);
+          setDeviceHistory(readFreeDeviceHistory());
+          setErr(`${r.code}: ${r.msg}`);
+          return;
+        }
+        if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
+          markFreeAttemptFail(r.code);
+          setDeviceHistory(readFreeDeviceHistory());
+          setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
+        } else if (r.code === "SESSION_PENDING_LIMIT") {
+          markFreeAttemptFail(r.code);
+          setDeviceHistory(readFreeDeviceHistory());
+          setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+        } else if (r.code === "SHORTLINK_CREATE_FAILED") {
+          markFreeAttemptFail(r.code);
+          setDeviceHistory(readFreeDeviceHistory());
+          const detail = String(r.detail ?? "").trim();
+          setErr(detail ? `${r.code}: ${detail}` : r.code);
+        } else {
+          markFreeAttemptFail(r.code || r.msg || "START_FAILED");
+          setDeviceHistory(readFreeDeviceHistory());
+          setErr(r.msg || "Start failed");
+        }
+        return;
+      }
+
+      setOutToken(res.out_token);
+
+      try {
+        const sid = String((res as any).session_id ?? "").trim();
+        if (sid) {
+          writeBundle({ session_id: sid, out_token: String(res.out_token), trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
+        }
+      } catch {
+        // ignore
+      }
+
+      setFreeStartMeta({
+        startedAtMs: Date.now(),
+        minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
+      });
+      try {
+        writeFlowItem("free_out_token_v1", String(res.out_token));
+        writeFlowItem("free_out_token", String(res.out_token));
+
+        const sid = String((res as any).session_id ?? "").trim();
+        if (sid) {
+          writeFlowItem("free_session_id_v1", sid);
+          writeFlowItem("free_session_id", sid);
+        }
+
+        writeFlowItem("free_started_at_ms", String(Date.now()));
+        writeFlowItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
+        writeFlowItem("free_key_type_code", String(selected));
+        setSelectedAppCode(selectedAppCode);
+        if (isFindDumpsSelected) setFindDumpsFreeSelection(effectiveFindDumpsKind, effectiveFindDumpsCode, effectiveFindDumpsReward?.walletKind ?? null);
+        const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
+        if (pass2Tok) writeFlowItem("free_out_token_pass2", pass2Tok);
+        const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
+        if (pass2Outbound) writeFlowItem("free_outbound_url_pass2", pass2Outbound);
+      } catch {
+        // ignore
+      }
+      try {
+        removeFlowItem("free_claim_token");
+      } catch {
+        /* ignore */
+      }
+      setSelectedKeyTypeCode(selected);
+
+      const outbound = String(res.outbound_url ?? "").trim();
+      if (!outbound) {
+        if (testMode) {
+          window.location.assign(res.gate_url);
+          return;
+        }
+        setErr("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M outbound đúng. Vui lòng báo admin kiểm tra free_outbound_url.");
+        return;
+      }
+
+      window.location.assign(outbound);
+    } catch (e: any) {
+      const code = String(e?.code ?? "").trim();
+      if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
+        setErr(
+          "SERVER_RATE_LIMIT_MISCONFIG: Database thiếu RPC/bảng rate-limit cho FREE. Owner cần chạy migration FREE (đặc biệt: 20260206150000_free_schema_runtime_fix.sql + các migration free_rate_limit_*).",
+        );
+        return;
+      }
+      if (code === "FREE_NOT_READY") {
+        setErr("FREE_NOT_READY: Backend FREE chưa sẵn sàng (thiếu secrets hoặc thiếu bảng cấu hình). Owner cần kiểm tra secrets + migration.");
+        return;
+      }
+      if (code === "UNAUTHORIZED") {
+        setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
+        return;
+      }
+      if (code === "SESSION_PENDING_LIMIT") {
+        setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
+        return;
+      }
+      if (code === "SECONDARY_SHORTLINK_NOT_READY") {
+        toast({ title: "Link phụ chưa sẵn sàng" });
+        return;
+      }
+      markFreeAttemptFail(code || e?.message || "START_FAILED");
+      setDeviceHistory(readFreeDeviceHistory());
+      setErr(e?.message ?? "Start failed");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <>
@@ -472,162 +640,22 @@ export function FreeLandingPage() {
                 className="h-12 w-full rounded-2xl text-base font-semibold shadow-sm"
                 size="lg"
                 disabled={!canGet}
-                onClick={async () => {
-                  if (isClosed) {
-                    setShowClosedDialog(true);
-                    return;
-                  }
-
-                  if (!selected) return;
-
-                  clearBundle(selectedAppCode);
-                  markFreeAttempt();
-                  setDeviceHistory(readFreeDeviceHistory());
-
-                  setLoading(true);
-                  setErr(null);
-                  try {
-                    const fp = getOrCreateFingerprint();
-                    const testMode = debugMode && getFreeTestMode();
-                    const session = testMode ? await supabase.auth.getSession() : null;
-                    if (testMode && !session?.data?.session?.access_token) {
-                      setErr("Test mode yêu cầu đăng nhập admin.");
-                      return;
-                    }
-
-                    const res = await postFunction<StartOk | StartErr>(
-                      "/free-start",
-                      {
-                        key_type_code: selected,
-                        app_code: selectedAppCode,
-                        package_code: isFindDumpsSelected && effectiveFindDumpsKind === "package" ? effectiveFindDumpsCode : null,
-                        credit_code: isFindDumpsSelected && effectiveFindDumpsKind === "credit" ? effectiveFindDumpsCode : null,
-                        wallet_kind: isFindDumpsSelected && effectiveFindDumpsKind === "credit" ? effectiveFindDumpsReward?.walletKind ?? null : null,
-                        fingerprint: fp,
-                        test_mode: testMode,
-                      },
-                      {
-                        authToken: testMode ? session?.data?.session?.access_token ?? null : null,
-                        headers: {
-                          "x-fp": fp,
-                        },
-                      },
-                    );
-
-                    if (!res.ok) {
-                      const r = res as StartErr;
-                      if (r.code === "OUTBOUND_URL_TEMPLATE_INVALID") {
-                        markFreeAttemptFail(r.code);
-                        setDeviceHistory(readFreeDeviceHistory());
-                        setErr(`${r.code}: ${r.msg}`);
-                        return;
-                      }
-                      if (r.code === "SERVER_RATE_LIMIT_MISCONFIG") {
-                        markFreeAttemptFail(r.code);
-                        setDeviceHistory(readFreeDeviceHistory());
-                        setErr("Server FREE chưa đủ migration. Vui lòng báo owner chạy migration FREE mới nhất.");
-                      } else if (r.code === "SESSION_PENDING_LIMIT") {
-                        markFreeAttemptFail(r.code);
-                        setDeviceHistory(readFreeDeviceHistory());
-                        setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
-                      } else if (r.code === "SHORTLINK_CREATE_FAILED") {
-                        markFreeAttemptFail(r.code);
-                        setDeviceHistory(readFreeDeviceHistory());
-                        const detail = String(r.detail ?? "").trim();
-                        setErr(detail ? `${r.code}: ${detail}` : r.code);
-                      } else {
-                        markFreeAttemptFail(r.code || r.msg || "START_FAILED");
-                        setDeviceHistory(readFreeDeviceHistory());
-                        setErr(r.msg || "Start failed");
-                      }
-                      return;
-                    }
-
-                    setOutToken(res.out_token);
-
-                    try {
-                      const sid = String((res as any).session_id ?? "").trim();
-                      if (sid) {
-                        writeBundle({ session_id: sid, out_token: String(res.out_token), trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
-                      }
-                    } catch {
-                      // ignore
-                    }
-
-                    setFreeStartMeta({
-                      startedAtMs: Date.now(),
-                      minDelaySeconds: Math.max(0, Number(res.min_delay_seconds ?? 0)),
-                    });
-                    try {
-                      writeFlowItem("free_out_token_v1", String(res.out_token));
-                      writeFlowItem("free_out_token", String(res.out_token));
-
-                      const sid = String((res as any).session_id ?? "").trim();
-                      if (sid) {
-                        writeFlowItem("free_session_id_v1", sid);
-                        writeFlowItem("free_session_id", sid);
-                      }
-
-                      writeFlowItem("free_started_at_ms", String(Date.now()));
-                      writeFlowItem("free_min_delay_seconds", String(Math.max(0, Number(res.min_delay_seconds ?? 0))));
-                      writeFlowItem("free_key_type_code", String(selected));
-                      setSelectedAppCode(selectedAppCode);
-                      if (isFindDumpsSelected) setFindDumpsFreeSelection(effectiveFindDumpsKind, effectiveFindDumpsCode, effectiveFindDumpsReward?.walletKind ?? null);
-                      const pass2Tok = String((res as any).out_token_pass2 ?? "").trim();
-                      if (pass2Tok) writeFlowItem("free_out_token_pass2", pass2Tok);
-                      const pass2Outbound = String((res as any).outbound_url_pass2 ?? "").trim();
-                      if (pass2Outbound) writeFlowItem("free_outbound_url_pass2", pass2Outbound);
-                    } catch {
-                      // ignore
-                    }
-                    try {
-                      removeFlowItem("free_claim_token");
-                    } catch {
-                      /* ignore */
-                    }
-                    setSelectedKeyTypeCode(selected);
-
-                    const outbound = String(res.outbound_url ?? "").trim();
-                    if (!outbound) {
-                      if (testMode) {
-                        window.location.assign(res.gate_url);
-                        return;
-                      }
-                      setErr("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M outbound đúng. Vui lòng báo admin kiểm tra free_outbound_url.");
-                      return;
-                    }
-
-                    window.location.assign(outbound);
-                  } catch (e: any) {
-                    const code = String(e?.code ?? "").trim();
-                    if (code === "SERVER_RATE_LIMIT_MISCONFIG") {
-                      setErr(
-                        "SERVER_RATE_LIMIT_MISCONFIG: Database thiếu RPC/bảng rate-limit cho FREE. Owner cần chạy migration FREE (đặc biệt: 20260206150000_free_schema_runtime_fix.sql + các migration free_rate_limit_*).",
-                      );
-                      return;
-                    }
-                    if (code === "FREE_NOT_READY") {
-                      setErr("FREE_NOT_READY: Backend FREE chưa sẵn sàng (thiếu secrets hoặc thiếu bảng cấu hình). Owner cần kiểm tra secrets + migration.");
-                      return;
-                    }
-                    if (code === "UNAUTHORIZED") {
-                      setErr("Bạn chưa đăng nhập/không có quyền. Vui lòng đăng nhập admin rồi thử lại.");
-                      return;
-                    }
-                    if (code === "SESSION_PENDING_LIMIT") {
-                      setErr("Thiết bị này đang có quá nhiều phiên đang chờ xác thực. Hãy hoàn tất hoặc chờ vài phút rồi thử lại.");
-                      return;
-                    }
-                    markFreeAttemptFail(code || e?.message || "START_FAILED");
-                    setDeviceHistory(readFreeDeviceHistory());
-                    setErr(e?.message ?? "Start failed");
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
+                onClick={() => void startKey("primary")}
               >
                 {loading ? "Đang chuyển hướng…" : "Get Key 🔑"}
               </Button>
+
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-9 rounded-xl px-5 text-sm font-medium text-muted-foreground shadow-sm"
+                  disabled={!canGet}
+                  onClick={() => void startKey("secondary")}
+                >
+                  Get Key phụ
+                </Button>
+              </div>
 
               {lastFreeKey ? (
                 <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">

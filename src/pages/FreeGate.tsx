@@ -10,9 +10,10 @@ import { readBundle, writeBundle } from "@/lib/freeFlow";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
 type GateNextPass2 = { ok: true; next: "PASS2"; out_token?: string; outbound_url: string; gate_url?: string | null; min_delay_seconds: number; gate_token_life_seconds?: number };
+type GateNextFallback = { ok: true; next: "SHORTLINK_FALLBACK"; outbound_url: string; gate_url?: string | null; min_delay_seconds: number; gate_token_life_seconds?: number };
 type GateNextClaim = { ok: true; next: "CLAIM"; session_id?: string; claim_token: string; claim_url?: string | null };
-type GateOk = GateNextPass2 | GateNextClaim;
-type GateErr = { ok: false; msg: string; code?: string; detail?: any };
+type GateOk = GateNextPass2 | GateNextFallback | GateNextClaim;
+type GateErr = { ok: false; msg: string; code?: string; detail?: any; retry_after_ms?: number };
 type ResolveOk = { ok: true; session_id: string };
 type ResolveErr = { ok: false; msg: string; code?: string; detail?: any };
 
@@ -186,7 +187,7 @@ export function FreeGatePage() {
     }
   }
 
-  async function gateOnce() {
+  async function gateOnce(rotationRetry = 0) {
     const tok = outToken;
     const gateTok = gateTokenFromQuery;
     let sid = effectiveSessionId;
@@ -234,6 +235,24 @@ export function FreeGatePage() {
 
       if ((res as any).ok) {
         const ok = res as GateOk;
+
+        if (ok.next === "SHORTLINK_FALLBACK") {
+          const outbound = String(ok.outbound_url || "").trim();
+          if (!outbound) {
+            setStatus("error");
+            setMessage("Không tạo được link dự phòng. Vui lòng quay lại Get Key.");
+            window.setTimeout(() => nav("/free", { replace: true }), 1500);
+            return;
+          }
+          setMessage("Link GTraffic của phiên này không còn dùng được, đang chuyển sang link dự phòng…");
+          setFreeStartMeta({
+            startedAtMs: Date.now(),
+            minDelaySeconds: Math.max(0, Number(ok.min_delay_seconds ?? 0)),
+            pass,
+          });
+          window.location.assign(outbound);
+          return;
+        }
 
         if (ok.next === "PASS2") {
           // Transition to Pass2. Prefer the pre-issued pass2 token/outbound captured at /free-start
@@ -300,6 +319,13 @@ export function FreeGatePage() {
 
       const err = res as GateErr;
       const msg = err.code || err.msg || "VERIFY_FAILED";
+      if (msg === "GTRAFFIC_ROTATION_IN_PROGRESS" && rotationRetry < 8) {
+        const retryAfter = Math.max(300, Math.min(2000, Number(err.retry_after_ms ?? 800)));
+        setStatus("working");
+        setMessage("Đang xoay link dự phòng cho phiên này…");
+        window.setTimeout(() => void gateOnce(rotationRetry + 1), retryAfter);
+        return;
+      }
       markFreeAttemptFail(msg);
       setStatus("error");
       setMessage(friendlyGateError(msg));

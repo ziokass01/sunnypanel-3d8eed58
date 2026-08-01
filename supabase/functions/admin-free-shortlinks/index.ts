@@ -68,9 +68,10 @@ function normalizeProvider(row: any, index: number) {
   const api_url_template = normalizeApiBase(provider, parsed.api);
   const note = trim(row?.note, 512) || null;
   const enabled = row?.enabled !== false;
+  const secondary_enabled = row?.secondary_enabled === true;
   const sort_order = (index + 1) * 10;
 
-  if (provider !== "none" && enabled) {
+  if (provider !== "none" && (enabled || secondary_enabled)) {
     if (!api_url_template) throw new Error(`MISSING_API_ROW_${index + 1}`);
     if (!/^https?:\/\//i.test(api_url_template)) throw new Error(`API_MUST_BE_HTTPS_ROW_${index + 1}`);
     if (!api_token_secret) throw new Error(`MISSING_TOKEN_ROW_${index + 1}`);
@@ -83,6 +84,7 @@ function normalizeProvider(row: any, index: number) {
     api_token_secret: provider === "none" ? null : api_token_secret,
     api_url_template: provider === "none" ? null : api_url_template,
     enabled,
+    secondary_enabled,
     pass_scope,
     sort_order,
     note,
@@ -123,7 +125,7 @@ Deno.serve(async (req) => {
 
     const settings = await db
       .from("licenses_free_settings")
-      .select("free_shortlink_mode,free_gate_token_life_seconds")
+      .select("free_shortlink_mode,free_secondary_shortlink_mode,free_secondary_enabled,free_gate_token_life_seconds")
       .eq("id", 1)
       .maybeSingle();
 
@@ -147,6 +149,7 @@ Deno.serve(async (req) => {
         api_token_secret: row.api_token_secret,
         api_url_template: row.api_url_template,
         enabled: row.enabled,
+        secondary_enabled: row.secondary_enabled,
         pass_scope: row.pass_scope,
         sort_order: row.sort_order,
         note: row.note,
@@ -163,10 +166,18 @@ Deno.serve(async (req) => {
     }
 
     const mode = MODES.has(trim(body.free_shortlink_mode, 32).toLowerCase()) ? trim(body.free_shortlink_mode, 32).toLowerCase() : "round_robin";
+    const secondaryMode = MODES.has(trim(body.free_secondary_shortlink_mode, 32).toLowerCase()) ? trim(body.free_secondary_shortlink_mode, 32).toLowerCase() : "priority_failover";
+    const secondaryEnabled = body.free_secondary_enabled !== false;
     const life = Math.max(60, Math.min(1800, Math.floor(Number(body.free_gate_token_life_seconds ?? 600) || 600)));
     const settings = await db
       .from("licenses_free_settings")
-      .upsert({ id: 1, free_shortlink_mode: mode, free_gate_token_life_seconds: life }, { onConflict: "id" });
+      .upsert({
+        id: 1,
+        free_shortlink_mode: mode,
+        free_secondary_shortlink_mode: secondaryMode,
+        free_secondary_enabled: secondaryEnabled,
+        free_gate_token_life_seconds: life,
+      }, { onConflict: "id" });
     if (settings.error) {
       const msg = String(settings.error.message || "");
       const code = /schema cache|could not find|does not exist/i.test(msg) ? "DB_MIGRATION_REQUIRED" : "SETTINGS_SAVE_FAILED";

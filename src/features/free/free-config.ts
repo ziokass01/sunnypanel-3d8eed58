@@ -77,7 +77,8 @@ export type FreeConfig = {
   free_outbound_url: string | null;
   free_outbound_url_pass2?: string | null;
   free_shortlink_provider_count?: number;
-  free_shortlink_mode?: "round_robin" | "random";
+  free_shortlink_mode?: "round_robin" | "random" | "priority_failover";
+  free_secondary_enabled?: boolean;
   free_gate_token_life_seconds?: number;
   free_link4m_rotate_days?: number;
   free_session_waiting_limit?: number;

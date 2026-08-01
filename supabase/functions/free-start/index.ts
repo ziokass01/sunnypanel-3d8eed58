@@ -9,6 +9,7 @@ import {
   orderedProvidersForPass,
   parseGtrafficResponse,
   providerIsExhaustedToday,
+  type ShortlinkChannel,
   type ProviderShortenResult,
   vietnamDate,
 } from "../_shared/gtraffic.ts";
@@ -319,14 +320,14 @@ async function closeStale(db: any, ipHash: string, fpHash: string) {
   } catch { /* ignore */ }
   void ipHash;
 }
-async function loadProviders(db: any, passNo: number) {
+async function loadProviders(db: any, passNo: number, channel: ShortlinkChannel) {
   const res = await db.from("licenses_free_shortlink_providers")
     .select("*")
-    .eq("enabled", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   if (res.error) throw res.error;
-  return orderedProvidersForPass((res.data ?? []) as any[], passNo);
+  return orderedProvidersForPass((res.data ?? []) as any[], passNo, channel)
+    .filter((provider) => !providerIsExhaustedToday(provider));
 }
 function fallbackProviderFromSettings(cfg: any, passNo: number) {
   const template = text(passNo === 2 ? (cfg.free_outbound_url_pass2 || cfg.free_outbound_url) : cfg.free_outbound_url, 4096);
@@ -334,21 +335,24 @@ function fallbackProviderFromSettings(cfg: any, passNo: number) {
   if (/api-shorten|manager\.gtraffic\.io|\{token\}|[?&](?:apikey|api|token|tokenUser)=/i.test(template)) return null;
   return { id: null, name: passNo === 2 ? "Legacy Pass2" : "Legacy Pass1", provider: "custom", api_url_template: template, api_token_secret: "", pass_scope: passNo === 2 ? "pass2" : "pass1", sort_order: 9999, source: "settings_legacy" };
 }
-async function chooseProvider(db: any, cfg: any, passNo: number) {
+async function chooseProvider(db: any, cfg: any, passNo: number, channel: ShortlinkChannel) {
   let providers: any[] = [];
-  try { providers = await loadProviders(db, passNo); } catch { providers = []; }
+  try { providers = await loadProviders(db, passNo, channel); } catch { providers = []; }
   if (!providers.length) {
+    if (channel === "secondary") throw new Error("SECONDARY_SHORTLINK_NOT_READY");
     const fb = fallbackProviderFromSettings(cfg, passNo);
     if (fb) return fb;
     throw new Error("SHORTLINK_PROVIDER_MISSING");
   }
 
-  const mode = normalizeShortlinkMode(cfg.free_shortlink_mode);
-  const lastId = text(passNo === 2 ? cfg.free_shortlink_last_provider_id_pass2 : cfg.free_shortlink_last_provider_id_pass1, 64);
+  const mode = normalizeShortlinkMode(channel === "secondary" ? cfg.free_secondary_shortlink_mode : cfg.free_shortlink_mode);
+  const lastId = text(channel === "secondary"
+    ? (passNo === 2 ? cfg.free_secondary_last_provider_id_pass2 : cfg.free_secondary_last_provider_id_pass1)
+    : (passNo === 2 ? cfg.free_shortlink_last_provider_id_pass2 : cfg.free_shortlink_last_provider_id_pass1), 64);
   let selected: any;
 
   if (mode === "priority_failover") {
-    selected = providers.find((provider) => !providerIsExhaustedToday(provider));
+    selected = providers[0];
     if (!selected) {
       const fallback = fallbackProviderFromSettings(cfg, passNo);
       if (fallback) return fallback;
@@ -359,29 +363,33 @@ async function chooseProvider(db: any, cfg: any, passNo: number) {
     if (lastId && providers.length > 1) pool = providers.filter((p) => String(p.id) !== lastId);
     selected = pool[Math.floor(Math.random() * pool.length)] ?? providers[0];
   } else {
-    const idxRaw = Number(passNo === 2 ? cfg.free_shortlink_next_index_pass2 : cfg.free_shortlink_next_index_pass1);
+    const idxRaw = Number(channel === "secondary"
+      ? (passNo === 2 ? cfg.free_secondary_next_index_pass2 : cfg.free_secondary_next_index_pass1)
+      : (passNo === 2 ? cfg.free_shortlink_next_index_pass2 : cfg.free_shortlink_next_index_pass1));
     const idx = Number.isFinite(idxRaw) ? Math.max(0, Math.floor(idxRaw)) : 0;
     selected = providers[idx % providers.length] ?? providers[0];
     const next = (idx + 1) % providers.length;
-    const patch: Record<string, unknown> = passNo === 2 ? { free_shortlink_next_index_pass2: next } : { free_shortlink_next_index_pass1: next };
+    const patch: Record<string, unknown> = channel === "secondary"
+      ? (passNo === 2 ? { free_secondary_next_index_pass2: next } : { free_secondary_next_index_pass1: next })
+      : (passNo === 2 ? { free_shortlink_next_index_pass2: next } : { free_shortlink_next_index_pass1: next });
     try { await db.from("licenses_free_settings").update(patch).eq("id", 1); } catch { /* ignore */ }
   }
 
   if (selected?.id) {
-    const patch: Record<string, unknown> = passNo === 2
-      ? { free_shortlink_last_provider_id_pass2: selected.id }
-      : { free_shortlink_last_provider_id_pass1: selected.id };
+    const patch: Record<string, unknown> = channel === "secondary"
+      ? (passNo === 2 ? { free_secondary_last_provider_id_pass2: selected.id } : { free_secondary_last_provider_id_pass1: selected.id })
+      : (passNo === 2 ? { free_shortlink_last_provider_id_pass2: selected.id } : { free_shortlink_last_provider_id_pass1: selected.id });
     try { await db.from("licenses_free_settings").update(patch).eq("id", 1); } catch { /* ignore */ }
   }
   return selected;
 }
 
-async function providerCandidates(db: any, cfg: any, passNo: number, selected: any) {
+async function providerCandidates(db: any, cfg: any, passNo: number, selected: any, channel: ShortlinkChannel) {
   let providers: any[] = [];
-  try { providers = await loadProviders(db, passNo); } catch { providers = []; }
+  try { providers = await loadProviders(db, passNo, channel); } catch { providers = []; }
   const out: any[] = [];
   const seen = new Set<string>();
-  const mode = normalizeShortlinkMode(cfg.free_shortlink_mode);
+  const mode = normalizeShortlinkMode(channel === "secondary" ? cfg.free_secondary_shortlink_mode : cfg.free_shortlink_mode);
   const push = (provider: any) => {
     if (!provider) return;
     if (mode === "priority_failover" && providerIsExhaustedToday(provider)) return;
@@ -395,37 +403,6 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   push(selected);
   for (const provider of providers) push(provider);
   return out;
-}
-
-async function reserveGtrafficBridgeQuota(db: any, provider: any) {
-  const today = vietnamDate();
-  const configuredLimit = Math.floor(Number(Deno.env.get("GTRAFFIC_DAILY_LIMIT") || 1000));
-  const dailyLimit = Number.isFinite(configuredLimit) ? Math.max(1, configuredLimit) : 1000;
-
-  if (provider?.id) {
-    try {
-      const reserved = await db.rpc("licenses_reserve_gtraffic_quota", {
-        p_provider_id: provider.id,
-        p_quota_date: today,
-        p_daily_limit: dailyLimit,
-      });
-      if (!reserved.error) {
-        const row = Array.isArray(reserved.data) ? reserved.data[0] : reserved.data;
-        return {
-          allowed: row?.allowed === true,
-          remaining: Math.max(0, Number(row?.remaining ?? 0) || 0),
-          quotaDate: today,
-        };
-      }
-    } catch {
-      // Compatibility fallback for a deployment where the new RPC is not live yet.
-    }
-  }
-
-  const sameDay = String(provider?.quota_date ?? "") === today;
-  const savedRemaining = Number(provider?.quota_remaining);
-  const before = sameDay && Number.isFinite(savedRemaining) ? Math.max(0, Math.floor(savedRemaining)) : dailyLimit;
-  return { allowed: before > 0, remaining: Math.max(0, before - 1), quotaDate: today };
 }
 
 async function markProviderFailure(db: any, provider: any, error: unknown) {
@@ -444,7 +421,7 @@ async function markProviderFailure(db: any, provider: any, error: unknown) {
   } catch { /* ignore */ }
 }
 
-async function markProviderSuccess(db: any, provider: any, passNo: number, result: ProviderShortenResult) {
+async function markProviderSuccess(db: any, provider: any, passNo: number, result: ProviderShortenResult, channel: ShortlinkChannel) {
   if (!provider?.id) return;
   const providerPatch: Record<string, unknown> = {
     last_used_at: new Date().toISOString(),
@@ -458,20 +435,20 @@ async function markProviderSuccess(db: any, provider: any, passNo: number, resul
   try {
     await db.from("licenses_free_shortlink_providers").update(providerPatch).eq("id", provider.id);
   } catch { /* ignore */ }
-  const patch: Record<string, unknown> = passNo === 2
-    ? { free_shortlink_last_provider_id_pass2: provider.id }
-    : { free_shortlink_last_provider_id_pass1: provider.id };
+  const patch: Record<string, unknown> = channel === "secondary"
+    ? (passNo === 2 ? { free_secondary_last_provider_id_pass2: provider.id } : { free_secondary_last_provider_id_pass1: provider.id })
+    : (passNo === 2 ? { free_shortlink_last_provider_id_pass2: provider.id } : { free_shortlink_last_provider_id_pass1: provider.id });
   try { await db.from("licenses_free_settings").update(patch).eq("id", 1); } catch { /* ignore */ }
 }
 
-async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: string) {
+async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: string, channel: ShortlinkChannel) {
   const failures: string[] = [];
   let selected: any = null;
   let candidates: any[] = [];
 
   try {
-    selected = await chooseProvider(db, cfg, passNo);
-    candidates = await providerCandidates(db, cfg, passNo, selected);
+    selected = await chooseProvider(db, cfg, passNo, channel);
+    candidates = await providerCandidates(db, cfg, passNo, selected, channel);
   } catch (error) {
     const message = safeProviderError(error);
     failures.push(`provider-config: ${message}`);
@@ -489,15 +466,9 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   for (const provider of candidates) {
     try {
       const result = await shortenWithProvider(provider, gateUrl);
-      if (result.browserBridge) {
-        const quota = await reserveGtrafficBridgeQuota(db, provider);
-        if (!quota.allowed) throw new Error("GTRAFFIC_DAILY_QUOTA_EXHAUSTED");
-        result.quotaRemaining = quota.remaining;
-        result.quotaDate = quota.quotaDate;
-      }
       const outboundUrl = result.outboundUrl;
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
-      await markProviderSuccess(db, provider, passNo, result);
+      await markProviderSuccess(db, provider, passNo, result, channel);
       return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
       const message = safeProviderError(error);
@@ -542,6 +513,7 @@ Deno.serve(async (req) => {
   const creditCode = text(body.credit_code, 128) || null;
   const walletKind = text(body.wallet_kind, 32) || null;
   const fingerprint = text(body.fingerprint || req.headers.get("x-fp"), 512);
+  const linkChannel: ShortlinkChannel = text(body.link_channel, 16).toLowerCase() === "secondary" ? "secondary" : "primary";
   const ip = getIp(req);
   const ua = req.headers.get("user-agent") ?? "";
   const ipHash = await sha256Hex(ip || "0.0.0.0");
@@ -559,7 +531,8 @@ Deno.serve(async (req) => {
   const { data: settings, error: settingsErr } = await db.from("licenses_free_settings").select("*").eq("id", 1).maybeSingle();
   if (settingsErr) return await deny("FREE_SETTINGS_LOAD_FAILED", { detail: settingsErr.message });
   const cfg = (settings ?? {}) as any;
-  if (cfg.free_enabled === false) return await deny("FREE_DISABLED", { msg: cfg.free_disabled_message || "FREE_DISABLED" });
+  if (linkChannel === "primary" && cfg.free_enabled === false) return await deny("FREE_DISABLED", { msg: cfg.free_disabled_message || "FREE_DISABLED" });
+  if (linkChannel === "secondary" && cfg.free_secondary_enabled === false) return await deny("SECONDARY_SHORTLINK_NOT_READY");
 
   await closeStale(db, ipHash, fpHash);
 
@@ -575,6 +548,15 @@ Deno.serve(async (req) => {
     return await deny("KEY_TYPE_LOAD_FAILED", { detail: String((error as any)?.message ?? error) });
   }
   if (!keyType || keyType.enabled === false) return await deny("KEY_TYPE_DISABLED");
+
+  const requiresDoubleGate = Boolean(keyType.requires_double_gate ?? false);
+  if (linkChannel === "secondary") {
+    const pass1Providers = await loadProviders(db, 1, "secondary").catch(() => [] as any[]);
+    const pass2Providers = requiresDoubleGate ? await loadProviders(db, 2, "secondary").catch(() => [] as any[]) : pass1Providers;
+    if (!pass1Providers.length || (requiresDoubleGate && !pass2Providers.length)) {
+      return await deny("SECONDARY_SHORTLINK_NOT_READY");
+    }
+  }
 
   const waitingLimit = Math.max(1, Number(cfg.free_session_waiting_limit ?? 2) || 2);
   try {
@@ -618,7 +600,7 @@ Deno.serve(async (req) => {
   let shortlinkFailures: string[] = [];
   try {
     gateUrl = gateUrlFromToken(gateToken, 1);
-    const shortened = await shortenWithFailover(db, cfg, 1, gateUrl);
+    const shortened = await shortenWithFailover(db, cfg, 1, gateUrl, linkChannel);
     provider = shortened.provider;
     outboundUrl = shortened.outboundUrl;
     shortlinkDegraded = Boolean(shortened.degraded);
@@ -631,11 +613,13 @@ Deno.serve(async (req) => {
       activateAfterAt = nowIso;
     }
   } catch (error) {
+    if (linkChannel === "secondary" && safeProviderError(error).includes("SECONDARY_SHORTLINK_NOT_READY")) {
+      return await deny("SECONDARY_SHORTLINK_NOT_READY");
+    }
     return await deny("SHORTLINK_CREATE_FAILED", { detail: safeProviderError(error) });
   }
   if (!outboundUrl) return await deny("OUTBOUND_URL_TEMPLATE_INVALID", { gate_url: gateUrl });
 
-  const requiresDoubleGate = Boolean(keyType.requires_double_gate ?? false);
   const fullPayload: Record<string, unknown> = {
     session_id: sessionId,
     key_type_code: keyTypeCode,
@@ -661,6 +645,7 @@ Deno.serve(async (req) => {
     gate_flow_version: "tokenized_v1",
     gate_token_life_seconds: gateLifeSeconds,
     provider_id_pass1: provider?.id ?? null,
+    shortlink_channel: linkChannel,
   };
   const compatPayload: Record<string, unknown> = {
     session_id: sessionId,
@@ -691,6 +676,7 @@ Deno.serve(async (req) => {
       activate_after_at: activateAfterAt,
       expires_at: gateExpiresAt,
       provider_id: provider?.id ?? null,
+      shortlink_channel: linkChannel,
       short_url: outboundUrl,
       ip_hash: ipHash,
       ua_hash: uaHash,
@@ -717,6 +703,7 @@ Deno.serve(async (req) => {
       provider_id: provider?.id ?? null,
       provider_name: provider?.name ?? null,
       provider_kind: provider?.provider ?? null,
+      shortlink_channel: linkChannel,
       shortlink_degraded: shortlinkDegraded,
       shortlink_failures: shortlinkFailures.length ? shortlinkFailures : undefined,
       session_ttl_seconds: sessionTtlSeconds,
