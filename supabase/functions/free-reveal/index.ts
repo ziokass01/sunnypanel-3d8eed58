@@ -3,6 +3,7 @@ import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveClientIp } from "../_shared/client-ip.ts";
 import { insertLicenseCompat } from "../_shared/license-insert.ts";
+import { requiredFinalPass, tokenPairMatches, validateFinalGateProof } from "../_shared/free-claim-guard.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -379,79 +380,40 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "BLOCKED" }, 403);
   }
 
-  // Session lookup:
-  // - If claimHash && outHash both present: prefer lookup by BOTH (prevents "half-mixed" tokens)
-  // - Then fallback to explicit session_id
-  // - Then fallback to claim_token_hash
-  // - Then fallback to out_token_hash
-  const requestedSessionId = sessionIdTrim;
+  // Both one-time tokens are mandatory and must resolve the same session.
+  if (!outTokenTrim) {
+    return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED" }, 200);
+  }
 
-  let sess: any = null;
+  const requestedSessionId = sessionIdTrim;
   const debugLookup: Record<string, unknown> | null = debugEnabled
     ? {
       session_id_provided: Boolean(requestedSessionId),
       claim_token_len: claimTokenTrim.length,
       out_token_len: outTokenTrim.length,
-      looked_up_by: null,
+      looked_up_by: "claim+out(any-pass)",
     }
     : null;
 
-  if (claimHash && outHash) {
-    const q = await sb
-      .from("licenses_free_sessions")
-      .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
-      )
-      .eq("claim_token_hash", claimHash)
-      .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
-      .maybeSingle();
-    if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = "claim+out(any-pass)";
+  const sessionColumns = "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,gate_ok_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version";
+  const sessionLookup = await sb
+    .from("licenses_free_sessions")
+    .select(sessionColumns)
+    .eq("claim_token_hash", claimHash)
+    .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
+    .maybeSingle();
+
+  if (sessionLookup.error) {
+    return json({ ok: false, msg: "SESSION_LOOKUP_FAILED", code: "SESSION_LOOKUP_FAILED" }, 500);
   }
 
-  if (!sess && requestedSessionId) {
-    const q = await sb
-      .from("licenses_free_sessions")
-      .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
-      )
-      .eq("session_id", requestedSessionId)
-      .maybeSingle();
-    if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "session_id";
-  }
-
-  if (!sess && claimHash) {
-    const q = await sb
-      .from("licenses_free_sessions")
-      .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
-      )
-      .eq("claim_token_hash", claimHash)
-      .maybeSingle();
-    if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "claim_token_hash";
-  }
-
-  if (!sess && outHash) {
-    const q = await sb
-      .from("licenses_free_sessions")
-      .select(
-        "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version",
-      )
-      .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
-      .maybeSingle();
-    if (!q.error && q.data) sess = q.data;
-    if (debugLookup) debugLookup.looked_up_by = debugLookup.looked_up_by ?? "out_token_hash(any-pass)";
-  }
+  const sess: any = sessionLookup.data ?? null;
 
   if (!sess) {
     return json({ ok: false, msg: "SESSION_NOT_FOUND", code: "SESSION_NOT_FOUND", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   const sessionId = sess.session_id;
-  const revealedLicenseId = (sess as any).revealed_license_id as string | null;
-
   const now = Date.now();
   const expMs = Date.parse(sess.expires_at);
   if (!isFinite(expMs) || expMs < now) return json({ ok: false, msg: "SESSION_EXPIRED" }, 200);
@@ -491,39 +453,6 @@ Deno.serve(async (req) => {
     const kt = await sb.from("licenses_free_key_types").select("label").eq("code", code).maybeSingle();
     return kt.data?.label ?? null;
   }
-
-  async function findExistingIssuedKey() {
-    const directId = revealedLicenseId ?? null;
-    if (directId) {
-      const lic = await sb.from("licenses").select("key,expires_at").eq("id", directId).maybeSingle();
-      if (lic.data?.key) return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? null) as string, server_redeem_key_id: null as string | null };
-    }
-
-    const issue = await sb
-      .from("licenses_free_issues")
-      .select("license_id,expires_at,server_redeem_key_id,key_mask")
-      .eq("session_id", sessionId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const serverRedeemKeyId = String((issue.data as any)?.server_redeem_key_id ?? "").trim() || null;
-    if (serverRedeemKeyId) {
-      const rk = await sb.from("server_app_redeem_keys").select("redeem_key,expires_at").eq("id", serverRedeemKeyId).maybeSingle();
-      if (rk.data?.redeem_key) return { key: rk.data.redeem_key as string, expires_at: (rk.data.expires_at ?? issue.data?.expires_at) as string, server_redeem_key_id: serverRedeemKeyId };
-      const masked = String((issue.data as any)?.key_mask ?? "").trim();
-      if (masked) return { key: masked, expires_at: String((issue.data as any)?.expires_at ?? "").trim(), server_redeem_key_id: serverRedeemKeyId };
-    }
-
-    const licenseId = issue.data?.license_id;
-    if (!licenseId) return null;
-
-    const lic = await sb.from("licenses").select("key,expires_at").eq("id", licenseId).maybeSingle();
-    if (!lic.data?.key) return null;
-
-    return { key: lic.data.key as string, expires_at: (lic.data.expires_at ?? issue.data?.expires_at) as string, server_redeem_key_id: null as string | null };
-  }
-
 
   async function issueFindDumpsRedeemKey(sessRow: any, keyTypeMeta: any) {
     const durationSeconds = Math.max(60, Number(sessRow?.duration_seconds ?? 0));
@@ -730,6 +659,11 @@ Deno.serve(async (req) => {
       last_error: null,
       reveal_count: 1,
       revealed_at: issuedAt,
+      claim_token_hash: null,
+      claim_expires_at: null,
+      out_token_hash: null,
+      out_token_hash_pass2: null,
+      out_expires_at: issuedAt,
       issued_server_redeem_key_id: inserted.id,
       issued_server_reward_mode: "ai_redeem",
       app_code: appCode,
@@ -759,42 +693,12 @@ Deno.serve(async (req) => {
     return { key: inserted.key, expires_at: expiresAt, allow_reset: true, app_code: appCode, key_signature: keySignature, reward_mode: "ai_redeem", created_at: issuedAt, server_redeem_key_id: inserted.id };
   }
 
-  // Already revealed (or in-progress) => return same key if present; otherwise auto-repair inconsistent state.
-  if (Number(sess.reveal_count ?? 0) > 0 || sess.status === "revealed" || sess.status === "revealing") {
-    const existing = await findExistingIssuedKey();
-    const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
-    const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
-    if (existing) {
-      return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: (sess.app_code === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) ? true : (existing.server_redeem_key_id ? false : Boolean(keyTypeMeta?.allow_reset ?? true)), app_code: sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire", key_signature: sess.app_code === "find-dumps" ? "FD" : keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
-    }
-
-    // Inconsistent: session says revealed/revealing but no issued key row exists.
-    // Auto-repair: reset to gate_ok and allow user to retry.
-    await sb
-      .from("licenses_free_sessions")
-      .update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "INCONSISTENT_STATE_REPAIRED" })
-      .eq("session_id", sessionId);
-
-    return json(
-      {
-        ok: false,
-        msg: "INCONSISTENT_STATE_REPAIRED_TRY_AGAIN",
-        code: "INCONSISTENT_STATE_REPAIRED_TRY_AGAIN",
-        warnings: warnings.length ? warnings : undefined,
-        debug: debugLookup ? { lookup: debugLookup } : undefined,
-      },
-      200,
-    );
-  }
-
-  // Require valid claim token when NOT yet revealed.
+  // Claim and start token must both still be live and belong to this session.
   const claimExpMs = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
-
-  if (!claimHash || !sess.claim_token_hash || sess.claim_token_hash !== claimHash) {
-    await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_INVALID" }).eq("session_id", sessionId);
-    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "CLAIM_INVALID", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-    return json({ ok: false, msg: "CLAIM_INVALID", code: "CLAIM_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+  if (!tokenPairMatches(claimHash, outHash, sess)) {
+    await sb.from("licenses_free_sessions").update({ last_error: "TOKEN_PAIR_INVALID" }).eq("session_id", sessionId);
+    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "TOKEN_PAIR_INVALID", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    return json({ ok: false, msg: "TOKEN_PAIR_INVALID", code: "TOKEN_PAIR_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
   if (!claimExpMs || claimExpMs < now) {
@@ -804,6 +708,12 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "CLAIM_EXPIRED", code: "CLAIM_EXPIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
+  if (sess.status === "revealed" || (Number(sess.reveal_count ?? 0) > 0 && sess.status !== "revealing")) {
+    return json({ ok: false, msg: "CLAIM_ALREADY_USED", code: "CLAIM_ALREADY_USED" }, 200);
+  }
+  if (sess.status === "revealing") {
+    return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS" }, 200);
+  }
   if (sess.status !== "gate_ok") {
     await sb.from("licenses_free_sessions").update({ last_error: "GATE_STATUS_INVALID" }).eq("session_id", sessionId);
     await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "GATE_STATUS_INVALID", detail: { status: sess.status }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
@@ -811,21 +721,25 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
   }
 
-  // Require a matching out_token for legacy flows. Tokenized gate flow may reveal by claim_token only,
-  // because claim_token is only minted after /free/gate accepted the single-use gate token.
-  const isTokenizedGateFlow = String((sess as any).gate_flow_version ?? "").trim() === "tokenized_v1";
-  const acceptedOutHashes = [String((sess as any).out_token_hash || "").trim(), String((sess as any).out_token_hash_pass2 || "").trim()].filter(Boolean);
-  if (acceptedOutHashes.length > 0 && !isTokenizedGateFlow) {
-    if (!outHash) return json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
-    if (!acceptedOutHashes.includes(outHash)) {
-      await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "OUT_TOKEN_MISMATCH", detail: { accepted_out_hash_slots: acceptedOutHashes.length }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-      await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-      return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length } : undefined }, 200);
-    }
-  } else if (acceptedOutHashes.length > 0 && isTokenizedGateFlow && outHash && !acceptedOutHashes.includes(outHash)) {
-    // If a tokenized client sends an out_token, it must still match; but absence is allowed.
-    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "OUT_TOKEN_MISMATCH", detail: { tokenized: true, accepted_out_hash_slots: acceptedOutHashes.length }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    return json({ ok: false, msg: "OUT_TOKEN_MISMATCH", code: "OUT_TOKEN_MISMATCH", debug: debugLookup ? { lookup: debugLookup, accepted_out_hash_slots: acceptedOutHashes.length, tokenized: true } : undefined }, 200);
+  // Verify the final gate row itself. Session status alone is not enough proof.
+  const finalPass = requiredFinalPass(sess);
+  const finalGateQuery = await sb
+    .from("licenses_free_gate_tokens")
+    .select("pass_no,status,activate_after_at,expires_at,used_at")
+    .eq("session_id", sessionId)
+    .eq("pass_no", finalPass)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (finalGateQuery.error) {
+    return json({ ok: false, msg: "FINAL_GATE_PROOF_LOAD_FAILED", code: "FINAL_GATE_PROOF_LOAD_FAILED" }, 500);
+  }
+
+  const gateProof = validateFinalGateProof(sess, finalGateQuery.data ?? null);
+  if (!gateProof.ok) {
+    await sb.from("licenses_free_sessions").update({ last_error: gateProof.code }).eq("session_id", sessionId);
+    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: finalPass, event_code: gateProof.code, detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    return json({ ok: false, msg: gateProof.code, code: gateProof.code }, 200);
   }
 
   // Daily quota by Vietnam calendar day (00:00 Asia/Ho_Chi_Minh)
@@ -878,7 +792,8 @@ Deno.serve(async (req) => {
   }
 
   // Acquire lock BEFORE inserting license (prevents multi-mint bug).
-  // IMPORTANT: do NOT clear claim_token_hash here; only rely on status/reveal_count as the mint-lock.
+  // Keep token hashes only while issuing so a transient insert error can retry.
+  // Every successful issue clears both token families below.
   const lockIso = new Date().toISOString();
   const lock = await sb
     .from("licenses_free_sessions")
@@ -896,16 +811,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (!lock.data) {
-    const existing = await findExistingIssuedKey();
-    const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
-    const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
-    if (existing) return json({ ok: true, key: existing.key, expires_at: existing.expires_at, key_type_label, allow_reset: (sess.app_code === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) ? true : (existing.server_redeem_key_id ? false : Boolean(keyTypeMeta?.allow_reset ?? true)), app_code: sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire", key_signature: sess.app_code === "find-dumps" ? "FD" : keyTypeMeta?.key_signature ?? "FF", warnings: warnings.length ? warnings : undefined }, 200);
-
-    // If someone else locked it, signal in-progress; otherwise report lock failure clearly.
-    if (sess.status === "revealing") {
-      return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
-    }
-    return json({ ok: false, msg: "SESSION_LOCK_FAILED", code: "SESSION_LOCK_FAILED", warnings: warnings.length ? warnings : undefined }, 200);
+    return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
   }
 
   const dur = Math.max(60, Number(sess.duration_seconds ?? 0));
@@ -927,13 +833,31 @@ Deno.serve(async (req) => {
         const issued = await issueAiSunnyRedeemKey(sess, keyTypeMeta);
         return json({ ok: true, ...issued, key_type_label: keyTypeMeta?.label ?? null, warnings }, 200);
       } catch (error) {
+        await sb.from("licenses_free_sessions").update({
+          status: "gate_ok",
+          reveal_count: 0,
+          revealed_at: null,
+          last_error: "AI_REDEEM_KEY_FAILED",
+        }).eq("session_id", sessionId).eq("status", "revealing");
         const code = String((error as any)?.code ?? (error as any)?.message ?? "AI_REDEEM_KEY_FAILED");
         return json({ ok: false, msg: code, code }, Number((error as any)?.status ?? 500));
       }
     }
 
     if (appCode === "find-dumps") {
-    const issued = await issueFindDumpsRedeemKey(sess, keyTypeMeta);
+    let issued: Awaited<ReturnType<typeof issueFindDumpsRedeemKey>>;
+    try {
+      issued = await issueFindDumpsRedeemKey(sess, keyTypeMeta);
+    } catch (error) {
+      await sb.from("licenses_free_sessions").update({
+        status: "gate_ok",
+        reveal_count: 0,
+        revealed_at: null,
+        last_error: "FIND_DUMPS_KEY_FAILED",
+      }).eq("session_id", sessionId).eq("status", "revealing");
+      const code = String((error as any)?.code ?? (error as any)?.message ?? "FIND_DUMPS_KEY_FAILED");
+      return json({ ok: false, msg: code, code }, Number((error as any)?.status ?? 500));
+    }
     await sb
       .from("licenses_free_sessions")
       .update({
@@ -941,6 +865,11 @@ Deno.serve(async (req) => {
         last_error: null,
         revealed_at: issued.created_at,
         reveal_count: 1,
+        claim_token_hash: null,
+        claim_expires_at: null,
+        out_token_hash: null,
+        out_token_hash_pass2: null,
+        out_expires_at: issued.created_at,
         close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(),
         copied_at: null,
       })
@@ -1061,6 +990,11 @@ Deno.serve(async (req) => {
       revealed_at: new Date().toISOString(),
       revealed_license_id: inserted.id,
       reveal_count: 1,
+      claim_token_hash: null,
+      claim_expires_at: null,
+      out_token_hash: null,
+      out_token_hash_pass2: null,
+      out_expires_at: new Date().toISOString(),
       close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(),
       copied_at: null,
     })
@@ -1112,3 +1046,4 @@ Deno.serve(async (req) => {
     200,
   );
 });
+

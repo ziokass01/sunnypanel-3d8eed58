@@ -14,8 +14,6 @@ type GateNextFallback = { ok: true; next: "SHORTLINK_FALLBACK"; outbound_url: st
 type GateNextClaim = { ok: true; next: "CLAIM"; session_id?: string; claim_token: string; claim_url?: string | null };
 type GateOk = GateNextPass2 | GateNextFallback | GateNextClaim;
 type GateErr = { ok: false; msg: string; code?: string; detail?: any; retry_after_ms?: number };
-type ResolveOk = { ok: true; session_id: string };
-type ResolveErr = { ok: false; msg: string; code?: string; detail?: any };
 
 function friendlyGateError(msg: string) {
   const m = String(msg || "").trim();
@@ -35,6 +33,11 @@ function friendlyGateError(msg: string) {
   if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên❌. Vui lòng quay lại Get Key và làm lại.";
   if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi❌. Nếu muốn lấy key mới, hãy quay lại Get Key.";
   if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng❌. Vui lòng quay lại Get Key và làm lại.";
+  if (m === "GATE_TOKEN_INVALID") return "Link Gate không hợp lệ. Hãy quay lại Get Key và tạo link mới.";
+  if (m === "GATE_TOKEN_ALREADY_USED") return "Link Gate này đã được sử dụng và không thể dùng lại.";
+  if (m === "GATE_TOKEN_EXPIRED") return "Link Gate đã hết hạn. Key sẽ không được tạo; hãy quay lại Get Key.";
+  if (m === "TOKENIZED_GATE_REQUIRED") return "Bạn phải sử dụng đúng link Gate mới được phép nhận key.";
+  if (m === "OUT_TOKEN_REQUIRED" || m === "OUT_TOKEN_MISMATCH") return "Token bắt đầu không hợp lệ hoặc không cùng phiên Gate. Hãy quay lại Get Key và làm lại.";
   if (m === "GATE_TOO_EARLY") return "Xác minh đã bị gián đoạn❌.Lý do bạn không vượt link. Phiên đã bị hủy, vui lòng quay lại Get Key🔑 và làm lại.";
   return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
 }
@@ -145,8 +148,7 @@ export function FreeGatePage() {
     return "";
   }, [sidFromQuery]);
 
-  const [resolvedSessionId, setResolvedSessionId] = useState<string>("");
-  const effectiveSessionId = useMemo(() => (sessionId || resolvedSessionId || "").trim(), [sessionId, resolvedSessionId]);
+  const effectiveSessionId = useMemo(() => (sessionId || "").trim(), [sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,40 +169,16 @@ export function FreeGatePage() {
     };
   }, []);
 
-  async function resolveSessionIdByOutToken(tok: string) {
-    const cleanTok = String(tok || "").trim();
-    if (!cleanTok) return "";
-
-    try {
-      const res = await postFunction<ResolveOk | ResolveErr>("/free-resolve", { out_token: cleanTok });
-      if (!(res as ResolveOk).ok) return "";
-
-      const sid = String((res as ResolveOk).session_id || "").trim();
-      if (!sid) return "";
-
-      setResolvedSessionId(sid);
-      persistGateFlow(sid, cleanTok);
-      writeBundle({ session_id: sid, out_token: cleanTok });
-      return sid;
-    } catch {
-      return "";
-    }
-  }
-
   async function gateOnce(rotationRetry = 0) {
     const tok = outToken;
     const gateTok = gateTokenFromQuery;
     let sid = effectiveSessionId;
 
-    // Tokenized flow: URL /free/gate?t=gt_... is authoritative and does not need localStorage/out_token.
-    // Legacy flow: keep old session_id + out_token path for existing links.
-    if (!gateTok && !sid && tok) {
-      sid = await resolveSessionIdByOutToken(tok);
-    }
-
-    if ((!gateTok && !tok) || (!gateTok && !sid)) {
+    // Both tokens are mandatory: the start token in browser storage and the
+    // single-use gate token in /free/gate?t=gt_.... Neither can replace the other.
+    if (!gateTok || !tok) {
       setStatus("error");
-      setMessage("Thiếu phiên. Hãy quay lại trang Get Key🔑 và làm lại.");
+      setMessage("Thiếu một trong hai token xác thực. Hãy quay lại trang Get Key🔑 và làm lại.");
       window.setTimeout(() => nav("/free", { replace: true }), 1200);
       return;
     }

@@ -116,11 +116,6 @@ function safeProviderError(error: unknown) {
     .slice(0, 300);
 }
 
-function shortlinkStrictProviderEnabled() {
-  // The Free Key flow must never bypass the configured shortener.
-  return true;
-}
-
 async function fetchProviderResponse(url: string, headers: Record<string, string>) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -452,14 +447,6 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   } catch (error) {
     const message = safeProviderError(error);
     failures.push(`provider-config: ${message}`);
-    if (!shortlinkStrictProviderEnabled()) {
-      return {
-        provider: { id: null, name: "Direct emergency fallback", provider: "none" },
-        outboundUrl: gateUrl,
-        degraded: true,
-        failures,
-      };
-    }
     throw error;
   }
 
@@ -477,16 +464,7 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
     }
   }
 
-  // Every candidate follows the visible admin row order for this pass.
-  if (!shortlinkStrictProviderEnabled()) {
-    return {
-      provider: { id: null, name: "Direct emergency fallback", provider: "none" },
-      outboundUrl: gateUrl,
-      degraded: true,
-      failures,
-    };
-  }
-
+  // Fail closed: never expose the raw gate URL when every shortener fails.
   throw new Error(`ALL_SHORTLINK_PROVIDERS_FAILED${failures.length ? ` | ${failures.join(" | ")}` : ""}`);
 }
 

@@ -49,6 +49,10 @@ function friendlyRevealError(msg: string) {
   if (m === "OUT_TOKEN_REQUIRED") return "Thiếu xác thực. Hãy quay lại trang Get Key 🔑 rồi vượt lại.";
   if (m === "OUT_TOKEN_MISMATCH") return "Xác thực không đúng . Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "CLAIM_INVALID") return "Lỗi xác minh không hợp lệ. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
+  if (m === "TOKEN_PAIR_INVALID") return "Hai token xác thực không cùng một phiên hoặc đã được sử dụng. Hãy quay lại Get Key và làm lại.";
+  if (m === "CLAIM_ALREADY_USED") return "Token nhận key đã được sử dụng và không thể dùng lại.";
+  if (m === "TOKENIZED_GATE_REQUIRED") return "Bạn phải đi qua đúng link Gate mới được phép nhận key.";
+  if (m.startsWith("FINAL_GATE_") || m === "GATE_PASSES_INCOMPLETE") return "Gate chưa hoàn tất, đã hết hạn hoặc không hợp lệ. Key sẽ không được tạo.";
   if (m === "GATE_STATUS_INVALID") return "Xác thực chưa hợp lệ hoặc chưa xác thực. Vui lòng quay lại trang Get Key 🔑 và làm lại.";
   if (m === "RATE_LIMIT") return "Bạn đã hết lượt nhận key trong hôm nay. Vui lòng thử lại sau 00:00 (GMT+7).";
   if (m === "SERVER_ERROR") return "Server bận. Vui lòng thử lại.";
@@ -217,6 +221,7 @@ export function FreeClaimPage() {
   const effectiveSessionId = resolvedSessionId || sessionId || "";
 
   const didRetryRef = useRef(false);
+  const revealInProgressRetryRef = useRef(0);
 
   function clearLegacyFreeKeys() {
     try {
@@ -243,6 +248,7 @@ export function FreeClaimPage() {
   // Reset the one-time retry guard when tokens change.
   useEffect(() => {
     didRetryRef.current = false;
+    revealInProgressRetryRef.current = 0;
   }, [claimToken, outToken]);
 
   // Canonical session_id: whenever we have out_token, resolve sid from backend.
@@ -351,10 +357,9 @@ export function FreeClaimPage() {
   }, [hasBareClaimKey, claimFromUrl, tokenSource, clearAllFreeStorage]);
 
   useEffect(() => {
-    // Tokenized free-key flow may arrive with claim_token only.
-    // Legacy flow still keeps out_token when available, but it is no longer mandatory here.
-    if (!claimToken || outToken || !debugMode) return;
-    setServerDebug((prev: any) => ({ ...(prev ?? {}), note: "TOKENIZED_CLAIM_NO_OUT_TOKEN" }));
+    if (!claimToken || outToken) return;
+    setError("Thiếu token bắt đầu. Bạn phải mở link Gate bằng đúng trình duyệt đã bấm Get Key.");
+    if (debugMode) setServerDebug((prev: any) => ({ ...(prev ?? {}), note: "CLAIM_BLOCKED_WITHOUT_OUT_TOKEN" }));
   }, [claimToken, outToken, debugMode]);
 
   useEffect(() => {
@@ -378,8 +383,9 @@ export function FreeClaimPage() {
   const canVerify = useMemo(() => {
     if (revealed) return false;
     if (!claimToken) return false;
+    if (!outToken) return false;
     return !loading;
-  }, [claimToken, revealed, loading]);
+  }, [claimToken, outToken, revealed, loading]);
 
   async function revealOnce(opts?: { forceSid?: string | null }) {
     if (!claimToken) return;
@@ -412,6 +418,13 @@ export function FreeClaimPage() {
       if (!res.ok) {
         const err = res as RevealErr;
         const code = String(err.code || err.msg || "").trim();
+
+        if (code === "REVEAL_IN_PROGRESS" && revealInProgressRetryRef.current < 8) {
+          revealInProgressRetryRef.current += 1;
+          setLoading(false);
+          window.setTimeout(() => void revealOnce({ forceSid: sid }), 650);
+          return;
+        }
 
         // If session not found, try to resolve session_id again and retry ONCE with the new sid.
         if (code === "SESSION_NOT_FOUND") {
@@ -475,7 +488,7 @@ export function FreeClaimPage() {
   }
 
   useEffect(() => {
-    if (!claimToken) return;
+    if (!claimToken || !outToken) return;
     if (revealed) return;
     void revealOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps

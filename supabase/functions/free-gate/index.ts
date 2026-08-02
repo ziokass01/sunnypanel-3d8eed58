@@ -128,11 +128,6 @@ function safeProviderError(error: unknown) {
     .slice(0, 300);
 }
 
-function shortlinkStrictProviderEnabled() {
-  // The Free Key flow must never bypass the configured shortener.
-  return true;
-}
-
 async function fetchProviderResponse(url: string, headers: Record<string, string>) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -426,14 +421,6 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   } catch (error) {
     const message = safeProviderError(error);
     failures.push(`provider-config: ${message}`);
-    if (!shortlinkStrictProviderEnabled()) {
-      return {
-        provider: { id: null, name: "Direct emergency fallback", provider: "none" },
-        outboundUrl: gateUrl,
-        degraded: true,
-        failures,
-      };
-    }
     throw error;
   }
 
@@ -451,17 +438,7 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
     }
   }
 
-  // Apply the same continuity rule to Pass 2. A failed shortener must not kill
-  // an otherwise valid session after the user has already completed Pass 1.
-  if (!shortlinkStrictProviderEnabled()) {
-    return {
-      provider: { id: null, name: "Direct emergency fallback", provider: "none" },
-      outboundUrl: gateUrl,
-      degraded: true,
-      failures,
-    };
-  }
-
+  // Fail closed: a provider error must never expose the gate URL directly.
   throw new Error(`ALL_SHORTLINK_PROVIDERS_FAILED${failures.length ? ` | ${failures.join(" | ")}` : ""}`);
 }
 
@@ -548,7 +525,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, code, msg: code, ...extra }, 200);
   }
 
-  // New tokenized gate flow: /free/gate?t=gt_xxx. No session/out token is required in URL.
+  // Tokenized gate flow: gate token comes from the URL; the matching start
+  // token must still be supplied from the same browser's protected flow state.
   if (gateToken) {
     const gateHash = await sha256Hex(gateToken);
     const tokenRes = await db.from("licenses_free_gate_tokens").select("*").eq("token_hash", gateHash).maybeSingle();
@@ -564,6 +542,12 @@ Deno.serve(async (req) => {
     if (session.closed_at || String(session.status ?? "").toLowerCase() === "closed") return await deny("SESSION_CLOSED");
     if (secondsUntil(session.expires_at) <= 0) return await deny("SESSION_EXPIRED");
 
+    // Both start token and single-use gate token must belong to this session.
+    if (!outToken) return await deny("OUT_TOKEN_REQUIRED");
+    const outHash = await sha256Hex(outToken);
+    const acceptedOutHashes = [text(session.out_token_hash, 128), text(session.out_token_hash_pass2, 128)].filter(Boolean);
+    if (!acceptedOutHashes.length || !acceptedOutHashes.includes(outHash)) return await deny("OUT_TOKEN_MISMATCH");
+
     const passNo = Number(gateRow.pass_no ?? passNoFromBody) === 2 ? 2 : 1;
     let requiresDoubleGate = Number(session.passes_required ?? 1) >= 2;
     if (!requiresDoubleGate && session.key_type_code) {
@@ -575,11 +559,13 @@ Deno.serve(async (req) => {
 
     const status = String(gateRow.status ?? "").toLowerCase();
     if (status !== "pending") {
-      const sessionStatus = String(session.status ?? "").toLowerCase();
-      const finalGateWasUsed = status === "used" && !(requiresDoubleGate && passNo === 1) && (sessionStatus === "gate_ok" || sessionStatus === "revealed");
-      if (finalGateWasUsed) {
-        const claimToken = await claimTokenForGate(gateToken, session.session_id);
-        return json({ ok: true, next: "CLAIM", session_id: session.session_id, claim_token: claimToken, claim_url: "/free/claim", replay: true }, 200);
+      if (status === "used" && String(gateRow.fail_reason ?? "") === "GTRAFFIC_EARLY_RETURN_FALLBACK") {
+        return json({
+          ok: false,
+          code: "GTRAFFIC_ROTATION_IN_PROGRESS",
+          msg: "GTRAFFIC_ROTATION_IN_PROGRESS",
+          retry_after_ms: 800,
+        }, 200);
       }
       return await deny(status === "burned_early" ? "GATE_TOKEN_BURNED" : status === "expired" ? "GATE_TOKEN_EXPIRED" : "GATE_TOKEN_ALREADY_USED", { token_status: status });
     }
@@ -766,68 +752,6 @@ Deno.serve(async (req) => {
     return json({ ok: true, next: "CLAIM", session_id: session.session_id, claim_token: claimToken, claim_url: "/free/claim", claim_expires_at: claimExpiresAt }, 200);
   }
 
-  // Legacy fallback for already-open old browser tabs. New flow should always use gate_token.
-  const passNo = passNoFromBody;
-  const sessionId = sessionIdFromBody;
-  if (!sessionId || !outToken) return await deny("INVALID_SESSION");
-  const outHash = await sha256Hex(outToken);
-  const { data: session, error: sessionError } = await db.from("licenses_free_sessions").select("*").eq("session_id", sessionId).maybeSingle();
-  if (sessionError) return await deny("SESSION_LOAD_FAILED", { detail: sessionError.message });
-  if (!session) return await deny("SESSION_NOT_FOUND");
-  baseLog.key_type_code = session.key_type_code ?? null;
-
-  if (session.closed_at || String(session.status ?? "").toLowerCase() === "closed") return await deny("SESSION_CLOSED");
-  if (session.revealed_at || String(session.status ?? "").toLowerCase() === "revealed") return await deny("ALREADY_REVEALED");
-  if (secondsUntil(session.expires_at) <= 0 || (session.out_expires_at && secondsUntil(session.out_expires_at) <= 0)) return await deny("SESSION_EXPIRED");
-  const acceptedOutHashes = [text(session.out_token_hash, 128), text(session.out_token_hash_pass2, 128)].filter(Boolean);
-  if (acceptedOutHashes.length && !acceptedOutHashes.includes(outHash)) return await deny("OUT_TOKEN_MISMATCH");
-
-  const requireIp = Boolean(cfg.free_gate_require_ip_match ?? false);
-  const requireUa = Boolean(cfg.free_gate_require_ua_match ?? false);
-  if (requireIp && text(session.ip_hash, 128) && text(session.ip_hash, 128) !== ipHash) return await deny("DEVICE_MISMATCH", { field: "ip" });
-  if (requireUa && text(session.ua_hash, 128) && text(session.ua_hash, 128) !== uaHash) return await deny("DEVICE_MISMATCH", { field: "ua" });
-  if (fpHash && text(session.fingerprint_hash, 128) && text(session.fingerprint_hash, 128) !== fpHash) return await deny("DEVICE_MISMATCH", { field: "fingerprint" });
-
-  const startedAtMs = Date.parse(String(passNo === 2 ? session.pass2_started_at ?? session.started_at ?? session.created_at : session.started_at ?? session.created_at ?? ""));
-  const requiredWait = Math.max(0, Number(passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) || 0, Boolean(cfg.free_gate_antibypass_enabled ?? false) ? Number(cfg.free_gate_antibypass_seconds ?? 0) || 0 : 0);
-  if (requiredWait > 0 && Number.isFinite(startedAtMs)) {
-    const elapsed = Math.floor((Date.now() - startedAtMs) / 1000);
-    if (elapsed < requiredWait) {
-      await updateSession(db, sessionId, { status: "closed", closed_at: new Date().toISOString(), out_expires_at: new Date().toISOString(), last_error: "GATE_TOO_EARLY" });
-      return await deny("GATE_TOO_EARLY", { wait_seconds: requiredWait - elapsed, required_seconds: requiredWait, elapsed_seconds: elapsed });
-    }
-  }
-
-  let requiresDoubleGate = false;
-  if (session.key_type_code) {
-    try {
-      const { data: keyType } = await db.from("licenses_free_key_types").select("requires_double_gate").eq("code", session.key_type_code).maybeSingle();
-      requiresDoubleGate = Boolean((keyType as any)?.requires_double_gate ?? false);
-    } catch { /* ignore */ }
-  }
-
-  if (requiresDoubleGate && passNo === 1) {
-    let next;
-    try { next = await createNextGateToken(db, cfg, session, 2, { ipHash, uaHash, fpHash }); }
-    catch (error) { return await deny("PASS2_SHORTLINK_FAILED", { detail: String((error as any)?.message ?? error) }); }
-    await updateSession(db, sessionId, { status: "waiting_pass2", passes_required: 2, passes_completed: 1, current_pass: 2, pass1_ok_at: new Date().toISOString(), gate_ok_at: new Date().toISOString(), provider_id_pass2: next.provider?.id ?? null, last_error: null });
-    return json({
-      ok: true,
-      next: "PASS2",
-      outbound_url: next.outboundUrl,
-      gate_url: next.gateUrl,
-      min_delay_seconds: next.delay,
-      gate_token_life_seconds: next.gateLifeSeconds,
-      shortlink_degraded: Boolean(next.degraded),
-      shortlink_failures: next.failures?.length ? next.failures : undefined,
-    }, 200);
-  }
-
-  const claimToken = randomToken("clm");
-  const claimHash = await sha256Hex(claimToken);
-  const claimWindowSeconds = clampSeconds(cfg.free_claim_window_seconds, 180, 30, 600);
-  const claimExpiresAt = minIsoDeadline(Date.now() + claimWindowSeconds * 1000, session.expires_at);
-  await updateSession(db, sessionId, { status: "gate_ok", gate_ok_at: new Date().toISOString(), claim_token_hash: claimHash, claim_expires_at: claimExpiresAt, last_error: null });
-  await logGate(db, { ...baseLog, event_code: "gate_ok_legacy", detail: { ...(baseLog.detail as any), next: "CLAIM" } });
-  return json({ ok: true, next: "CLAIM", session_id: sessionId, claim_token: claimToken, claim_url: "/free/claim", claim_expires_at: claimExpiresAt }, 200);
+  // Fail closed: out_token alone can never replace the single-use gate token.
+  return await deny("TOKENIZED_GATE_REQUIRED");
 });
