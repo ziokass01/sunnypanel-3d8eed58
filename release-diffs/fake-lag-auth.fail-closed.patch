@@ -1,0 +1,48 @@
+--- /mnt/data/_audit_latest/supabase/functions/fake-lag-auth/index.ts	2026-08-04 16:35:38.000000000 +0000
++++ /mnt/data/SunnyPanel_SERVER_RUNNING_SAFE_UPDATE_20260805/supabase/functions/fake-lag-auth/index.ts	2026-08-04 18:00:03.661252392 +0000
+@@ -575,27 +575,25 @@
+     const useGuard = await db.rpc("increment_fake_lag_license_use", { p_license_id: licRow.id, p_app_code: "fake-lag", p_ip_hash: ipHash });
+     guardRow = Array.isArray(useGuard.data) ? useGuard.data[0] : useGuard.data;
+     if (useGuard.error) {
+-      // Fallback cho trường hợp function RPC chưa deploy đúng, tránh đẩy app về SERVER_ERROR.
+-      const maxVerify = Math.max(1, Number(licRow.max_verify ?? 1));
+-      const currentVerify = Math.max(0, Number(licRow.verify_count ?? 0));
+-      if (currentVerify >= maxVerify) {
+-        if (!existingDevice.data && deviceRowId) {
+-          await db.from("license_devices").delete().eq("id", deviceRowId).eq("license_id", licRow.id);
+-        }
+-        await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "VERIFY_LIMIT_EXCEEDED", fallback: true } });
+-        return json({ ok: false, msg: "VERIFY_LIMIT_EXCEEDED" }, 200);
+-      }
+-      try {
+-        await db.from("license_ip_bindings").upsert({ license_id: licRow.id, app_code: "fake-lag", ip_hash: ipHash, last_seen_at: now.toISOString() }, { onConflict: "license_id,ip_hash" });
+-      } catch { /* best effort */ }
+-      const upd = await db.from("licenses").update({ verify_count: currentVerify + 1 }).eq("id", licRow.id).select("verify_count").maybeSingle();
+-      if (upd.error || !upd.data) {
+-        if (!existingDevice.data && deviceRowId) {
+-          await db.from("license_devices").delete().eq("id", deviceRowId).eq("license_id", licRow.id);
+-        }
+-        return json({ ok: false, msg: "SERVER_ERROR" }, 500);
++      // Quota is security-sensitive and must remain atomic. Never fall back to
++      // a stale read + plain update because concurrent logins could exceed the
++      // configured verify limit or overwrite a newer counter value.
++      if (!existingDevice.data && deviceRowId) {
++        await db.from("license_devices").delete().eq("id", deviceRowId).eq("license_id", licRow.id);
+       }
+-      guardRow = { ok: true, msg: "OK", verify_count: upd.data?.verify_count ?? currentVerify + 1, ip_count: null, fallback: true };
++      await db.from("audit_logs").insert({
++        action: "VERIFY",
++        license_key: key,
++        detail: {
++          ip,
++          device,
++          ok: false,
++          app_code: "fake-lag",
++          msg: "SERVER_ERROR",
++          reason: "FAKE_LAG_QUOTA_RPC_FAILED",
++        },
++      });
++      return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+     } else if (!guardRow?.ok) {
+       const msg = String(guardRow?.msg || "FAKE_LAG_RULE_BLOCKED");
+       if (!existingDevice.data && deviceRowId) {

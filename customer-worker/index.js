@@ -62,7 +62,17 @@ async function readBodyBytes(req, maxBytes) {
 
 async function checkRateLimit(env, bindingName, key) {
   const limiter = env?.[bindingName];
-  if (!limiter || typeof limiter.limit !== "function") return { configured: false, success: true };
+  if (!limiter || typeof limiter.limit !== "function") {
+    // Production must never silently lose DDoS protection because a binding
+    // was removed or the wrong wrangler config was deployed. Local testing may
+    // opt out explicitly with ALLOW_UNBOUND_RATE_LIMITS=1.
+    const allowUnbound = String(env?.ALLOW_UNBOUND_RATE_LIMITS ?? "").trim() === "1";
+    return {
+      configured: false,
+      success: allowUnbound,
+      unavailable: !allowUnbound,
+    };
+  }
   try {
     const result = await limiter.limit({ key });
     return { configured: true, success: Boolean(result?.success) };

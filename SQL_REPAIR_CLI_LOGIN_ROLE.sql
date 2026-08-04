@@ -1,9 +1,14 @@
--- CHỈ CHẠY MỘT LẦN trong Supabase Dashboard -> SQL Editor của project mới.
--- Dùng khi Supabase CLI báo:
---   Failed to create login role
---   role "postgres" is a member of role "cli_login_postgres"
---
--- Đây là role CLI bị sao chép sai khi restore/clone. Sau khi xóa, Supabase CLI
--- sẽ tự tạo lại role đúng ở lần `supabase link` hoặc `supabase db push` kế tiếp.
-
-DROP ROLE IF EXISTS cli_login_postgres;
+-- Run once in Supabase SQL Editor only when `supabase db push` fails with:
+-- role "postgres" is a member of role "cli_login_postgres"
+-- The Supabase CLI will recreate this transient login role correctly.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cli_login_postgres') THEN
+    EXECUTE 'REVOKE cli_login_postgres FROM postgres';
+    EXECUTE 'REVOKE postgres FROM cli_login_postgres';
+    EXECUTE 'REASSIGN OWNED BY cli_login_postgres TO postgres';
+    EXECUTE 'DROP OWNED BY cli_login_postgres';
+    EXECUTE 'DROP ROLE cli_login_postgres';
+  END IF;
+END
+$$;
