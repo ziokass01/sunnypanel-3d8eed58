@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       run_db_push:
-        description: "Run supabase db push"
+        description: "Run database migrations before deploying functions"
         required: false
-        default: "false"
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 permissions:
   contents: read
@@ -43,21 +47,36 @@ jobs:
           test -n "$SUPABASE_DB_PASSWORD" || { echo "::error::Missing SUPABASE_DB_PASSWORD"; exit 1; }
           test -n "$PROJECT_REF" || { echo "::error::Missing SUPABASE_PROJECT_REF"; exit 1; }
 
-      - name: Link project
-        run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
-      - name: Show migration list
-        run: supabase migration list
-
-      - name: Repair legacy migration markers 20260327 and 20260327120000
-        if: ${{ github.event.inputs.run_db_push == 'true' }}
+      - name: Link project using database-password authentication
+        shell: bash
         run: |
-          supabase migration repair --status reverted 20260327 || true
-          supabase migration repair --status reverted 20260327120000 || true
+          set -euo pipefail
+          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" \
+            supabase link \
+              --project-ref "$PROJECT_REF" \
+              --password "$SUPABASE_DB_PASSWORD"
 
-      - name: Push migrations
+      - name: Preview pending migrations
         if: ${{ github.event.inputs.run_db_push == 'true' }}
-        run: yes | supabase db push --include-all
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" \
+            supabase db push \
+              --linked \
+              --password "$SUPABASE_DB_PASSWORD" \
+              --dry-run
+
+      - name: Push pending migrations
+        if: ${{ github.event.inputs.run_db_push == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" \
+            supabase db push \
+              --linked \
+              --password "$SUPABASE_DB_PASSWORD" \
+              --yes
 
       - name: Configure function secrets before deploy
         shell: bash

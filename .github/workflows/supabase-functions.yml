@@ -1,4 +1,4 @@
-name: Deploy Supabase Edge Functions
+name: Deploy Supabase DB + Edge Functions
 
 on:
   push:
@@ -41,8 +41,34 @@ jobs:
           test -n "$SUPABASE_DB_PASSWORD" || { echo "::error::Missing SUPABASE_DB_PASSWORD"; exit 1; }
           test -n "$PROJECT_REF" || { echo "::error::Missing SUPABASE_PROJECT_REF"; exit 1; }
 
-      - name: Link project
-        run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+      - name: Link project using database-password authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" \
+            supabase link \
+              --project-ref "$PROJECT_REF" \
+              --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Preview pending migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" \
+            supabase db push \
+              --linked \
+              --password "$SUPABASE_DB_PASSWORD" \
+              --dry-run
+
+      - name: Push pending migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" \
+            supabase db push \
+              --linked \
+              --password "$SUPABASE_DB_PASSWORD" \
+              --yes
 
       - name: Configure function secrets before deploy
         shell: bash
