@@ -4,18 +4,39 @@ export type LicenseDeviceRow = {
   id: string;
   license_id: string;
   device_id: string;
+  device_name?: string | null;
   first_seen: string;
   last_seen: string;
+};
+
+export type LicenseIpBindingRow = {
+  id: string;
+  license_id: string;
+  app_code: string;
+  ip_hash: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  verify_count: number;
 };
 
 export async function fetchLicenseDevices(licenseId: string) {
   const { data, error } = await supabase
     .from("license_devices")
-    .select("id,license_id,device_id,first_seen,last_seen")
+    .select("id,license_id,device_id,device_name,first_seen,last_seen")
     .eq("license_id", licenseId)
     .order("last_seen", { ascending: false });
   if (error) throw error;
   return (data ?? []) as LicenseDeviceRow[];
+}
+
+export async function fetchLicenseIpBindings(licenseId: string) {
+  const { data, error } = await supabase
+    .from("license_ip_bindings" as any)
+    .select("id,license_id,app_code,ip_hash,first_seen_at,last_seen_at,verify_count")
+    .eq("license_id", licenseId)
+    .order("last_seen_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as LicenseIpBindingRow[];
 }
 
 export async function deleteLicenseDevice(deviceRowId: string) {

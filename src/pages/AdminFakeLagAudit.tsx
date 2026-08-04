@@ -59,7 +59,7 @@ async function fetchLicensesByIds(ids: string[]) {
   for (let i = 0; i < unique.length; i += 100) {
     const chunk = unique.slice(i, i + 100);
     const { data, error } = await (supabase.from("licenses") as any)
-      .select("id,key,is_active,deleted_at,expires_at,verify_count,max_verify,max_devices,note,created_at")
+      .select("id,key,is_active,deleted_at,expires_at,verify_count,max_verify,max_devices,max_ips,note,created_at")
       .in("id", chunk);
     if (error) throw error;
     (data ?? []).forEach((row: any) => byId.set(String(row.id), row));
@@ -109,11 +109,35 @@ export function AdminFakeLagAuditPage() {
         .map((row: any) => String(row.license_id || "").trim())
         .filter(Boolean);
       const licenseById = await fetchLicensesByIds(licenseIds);
+      const uniqueLicenseIds = Array.from(new Set(licenseIds));
+
+      const deviceCountByLicense = new Map<string, number>();
+      const ipCountByLicense = new Map<string, number>();
+      for (let i = 0; i < uniqueLicenseIds.length; i += 100) {
+        const chunk = uniqueLicenseIds.slice(i, i + 100);
+        if (!chunk.length) continue;
+        const [devicesRes, ipsRes] = await Promise.all([
+          (supabase.from("license_devices") as any).select("license_id").in("license_id", chunk),
+          (supabase.from("license_ip_bindings") as any).select("license_id").in("license_id", chunk),
+        ]);
+        if (devicesRes.error) throw devicesRes.error;
+        if (ipsRes.error) throw ipsRes.error;
+        (devicesRes.data ?? []).forEach((item: any) => {
+          const id = String(item.license_id);
+          deviceCountByLicense.set(id, (deviceCountByLicense.get(id) ?? 0) + 1);
+        });
+        (ipsRes.data ?? []).forEach((item: any) => {
+          const id = String(item.license_id);
+          ipCountByLicense.set(id, (ipCountByLicense.get(id) ?? 0) + 1);
+        });
+      }
 
       const issues = issueRows
         .map((row: any) => {
           const license = row.license_id ? licenseById.get(String(row.license_id)) : null;
-          const displayKey = String(row.key_mask || license?.key || "").trim();
+          // licenses.key is authoritative. key_mask is a historical snapshot and
+          // may be stale after old migrations/imports.
+          const displayKey = String(license?.key || row.key_mask || "").trim();
           return {
             ...row,
             license,
@@ -122,6 +146,8 @@ export function AdminFakeLagAuditPage() {
             license_note: license?.note ?? null,
             license_verify: license?.verify_count ?? null,
             license_max_verify: license?.max_verify ?? null,
+            license_device_count: row.license_id ? (deviceCountByLicense.get(String(row.license_id)) ?? 0) : 0,
+            license_ip_count: row.license_id ? (ipCountByLicense.get(String(row.license_id)) ?? 0) : 0,
           };
         })
         .filter((row: any) => includesNeedle({
@@ -269,6 +295,8 @@ export function AdminFakeLagAuditPage() {
                         <TableCell>
                           <Badge variant={row.license_status === "active" ? "secondary" : "destructive" as any}>{row.license_status}</Badge>
                           <div className="mt-1 text-xs text-muted-foreground">Verify {row.license_verify ?? 0}/{row.license_max_verify ?? 1}</div>
+                          <div className="text-xs text-muted-foreground">Device {row.license_device_count ?? 0}/{row.license?.max_devices ?? 1}</div>
+                          <div className="text-xs text-muted-foreground">IP {row.license_ip_count ?? 0}/{row.license?.max_ips ?? 1}</div>
                         </TableCell>
                         <TableCell>{fmt(row.expires_at || row.license?.expires_at)}</TableCell>
                         <TableCell>

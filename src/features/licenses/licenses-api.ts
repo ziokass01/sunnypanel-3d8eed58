@@ -21,6 +21,9 @@ export type LicenseRow = {
   duration_seconds?: number | null;
   activated_at?: string | null;
   max_devices: number;
+  max_ips?: number | null;
+  max_verify?: number | null;
+  verify_count?: number | null;
   is_active: boolean;
   public_reset_disabled?: boolean;
   note: string | null;
@@ -36,7 +39,7 @@ export type LicenseDeviceRow = {
   last_seen: string;
 };
 
-export { fetchLicenseDevices, deleteLicenseDevice, resetLicenseDevices, resetLicenseDevicesPenalty } from "./licenses-devices-api";
+export { fetchLicenseDevices, fetchLicenseIpBindings, deleteLicenseDevice, resetLicenseDevices, resetLicenseDevicesPenalty } from "./licenses-devices-api";
 
 // Note: backend schema evolved (deleted_at). Types file may lag, so we intentionally loosen typing here.
 const licensesTable = "licenses" as any;
@@ -65,7 +68,7 @@ export async function fetchLicenses(params: {
       "id,key,created_at,expires_at," +
         "start_on_first_use,duration_days,first_used_at," +
         "starts_on_first_use,duration_seconds,activated_at," +
-        "max_devices,is_active,public_reset_disabled,note,deleted_at,app_code",
+        "max_devices,max_ips,max_verify,verify_count,is_active,public_reset_disabled,note,deleted_at,app_code",
     )
     .is("deleted_at", null)
     .not("key", "ilike", "FAKELAG-%")
@@ -105,7 +108,7 @@ export async function fetchLicense(id: string) {
       "id,key,created_at,expires_at," +
         "start_on_first_use,duration_days,first_used_at," +
         "starts_on_first_use,duration_seconds,activated_at," +
-        "max_devices,is_active,public_reset_disabled,note,deleted_at",
+        "max_devices,max_ips,max_verify,verify_count,is_active,public_reset_disabled,note,deleted_at,app_code",
     )
     .eq("id", id)
     .is("deleted_at", null)

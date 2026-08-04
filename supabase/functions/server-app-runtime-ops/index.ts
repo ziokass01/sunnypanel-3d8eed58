@@ -72,7 +72,9 @@ async function assertOpsAdmin(req: Request): Promise<{ ok: true } | { ok: false;
   const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS") ?? Deno.env.get("ADMIN_EMAIL") ?? Deno.env.get("ADMIN_MAIL") ?? Deno.env.get("ADMIN_EMAIL_SECRET"));
   const userEmail = String(user.email ?? "").toLowerCase();
   const emailAllowed = userEmail ? adminEmails.has(userEmail) : false;
-  const metadataAdmin = user.user_metadata?.is_admin === true || user.app_metadata?.is_admin === true || user.app_metadata?.panel_role === "admin";
+  // user_metadata is user-editable; only app_metadata/server-side role checks
+  // are allowed to elevate an account to operations admin.
+  const metadataAdmin = user.app_metadata?.is_admin === true || user.app_metadata?.panel_role === "admin";
   const roleCheck = await authed.rpc("has_role", { _user_id: user.id, _role: "admin" });
   let roleAllowed = !roleCheck.error && roleCheck.data === true;
 

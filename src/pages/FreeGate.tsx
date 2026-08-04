@@ -172,7 +172,7 @@ export function FreeGatePage() {
   async function gateOnce(rotationRetry = 0) {
     const tok = outToken;
     const gateTok = gateTokenFromQuery;
-    let sid = effectiveSessionId;
+    const sid = effectiveSessionId;
 
     // Both tokens are mandatory: the start token in browser storage and the
     // single-use gate token in /free/gate?t=gt_.... Neither can replace the other.

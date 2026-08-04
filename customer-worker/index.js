@@ -34,7 +34,6 @@ async function readBodyBytes(req, maxBytes) {
       throw new PayloadTooLargeError();
     }
   }
-
   if (!req.body) return new ArrayBuffer(0);
 
   const reader = req.body.getReader();
@@ -63,9 +62,7 @@ async function readBodyBytes(req, maxBytes) {
 
 async function checkRateLimit(env, bindingName, key) {
   const limiter = env?.[bindingName];
-  if (!limiter || typeof limiter.limit !== "function") {
-    return { configured: false, success: true };
-  }
+  if (!limiter || typeof limiter.limit !== "function") return { configured: false, success: true };
   try {
     const result = await limiter.limit({ key });
     return { configured: true, success: Boolean(result?.success) };
@@ -292,20 +289,22 @@ export default {
       return json({ ok: false, code: "FUNCTION_NOT_ALLOWED", function_name: fnName }, 403, origin, env);
     }
 
+    const realIp = String(req.headers.get("CF-Connecting-IP") || "").trim();
+    if (!realIp) return json({ ok: false, msg: "GATEWAY_REQUIRED" }, 403, origin, env);
+    const apiRateLimit = await checkRateLimit(env, "API_RATE_LIMITER", `${realIp}:api`);
+    if (!apiRateLimit.success) {
+      if (apiRateLimit.unavailable) return json({ ok: false, msg: "SERVER_ERROR" }, 503, origin, env);
+      return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+    }
+
     if (fnName === "verify-key" && req.method !== "POST") {
       return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
     if (fnName === "verify-key") {
-      const realIp = String(req.headers.get("CF-Connecting-IP") || "").trim();
-      if (!realIp) {
-        return json({ ok: false, msg: "GATEWAY_REQUIRED" }, 403, origin, env);
-      }
       const rateLimit = await checkRateLimit(env, "VERIFY_RATE_LIMITER", `${realIp}:verify-key`);
       if (!rateLimit.success) {
-        if (rateLimit.unavailable) {
-          return json({ ok: false, msg: "SERVER_ERROR" }, 503, origin, env);
-        }
+        if (rateLimit.unavailable) return json({ ok: false, msg: "SERVER_ERROR" }, 503, origin, env);
         return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
       }
     }
@@ -322,48 +321,8 @@ export default {
     try {
       upstream = await forwardRequest(req, upstreamUrl, env, fnName);
     } catch (error) {
-      if (error instanceof PayloadTooLargeError) {
-        return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env);
-      }
-
-      const errorName = String(error?.name || "Error");
-      const errorMessage = String(
-        error?.message || error || "Unknown upstream error"
-      ).slice(0, 300);
-
-      let upstreamHost = "invalid";
-      try {
-        upstreamHost = new URL(upstreamUrl).host;
-      } catch {
-        upstreamHost = "invalid";
-      }
-
-      console.error(JSON.stringify({
-        event: "UPSTREAM_FETCH_FAILED",
-        function_name: fnName,
-        upstream_host: upstreamHost,
-        error_name: errorName,
-        error_message: errorMessage,
-      }));
-
-      const isUpstreamTimeout =
-        error?.name === "AbortError" ||
-        error?.name === "TimeoutError" ||
-        error?.message === "UPSTREAM_TIMEOUT";
-
-      if (isUpstreamTimeout) {
-        return json(
-          {
-            ok: false,
-            code: "UPSTREAM_TIMEOUT",
-            msg: "Upstream request timed out"
-          },
-          504,
-          origin,
-          env
-        );
-      }
-
+      if (error instanceof PayloadTooLargeError) return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env);
+      if (error?.name === "AbortError") return json({ ok: false, code: "UPSTREAM_TIMEOUT", msg: "Upstream request timed out" }, 504, origin, env);
       return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: "Upstream request failed" }, 502, origin, env);
     }
 

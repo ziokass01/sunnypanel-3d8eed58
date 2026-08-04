@@ -259,7 +259,9 @@ async function checkVersionPolicy(db: any, input: any) {
       device_id: safeText(input?.device, 128) || null,
       meta: { source: "fake-lag-auth", strict: true, result: { allowed: !(hardBlocked || updateRequired), update_required: updateRequired, hard_blocked: hardBlocked, reason }, apk_sha256: apkSha256 || null, so_sha256: soSha256 || null, dex_crc: dexCrc || null, integrity_mix: safeText(input?.integrity_mix, 64) || null },
     });
-  } catch {}
+  } catch {
+    // Version audit is best-effort and must not change the policy decision.
+  }
 
   return {
     allowed: !(hardBlocked || updateRequired),
@@ -359,7 +361,9 @@ async function recordRiskAndMaybeBlock(db: any, args: {
       license_key: args.key || null,
       detail,
     });
-  } catch {}
+  } catch {
+    // Runtime risk audit is best-effort; blocking logic continues below.
+  }
 
   if (!policy.enabled) return { blocked: false, hit_count: 1 };
 
@@ -495,9 +499,12 @@ Deno.serve(async (req) => {
 
   try {
     const ipRl = await db.rpc("check_ip_rate_limit", { p_ip: ip, p_limit: 180, p_window_seconds: 60 });
-    const allowed = ipRl.error ? true : Boolean(ipRl.data?.[0]?.allowed);
+    if (ipRl.error) return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+    const allowed = Boolean(ipRl.data?.[0]?.allowed);
     if (!allowed) return json({ ok: false, msg: "RATE_LIMIT" }, 200);
-  } catch {}
+  } catch {
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
 
   const lic = await db
     .from("licenses")
@@ -522,7 +529,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "KEY_BLOCKED" }, 200);
   }
 
-  const startsOnFirstUse = Boolean(licRow.start_on_first_use ?? licRow.starts_on_first_use);
+  const startsOnFirstUse = Boolean(licRow.start_on_first_use || licRow.starts_on_first_use);
   const firstUsedAt: string | null = licRow.first_used_at ?? licRow.activated_at ?? null;
   const durationSecondsRaw = Number(licRow.duration_seconds ?? 0);
   const durationDaysRaw = Number(licRow.duration_days ?? 0);
@@ -572,6 +579,9 @@ Deno.serve(async (req) => {
       const maxVerify = Math.max(1, Number(licRow.max_verify ?? 1));
       const currentVerify = Math.max(0, Number(licRow.verify_count ?? 0));
       if (currentVerify >= maxVerify) {
+        if (!existingDevice.data && deviceRowId) {
+          await db.from("license_devices").delete().eq("id", deviceRowId).eq("license_id", licRow.id);
+        }
         await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg: "VERIFY_LIMIT_EXCEEDED", fallback: true } });
         return json({ ok: false, msg: "VERIFY_LIMIT_EXCEEDED" }, 200);
       }
@@ -579,9 +589,18 @@ Deno.serve(async (req) => {
         await db.from("license_ip_bindings").upsert({ license_id: licRow.id, app_code: "fake-lag", ip_hash: ipHash, last_seen_at: now.toISOString() }, { onConflict: "license_id,ip_hash" });
       } catch { /* best effort */ }
       const upd = await db.from("licenses").update({ verify_count: currentVerify + 1 }).eq("id", licRow.id).select("verify_count").maybeSingle();
+      if (upd.error || !upd.data) {
+        if (!existingDevice.data && deviceRowId) {
+          await db.from("license_devices").delete().eq("id", deviceRowId).eq("license_id", licRow.id);
+        }
+        return json({ ok: false, msg: "SERVER_ERROR" }, 500);
+      }
       guardRow = { ok: true, msg: "OK", verify_count: upd.data?.verify_count ?? currentVerify + 1, ip_count: null, fallback: true };
     } else if (!guardRow?.ok) {
       const msg = String(guardRow?.msg || "FAKE_LAG_RULE_BLOCKED");
+      if (!existingDevice.data && deviceRowId) {
+        await db.from("license_devices").delete().eq("id", deviceRowId).eq("license_id", licRow.id);
+      }
       await db.from("audit_logs").insert({ action: "VERIFY", license_key: key, detail: { ip, device, ok: false, app_code: "fake-lag", msg } });
       return json({ ok: false, msg }, 200);
     }

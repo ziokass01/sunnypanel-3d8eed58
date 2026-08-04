@@ -139,7 +139,7 @@ function statusOf(row: FakeLagLicenseRow) {
   if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return "Expired";
   return "Active";
 }
-function isFirstUse(row: FakeLagLicenseRow) { return Boolean(row.start_on_first_use ?? row.starts_on_first_use); }
+function isFirstUse(row: FakeLagLicenseRow) { return Boolean(row.start_on_first_use || row.starts_on_first_use); }
 function firstUsedAt(row: FakeLagLicenseRow) { return row.first_used_at ?? row.activated_at ?? null; }
 function remainingText(row: FakeLagLicenseRow) {
   if (isFirstUse(row) && !firstUsedAt(row)) {
@@ -153,7 +153,11 @@ function remainingText(row: FakeLagLicenseRow) {
   return days ? `${days}d ${hours}h` : `${hours}h ${mins%60}m`;
 }
 async function logAudit(action: string, key: string, detail: Record<string, unknown>) {
-  try { await supabase.rpc("log_audit", { p_action: action, p_license_key: key, p_detail: detail as any }); } catch {}
+  try {
+    await supabase.rpc("log_audit", { p_action: action, p_license_key: key, p_detail: detail as any });
+  } catch {
+    // Audit logging is best-effort and must not block the requested admin action.
+  }
 }
 
 export function AdminFakeLagLicensesPage() {
@@ -237,12 +241,16 @@ export function AdminFakeLagLicensesPage() {
       if (!keyRe.test(key)) throw new Error(`Key phải đúng dạng ${safePrefix}-XXXX-XXXX-XXXX`);
       const firstUse = form.licenseType === "first_use";
       const durationSeconds = firstUse ? durationToSeconds(form.durationValue, form.durationUnit) : null;
+      const expiresAt = firstUse ? null : localToIso(form.expiresAt);
+      if (!firstUse && (!expiresAt || new Date(expiresAt).getTime() <= Date.now())) {
+        throw new Error("Ngày hết hạn phải lớn hơn thời điểm hiện tại.");
+      }
       const patch: Record<string, unknown> = {
         key,
         app_code: APP_CODE,
         is_active: Boolean(form.isActive),
-        max_devices: 1,
-        max_ips: null,
+        max_devices: Math.max(1, Math.trunc(Number(form.maxDevices) || 1)),
+        max_ips: Math.max(1, Math.trunc(Number(form.maxIps) || 1)),
         max_verify: Math.max(1, Math.trunc(Number(form.maxVerify) || 1)),
         public_reset_disabled: Boolean(form.publicResetDisabled),
         note: form.note.trim() || null,
@@ -256,7 +264,7 @@ export function AdminFakeLagLicensesPage() {
         patch.first_used_at = null;
         patch.activated_at = null;
       } else {
-        patch.expires_at = localToIso(form.expiresAt);
+        patch.expires_at = expiresAt;
         patch.first_used_at = null;
         patch.activated_at = null;
         patch.duration_seconds = null;
@@ -369,7 +377,7 @@ export function AdminFakeLagLicensesPage() {
           <CardHeader>
             <CardTitle>{form.id ? "Edit Fake Lag key" : "Create Fake Lag key"}</CardTitle>
             <CardDescription>
-              Mặc định lấy từ Server key Fake Lag: thời hạn và lượt verify {ruleDefaults.maxVerify}. Giới hạn IP/thiết bị chỉ dùng cho trang vượt key public, không áp vào từng license.
+              Mỗi giới hạn được lưu độc lập: thiết bị, IP và lượt verify không tự ghi đè lẫn nhau.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -381,13 +389,15 @@ export function AdminFakeLagLicensesPage() {
               <div className="flex items-end"><Button type="button" variant="soft" onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>Generate</Button></div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <div className="space-y-2"><Label>Loại key</Label><Select value={form.licenseType} onValueChange={v => setForm(p => ({...p, licenseType: v === "first_use" ? "first_use" : "fixed"}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="fixed">Hết hạn cố định</SelectItem><SelectItem value="first_use">Đếm từ lần dùng đầu</SelectItem></SelectContent></Select></div>
               {form.licenseType === "fixed" ? <div className="space-y-2"><Label>Hết hạn lúc</Label><Input type="datetime-local" value={form.expiresAt} onChange={e => setForm(p => ({...p, expiresAt: e.target.value}))}/></div> : <>
                 <div className="space-y-2"><Label>Thời lượng</Label><Input type="number" min={1} value={form.durationValue} onChange={e => setForm(p => ({...p, durationValue: Number(e.target.value || 1)}))}/></div>
                 <div className="space-y-2"><Label>Đơn vị</Label><Select value={form.durationUnit} onValueChange={v => setForm(p => ({...p, durationUnit: v as any}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="minutes">Phút</SelectItem><SelectItem value="hours">Giờ</SelectItem><SelectItem value="days">Ngày</SelectItem></SelectContent></Select></div>
               </>}
               <div className="space-y-2"><Label>Lượt dùng / verify</Label><Input type="number" min={1} value={form.maxVerify} onChange={e => setForm(p => ({...p, maxVerify: Number(e.target.value || 1)}))}/></div>
+              <div className="space-y-2"><Label>Thiết bị tối đa</Label><Input type="number" min={1} value={form.maxDevices} onChange={e => setForm(p => ({...p, maxDevices: Number(e.target.value || 1)}))}/></div>
+              <div className="space-y-2"><Label>IP tối đa</Label><Input type="number" min={1} value={form.maxIps} onChange={e => setForm(p => ({...p, maxIps: Number(e.target.value || 1)}))}/></div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -413,14 +423,14 @@ export function AdminFakeLagLicensesPage() {
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-2xl border">
-            <Table><TableHeader><TableRow><TableHead>Key</TableHead><TableHead>Status</TableHead><TableHead>Hạn còn lại</TableHead><TableHead>Lượt dùng</TableHead><TableHead>Action</TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Key</TableHead><TableHead>Status</TableHead><TableHead>Hạn còn lại</TableHead><TableHead>Thiết bị / IP / Verify</TableHead><TableHead>Action</TableHead></TableRow></TableHeader>
               <TableBody>
                 {(licensesQuery.data ?? []).map(row => (
                   <TableRow key={row.id}>
                     <TableCell><div className="font-mono text-xs break-all">{row.key}</div><div className="mt-1 text-xs text-muted-foreground">Tạo: {formatVn(row.created_at)}</div>{row.note ? <div className="mt-1 max-w-xs truncate text-xs text-muted-foreground">{row.note}</div> : null}</TableCell>
                     <TableCell><Badge variant={statusOf(row) === "Active" ? "secondary" : statusOf(row) === "Blocked" ? "destructive" as any : "outline"}>{statusOf(row)}</Badge></TableCell>
                     <TableCell><div className="text-sm">{remainingText(row)}</div><div className="text-xs text-muted-foreground">Exp: {formatVn(row.expires_at)}</div></TableCell>
-                    <TableCell className="text-sm"><div>{row.verify_count ?? 0} / {row.max_verify ?? 1}</div><div className="text-xs text-muted-foreground">Hết lượt thì key bị giới hạn</div></TableCell>
+                    <TableCell className="text-sm"><div>Thiết bị tối đa: {row.max_devices ?? 1}</div><div>IP tối đa: {row.max_ips ?? 1}</div><div>Verify: {row.verify_count ?? 0} / {row.max_verify ?? 1}</div></TableCell>
                     <TableCell><div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="soft" onClick={() => startEdit(row)}><Edit3 className="mr-1 h-3.5 w-3.5"/>Edit</Button>
                       <Button size="sm" variant="soft" onClick={() => toggleBlockMutation.mutate(row)}>{row.is_active ? <ShieldOff className="mr-1 h-3.5 w-3.5"/> : <ShieldCheck className="mr-1 h-3.5 w-3.5"/>}{row.is_active ? "Block" : "Unlock"}</Button>

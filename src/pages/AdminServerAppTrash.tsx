@@ -137,7 +137,9 @@ function FakeLagLicenseTrashPage() {
         .update({ deleted_at: null, is_active: true })
         .eq("id", row.id);
       if (error) throw error;
-      try { await supabase.rpc("log_audit", { p_action: "FAKE_LAG_RESTORE", p_license_key: row.key, p_detail: { app_code: "fake-lag", license_id: row.id } as any }); } catch {}
+      try { await supabase.rpc("log_audit", { p_action: "FAKE_LAG_RESTORE", p_license_key: row.key, p_detail: { app_code: "fake-lag", license_id: row.id } as any }); } catch {
+        // Audit logging is best-effort; the restore itself already succeeded.
+      }
     },
     onSuccess: async () => {
       toast({ title: "Đã khôi phục key", description: "Key đã quay lại tab Licenses và được mở lại trạng thái Active." });
@@ -151,7 +153,9 @@ function FakeLagLicenseTrashPage() {
     mutationFn: async (row: FakeLagTrashLicenseRow) => {
       const { error } = await (supabase.from("licenses") as any).delete().eq("id", row.id);
       if (error) throw error;
-      try { await supabase.rpc("log_audit", { p_action: "FAKE_LAG_HARD_DELETE", p_license_key: row.key, p_detail: { app_code: "fake-lag", license_id: row.id } as any }); } catch {}
+      try { await supabase.rpc("log_audit", { p_action: "FAKE_LAG_HARD_DELETE", p_license_key: row.key, p_detail: { app_code: "fake-lag", license_id: row.id } as any }); } catch {
+        // Audit logging is best-effort; the hard delete itself already succeeded.
+      }
     },
     onSuccess: async () => {
       toast({ title: "Đã xóa vĩnh viễn key", description: "Key đã bị xóa hẳn khỏi database." });
@@ -256,7 +260,6 @@ function FakeLagLicenseTrashPage() {
 
 export function AdminServerAppTrashPage() {
   const { appCode = "find-dumps" } = useParams();
-  if (appCode === "fake-lag") return <FakeLagLicenseTrashPage />;
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
@@ -330,6 +333,8 @@ export function AdminServerAppTrashPage() {
       toast({ title: "Xóa vĩnh viễn thất bại", description: formatMutationError(e), variant: "destructive" });
     },
   });
+
+  if (appCode === "fake-lag") return <FakeLagLicenseTrashPage />;
 
   return (
     <section className="space-y-4">

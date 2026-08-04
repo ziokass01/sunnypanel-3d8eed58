@@ -27,6 +27,7 @@ import {
   deleteLicenseDevice,
   fetchLicense,
   fetchLicenseDevices,
+  fetchLicenseIpBindings,
   reactivateOrRenewLicense,
   resetLicenseDevicesPenalty,
   softDeleteLicense,
@@ -49,7 +50,7 @@ function computeStatus(lic: {
 }) {
   if (lic.deleted_at) return { label: "DELETED", variant: "secondary" as const };
   if (!lic.is_active) return { label: "BLOCKED", variant: "destructive" as const };
-  const startOnFirstUse = Boolean(lic.start_on_first_use ?? lic.starts_on_first_use);
+  const startOnFirstUse = Boolean(lic.start_on_first_use || lic.starts_on_first_use);
   const firstUsedAt = lic.first_used_at ?? lic.activated_at ?? null;
   if (startOnFirstUse && !firstUsedAt) return { label: "Not started", variant: "outline" as const };
   if (lic.expires_at && new Date(lic.expires_at).getTime() < Date.now()) return { label: "EXPIRED", variant: "outline" as const };
@@ -89,6 +90,12 @@ export function LicenseDetailPage() {
     queryKey: ["license_devices", licenseId],
     queryFn: () => fetchLicenseDevices(licenseId),
     enabled: Boolean(licenseId),
+  });
+
+  const ipBindingsQuery = useQuery({
+    queryKey: ["license_ip_bindings", licenseId],
+    queryFn: () => fetchLicenseIpBindings(licenseId),
+    enabled: Boolean(licenseId) && isAdmin,
   });
 
   const currentDevicesCount = devicesQuery.data?.length ?? 0;
@@ -157,7 +164,7 @@ export function LicenseDetailPage() {
 
   const reactivateMutation = useMutation({
     mutationFn: async () => {
-      const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
+      const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use || (licQuery.data as any)?.starts_on_first_use);
       const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
 
       const expires_at = reactivateExpiresLocal ? localToIso(reactivateExpiresLocal) : null;
@@ -283,7 +290,7 @@ export function LicenseDetailPage() {
             </Button>
           ) : null}
 
-          {Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use) ? (
+          {Boolean((licQuery.data as any)?.start_on_first_use || (licQuery.data as any)?.starts_on_first_use) ? (
             <Button variant="soft" onClick={() => setResetActivationOpen(true)} disabled={!licQuery.data}>
               Reset activation
             </Button>
@@ -367,7 +374,7 @@ export function LicenseDetailPage() {
                   <div className="text-xs text-muted-foreground">Expires</div>
                   <div className="text-sm">
                     {(() => {
-                      const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
+                      const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use || (licQuery.data as any).starts_on_first_use);
                       const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
                       if (startOnFirstUse && !firstUsedAt) return "Not started";
                       if (!licQuery.data.expires_at) return startOnFirstUse ? "—" : "Never expires";
@@ -379,13 +386,13 @@ export function LicenseDetailPage() {
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Type</div>
                   <div className="text-sm">
-                    {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use)
+                    {Boolean((licQuery.data as any).start_on_first_use || (licQuery.data as any).starts_on_first_use)
                       ? "Countdown"
                       : "Fixed"}
                   </div>
                 </div>
 
-                {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
+                {Boolean((licQuery.data as any).start_on_first_use || (licQuery.data as any).starts_on_first_use) ? (
                   <div className="space-y-1">
                     <div className="text-xs text-muted-foreground">Duration</div>
                     <div className="text-sm">{formatDurationSecondsOrDays(licQuery.data)}</div>
@@ -396,7 +403,7 @@ export function LicenseDetailPage() {
                   <div className="text-xs text-muted-foreground">Remaining time</div>
                   <div className="text-sm">
                     {(() => {
-                      const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
+                      const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use || (licQuery.data as any).starts_on_first_use);
                       const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
                       const badState = startOnFirstUse && Boolean(firstUsedAt) && !licQuery.data.expires_at;
                       if (startOnFirstUse && !firstUsedAt) return `Not started • ${formatDurationSecondsOrDays(licQuery.data)}`;
@@ -408,7 +415,7 @@ export function LicenseDetailPage() {
                 </div>
 
                 {(() => {
-                  const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use);
+                  const startOnFirstUse = Boolean((licQuery.data as any).start_on_first_use || (licQuery.data as any).starts_on_first_use);
                   const firstUsedAt = (licQuery.data as any).first_used_at ?? (licQuery.data as any).activated_at ?? null;
                   const badState = startOnFirstUse && Boolean(firstUsedAt) && !licQuery.data.expires_at;
                   if (!badState) return null;
@@ -429,7 +436,7 @@ export function LicenseDetailPage() {
                   <div className="text-sm">{licQuery.data.is_active ? "Yes" : "No"}</div>
                 </div>
 
-                {Boolean((licQuery.data as any).start_on_first_use ?? (licQuery.data as any).starts_on_first_use) ? (
+                {Boolean((licQuery.data as any).start_on_first_use || (licQuery.data as any).starts_on_first_use) ? (
                   <div className="space-y-1">
                     <div className="text-xs text-muted-foreground">First used at</div>
                     <div className="text-sm">
@@ -444,6 +451,19 @@ export function LicenseDetailPage() {
                   <div className="text-xs text-muted-foreground">Devices</div>
                   <div className="text-sm">{currentDevicesCount}</div>
                 </div>
+
+                {isAdmin ? (
+                  <>
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">IP bindings</div>
+                      <div className="text-sm">{ipBindingsQuery.data?.length ?? 0} / {licQuery.data.max_ips ?? "—"}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">Verify count</div>
+                      <div className="text-sm">{licQuery.data.verify_count ?? 0} / {licQuery.data.max_verify ?? "—"}</div>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               <Separator />
@@ -511,7 +531,10 @@ export function LicenseDetailPage() {
                     ) : (
                       (devicesQuery.data ?? []).map((d) => (
                         <TableRow key={d.id}>
-                          <TableCell className="font-mono text-xs md:text-sm break-all">{d.device_id}</TableCell>
+                          <TableCell className="text-xs md:text-sm break-all">
+                            <div className="font-mono">{d.device_id}</div>
+                            {d.device_name ? <div className="mt-1 text-muted-foreground">{d.device_name}</div> : null}
+                          </TableCell>
                           <TableCell className="hidden md:table-cell text-sm">{new Date(d.first_seen).toLocaleString()}</TableCell>
                           <TableCell className="hidden md:table-cell text-sm">{new Date(d.last_seen).toLocaleString()}</TableCell>
                           <TableCell className="text-right">
@@ -534,6 +557,33 @@ export function LicenseDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {isAdmin ? (
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <CardTitle className="text-base">IP bindings</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {ipBindingsQuery.error ? <div className="text-sm text-destructive">{String(ipBindingsQuery.error)}</div> : null}
+                <div className="rounded-lg border">
+                  <Table>
+                    <TableHeader><TableRow><TableHead>IP hash</TableHead><TableHead>Verify</TableHead><TableHead>First seen</TableHead><TableHead>Last seen</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {(ipBindingsQuery.data ?? []).map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-xs break-all">{row.ip_hash}</TableCell>
+                          <TableCell>{row.verify_count}</TableCell>
+                          <TableCell>{new Date(row.first_seen_at).toLocaleString()}</TableCell>
+                          <TableCell>{new Date(row.last_seen_at).toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                      {!ipBindingsQuery.isLoading && !(ipBindingsQuery.data ?? []).length ? <TableRow><TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">No IP bindings yet.</TableCell></TableRow> : null}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       ) : null}
 
@@ -619,7 +669,7 @@ export function LicenseDetailPage() {
                 onChange={(e) => setReactivateExpiresLocal(e.target.value)}
               />
               {(() => {
-                const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
+                const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use || (licQuery.data as any)?.starts_on_first_use);
                 const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
                 if (!startOnFirstUse) return <div className="text-xs text-muted-foreground">Optional. Leave empty = Never expires.</div>;
                 if (!firstUsedAt) return <div className="text-xs text-muted-foreground">Countdown: expires_at will be set automatically on first verify.</div>;
@@ -642,7 +692,7 @@ export function LicenseDetailPage() {
               onClick={() => reactivateMutation.mutate()}
               disabled={(() => {
                 if (reactivateMutation.isPending) return true;
-                const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use ?? (licQuery.data as any)?.starts_on_first_use);
+                const startOnFirstUse = Boolean((licQuery.data as any)?.start_on_first_use || (licQuery.data as any)?.starts_on_first_use);
                 const firstUsedAt = (licQuery.data as any)?.first_used_at ?? (licQuery.data as any)?.activated_at ?? null;
                 if (startOnFirstUse && firstUsedAt && !reactivateExpiresLocal) return true;
                 return false;

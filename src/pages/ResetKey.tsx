@@ -30,6 +30,10 @@ type ResetKeyPayload = {
   http_status?: number;
   device_count?: number;
   max_devices?: number;
+  ip_count?: number;
+  max_ips?: number;
+  verify_count?: number;
+  max_verify?: number;
   admin_reset_count?: number;
   public_reset_count?: number;
   penalty_pct?: number;
@@ -368,9 +372,11 @@ export function ResetKeyPage() {
               <Info label="Key" value={result.key ?? normalizedKey} mono />
               <Info label="Loại key" value={keyKindLabel(result)} />
               <Info label="Tạo lúc" value={formatDateTime(result.created_at)} />
-              <Info label="Hết hạn" value={result.expires_at ? formatDateTime(result.expires_at) : "Không giới hạn"} />
-              <Info label="Thời gian còn lại" value={result.expires_at ? formatRemaining(result.remaining_seconds) : "Không giới hạn"} />
-              <Info label="Lượt dùng / thiết bị" value={`${result.device_count ?? 0}/${result.max_devices ?? 0}`} />
+              <Info label="Hết hạn" value={result.status === "not_started" ? "Chưa kích hoạt" : result.expires_at ? formatDateTime(result.expires_at) : "Không giới hạn"} />
+              <Info label="Thời gian còn lại" value={result.remaining_seconds == null ? "Không giới hạn" : formatRemaining(result.remaining_seconds)} />
+              <Info label="Thiết bị" value={`${result.device_count ?? 0}/${result.max_devices ?? 0}`} />
+              <Info label="IP" value={`${result.ip_count ?? 0}/${result.max_ips ?? 0}`} />
+              <Info label="Lượt verify" value={`${result.verify_count ?? 0}/${result.max_verify ?? 0}`} />
               <Info label="Public reset" value={String(result.public_reset_count ?? 0)} />
               <Info label="Admin reset" value={String(result.admin_reset_count ?? 0)} />
               <Info label="Reset public" value={result.public_reset_disabled ? "Đã khóa bởi admin" : "Được phép"} />

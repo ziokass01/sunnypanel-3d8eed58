@@ -100,7 +100,6 @@ async function readTextBodyWithLimit(req: Request, maxBytes: number) {
       throw new PayloadTooLargeError();
     }
   }
-
   if (!req.body) return "";
 
   const reader = req.body.getReader();
@@ -118,8 +117,7 @@ async function readTextBodyWithLimit(req: Request, maxBytes: number) {
     }
     text += decoder.decode(value, { stream: true });
   }
-  text += decoder.decode();
-  return text;
+  return text + decoder.decode();
 }
 
 function toHex(bytes: ArrayBuffer | Uint8Array) {
@@ -502,18 +500,50 @@ Deno.serve(async (req) => {
   try {
     rawBody = await readTextBodyWithLimit(req, VERIFY_MAX_BODY_BYTES);
   } catch (error) {
-    if (error instanceof PayloadTooLargeError) {
-      return json({ ok: false, msg: "INVALID_INPUT" }, 413);
-    }
+    if (error instanceof PayloadTooLargeError) return json({ ok: false, msg: "INVALID_INPUT" }, 413);
     return json({ ok: false, msg: "INVALID_INPUT" }, 400);
   }
-
   const gateway = await verifyGateway(req, rawBody);
   if (!gateway.ok) {
     return json({ ok: false, msg: "GATEWAY_REQUIRED" }, 403);
   }
   const ip = gateway.ip;
   const now = new Date();
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+  const db = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+
+  // --- Early blocklist check (auto-blocked IPs) ---
+  // Keep contract unchanged: return RATE_LIMIT.
+  const blk = await db
+    .from("blocked_ips")
+    .select("blocked_until")
+    .eq("ip", ip)
+    .maybeSingle();
+
+  if (blk.error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "SERVER_ERROR", reason: "BLOCKLIST_LOOKUP_FAILED" },
+    });
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
+  }
+
+  const untilIso = blk.data?.blocked_until ?? null;
+  const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
+  if (untilMs && untilMs > now.getTime()) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "RATE_LIMIT", reason: "IP_BLOCKED" },
+    });
+    return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)) }, 429);
+  }
 
   // --- HMAC-signed requests (anti-enumeration) ---
   // Require x-ts, x-nonce, x-sig.
@@ -526,7 +556,12 @@ Deno.serve(async (req) => {
   const sig = req.headers.get("x-sig") ?? "";
 
   if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
-    // Reject unauthenticated traffic before creating a Supabase client or writing logs.
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_HEADERS" },
+    });
+    // Don't leak key status; keep HTTP 200 as requested.
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
@@ -534,6 +569,11 @@ Deno.serve(async (req) => {
   // device identity because its secret exists in the client process.
   const secret = (Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? "").trim();
   if (!secret) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "MISCONFIGURED" },
+    });
     // Misconfigured backend; still don't leak any key status.
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
@@ -541,6 +581,11 @@ Deno.serve(async (req) => {
   const canonical = `${ts}.${nonce}.${requestBodyHash}`;
   const expected = await hmacSha256Hex(secret, canonical);
   if (!timingSafeEqualHex(expected, sig)) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_SIG" },
+    });
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
@@ -549,7 +594,34 @@ Deno.serve(async (req) => {
   const nowUnix = Math.floor(now.getTime() / 1000);
   const tsNum = Number(ts);
   if (!Number.isFinite(tsNum) || Math.abs(nowUnix - tsNum) > 300) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "TS_WINDOW" },
+    });
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // Store nonce with TTL 10 minutes; reject replays on conflict.
+  const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  const nonceInsert = await db.from("request_nonces").insert({
+    nonce,
+    ts: Math.trunc(tsNum),
+    expires_at: nonceExpiresAt,
+  });
+  if (nonceInsert.error) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: "",
+      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "NONCE_REPLAY" },
+    });
+    // Conflict (duplicate nonce) or any DB error: fail closed but generic.
+    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+  }
+
+  // Lightweight cleanup (best-effort)
+  if (Math.random() < 0.02) {
+    await db.from("request_nonces").delete().lt("expires_at", now.toISOString());
   }
 
   let body: unknown;
@@ -569,6 +641,16 @@ Deno.serve(async (req) => {
   const device = parsed.data.device;
   const deviceName = parsed.data.device_name;
   if (isUnstableDeviceId(device)) {
+    await db.from("audit_logs").insert({
+      action: "VERIFY",
+      license_key: key,
+      detail: {
+        ip,
+        ok: false,
+        msg: "DEVICE_ID_UNSTABLE",
+        reason: "PLACEHOLDER_DEVICE_ID",
+      },
+    });
     return json({ ok: false, msg: "DEVICE_ID_UNSTABLE" }, 200);
   }
   const bodyBuildId = (parsed.data.build_id ?? "").trim();
@@ -580,51 +662,12 @@ Deno.serve(async (req) => {
   // Bind the authenticated request body and gateway header to the exact same build.
   // This still works in virtual spaces because it does not rely on APK signatures.
   if (!bodyBuildId || !headerBuildId || bodyBuildId !== headerBuildId || bodyBuildId !== REQUIRED_BUILD_ID || productId !== PRODUCT_ID) {
-    return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
-  }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const db = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false },
-  });
-
-  // Only authenticated, structurally valid client traffic reaches Supabase.
-  // Keep the existing block response contract unchanged.
-  const blk = await db
-    .from("blocked_ips")
-    .select("blocked_until")
-    .eq("ip", ip)
-    .maybeSingle();
-
-  if (blk.error) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: key,
-      detail: { ip, device, ok: false, msg: "SERVER_ERROR", reason: "BLOCKLIST_LOOKUP_FAILED" },
+      detail: { ip, device, ok: false, msg: "APP_UPDATE_REQUIRED", reason: "BAD_BUILD_ID", build_id: buildId },
     });
-    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
-  }
-
-  const untilIso = blk.data?.blocked_until ?? null;
-  const untilMs = untilIso ? new Date(untilIso).getTime() : 0;
-  if (untilMs && untilMs > now.getTime()) {
-    return json({
-      ok: false,
-      msg: "RATE_LIMIT",
-      retry_after_seconds: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)),
-    }, 429);
-  }
-
-  // Store nonce with TTL 10 minutes; reject replays on conflict.
-  const nonceExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
-  const nonceInsert = await db.from("request_nonces").insert({
-    nonce,
-    ts: Math.trunc(tsNum),
-    expires_at: nonceExpiresAt,
-  });
-  if (nonceInsert.error) {
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
+    return json({ ok: false, msg: "APP_UPDATE_REQUIRED" }, 200);
   }
 
   const buildRow = await db
@@ -765,7 +808,9 @@ Deno.serve(async (req) => {
   }
 
   // Backward compatible: accept either legacy fields or the new fields.
-  const startsOnFirstUse = Boolean(licRow.start_on_first_use ?? licRow.starts_on_first_use);
+  // The database has both column families. OR is intentional: some upgraded rows
+  // have the new boolean default=false while the legacy flag is still true.
+  const startsOnFirstUse = Boolean(licRow.start_on_first_use || licRow.starts_on_first_use);
   const firstUsedAt: string | null = licRow.first_used_at ?? licRow.activated_at ?? null;
   const durationDays: number | null = licRow.duration_days ?? null;
   const durationSeconds: number | null = licRow.duration_seconds ?? null;
@@ -953,7 +998,7 @@ Deno.serve(async (req) => {
 
   // 4.4) Extra server-side guard for Fake Lag keys.
   // This is intentionally enforced on server. The app version/prefix stored in APK is not trusted.
-  if (appCode === "fake-lag" || keyPrefix === "FAKELAG") {
+  if ((appCode === "fake-lag" || keyPrefix === "FAKELAG") && !existing.data) {
     const ipHash = await sha256Hex(ip);
     const useGuard = await db.rpc("increment_fake_lag_license_use" as any, {
       p_license_id: licRow.id,
@@ -964,6 +1009,11 @@ Deno.serve(async (req) => {
     const guardRow: any = Array.isArray(useGuard.data) ? useGuard.data[0] : useGuard.data;
     if (useGuard.error || !guardRow?.ok) {
       const msg = useGuard.error ? "SERVER_ERROR" : String(guardRow?.msg || "FAKE_LAG_RULE_BLOCKED");
+      // The device row was inserted just above. Remove it on a rejected quota
+      // check so retrying the same device cannot bypass the new-device guard.
+      if (!existing.data && up.data?.id) {
+        await db.from("license_devices").delete().eq("id", up.data.id).eq("license_id", licRow.id);
+      }
       await db.from("audit_logs").insert({
         action: "VERIFY",
         license_key: key,

@@ -93,7 +93,7 @@ jobs:
           supabase secrets set --project-ref "$PROJECT_REF" \
             ADMIN_EMAILS="${{ secrets.ADMIN_EMAILS }}" \
             PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}" \
-            VERIFY_REQUEST_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
+            VERIFY_HMAC_SECRET="${{ secrets.VERIFY_HMAC_SECRET }}" \
             TURNSTILE_SITE_KEY="${{ secrets.TURNSTILE_SITE_KEY }}" \
             TURNSTILE_SECRET_KEY="${{ secrets.TURNSTILE_SECRET_KEY }}" \
             RUNTIME_OPS_ADMIN_KEY="${{ secrets.RUNTIME_OPS_ADMIN_KEY }}" \

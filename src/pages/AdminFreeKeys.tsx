@@ -193,6 +193,8 @@ type AdminTestResult = {
   ok: boolean;
   key?: string;
   expires_at?: string;
+  duration_seconds?: number;
+  session_expires_at?: string;
   ip_hash?: string | null;
   fp_hash?: string | null;
   session_id?: string | null;
@@ -2576,7 +2578,9 @@ export function AdminFreeKeysPage() {
                 </pre>
               ) : null}
               <div>Key: {adminTestResult.key || "-"}</div>
-              <div>Expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
+              <div>Thời lượng key: {adminTestResult.duration_seconds ? `${Math.floor(adminTestResult.duration_seconds / 3600)}h ${Math.floor((adminTestResult.duration_seconds % 3600) / 60)}m` : "-"}</div>
+              <div>Key expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
+              <div>Test session expires: {formatVnDateTime(adminTestResult.session_expires_at)}</div>
               <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>
               <div>FP hash: <span className="font-mono">{shortText(adminTestResult.fp_hash, 12)}</span></div>
               <div>Session: <span className="font-mono">{shortText(adminTestResult.session_id, 12)}</span></div>

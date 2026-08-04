@@ -143,7 +143,9 @@ async function getSecurityBlock(supabase: any, appCode: string, deviceId: string
 async function recordVersionRisk(supabase: any, args: { appCode: string; deviceId: string; ipHash: string; riskFlags: string; detail: Record<string, unknown>; policy: any }) {
   try {
     await supabase.from("audit_logs").insert({ action: "FAKE_LAG_VERSION_RISK", license_key: null, detail: args.detail });
-  } catch {}
+  } catch {
+    // Risk audit is best-effort; the security policy below remains authoritative.
+  }
 
   const enabled = asBool(args.policy?.risk_auto_block_enabled, true);
   if (!enabled || !args.deviceId) return { blocked: false, hit_count: 1, blocked_until: null as string | null };
@@ -240,7 +242,9 @@ Deno.serve(async (req) => {
       if (isRuntimeRisk(riskFlags)) {
         try {
           await supabase.from("audit_logs").insert({ action: "FAKE_LAG_VERSION_RISK", license_key: null, detail: { app_code: appCode, ip_hash: ipHash, device: deviceId || null, risk_flags: riskFlags, package_name: packageName || null, build_id: buildId || null, signature_sha256: signatureSha256 || null, native_guard: nativeGuard, client_watermark: clientWatermark || null, policy: null } });
-        } catch {}
+        } catch {
+          // Risk audit is best-effort when no policy row exists.
+        }
       }
       await logVersionCheck(supabase, { ...baseAudit, decision: "allow", code: "NO_POLICY" });
       return json(200, { ok: true, allowed: true, decision: "allow", code: "NO_POLICY", update_required: false, hard_blocked: false, update_url: "https://mityangho.id.vn/free" }, origin);

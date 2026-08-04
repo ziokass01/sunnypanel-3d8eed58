@@ -75,18 +75,6 @@ export function AdminServerAppAuditPage() {
     enabled: Boolean(activeTrace),
   });
 
-  if (appCode === "fake-lag") return <AdminFakeLagAuditPage />;
-
-  if (appCode === "free-fire") {
-    return (
-      <section className="space-y-4">
-        <Badge variant="secondary">Legacy audit</Badge>
-        <h1 className="text-2xl font-semibold">Free Fire giữ log theo vùng admin cũ</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">Audit Log ở app-host tập trung cho Find Dumps và các app mới. Free Fire tiếp tục dùng hệ log legacy hiện tại để tránh làm gãy cấu trúc đang chạy ổn.</p>
-      </section>
-    );
-  }
-
   const data = auditQuery.data;
   const trace = traceQuery.data;
   const topBalances = useMemo(() => {
@@ -105,6 +93,18 @@ export function AdminServerAppAuditPage() {
       : rows.filter((row: any) => [row.account_ref, row.device_id].map((v: any) => String(v || "").toLowerCase()).join(" ").includes(needle));
     return filtered.map((row: any, index: number) => ({ ...row, rank: index + 1 }));
   }, [data?.wallets, topSearch]);
+
+  if (appCode === "fake-lag") return <AdminFakeLagAuditPage />;
+
+  if (appCode === "free-fire") {
+    return (
+      <section className="space-y-4">
+        <Badge variant="secondary">Legacy audit</Badge>
+        <h1 className="text-2xl font-semibold">Free Fire giữ log theo vùng admin cũ</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">Audit Log ở app-host tập trung cho Find Dumps và các app mới. Free Fire tiếp tục dùng hệ log legacy hiện tại để tránh làm gãy cấu trúc đang chạy ổn.</p>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-5">

@@ -639,13 +639,13 @@ export function AdminServerAppDetailPage() {
     const url = appDraft.admin_url?.trim();
     if (!url) return;
     const legacyTarget = () => {
-      if (/^\/admin\/free-keys/i.test(url)) {
+      if (/^\/admin\/free-keys\b/i.test(url)) {
         return buildWorkspacePath(appCode || "find-dumps", "keys", workspaceScope);
       }
       if (/^https?:\/\//i.test(url)) {
         try {
           const parsed = new URL(url);
-          if (/^\/admin\/free-keys/i.test(parsed.pathname)) {
+          if (/^\/admin\/free-keys\b/i.test(parsed.pathname)) {
             return buildAppWorkspaceUrl(appCode || "find-dumps", "keys");
           }
         } catch (_error) {
@@ -667,6 +667,7 @@ export function AdminServerAppDetailPage() {
           return;
         }
       } catch (_error) {
+        // Invalid external URL falls through to the safe window.open branch.
       }
       window.open(url, "_blank", "noopener,noreferrer");
       return;

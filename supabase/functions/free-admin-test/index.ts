@@ -3,6 +3,7 @@ import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
 import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 import { insertLicenseCompat } from "../_shared/license-insert.ts";
+import { resolveKeyTypeDurationSeconds } from "../_shared/license-duration.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -169,11 +170,12 @@ Deno.serve(async (req) => {
 
   const { data: keyType } = await sb
     .from("licenses_free_key_types")
-    .select("code,label,duration_seconds,enabled,app_code,app_label,key_signature,allow_reset,free_selection_mode,free_selection_expand,default_package_code,default_credit_code,default_wallet_kind")
+    .select("code,label,duration_seconds,kind,value,enabled,app_code,app_label,key_signature,allow_reset,free_selection_mode,free_selection_expand,default_package_code,default_credit_code,default_wallet_kind")
     .eq("code", parsed.data.key_type_code)
     .maybeSingle();
 
   if (!keyType || !keyType.enabled) return json({ ok: false, message: "KEY_TYPE_DISABLED" });
+  const durationSeconds = resolveKeyTypeDurationSeconds(keyType);
 
   // AI_ADMIN_TEST_DETECT_BY_CODE_V2: some old rows may still have app_code null/legacy.
   // Treat aisunny_* or AI-SUNNY signature as AI Coding so it never falls into legacy licenses insert.
@@ -195,7 +197,7 @@ Deno.serve(async (req) => {
       ua_hash: uaHash,
       fingerprint_hash: fpHash,
       key_type_code: keyType.code,
-      duration_seconds: Number(keyType.duration_seconds ?? 3600),
+      duration_seconds: durationSeconds,
       started_at: now.toISOString(),
       gate_ok_at: now.toISOString(),
       expires_at: sessionExp,
@@ -232,11 +234,12 @@ Deno.serve(async (req) => {
       ip_hash: ipHash,
       fp_hash: fpHash,
       session_id: sessionId,
-      expires_at: new Date(now.getTime() + Number(keyType.duration_seconds ?? 3600) * 1000).toISOString(),
+      expires_at: new Date(now.getTime() + durationSeconds * 1000).toISOString(),
+      duration_seconds: durationSeconds,
+      session_expires_at: sessionExp,
     });
   }
 
-  const durationSeconds = Math.max(60, Number(keyType.duration_seconds ?? 3600));
   const expiresAt = addSecondsIso(now, durationSeconds);
 
 
@@ -334,7 +337,7 @@ Deno.serve(async (req) => {
       },
     }).eq("session_id", sessionId);
 
-    return json({ ok: true, message: "ADMIN_TEST_OK", key: rawKey, expires_at: expiresAt, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+    return json({ ok: true, message: "ADMIN_TEST_OK", key: rawKey, expires_at: expiresAt, duration_seconds: durationSeconds, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
   }
 
   // Find Dumps free key types are server-app redeem keys, not legacy rows in public.licenses.
@@ -476,7 +479,7 @@ Deno.serve(async (req) => {
       },
     }).eq("session_id", sessionId);
 
-    return json({ ok: true, message: "ADMIN_TEST_OK", key: inserted.redeem_key, expires_at: expiresAt, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+    return json({ ok: true, message: "ADMIN_TEST_OK", key: inserted.redeem_key, expires_at: expiresAt, duration_seconds: durationSeconds, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
   }
 
   let fakeLagRule: any = null;
@@ -583,5 +586,5 @@ Deno.serve(async (req) => {
     .update({ status: "revealed", reveal_count: 1, revealed_at: now.toISOString(), revealed_license_id: licenseId })
     .eq("session_id", sessionId);
 
-  return json({ ok: true, message: "ADMIN_TEST_OK", key, expires_at: expiresAt, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+  return json({ ok: true, message: "ADMIN_TEST_OK", key, expires_at: expiresAt, duration_seconds: durationSeconds, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
 });

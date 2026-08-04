@@ -34,12 +34,12 @@ function formatDurationForRow(row: any) {
 }
 
 function getLicenseType(row: any) {
-  const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
+  const startOnFirstUse = Boolean(row?.start_on_first_use || row?.starts_on_first_use);
   return startOnFirstUse ? "Start on first use" : "Fixed";
 }
 
 function computeRemainingLabel(row: any, nowMs: number) {
-  const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
+  const startOnFirstUse = Boolean(row?.start_on_first_use || row?.starts_on_first_use);
   const firstUsedAt = row?.first_used_at ?? row?.activated_at ?? null;
   const notStarted = startOnFirstUse && !firstUsedAt;
   const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
@@ -59,7 +59,7 @@ function getKeyKind(row: any) {
 }
 
 function computeExpiresLabel(row: any) {
-  const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
+  const startOnFirstUse = Boolean(row?.start_on_first_use || row?.starts_on_first_use);
   const firstUsedAt = row?.first_used_at ?? row?.activated_at ?? null;
   const notStarted = startOnFirstUse && !firstUsedAt;
   const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
@@ -87,11 +87,11 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
 
   const filteredData = useMemo(() => {
     const base = props.filterMode === "start_on_first_use"
-      ? data.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use))
+      ? data.filter((row: any) => Boolean(row?.start_on_first_use || row?.starts_on_first_use))
       : data;
     if (type === "all") return base;
     const wantFirstUse = type === "first_use";
-    return base.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) === wantFirstUse);
+    return base.filter((row: any) => Boolean(row?.start_on_first_use || row?.starts_on_first_use) === wantFirstUse);
   }, [data, props.filterMode, type]);
 
   const softDeleteMutation = useMutation({

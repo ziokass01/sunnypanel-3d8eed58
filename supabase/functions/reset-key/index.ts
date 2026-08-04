@@ -56,6 +56,25 @@ function addSeconds(date: Date, seconds: number) {
   return new Date(date.getTime() + Math.max(0, Math.floor(seconds)) * 1000).toISOString();
 }
 
+function effectiveTiming(lic: any, now: Date) {
+  const startsOnFirstUse = Boolean(lic?.start_on_first_use || lic?.starts_on_first_use);
+  const firstUsedAt = lic?.first_used_at ?? lic?.activated_at ?? null;
+  const seconds = Number(lic?.duration_seconds ?? 0);
+  const days = Number(lic?.duration_days ?? 0);
+  const durationSeconds = seconds > 0 ? seconds : days > 0 ? days * 86400 : null;
+  let expiresAt: string | null = lic?.expires_at ?? null;
+  if (!expiresAt && startsOnFirstUse && firstUsedAt && durationSeconds) {
+    const firstMs = new Date(firstUsedAt).getTime();
+    if (Number.isFinite(firstMs)) expiresAt = new Date(firstMs + durationSeconds * 1000).toISOString();
+  }
+  const remainingSeconds = expiresAt
+    ? secondsBetween(now, expiresAt)
+    : startsOnFirstUse && !firstUsedAt && durationSeconds
+      ? Math.max(0, Math.floor(durationSeconds))
+      : null;
+  return { startsOnFirstUse, firstUsedAt, durationSeconds, expiresAt, remainingSeconds };
+}
+
 function response(req: Request, status: number, body: JsonRecord) {
   const publicBaseUrl = env("PUBLIC_BASE_URL", "https://mityangho.id.vn");
   return new Response(JSON.stringify(body), {
@@ -65,6 +84,29 @@ function response(req: Request, status: number, body: JsonRecord) {
       "content-type": "application/json; charset=utf-8",
     },
   });
+}
+
+async function readJsonBody(req: Request, maxBytes = 8192) {
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(declared) || declared < 0 || declared > maxBytes) throw new Error("PAYLOAD_TOO_LARGE");
+  if (!req.body) return {};
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel("PAYLOAD_TOO_LARGE");
+      throw new Error("PAYLOAD_TOO_LARGE");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return text ? JSON.parse(text) : {};
 }
 
 async function verifyTurnstile(token: string | undefined | null, req: Request) {
@@ -131,6 +173,7 @@ function buildSnapshot(args: {
   keyKind: string;
   appCode: string;
   deviceCount: number;
+  ipCount?: number;
   publicResetCount: number;
   penaltyPct?: number;
   penaltySeconds?: number;
@@ -138,15 +181,18 @@ function buildSnapshot(args: {
   msg?: string;
 }) {
   const now = new Date();
-  const remainingSeconds = secondsBetween(now, args.lic?.expires_at);
+  const timing = effectiveTiming(args.lic, now);
+  const remainingSeconds = timing.remainingSeconds;
   const nextPenaltyPct = computePenaltyPct(args.settings, args.keyKind, args.publicResetCount);
   const nextPenaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * nextPenaltyPct / 100);
   const status = !args.lic?.is_active
     ? "blocked"
     : args.lic?.deleted_at
       ? "deleted"
-      : args.lic?.expires_at && remainingSeconds === 0
+    : timing.expiresAt && remainingSeconds === 0
         ? "expired"
+        : timing.startsOnFirstUse && !timing.firstUsedAt
+          ? "not_started"
         : "active";
   return {
     ok: true,
@@ -155,11 +201,15 @@ function buildSnapshot(args: {
     key_kind: args.keyKind,
     app_code: args.appCode,
     created_at: args.lic?.created_at ?? null,
-    expires_at: args.lic?.expires_at ?? null,
+    expires_at: timing.expiresAt,
     remaining_seconds: remainingSeconds,
     status,
     device_count: args.deviceCount,
     max_devices: args.lic?.max_devices ?? 1,
+    ip_count: args.ipCount ?? 0,
+    max_ips: args.lic?.max_ips ?? 1,
+    verify_count: args.lic?.verify_count ?? 0,
+    max_verify: args.lic?.max_verify ?? 1,
     public_reset_count: args.publicResetCount,
     penalty_pct: args.penaltyPct,
     penalty_seconds: args.penaltySeconds,
@@ -285,25 +335,26 @@ async function handleCheck(req: Request, db: any, key: string) {
   if (appCodeFromKey(key) === "ai-coding") return await handleAiCheck(req, db, key);
   const { data: lic, error } = await db
     .from("licenses")
-    .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,public_reset_disabled")
+    .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,max_ips,max_verify,verify_count,public_reset_disabled,start_on_first_use,starts_on_first_use,duration_seconds,duration_days,first_used_at,activated_at,app_code,public_reset_count,admin_reset_count")
     .eq("key", key)
     .is("deleted_at", null)
     .maybeSingle();
   if (error || !lic) return response(req, 404, { ok: false, msg: "KEY_UNAVAILABLE" });
-  const [settings, keyKind, deviceCount, publicResetCount] = await Promise.all([
+  const [settings, keyKind, deviceCount, ipCount, publicResetCount] = await Promise.all([
     getResetSettings(db),
     getKeyKind(db, lic.id),
     countRows(db, "license_devices", (q) => q.eq("license_id", lic.id)),
+    countRows(db, "license_ip_bindings", (q) => q.eq("license_id", lic.id)),
     countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
   ]);
-  return response(req, 200, buildSnapshot({ lic, settings, keyKind, appCode: appCodeFromKey(key), deviceCount, publicResetCount }));
+  return response(req, 200, buildSnapshot({ lic, settings, keyKind, appCode: appCodeFromKey(key), deviceCount, ipCount, publicResetCount: Math.max(Number(lic.public_reset_count ?? 0), publicResetCount) }));
 }
 
 async function handleReset(req: Request, db: any, body: any, key: string) {
   if (appCodeFromKey(key) === "ai-coding") return await handleAiReset(req, db, body, key);
   const { data: lic, error } = await db
     .from("licenses")
-    .select("id,key,created_at,expires_at,is_active,deleted_at,max_devices,public_reset_disabled")
+    .select("id,key,is_active,deleted_at,public_reset_disabled")
     .eq("key", key)
     .is("deleted_at", null)
     .maybeSingle();
@@ -315,28 +366,14 @@ async function handleReset(req: Request, db: any, body: any, key: string) {
     const ok = await verifyTurnstile(body?.turnstile_token, req);
     if (!ok) return response(req, 403, { ok: false, msg: "TURNSTILE_FAILED" });
   }
-  const now = new Date();
-  const [keyKind, deviceCount, priorPublicResetCount] = await Promise.all([
-    getKeyKind(db, lic.id),
-    countRows(db, "license_devices", (q) => q.eq("license_id", lic.id)),
-    countRows(db, "audit_logs", (q) => q.eq("license_key", key).eq("action", "PUBLIC_RESET")),
-  ]);
-  const appCode = appCodeFromKey(key);
-  const penaltyPct = computePenaltyPct(settings, keyKind, priorPublicResetCount);
-  const remainingSeconds = secondsBetween(now, lic.expires_at);
-  const penaltySeconds = remainingSeconds == null ? 0 : Math.floor(remainingSeconds * penaltyPct / 100);
-  const newExpiresAt = remainingSeconds == null || penaltySeconds <= 0 ? lic.expires_at : addSeconds(now, Math.max(0, remainingSeconds - penaltySeconds));
-  await db.from("license_devices").delete().eq("license_id", lic.id);
-  if (newExpiresAt !== lic.expires_at) {
-    await db.from("licenses").update({ expires_at: newExpiresAt, is_active: new Date(newExpiresAt).getTime() > now.getTime() }).eq("id", lic.id);
+  const resetResult = await db.rpc("reset_license_key_atomic", { p_key: key });
+  if (resetResult.error) return response(req, 500, { ok: false, msg: "SERVER_ERROR" });
+  const result = resetResult.data ?? { ok: false, msg: "RESET_INTERNAL_ERROR" };
+  const status = result?.ok ? 200 : String(result?.msg || "") === "KEY_RESET_DISABLED" ? 403 : 409;
+  if (!result?.ok && String(result?.msg || "") === "RESET_INTERNAL_ERROR") {
+    return response(req, status, { ok: false, msg: "RESET_INTERNAL_ERROR" });
   }
-  await db.from("audit_logs").insert({
-    action: "PUBLIC_RESET",
-    license_key: key,
-    detail: { license_id: lic.id, app_code: appCode, key_kind: keyKind, devices_removed: deviceCount, prior_public_reset_count: priorPublicResetCount, penalty_pct: penaltyPct, penalty_seconds: penaltySeconds, old_expires_at: lic.expires_at, new_expires_at: newExpiresAt, source: "public" },
-  });
-  const refreshed = { ...lic, expires_at: newExpiresAt, is_active: !newExpiresAt || new Date(newExpiresAt).getTime() > now.getTime() };
-  return response(req, 200, buildSnapshot({ lic: refreshed, settings, keyKind, appCode, deviceCount: 0, publicResetCount: priorPublicResetCount + 1, penaltyPct, penaltySeconds, devicesRemoved: deviceCount, msg: "RESET_OK" }));
+  return response(req, status, result);
 }
 
 Deno.serve(async (req) => {
@@ -349,12 +386,22 @@ Deno.serve(async (req) => {
       return response(req, 200, { ok: true, turnstile_enabled: Boolean(settings?.require_turnstile), configured: Boolean(env("TURNSTILE_SECRET_KEY") || env("CLOUDFLARE_TURNSTILE_SECRET")) });
     }
     if (req.method !== "POST") return response(req, 405, { ok: false, msg: "METHOD_NOT_ALLOWED" });
-    const body = await req.json().catch(() => ({}));
+    let body: any = {};
+    try {
+      body = await readJsonBody(req);
+    } catch (error) {
+      return response(req, String((error as Error)?.message) === "PAYLOAD_TOO_LARGE" ? 413 : 400, { ok: false, msg: "INVALID_INPUT" });
+    }
     const action = String(body?.action ?? "check").toLowerCase();
     const key = normalizeKey(body?.key);
     if (!/^[A-Z0-9_-]{2,24}-[A-Z0-9]{4,8}-[A-Z0-9]{4,8}-[A-Z0-9]{4,8}$/.test(key)) {
       return response(req, 400, { ok: false, msg: "KEY_UNAVAILABLE" });
     }
+    const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ipLimit = await db.rpc("check_rate_limit", { p_key: `RESET_KEY_${action.toUpperCase()}`, p_ip: ip, p_limit: action === "reset" ? 10 : 60, p_window_seconds: 300 });
+    const keyLimit = await db.rpc("check_rate_limit", { p_key: key, p_ip: ip, p_limit: action === "reset" ? 3 : 20, p_window_seconds: action === "reset" ? 600 : 300 });
+    if (ipLimit.error || keyLimit.error) return response(req, 503, { ok: false, msg: "SERVER_ERROR" });
+    if (!ipLimit.data?.[0]?.allowed || !keyLimit.data?.[0]?.allowed) return response(req, 429, { ok: false, msg: "RATE_LIMIT" });
     if (action === "reset") return await handleReset(req, db, body, key);
     return await handleCheck(req, db, key);
   } catch (e) {

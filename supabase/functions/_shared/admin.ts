@@ -100,7 +100,9 @@ export async function assertAdmin(
   const adminEmails = parseAdminEmails(Deno.env.get("ADMIN_EMAILS") ?? Deno.env.get("ADMIN_EMAIL") ?? Deno.env.get("ADMIN_MAIL") ?? Deno.env.get("ADMIN_EMAIL_SECRET"));
   const userEmail = String(user.email ?? "").toLowerCase();
   const emailAllowed = userEmail ? adminEmails.has(userEmail) : false;
-  const metadataAdmin = user.user_metadata?.is_admin === true || user.app_metadata?.is_admin === true;
+  // user_metadata is editable by the account owner and must never grant admin.
+  // app_metadata and the server-side user_roles table are trusted authorities.
+  const metadataAdmin = user.app_metadata?.is_admin === true || user.app_metadata?.panel_role === "admin";
 
   const roleCheck = await authed.rpc("has_role", { _user_id: user.id, _role: "admin" });
   let roleAllowed = !roleCheck.error && roleCheck.data === true;

@@ -32,12 +32,12 @@ function formatDurationForRow(row: any) {
 }
 
 function getLicenseType(row: any) {
-  const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
+  const startOnFirstUse = Boolean(row?.start_on_first_use || row?.starts_on_first_use);
   return startOnFirstUse ? "Start on first use" : "Fixed";
 }
 
 function computeRemainingLabel(row: any, nowMs: number) {
-  const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
+  const startOnFirstUse = Boolean(row?.start_on_first_use || row?.starts_on_first_use);
   const firstUsedAt = row?.first_used_at ?? row?.activated_at ?? null;
   const notStarted = startOnFirstUse && !firstUsedAt;
   const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
@@ -56,7 +56,7 @@ function computeRemainingLabel(row: any, nowMs: number) {
 }
 
 function computeExpiresLabel(row: any) {
-  const startOnFirstUse = Boolean(row?.start_on_first_use ?? row?.starts_on_first_use);
+  const startOnFirstUse = Boolean(row?.start_on_first_use || row?.starts_on_first_use);
   const firstUsedAt = row?.first_used_at ?? row?.activated_at ?? null;
   const notStarted = startOnFirstUse && !firstUsedAt;
   const badState = startOnFirstUse && Boolean(firstUsedAt) && !row?.expires_at;
@@ -84,7 +84,7 @@ export function FreeLicensesPage() {
   const filteredData = useMemo(() => {
     if (type === "all") return data;
     const wantFirstUse = type === "first_use";
-    return data.filter((row: any) => Boolean(row?.start_on_first_use ?? row?.starts_on_first_use) === wantFirstUse);
+    return data.filter((row: any) => Boolean(row?.start_on_first_use || row?.starts_on_first_use) === wantFirstUse);
   }, [data, type]);
 
   const softDeleteMutation = useMutation({

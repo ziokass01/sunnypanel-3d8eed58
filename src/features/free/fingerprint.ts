@@ -156,7 +156,9 @@ const FREE_FIND_DUMPS_REWARD_STORAGE = "find_dumps_free_reward_code";
 const FREE_FIND_DUMPS_WALLET_STORAGE = "find_dumps_free_wallet_kind";
 
 export function setSelectedAppCode(appCode: string) {
-  try { localStorage.setItem(FREE_APP_CODE_STORAGE, String(appCode || "free-fire")); } catch {}
+  try { localStorage.setItem(FREE_APP_CODE_STORAGE, String(appCode || "free-fire")); } catch {
+    // Storage can be unavailable in privacy mode; selection remains in memory.
+  }
 }
 
 export function getSelectedAppCode() {
@@ -169,7 +171,9 @@ export function setFindDumpsFreeSelection(mode: string, rewardCode: string, wall
     localStorage.setItem(FREE_FIND_DUMPS_REWARD_STORAGE, String(rewardCode || "classic"));
     if (walletKind) localStorage.setItem(FREE_FIND_DUMPS_WALLET_STORAGE, String(walletKind));
     else localStorage.removeItem(FREE_FIND_DUMPS_WALLET_STORAGE);
-  } catch {}
+  } catch {
+    // Storage can be unavailable in privacy mode; defaults are used on read.
+  }
 }
 
 export function getFindDumpsFreeSelection() {

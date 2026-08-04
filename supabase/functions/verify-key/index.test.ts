@@ -27,23 +27,30 @@ async function hmacSha256Hex(secret: string, message: string) {
 }
 
 async function callVerify(params: { key: string; device: string; device_name?: string }) {
-  const REQUIRED_BUILD_ID = Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v31-ac-20260616";
+  const REQUIRED_BUILD_ID = Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v34-ac-20260721";
+  const PRODUCT_ID = Deno.env.get("VERIFY_PRODUCT_ID") ?? "sunny-free-fire";
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("VITE_SUPABASE_URL");
   const VERIFY_HMAC_SECRET = Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? Deno.env.get("VERIFY_HMAC_SECRET");
+  const GATEWAY_SECRET = Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET");
   assert(SUPABASE_URL, "Missing SUPABASE_URL/VITE_SUPABASE_URL");
   // Note: Some CI/test runners don't expose secrets to Deno tests.
   // In that case, the integration test is skipped; the public endpoint has no admin bypass.
-  if (!VERIFY_HMAC_SECRET) {
+  if (!VERIFY_HMAC_SECRET || !GATEWAY_SECRET) {
     return { status: 200, json: { ok: false, msg: "SKIPPED_NO_SECRET" } };
   }
 
   const url = `${SUPABASE_URL}/functions/v1/verify-key`;
   const ts = String(Math.floor(Date.now() / 1000));
   const nonce = crypto.randomUUID();
-  const body = JSON.stringify({ ...params, build_id: REQUIRED_BUILD_ID });
+  const body = JSON.stringify({ ...params, build_id: REQUIRED_BUILD_ID, product_id: PRODUCT_ID });
   const bodyHash = await sha256Hex(body);
   const canonical = `${ts}.${nonce}.${bodyHash}`;
   const sig = await hmacSha256Hex(VERIFY_HMAC_SECRET, canonical);
+  const gatewayIp = "203.0.113.10";
+  const gatewayTs = ts;
+  const gatewayNonce = crypto.randomUUID();
+  const gatewayCanonical = ["v1", "POST", "verify-key", gatewayTs, gatewayNonce, gatewayIp, bodyHash].join("\n");
+  const gatewaySignature = await hmacSha256Hex(GATEWAY_SECRET, gatewayCanonical);
 
   const res = await fetch(url, {
     method: "POST",
@@ -53,6 +60,11 @@ async function callVerify(params: { key: string; device: string; device_name?: s
       "x-nonce": nonce,
       "x-sig": sig,
       "x-build-id": REQUIRED_BUILD_ID,
+      "x-gateway-ts": gatewayTs,
+      "x-gateway-nonce": gatewayNonce,
+      "x-gateway-ip": gatewayIp,
+      "x-gateway-body-sha256": bodyHash,
+      "x-gateway-signature": gatewaySignature,
     },
     body,
   });
@@ -71,11 +83,11 @@ Deno.test("verify-key: fixed expiry license still works", async () => {
   assertEquals(r.json.msg, "OK");
   assertEquals(typeof r.json.server_time, "string");
   assertEquals(typeof r.json.remaining_seconds, "number");
-  assertEquals(r.json.server_sig_alg, "ECDSA-P256-SHA256-V2");
-  assertEquals(r.json.server_key_id, "sunny-p256-2026-07-a");
+  assertEquals(r.json.server_sig_alg, "ECDSA-P256-SHA256-V3");
+  assertEquals(r.json.server_key_id, "sunny-p256-2026-07-b");
   assertEquals(typeof r.json.server_sig, "string");
   assertEquals(typeof r.json.session_id, "string");
-  assertEquals(typeof r.json.session_expires_at, "string");
+  assertEquals(typeof r.json.session_expires_at, "number");
   assertEquals(typeof r.json.feature_seed, "string");
   assertEquals(typeof r.json.key_hash, "string");
   assertEquals(typeof r.json.device_hash, "string");
@@ -95,8 +107,8 @@ Deno.test("verify-key: start-on-first-use activates after device checks", async 
   assertEquals(r1.json.started, true);
   assertEquals(typeof r1.json.expires_at, "string");
   assertEquals(typeof r1.json.remaining_seconds, "number");
-  assertEquals(r1.json.server_sig_alg, "ECDSA-P256-SHA256-V2");
-  assertEquals(r1.json.server_key_id, "sunny-p256-2026-07-a");
+  assertEquals(r1.json.server_sig_alg, "ECDSA-P256-SHA256-V3");
+  assertEquals(r1.json.server_key_id, "sunny-p256-2026-07-b");
   assertEquals(typeof r1.json.server_sig, "string");
   assert(r1.json.remaining_seconds <= 86400);
 

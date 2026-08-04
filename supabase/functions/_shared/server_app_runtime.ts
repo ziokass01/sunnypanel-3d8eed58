@@ -622,7 +622,7 @@ async function getFeatureUnlockRules(appCode: string): Promise<RuntimeFeatureUnl
 
 async function getLatestFeatureUnlockStates(appCode: string, accountRef: string, deviceId?: string | null): Promise<RuntimeFeatureUnlockState[]> {
   const admin = createAdminClient();
-  let query = admin
+  const query = admin
     .from("server_app_feature_unlocks")
     .select("id,access_code,status,started_at,expires_at,revoked_at")
     .eq("app_code", appCode)

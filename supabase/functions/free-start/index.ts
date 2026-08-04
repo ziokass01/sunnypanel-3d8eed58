@@ -13,6 +13,7 @@ import {
   type ProviderShortenResult,
   vietnamDate,
 } from "../_shared/gtraffic.ts";
+import { resolveKeyTypeDurationSeconds } from "../_shared/license-duration.ts";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -526,6 +527,7 @@ Deno.serve(async (req) => {
     return await deny("KEY_TYPE_LOAD_FAILED", { detail: String((error as any)?.message ?? error) });
   }
   if (!keyType || keyType.enabled === false) return await deny("KEY_TYPE_DISABLED");
+  const keyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
 
   const requiresDoubleGate = Boolean(keyType.requires_double_gate ?? false);
   if (linkChannel === "secondary") {
@@ -601,7 +603,7 @@ Deno.serve(async (req) => {
   const fullPayload: Record<string, unknown> = {
     session_id: sessionId,
     key_type_code: keyTypeCode,
-    duration_seconds: Math.max(0, Number(keyType.duration_seconds ?? 0) || 0),
+    duration_seconds: keyDurationSeconds,
     status: "waiting",
     started_at: nowIso,
     expires_at: expiresAt,
@@ -628,7 +630,7 @@ Deno.serve(async (req) => {
   const compatPayload: Record<string, unknown> = {
     session_id: sessionId,
     key_type_code: keyTypeCode,
-    duration_seconds: Math.max(0, Number(keyType.duration_seconds ?? 0) || 0),
+    duration_seconds: keyDurationSeconds,
     status: "waiting",
     started_at: nowIso,
     expires_at: expiresAt,
