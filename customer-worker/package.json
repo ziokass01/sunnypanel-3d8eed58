@@ -4,10 +4,10 @@
   "description": "Worker này đứng giữa frontend/public domain và Edge Functions thật của Supabase.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "wrangler": "^4.112.0"
   }

@@ -325,45 +325,9 @@ export default {
       if (error instanceof PayloadTooLargeError) {
         return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env);
       }
-
-      const errorName = String(error?.name || "Error");
-      const errorMessage = String(
-        error?.message || error || "Unknown upstream error"
-      ).slice(0, 300);
-
-      let upstreamHost = "invalid";
-      try {
-        upstreamHost = new URL(upstreamUrl).host;
-      } catch {
-        upstreamHost = "invalid";
+      if (error?.name === "AbortError") {
+        return json({ ok: false, code: "UPSTREAM_TIMEOUT", msg: "Upstream request timed out" }, 504, origin, env);
       }
-
-      console.error(JSON.stringify({
-        event: "UPSTREAM_FETCH_FAILED",
-        function_name: fnName,
-        upstream_host: upstreamHost,
-        error_name: errorName,
-        error_message: errorMessage,
-      }));
-
-      const isUpstreamTimeout =
-        error?.name === "AbortError" ||
-        error?.name === "TimeoutError" ||
-        error?.message === "UPSTREAM_TIMEOUT";
-
-      if (isUpstreamTimeout) {
-        return json(
-          {
-            ok: false,
-            code: "UPSTREAM_TIMEOUT",
-            msg: "Upstream request timed out"
-          },
-          504,
-          origin,
-          env
-        );
-      }
-
       return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: "Upstream request failed" }, 502, origin, env);
     }
 

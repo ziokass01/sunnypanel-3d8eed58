@@ -346,22 +346,8 @@ export default {
         error_message: errorMessage,
       }));
 
-      const isUpstreamTimeout =
-        error?.name === "AbortError" ||
-        error?.name === "TimeoutError" ||
-        error?.message === "UPSTREAM_TIMEOUT";
-
-      if (isUpstreamTimeout) {
-        return json(
-          {
-            ok: false,
-            code: "UPSTREAM_TIMEOUT",
-            msg: "Upstream request timed out"
-          },
-          504,
-          origin,
-          env
-        );
+      if (error?.name === "AbortError") {
+        return json({ ok: false, code: "UPSTREAM_TIMEOUT", msg: "Upstream request timed out" }, 504, origin, env);
       }
 
       return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: "Upstream request failed" }, 502, origin, env);

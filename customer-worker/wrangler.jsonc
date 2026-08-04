@@ -5,7 +5,19 @@
   "main": "index.js",
   "compatibility_date": "2026-07-21",
 
-  "workers_dev": true,
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "ratelimits": [
+    {
+      "name": "VERIFY_RATE_LIMITER",
+      "namespace_id": "2026080401",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ],
 
   "route": {
     "pattern": "mityangho.id.vn/api/*",

@@ -111,7 +111,7 @@ describe("functions auth headers", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/admin-rent");
   });
 
-  it("falls back to direct Supabase functions for GET when gateway is temporarily unavailable", async () => {
+  it("falls back to the gateway for direct-first free GET when Supabase is temporarily unavailable", async () => {
     vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
 
     const fetchMock = vi
@@ -128,7 +128,7 @@ describe("functions auth headers", () => {
 
     expect(data).toEqual({ ok: true, source: "direct" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/free-config");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-config");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-config");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://mityangho.id.vn/api/free-config");
   });
 });

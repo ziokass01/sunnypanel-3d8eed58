@@ -1,4 +1,4 @@
-project_id = "uvqgpgkaxpiczasfwzgm"
+project_id = "umuwgrxjzjdjzgyarstf"
 
 [functions.admin-free-block]
 verify_jwt = false
@@ -65,4 +65,19 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.fake-lag-check]
+verify_jwt = false
+
+[functions.admin-free-shortlinks]
+verify_jwt = false
+
+[functions.admin-ai-sunny-control]
+verify_jwt = false
+
+[functions.ai-sunny-chat]
+verify_jwt = false
+
+[functions.ai-sunny-redeem]
+verify_jwt = false
+
+[functions.mobile-auth-email]
 verify_jwt = false
