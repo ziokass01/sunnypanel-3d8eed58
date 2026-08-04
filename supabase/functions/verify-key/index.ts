@@ -414,6 +414,18 @@ function isValidSigHex(sig: string) {
   return /^[a-f0-9]{64}$/i.test(sig);
 }
 
+function getRequestHmacSecret() {
+  // `VERIFY_REQUEST_HMAC_SECRET` is the canonical V34 name.  Keep a
+  // compatibility fallback to `VERIFY_HMAC_SECRET` because the currently
+  // released menu and the existing GitHub deployment secret still use that
+  // value.  This does not weaken verification: both names resolve to the same
+  // request-HMAC secret and the request still has to pass the exact canonical
+  // signature check below.
+  const primary = (Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? "").trim();
+  if (primary) return primary;
+  return (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
+}
+
 function getClientIp(req: Request) {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
@@ -567,7 +579,7 @@ Deno.serve(async (req) => {
 
   // Request HMAC is anti-spam/anti-enumeration only. It is not a trusted
   // device identity because its secret exists in the client process.
-  const secret = (Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? "").trim();
+  const secret = getRequestHmacSecret();
   if (!secret) {
     await db.from("audit_logs").insert({
       action: "VERIFY",

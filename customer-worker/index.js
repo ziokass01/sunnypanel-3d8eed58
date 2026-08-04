@@ -135,6 +135,16 @@ function json(data, status, origin, env) {
   });
 }
 
+function isUpstreamTimeoutError(error) {
+  if (!error) return false;
+  const name = String(error.name || "");
+  const message = String(error.message || "");
+  return name === "AbortError" ||
+    name === "TimeoutError" ||
+    message === "UPSTREAM_TIMEOUT" ||
+    message.includes("UPSTREAM_TIMEOUT");
+}
+
 function getAllowedFunctions(env) {
   const raw = String(env.ALLOWED_FUNCTIONS ?? "").trim();
   if (raw) {
@@ -251,7 +261,9 @@ async function forwardRequest(req, upstreamUrl, env, fnName = "") {
   if (method !== "GET" && method !== "HEAD") init.body = bodyBytes;
   const timeoutMs = envInt(env, "UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS, 1000, 30_000);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort("UPSTREAM_TIMEOUT"), timeoutMs);
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException("UPSTREAM_TIMEOUT", "AbortError"));
+  }, timeoutMs);
   init.signal = controller.signal;
   try {
     return await fetch(upstreamUrl, init);
@@ -322,7 +334,13 @@ export default {
       upstream = await forwardRequest(req, upstreamUrl, env, fnName);
     } catch (error) {
       if (error instanceof PayloadTooLargeError) return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env);
-      if (error?.name === "AbortError") return json({ ok: false, code: "UPSTREAM_TIMEOUT", msg: "Upstream request timed out" }, 504, origin, env);
+      if (isUpstreamTimeoutError(error)) {
+        return json({
+          ok: false,
+          code: "UPSTREAM_TIMEOUT",
+          msg: "Upstream request timed out",
+        }, 504, origin, env);
+      }
       return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: "Upstream request failed" }, 502, origin, env);
     }
 

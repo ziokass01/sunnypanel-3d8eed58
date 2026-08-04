@@ -13,6 +13,7 @@ Mục tiêu:
 - `ACTIVE_SUPABASE_URL`: URL project đang active, ví dụ `https://project-a.supabase.co`
 - `ACTIVE_FUNCTIONS_BASE_URL`: tùy chọn. Nếu set thì worker sẽ dùng trực tiếp URL này thay vì tự ghép từ `ACTIVE_SUPABASE_URL`
 - `UPSTREAM_ANON_KEY`: tùy chọn. Dùng khi request gửi vào worker không mang `apikey`
+- `GATEWAY_SHARED_SECRET`: bắt buộc cho `verify-key`. Phải trùng tuyệt đối với Supabase secret `VERIFY_GATEWAY_SHARED_SECRET`; không đặt trong frontend hoặc menu.
 - `ALLOWED_ORIGINS`: danh sách origin được phép gọi, ngăn bằng dấu phẩy
 - `ALLOWED_FUNCTIONS`: tùy chọn. Danh sách function được phép proxy, ngăn bằng dấu phẩy
 
@@ -49,6 +50,8 @@ Worker sẽ giữ các header quan trọng nếu có:
 - `apikey`
 - `Hmac`
 - `X-Client-Info`
+
+Riêng `verify-key`, Worker bỏ toàn bộ header gateway do client tự gửi, lấy IP thật từ Cloudflare, ký lại phần thân request bằng `GATEWAY_SHARED_SECRET` rồi mới chuyển sang Supabase. Timeout upstream được chuẩn hóa thành HTTP `504` với mã `UPSTREAM_TIMEOUT`.
 
 ## Gợi ý deploy nhanh với Cloudflare Worker
 

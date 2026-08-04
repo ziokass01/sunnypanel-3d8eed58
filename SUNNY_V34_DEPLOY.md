@@ -78,7 +78,11 @@ Keep the existing values for:
 - `VERIFY_REQUEST_HMAC_SECRET`
 - `VERIFY_SESSION_TTL_SECONDS`
 
-There is no fallback to the removed legacy `VERIFY_HMAC_SECRET`.
+For the currently released menu, the function reads
+`VERIFY_REQUEST_HMAC_SECRET` first and temporarily falls back to the existing
+`VERIFY_HMAC_SECRET`. The deployment workflows synchronize both names to the
+same value so moving to the clearer variable name does not invalidate issued
+menus or keys.
 
 Start with `VERIFY_REQUIRE_DEVICE_KEY=0` because some virtual spaces do not expose AndroidKeyStore correctly. When audit logs show stable `device_key_bound:true` for supported environments, strict mode can be enabled:
 
