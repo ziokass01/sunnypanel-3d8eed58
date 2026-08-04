@@ -36,6 +36,20 @@ const SERVER_KEY_ID = (
 const VERIFY_REQUIRE_GATEWAY = (Deno.env.get("VERIFY_REQUIRE_GATEWAY") ?? "1").trim() !== "0";
 const VERIFY_REQUIRE_DEVICE_KEY = (Deno.env.get("VERIFY_REQUIRE_DEVICE_KEY") ?? "0").trim() === "1";
 
+// Request HMAC is only an anti-enumeration compatibility layer. It is not
+// server identity: the released client necessarily contains this key. The
+// actual trust boundary remains Cloudflare gateway authentication plus the
+// ECDSA-signed response verified by the menu.
+//
+// V10.1 is already released, so its request key must remain accepted even if
+// the Supabase project was restored without VERIFY_REQUEST_HMAC_SECRET or a
+// stale deployment secret overwrote that setting. Future request keys may be
+// added through VERIFY_REQUEST_HMAC_SECRET / VERIFY_REQUEST_HMAC_SECRETS.
+const RELEASED_MENU_V10_1_REQUEST_HMAC_KEY = [
+  "f40b1576b8136cac6166c9879d2597aad",
+  "5e675ddedf1ec8c04a5174e6c715054",
+].join("");
+
 function envInt(name: string, fallback: number, min = 1, max = 100000) {
   const raw = (Deno.env.get(name) ?? "").trim();
   const n = Number(raw);
@@ -153,6 +167,35 @@ async function hmacSha256Hex(secret: string, message: string) {
     new TextEncoder().encode(message),
   );
   return toHex(sig);
+}
+
+function getAcceptedRequestHmacKeys() {
+  const configured = [
+    Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? "",
+    Deno.env.get("VERIFY_REQUEST_HMAC_SECRETS") ?? "",
+  ]
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 32);
+
+  // Always retain the key embedded in the menu already in users' hands.
+  // The retired VERIFY_HMAC_SECRET name is intentionally not read.
+  const keys = [...configured, RELEASED_MENU_V10_1_REQUEST_HMAC_KEY];
+  return [...new Set(keys)];
+}
+
+async function verifyReleasedMenuRequestHmac(signatureHex: string, canonical: string) {
+  const keys = getAcceptedRequestHmacKeys();
+  let matched = false;
+
+  // Evaluate every accepted key so key rotation does not create an obvious
+  // early-exit timing distinction.
+  for (const secret of keys) {
+    const expected = await hmacSha256Hex(secret, canonical);
+    if (timingSafeEqualHex(expected, signatureHex)) matched = true;
+  }
+
+  return matched;
 }
 
 function normalizePem(raw: string) {
@@ -414,18 +457,6 @@ function isValidSigHex(sig: string) {
   return /^[a-f0-9]{64}$/i.test(sig);
 }
 
-function getRequestHmacSecret() {
-  // `VERIFY_REQUEST_HMAC_SECRET` is the canonical V34 name.  Keep a
-  // compatibility fallback to `VERIFY_HMAC_SECRET` because the currently
-  // released menu and the existing GitHub deployment secret still use that
-  // value.  This does not weaken verification: both names resolve to the same
-  // request-HMAC secret and the request still has to pass the exact canonical
-  // signature check below.
-  const primary = (Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? "").trim();
-  if (primary) return primary;
-  return (Deno.env.get("VERIFY_HMAC_SECRET") ?? "").trim();
-}
-
 function getClientIp(req: Request) {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
@@ -557,15 +588,16 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)) }, 429);
   }
 
-  // --- HMAC-signed requests (anti-enumeration) ---
-  // Require x-ts, x-nonce, x-sig.
-  // Canonical: `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
-  // Sig: HMAC_SHA256_HEX(VERIFY_HMAC_SECRET, canonical)
+  // --- V10.1 request authentication (anti-enumeration compatibility) ---
+  // The released menu sends exactly:
+  //   canonical = `${x-ts}.${x-nonce}.${sha256_hex(raw_body)}`
+  //   x-sig = HMAC_SHA256_HEX(released_request_key, canonical)
+  // This is independent from the mandatory ECDSA response signature.
   const requestBodyHash = await sha256Hex(rawBody);
 
-  const ts = req.headers.get("x-ts") ?? "";
-  const nonce = req.headers.get("x-nonce") ?? "";
-  const sig = req.headers.get("x-sig") ?? "";
+  const ts = (req.headers.get("x-ts") ?? "").trim();
+  const nonce = (req.headers.get("x-nonce") ?? "").trim();
+  const sig = (req.headers.get("x-sig") ?? "").trim().toLowerCase();
 
   if (!isValidTs(ts) || !isValidNonce(nonce) || !isValidSigHex(sig)) {
     await db.from("audit_logs").insert({
@@ -573,30 +605,21 @@ Deno.serve(async (req) => {
       license_key: "",
       detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_HEADERS" },
     });
-    // Don't leak key status; keep HTTP 200 as requested.
-    return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
-  }
-
-  // Request HMAC is anti-spam/anti-enumeration only. It is not a trusted
-  // device identity because its secret exists in the client process.
-  const secret = getRequestHmacSecret();
-  if (!secret) {
-    await db.from("audit_logs").insert({
-      action: "VERIFY",
-      license_key: "",
-      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "MISCONFIGURED" },
-    });
-    // Misconfigured backend; still don't leak any key status.
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }
 
   const canonical = `${ts}.${nonce}.${requestBodyHash}`;
-  const expected = await hmacSha256Hex(secret, canonical);
-  if (!timingSafeEqualHex(expected, sig)) {
+  if (!(await verifyReleasedMenuRequestHmac(sig, canonical))) {
     await db.from("audit_logs").insert({
       action: "VERIFY",
       license_key: "",
-      detail: { ip, ok: false, msg: "UNAUTHORIZED", reason: "BAD_SIG" },
+      detail: {
+        ip,
+        ok: false,
+        msg: "UNAUTHORIZED",
+        reason: "BAD_SIG",
+        request_profile: "sunny-v10.1",
+      },
     });
     return json({ ok: false, msg: "UNAUTHORIZED" }, 200);
   }

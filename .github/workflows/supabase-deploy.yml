@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       run_db_push:
-        description: "Run supabase db push before deploying functions"
+        description: "Run supabase db push"
         required: false
-        default: "true"
+        default: "false"
 
 permissions:
   contents: read
@@ -37,18 +37,11 @@ jobs:
 
       - name: Validate required deployment secrets
         shell: bash
-        env:
-          VERIFY_REQUEST_HMAC_SECRET_INPUT: ${{ secrets.VERIFY_REQUEST_HMAC_SECRET }}
-          VERIFY_HMAC_SECRET_INPUT: ${{ secrets.VERIFY_HMAC_SECRET }}
         run: |
           set -euo pipefail
           test -n "$SUPABASE_ACCESS_TOKEN" || { echo "::error::Missing SUPABASE_ACCESS_TOKEN"; exit 1; }
           test -n "$SUPABASE_DB_PASSWORD" || { echo "::error::Missing SUPABASE_DB_PASSWORD"; exit 1; }
           test -n "$PROJECT_REF" || { echo "::error::Missing SUPABASE_PROJECT_REF"; exit 1; }
-          if [ -z "$VERIFY_REQUEST_HMAC_SECRET_INPUT" ] && [ -z "$VERIFY_HMAC_SECRET_INPUT" ]; then
-            echo "::error::Missing both VERIFY_REQUEST_HMAC_SECRET and VERIFY_HMAC_SECRET. Keep the current released-menu HMAC value in one of these GitHub secrets."
-            exit 1
-          fi
 
       - name: Link project
         run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
@@ -56,17 +49,21 @@ jobs:
       - name: Show migration list
         run: supabase migration list
 
-      - name: Push migrations before functions
+      - name: Repair legacy migration markers 20260327 and 20260327120000
         if: ${{ github.event.inputs.run_db_push == 'true' }}
         run: |
-          set -euo pipefail
-          yes | supabase db push --include-all
+          supabase migration repair --status reverted 20260327 || true
+          supabase migration repair --status reverted 20260327120000 || true
 
-      - name: Sync function secrets before deployment
+      - name: Push migrations
+        if: ${{ github.event.inputs.run_db_push == 'true' }}
+        run: yes | supabase db push --include-all
+
+      - name: Configure function secrets before deploy
         shell: bash
         env:
           VERIFY_REQUEST_HMAC_SECRET_INPUT: ${{ secrets.VERIFY_REQUEST_HMAC_SECRET }}
-          VERIFY_HMAC_SECRET_INPUT: ${{ secrets.VERIFY_HMAC_SECRET }}
+          VERIFY_REQUEST_HMAC_SECRETS_INPUT: ${{ secrets.VERIFY_REQUEST_HMAC_SECRETS }}
           VERIFY_GATEWAY_SHARED_SECRET_INPUT: ${{ secrets.VERIFY_GATEWAY_SHARED_SECRET }}
           VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM_INPUT: ${{ secrets.VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM }}
           ADMIN_EMAILS_INPUT: ${{ secrets.ADMIN_EMAILS }}
@@ -76,15 +73,7 @@ jobs:
           RUNTIME_OPS_ADMIN_KEY_INPUT: ${{ secrets.RUNTIME_OPS_ADMIN_KEY }}
         run: |
           set -euo pipefail
-
-          request_hmac="$VERIFY_REQUEST_HMAC_SECRET_INPUT"
-          if [ -z "$request_hmac" ]; then
-            request_hmac="$VERIFY_HMAC_SECRET_INPUT"
-          fi
-
           secret_args=(
-            "VERIFY_REQUEST_HMAC_SECRET=$request_hmac"
-            "VERIFY_HMAC_SECRET=$request_hmac"
             "VERIFY_REQUIRE_GATEWAY=1"
             "VERIFY_REQUIRED_BUILD_ID=sunny-v34-ac-20260721"
             "VERIFY_PRODUCT_ID=sunny-free-fire"
@@ -102,6 +91,8 @@ jobs:
             fi
           }
 
+          append_if_set "VERIFY_REQUEST_HMAC_SECRET" "$VERIFY_REQUEST_HMAC_SECRET_INPUT"
+          append_if_set "VERIFY_REQUEST_HMAC_SECRETS" "$VERIFY_REQUEST_HMAC_SECRETS_INPUT"
           append_if_set "VERIFY_GATEWAY_SHARED_SECRET" "$VERIFY_GATEWAY_SHARED_SECRET_INPUT"
           append_if_set "VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM" "$VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM_INPUT"
           append_if_set "ADMIN_EMAILS" "$ADMIN_EMAILS_INPUT"
@@ -113,6 +104,7 @@ jobs:
           supabase secrets set --project-ref "$PROJECT_REF" "${secret_args[@]}"
 
       - name: Deploy public/admin Edge Functions with verify_jwt disabled
+        shell: bash
         run: |
           set -euo pipefail
           no_verify_functions=(
@@ -129,6 +121,7 @@ jobs:
           done
 
       - name: Deploy remaining Edge Functions with default verify_jwt
+        shell: bash
         run: |
           set -euo pipefail
           remaining_functions=(mobile-auth-email)

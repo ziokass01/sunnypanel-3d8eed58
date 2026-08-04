@@ -30,12 +30,16 @@ async function callVerify(params: { key: string; device: string; device_name?: s
   const REQUIRED_BUILD_ID = Deno.env.get("VERIFY_REQUIRED_BUILD_ID") ?? "sunny-v34-ac-20260721";
   const PRODUCT_ID = Deno.env.get("VERIFY_PRODUCT_ID") ?? "sunny-free-fire";
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("VITE_SUPABASE_URL");
-  const VERIFY_HMAC_SECRET = Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? Deno.env.get("VERIFY_HMAC_SECRET");
+  const RELEASED_MENU_V10_1_REQUEST_HMAC_KEY =
+    "f40b1576b8136cac6166c9879d2597aad" +
+    "5e675ddedf1ec8c04a5174e6c715054";
+  const requestHmacSecret =
+    Deno.env.get("VERIFY_REQUEST_HMAC_SECRET") ?? RELEASED_MENU_V10_1_REQUEST_HMAC_KEY;
   const GATEWAY_SECRET = Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET");
   assert(SUPABASE_URL, "Missing SUPABASE_URL/VITE_SUPABASE_URL");
   // Note: Some CI/test runners don't expose secrets to Deno tests.
   // In that case, the integration test is skipped; the public endpoint has no admin bypass.
-  if (!VERIFY_HMAC_SECRET || !GATEWAY_SECRET) {
+  if (!GATEWAY_SECRET) {
     return { status: 200, json: { ok: false, msg: "SKIPPED_NO_SECRET" } };
   }
 
@@ -45,7 +49,7 @@ async function callVerify(params: { key: string; device: string; device_name?: s
   const body = JSON.stringify({ ...params, build_id: REQUIRED_BUILD_ID, product_id: PRODUCT_ID });
   const bodyHash = await sha256Hex(body);
   const canonical = `${ts}.${nonce}.${bodyHash}`;
-  const sig = await hmacSha256Hex(VERIFY_HMAC_SECRET, canonical);
+  const sig = await hmacSha256Hex(requestHmacSecret, canonical);
   const gatewayIp = "203.0.113.10";
   const gatewayTs = ts;
   const gatewayNonce = crypto.randomUUID();

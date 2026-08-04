@@ -1,49 +1,24 @@
-# Sunny verify-key ECDSA P-256 V2
+# Sunny V10.1 / V34 verify deployment
 
-## What changed
+## Current released protocol
 
-- Successful `verify-key` responses are now signed with ECDSA P-256/SHA-256.
-- The response private key exists only in Supabase secrets. The JNI contains only the public key.
-- The signature binds the request nonce/body hash, key hash, device hash, build ID, expiry, server time and a short-lived session.
-- `x-build-id` is forwarded by the Cloudflare customer worker and must match `build_id` in the JSON body.
-- IP, key and new-device rate-limit RPC failures now fail closed.
-- The old admin-JWT bypass was removed from the public `verify-key` endpoint.
+- Request headers: `x-ts`, `x-nonce`, `x-sig`, `x-build-id`.
+- Request canonical: `x-ts + "." + x-nonce + "." + sha256(raw_body)`.
+- The V10.1 request key embedded in the released menu is accepted directly by `verify-key`.
+- `VERIFY_HMAC_SECRET` is retired and is not read.
+- `VERIFY_REQUEST_HMAC_SECRET` and `VERIFY_REQUEST_HMAC_SECRETS` are optional rotation/additional-key inputs only.
+- Successful responses still require `ECDSA-P256-SHA256-V3`; request HMAC never replaces ECDSA.
 
-## Required secret setup
+## Required runtime secrets
 
-Use the PKCS#8 file from the separate offline key package:
+- `VERIFY_GATEWAY_SHARED_SECRET` must match Cloudflare Worker `GATEWAY_SHARED_SECRET`.
+- `VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM` must match the public key embedded in the released menu.
 
-```bash
-supabase secrets set \
-  VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM="$(cat sunny_server_private_p256_pkcs8.pem)" \
-  VERIFY_SESSION_TTL_SECONDS="900" \
-  VERIFY_REQUIRED_BUILD_ID="sunny-v31-ac-20260616"
-```
-
-The current JNI still signs requests with the existing request HMAC. Keep the current value available under `VERIFY_HMAC_SECRET`, or copy it to the clearer transitional name:
+## Deploy
 
 ```bash
-supabase secrets set VERIFY_REQUEST_HMAC_SECRET="YOUR_CURRENT_REQUEST_HMAC_SECRET"
+supabase functions deploy verify-key --project-ref "$SUPABASE_PROJECT_REF" --no-verify-jwt
+python3 tools/check_released_menu_v10_1.py
 ```
 
-The function reads `VERIFY_REQUEST_HMAC_SECRET` first and falls back to `VERIFY_HMAC_SECRET`, so deployment does not require an immediate client-secret rotation.
-
-## Deploy order
-
-1. Set the ECDSA private-key secret first.
-2. Deploy `verify-key`.
-3. Deploy the customer worker because it now forwards `x-build-id`.
-4. Test one real login with the JNI Anti-Crack/EXP V1 build.
-5. Confirm the response contains:
-   - `server_sig_alg: ECDSA-P256-SHA256-V2`
-   - `server_key_id: sunny-p256-2026-07-a`
-   - `session_id`, `session_expires_at`, `feature_seed`
-6. Let the menu run beyond 12 minutes to confirm signed-session renewal works.
-7. Only after successful testing, make ECDSA mandatory in the JNI by setting `SUNNY_ALLOW_LEGACY_HMAC_V1` to `0` and rotate the request HMAC secret in both client and server.
-
-## Important
-
-- Never upload the private PEM to the web source, APK, GitHub, Cloudflare Worker variables visible to clients, or public downloads.
-- Do not rename the key ID without rebuilding the JNI. The client currently expects `sunny-p256-2026-07-a`.
-- A session TTL shorter than the JNI poll interval will log users out. Default is 900 seconds; the JNI polls at about 12 minutes.
-- The server deliberately returns `503 SERVER_ERROR` instead of an unsigned `ok=true` when signing or security RPCs fail.
+A successful request-auth smoke test must return anything other than `UNAUTHORIZED` for the built-in fake key. `KEY_NOT_FOUND`/`INVALID_KEY` means the V10.1 request signature passed and the function reached license validation.

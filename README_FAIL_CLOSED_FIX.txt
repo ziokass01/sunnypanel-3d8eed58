@@ -21,5 +21,5 @@ After replacing files:
 - Deploy supabase function verify-key again.
 - Deploy Cloudflare customer-worker again if you use it.
 - Replace app login header with SunnyLoginModule_FIXED.hpp, then rebuild APK.
-- Rotate VERIFY_HMAC_SECRET on server and in the new app build so old APK builds stop working.
+- For a future client rotation, add a new key through VERIFY_REQUEST_HMAC_SECRET(S) and remove the released V10.1 compatibility key only after every user has updated.
 - Test expired, blocked, and offline/server-down cases. They must fail closed.
