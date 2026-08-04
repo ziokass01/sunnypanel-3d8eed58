@@ -1,0 +1,3 @@
+Phase 3 repo patch summary
+- Runtime state now returns plan_meta with hint/benefits text, daily credits, pricing multipliers, and limits.
+- App can use this metadata to show wallet/plan details without hardcoding copy.

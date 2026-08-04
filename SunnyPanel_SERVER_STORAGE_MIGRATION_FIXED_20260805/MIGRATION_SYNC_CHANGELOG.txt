@@ -1,0 +1,6 @@
+- Thêm installer tự chép patch và backup file cũ.
+- Sửa script nhận cả SUPABASE_PROJECT_REF và PROJECT_REF.
+- Sửa GitHub Actions dùng đúng SUPABASE_PROJECT_REF, tránh prompt/hang trong CI.
+- Nâng Supabase CLI GitHub Actions lên 2.111.0 để khớp CLI mới được báo trên máy.
+- Giữ cổng migration history fail-closed; không tự repair, không include-all.
+- Không chỉnh verify-key, Worker hay giao thức menu V10.1.

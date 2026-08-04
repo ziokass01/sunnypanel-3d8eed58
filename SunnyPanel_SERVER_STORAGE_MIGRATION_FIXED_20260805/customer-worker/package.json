@@ -1,0 +1,14 @@
+{
+  "name": "customer-worker",
+  "version": "1.0.0",
+  "description": "Worker này đứng giữa frontend/public domain và Edge Functions thật của Supabase.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "^4.112.0"
+  }
+}

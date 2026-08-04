@@ -1,0 +1,49 @@
+SunnyPanel storage + migration validation — 2026-08-05
+
+[verify hash before]
+a82e42bc02ae6df3295c8ce349e5179de02ca492937103b99769410376a00254  supabase/functions/verify-key/index.ts
+[verify hash after]
+a82e42bc02ae6df3295c8ce349e5179de02ca492937103b99769410376a00254  supabase/functions/verify-key/index.ts
+
+[static validation]
+PASS: verify build
+PASS: verify product
+PASS: verify ECDSA V3
+PASS: verify key id
+PASS: released V10.1 request key retained
+PASS: retired VERIFY_HMAC_SECRET not read
+PASS: request canonical unchanged
+PASS: success response remains signed
+PASS: gateway required by default
+PASS: worker strips client gateway headers
+PASS: worker signs verify gateway request
+PASS: worker rate limit missing binding fails closed
+PASS: workers.dev disabled
+PASS: preview URLs disabled
+PASS: verify limiter configured
+PASS: fake lag stale quota fallback removed
+PASS: fake lag quota error returns 503
+PASS: worker JavaScript syntax
+PASS: wrangler JSON syntax
+PASS: DDoS migration exists
+PASS: license consistency migration exists
+PASS: storage cleanup migration exists
+PASS: atomic reset RPC present
+PASS: Fake Lag quota RPC locked to service role
+PASS: cleanup avoids license/user business tables
+PASS: cleanup creates bounded retention function
+PASS: cleanup does not enable pg_cron
+PASS: rent route disabled in worker
+PASS: rent disabled in workflow secrets
+PASS: db push fetches remote history safely
+PASS: 30/30 static checks
+verify_sha256=a82e42bc02ae6df3295c8ce349e5179de02ca492937103b99769410376a00254
+
+[shell syntax]
+PASS
+
+[python syntax]
+PASS
+
+[worker syntax]
+PASS

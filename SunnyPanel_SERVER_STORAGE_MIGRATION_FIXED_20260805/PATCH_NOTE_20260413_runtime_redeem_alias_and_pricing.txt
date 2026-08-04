@@ -1,0 +1,14 @@
+2026-04-13 patch
+- Find Dumps runtime redeem now accepts both real runtime redeem keys and direct package_code aliases from server_app_reward_packages.
+- admin-free-test now mints real runtime redeem keys for find-dumps instead of plain licenses, so the code can be pasted directly into Runtime Center.
+- find-dumps config header now exposes a direct button to the key / redeem screen.
+- refreshed plan / wallet / feature / reward defaults:
+  + Classic reset 5 soft/day
+  + Go 12 soft/day with lighter multiplier
+  + Plus 80 soft + 8 premium/day
+  + Pro 250 soft + 25 premium/day
+  + only search_basic and runtime redeem remain free by default; repeated-use tools move to charge-by-threshold rules.
+- added migration 20260413170000_find_dumps_runtime_redeem_and_pricing_refresh.sql to force DB alignment on deploy.
+
+- 2026-04-13 bổ sung: game_profiles không còn free trong Find Dumps; app gate mở màn bằng 1 lượt consume nhẹ.
+- 2026-04-13 bổ sung: Go tăng lên 15 soft/day để rõ hơn Classic 5/day nhưng vẫn thấp hơn Plus/Pro.
