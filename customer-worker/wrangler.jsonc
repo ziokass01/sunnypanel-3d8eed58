@@ -1,13 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-
   "name": "sunnypanel",
   "main": "index.js",
   "compatibility_date": "2026-07-21",
-
   "workers_dev": false,
   "preview_urls": false,
-
   "ratelimits": [
     {
       "name": "API_RATE_LIMITER",
@@ -26,22 +23,17 @@
       }
     }
   ],
-
   "route": {
     "pattern": "mityangho.id.vn/api/*",
     "zone_name": "mityangho.id.vn"
   },
-
   "vars": {
     "UPSTREAM_TIMEOUT_MS": "12000",
     "VERIFY_SESSION_TTL_SECONDS": "900",
     "VERIFY_RPC_TIMEOUT_MS": "12000",
-    "VERIFY_TRANSIENT_RETRY_SECONDS": "30",
     "VERIFY_AUDIT_SUCCESS": "0"
   },
-
   "keep_vars": true,
-
   "observability": {
     "enabled": true,
     "logs": {

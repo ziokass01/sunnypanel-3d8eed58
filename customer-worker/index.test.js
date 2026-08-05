@@ -282,7 +282,7 @@ describe("verify-key gateway hardening", () => {
     assert.equal(body.session_expires_at - Number(body.server_time), 900);
   });
 
-  it("returns a short retryable response and does not fall back when the native RPC fails", async () => {
+  it("fails closed and does not fall back when the native RPC fails", async () => {
     const calls = [];
     globalThis.fetch = async (url) => {
       calls.push(String(url));
@@ -298,11 +298,10 @@ describe("verify-key gateway hardening", () => {
       baseEnv({ VERIFY_NATIVE_ENABLED: "1" }),
     );
 
-    assert.equal(response.status, 429);
+    assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
       ok: false,
-      msg: "RATE_LIMIT",
-      retry_after_seconds: 30,
+      msg: "SERVER_ERROR",
     });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].includes("/rest/v1/rpc/verify_key_v10_1_atomic"), true);

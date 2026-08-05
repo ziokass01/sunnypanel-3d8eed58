@@ -57,3 +57,6 @@ sunny_server_private_*.pem
 *ecdsa*private*.pem
 supabase/.env.verify-key.local
 supabase/VERIFY_KEY_SECRETS.local
+# Python cache
+__pycache__/
+*.py[cod]

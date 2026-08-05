@@ -709,31 +709,7 @@ export async function handleNativeVerify(req, env, context) {
   } catch (error) {
     const errorName = String(error?.name || "");
     const errorMessage = String(error?.message || "");
-    const isTransientRpcFailure =
-      errorName === "AbortError" ||
-      errorMessage.includes("TIMEOUT") ||
-      errorMessage === "VERIFY_RPC_FAILED";
-
-    if (isTransientRpcFailure) {
-      // Compatibility behavior for the already released V10.1 client:
-      // it treats HTTP 429 as retryable, while any 5xx during the periodic
-      // lease renewal forces an immediate logout. Return a short retry window
-      // for temporary PostgREST/database failures, without falling back to the
-      // Supabase Edge Function or accepting an unsigned/unchecked session.
-      const retryAfterSeconds = envInt(
-        env,
-        "VERIFY_TRANSIENT_RETRY_SECONDS",
-        30,
-        5,
-        120,
-      );
-      return json({
-        ok: false,
-        msg: "RATE_LIMIT",
-        retry_after_seconds: retryAfterSeconds,
-      }, 429);
-    }
-
+    console.error("verify native RPC unavailable", errorName, errorMessage);
     return json({ ok: false, msg: "SERVER_ERROR" }, 503);
   }
 
