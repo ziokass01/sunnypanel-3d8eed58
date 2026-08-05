@@ -19,7 +19,6 @@ declare
   table_oid regclass;
 begin
   foreach table_name in array array[
-    'public.audit_logs',
     'public.request_nonces',
     'public.security_alerts',
     'public.verify_rate_limits',
@@ -122,7 +121,6 @@ begin
   perform set_config('statement_timeout', '45s', true);
 
   foreach spec in array array[
-    'public.audit_logs|created_at|14 days',
     'public.security_alerts|created_at|14 days',
     'public.licenses_free_security_logs|created_at|14 days',
     'public.licenses_free_admin_logs|created_at|30 days',
@@ -172,6 +170,21 @@ begin
         details := details || jsonb_build_object(parts[1], 'SKIPPED_SCHEMA_MISMATCH');
     end;
   end loop;
+
+  -- audit_logs is not a disposable table: PUBLIC_RESET and reset penalty rows
+  -- are part of reset-count/penalty compatibility for released clients. Keep all
+  -- reset-history rows forever, and keep every other action for 3 days so the
+  -- anti-enumeration queries (5/10 minutes) and recent admin diagnostics remain
+  -- available. Physical compaction is handled separately by
+  -- public.sunny_compact_audit_logs_safe().
+  if to_regclass('public.audit_logs') is not null then
+    delete from public.audit_logs
+    where created_at < now() - interval '3 days'
+      and action not in ('PUBLIC_RESET', 'RESET_DEVICES', 'RESET_DEVICES_PENALTY');
+    get diagnostics affected = row_count;
+    total_deleted := total_deleted + affected;
+    details := details || jsonb_build_object('public.audit_logs', affected);
+  end if;
 
   if to_regclass('public.request_nonces') is not null then
     delete from public.request_nonces where expires_at < now();
