@@ -34,8 +34,9 @@ import { AdminServerAppKeysPage } from "@/pages/AdminServerAppKeys";
 import { AdminServerAppAuditPage } from "@/pages/AdminServerAppAudit";
 import { AdminServerAppControlPage } from "@/pages/AdminServerAppControl";
 import { AdminServerAppRedeemPage } from "@/pages/AdminServerAppRedeem";
+import { RentPortalPage } from "@/pages/RentPortal";
+import { RentAdminCustomerSetupPage } from "@/pages/RentAdminCustomerSetup";
 import { ServiceLandingPage } from "@/pages/ServiceLanding";
-import { RentDisabledPage } from "@/pages/RentDisabled";
 import { ResetKeyPage } from "@/pages/ResetKey";
 import { ResetSettingsPage } from "@/pages/ResetSettings";
 import { ResetLogsPage } from "@/pages/ResetLogs";
@@ -95,7 +96,6 @@ const App = () => {
               <Route path="/mobile-auth/google" element={<MobileGoogleStartPage />} />
               <Route path="/mobile-auth/callback" element={<MobileGoogleCallbackPage />} />
               <Route path="/free" element={<FreeLandingPage />} />
-              <Route path="/rent" element={<RentDisabledPage />} />
               <Route path="/fake-lag" element={<FakeLagPortalPage />} />
               <Route path="/coding-ai" element={<SunnyModCodingAIPage />} />
               <Route path="/free/link4m-bridge" element={<FreeLink4MBridgePage />} />
@@ -106,6 +106,7 @@ const App = () => {
               <Route path="/claim" element={<Navigate to="/free/claim" replace />} />
               <Route path="/clam" element={<Navigate to="/free/claim" replace />} />
 
+              {!isControlHost && <Route path="/rent" element={<RentPortalPage />} />}
               {isAppHost && <Route path="/admin/free-keys" element={<LegacyFreeKeysRedirect />} />}
               {isAppHost && <Route path="/admin/free" element={<LegacyFreeKeysRedirect />} />}
               {!isControlHost && <Route path="/reset-key" element={<ResetKeyPage />} />}
@@ -168,6 +169,7 @@ const App = () => {
                     <Route path="audit" element={<AdminServerAppAuditPage />} />
                     <Route path="trash" element={<AdminServerAppTrashPage />} />
                   </Route>
+                  <Route path="/rent" element={<AdminRoute><RentAdminCustomerSetupPage /></AdminRoute>} />
                   <Route path="/settings/reset-key" element={<AdminRoute><ResetSettingsPage /></AdminRoute>} />
                   <Route path="/settings/reset-logs" element={<AdminRoute><ResetLogsPage /></AdminRoute>} />
                 </Route>

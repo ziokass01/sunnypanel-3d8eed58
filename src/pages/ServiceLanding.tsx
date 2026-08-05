@@ -22,17 +22,7 @@ export function ServiceLandingPage() {
           </div>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          <Card className="border-primary/20">
-            <CardHeader>
-              <CardTitle>Thuê Website</CardTitle>
-              <CardDescription>Đăng nhập tài khoản thuê và quản lý key riêng của bạn trong giao diện sáng, dễ nhìn.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" onClick={() => nav("/rent")}>Vào trang thuê</Button>
-            </CardContent>
-          </Card>
-
+        <div className="grid gap-5 md:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle>Key Free</CardTitle>
@@ -57,7 +47,7 @@ export function ServiceLandingPage() {
       </section>
 
       <p className="px-2 text-sm text-slate-500">
-        Lưu ý: Free, Rent và Reset Key dùng các flow riêng để tránh đụng hệ thống đang chạy. Trang Fake Lag không hiển thị ở màn hình chính public.
+        Lưu ý: Key Free và Reset Key dùng các flow riêng để tránh đụng hệ thống đang chạy. Tính năng Thuê Website đang tạm đóng; trang Fake Lag không hiển thị ở màn hình chính public.
       </p>
     </div>
   );
