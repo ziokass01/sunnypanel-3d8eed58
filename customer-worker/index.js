@@ -1,3 +1,5 @@
+import { handleNativeVerify, isNativeVerifyEnabled, nativeVerifyReadiness } from "./verify-native.js";
+
 function trimTrailingSlash(value) {
   return String(value ?? "").trim().replace(/\/+$/, "");
 }
@@ -130,7 +132,7 @@ function corsHeaders(origin, env) {
   return headers;
 }
 
-function json(data, status, origin, env) {
+function json(data, status, origin, env, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -141,6 +143,7 @@ function json(data, status, origin, env) {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       ...corsHeaders(origin, env),
+      ...extraHeaders,
     },
   });
 }
@@ -293,11 +296,15 @@ export default {
 
     const route = extractRoute(url.pathname);
     if (route.kind === "health") {
+      const nativeVerify = nativeVerifyReadiness(env);
       return json({
         ok: true,
         service: "fixed-api-gateway-v34",
         public_api_base_url: trimTrailingSlash(env.PUBLIC_API_BASE_URL || `${url.origin}/api`),
         gateway_auth: Boolean(String(env.GATEWAY_SHARED_SECRET || "").trim()),
+        verify_native_enabled: nativeVerify.enabled,
+        verify_native_configured: nativeVerify.configured,
+        verify_native_contract_ok: nativeVerify.contract_matches_released_menu,
       }, 200, origin, env);
     }
 
@@ -328,6 +335,31 @@ export default {
       if (!rateLimit.success) {
         if (rateLimit.unavailable) return json({ ok: false, msg: "SERVER_ERROR" }, 503, origin, env);
         return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+      }
+
+      if (isNativeVerifyEnabled(env)) {
+        let bodyBytes;
+        try {
+          bodyBytes = await readBodyBytes(req, maxBodyBytesForRoute(fnName, env));
+        } catch (error) {
+          if (error instanceof PayloadTooLargeError) {
+            return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env, {
+              "X-Gateway-Project": "active",
+            });
+          }
+          return json({ ok: false, msg: "INVALID_INPUT" }, 400, origin, env, {
+            "X-Gateway-Project": "active",
+          });
+        }
+
+        return handleNativeVerify(req, env, {
+          bodyBytes,
+          realIp,
+          json: (data, status) => json(data, status, origin, env, {
+            "X-Gateway-Project": "active",
+            "X-Verify-Backend": "cloudflare-native",
+          }),
+        });
       }
     }
 

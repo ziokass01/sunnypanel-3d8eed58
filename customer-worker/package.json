@@ -1,10 +1,13 @@
 {
   "name": "customer-worker",
   "version": "1.0.0",
-  "description": "Worker này đứng giữa frontend/public domain và Edge Functions thật của Supabase.",
+  "description": "Cloudflare gateway with optional native Sunny V10.1 verify-key execution.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test index.test.js",
+    "check:syntax": "node --check index.js && node --check verify-native.js && node --check check-signing-key.mjs && node --check live-smoke.mjs",
+    "check:signing-key": "node check-signing-key.mjs",
+    "smoke:live": "node live-smoke.mjs"
   },
   "keywords": [],
   "type": "module",

@@ -1,64 +1,73 @@
-# Fixed API gateway worker
+# SunnyPanel Cloudflare API gateway
 
-Worker này đứng giữa frontend/public domain và Edge Functions thật của Supabase.
+Worker này giữ endpoint public cố định `https://mityangho.id.vn/api/...`.
 
-Mục tiêu:
-- Frontend chỉ gọi một API cố định, ví dụ `https://mityangho.id.vn/api/...`
-- Khi cần đổi project Supabase, chỉ đổi upstream trong worker
-- Giữ auth/admin của Supabase riêng nếu bạn chưa refactor auth qua gateway
+Có hai chế độ riêng cho `verify-key`:
 
-## Biến môi trường cần set
+- `VERIFY_NATIVE_ENABLED=0`: chế độ rollback an toàn, Worker proxy request sang Supabase Edge Function cũ.
+- `VERIFY_NATIVE_ENABLED=1`: Worker tự xác minh request, gọi đúng một PostgreSQL RPC qua PostgREST, tạo session và ký phản hồi ECDSA V3 cho SRC V10.1. Không gọi `/functions/v1/verify-key` và không tự fallback sang Edge Function.
 
-- `PUBLIC_API_BASE_URL`: URL public cố định, ví dụ `https://mityangho.id.vn/api`
-- `ACTIVE_SUPABASE_URL`: URL project đang active, ví dụ `https://project-a.supabase.co`
-- `ACTIVE_FUNCTIONS_BASE_URL`: tùy chọn. Nếu set thì worker sẽ dùng trực tiếp URL này thay vì tự ghép từ `ACTIVE_SUPABASE_URL`
-- `UPSTREAM_ANON_KEY`: tùy chọn. Dùng khi request gửi vào worker không mang `apikey`
-- `ALLOWED_ORIGINS`: danh sách origin được phép gọi, ngăn bằng dấu phẩy
-- `ALLOWED_FUNCTIONS`: tùy chọn. Danh sách function được phép proxy, ngăn bằng dấu phẩy
+Các API khác vẫn proxy tới Supabase Edge Functions như trước.
 
-## Route
+## File quan trọng
 
-- `GET /health` hoặc `GET /api/health`
-- `GET|POST /api/<function-name>`
-- `GET|POST /<function-name>`
+- `index.js`: route, CORS, Cloudflare rate limit và proxy/feature flag.
+- `verify-native.js`: hợp đồng verify của SRC V10.1, WebCrypto và lời gọi RPC duy nhất.
+- `../supabase/migrations/20260805210000_cloudflare_native_verify_v10_1.sql`: RPC atomic.
+- `check-signing-key.mjs`: xác nhận private key hiện có khớp public key đã nhúng trong menu.
+- `index.test.js`: negative test, rollback test và kiểm tra chữ ký V3.
+- `live-smoke.mjs`: gửi request giống menu và xác minh chữ ký response thật sau deploy.
 
-Ví dụ:
+## Biến bắt buộc cho native verify
 
-- `POST /api/rent-verify-key`
-- `POST /api/free-start`
-- `POST /api/reset-key`
-- `POST /api/admin-rent`
-- `POST /api/server-app-runtime`
+Lưu dưới dạng Cloudflare secrets:
 
-## Cách hoạt động
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `VERIFY_RESPONSE_ECDSA_PRIVATE_KEY_PEM`
+- `VERIFY_NATIVE_ENABLED`
 
-Worker sẽ forward request sang:
+Các biến hợp đồng phải giữ đúng:
 
-```
-ACTIVE_FUNCTIONS_BASE_URL/<function-name>
+```text
+VERIFY_REQUIRED_BUILD_ID=sunny-v34-ac-20260721
+VERIFY_PRODUCT_ID=sunny-free-fire
+VERIFY_RESPONSE_ECDSA_KEY_ID=sunny-p256-2026-07-b
 ```
 
-hoặc nếu `ACTIVE_FUNCTIONS_BASE_URL` không có thì tự ghép:
+Worker tự kiểm tra private key bằng public key V10.1 trước khi gọi database. Key thiếu, sai định dạng hoặc không khớp sẽ trả `SERVER_ERROR` và không chạy RPC.
 
+## Kiểm tra local
+
+```bash
+cd customer-worker
+npm test
+npm run check:syntax
+node check-signing-key.mjs /duong-dan/private-key-v10.1.pem
+SUNNY_EXPECT_VERIFY_BACKEND=cloudflare-native npm run smoke:live
 ```
-ACTIVE_SUPABASE_URL/functions/v1/<function-name>
+
+Lệnh cuối phải in `PASS`. Không tạo private key mới: key mới sẽ không khớp public key của menu đang phát hành.
+
+## Health check
+
+```bash
+curl -sS https://mityangho.id.vn/api/health
 ```
 
-Worker sẽ giữ các header quan trọng nếu có:
-- `Authorization`
-- `apikey`
-- `Hmac`
-- `X-Client-Info`
+Các trường cần xem:
 
-## Gợi ý deploy nhanh với Cloudflare Worker
+- `verify_native_enabled`
+- `verify_native_configured`
+- `verify_native_contract_ok`
 
-1. Tạo worker mới hoặc dùng worker hiện tại.
-2. Dán file `index.js` vào.
-3. Set các vars/secrets ở dashboard.
-4. Tạo route public như `mityangho.id.vn/api/*` trỏ vào worker.
-5. Kiểm tra `https://mityangho.id.vn/api/health`.
+`configured:true` chỉ xác nhận secrets có mặt. Việc private key thực sự khớp được kiểm tra fail-closed trong request native đầu tiên và bằng `check-signing-key.mjs` trước khi bật.
 
-## Lưu ý
+## Quy tắc triển khai
 
-- Worker này không thay thế `supabase.auth` ở frontend. Auth/session vẫn đang đi trực tiếp qua project Supabase trong repo hiện tại.
-- Nếu đổi project, nhớ deploy functions + migrations + secrets đồng bộ ở project mới.
+1. Migration trước.
+2. Deploy Worker khi `VERIFY_NATIVE_ENABLED=0`.
+3. Chạy toàn bộ kiểm tra và một key test kín.
+4. Sau cùng mới đổi thành `VERIFY_NATIVE_ENABLED=1`.
+5. Khi có lỗi, đổi lại `0`; không sửa SRC V10.1 và không bật fallback tự động.
+
+Xem hướng dẫn đầy đủ tại `docs/CLOUDFLARE_NATIVE_VERIFY_V10_1_DEPLOY.md`.
