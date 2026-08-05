@@ -23,7 +23,9 @@ function trimTrailingSlash(value) {
 }
 
 function envInt(env, name, fallback, min, max) {
-  const parsed = Number(String(env?.[name] ?? "").trim());
+  const raw = String(env?.[name] ?? "").trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }
@@ -702,12 +704,37 @@ export async function handleNativeVerify(req, env, context) {
       p_enum_distinct_10m_limit: envInt(env, "VERIFY_ENUM_DISTINCT_10M_LIMIT", 100, 10, 10000),
       p_enum_block_minutes: envInt(env, "VERIFY_ENUM_BLOCK_MINUTES", 15, 1, 1440),
       p_session_id_prefix: sessionId.slice(0, 8),
-      p_audit_success: envBool(env, "VERIFY_AUDIT_SUCCESS", true),
+      p_audit_success: envBool(env, "VERIFY_AUDIT_SUCCESS", false),
     });
   } catch (error) {
-    const isTimeout = String(error?.name || "") === "AbortError" ||
-      String(error?.message || "").includes("TIMEOUT");
-    return json({ ok: false, msg: "SERVER_ERROR" }, isTimeout ? 504 : 503);
+    const errorName = String(error?.name || "");
+    const errorMessage = String(error?.message || "");
+    const isTransientRpcFailure =
+      errorName === "AbortError" ||
+      errorMessage.includes("TIMEOUT") ||
+      errorMessage === "VERIFY_RPC_FAILED";
+
+    if (isTransientRpcFailure) {
+      // Compatibility behavior for the already released V10.1 client:
+      // it treats HTTP 429 as retryable, while any 5xx during the periodic
+      // lease renewal forces an immediate logout. Return a short retry window
+      // for temporary PostgREST/database failures, without falling back to the
+      // Supabase Edge Function or accepting an unsigned/unchecked session.
+      const retryAfterSeconds = envInt(
+        env,
+        "VERIFY_TRANSIENT_RETRY_SECONDS",
+        30,
+        5,
+        120,
+      );
+      return json({
+        ok: false,
+        msg: "RATE_LIMIT",
+        retry_after_seconds: retryAfterSeconds,
+      }, 429);
+    }
+
+    return json({ ok: false, msg: "SERVER_ERROR" }, 503);
   }
 
   if (rpcResult?.ok !== true) {

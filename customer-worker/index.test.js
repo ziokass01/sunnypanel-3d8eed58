@@ -275,9 +275,14 @@ describe("verify-key gateway hardening", () => {
     assert.equal(rpcPayload.p_key, "SUNNY-ABCD-EFGH-IJKL");
     assert.equal(rpcPayload.p_device, "stable-device");
     assert.equal(rpcPayload.p_precheck_msg, null);
+    assert.equal(rpcPayload.p_ip_rate_limit, 300);
+    assert.equal(rpcPayload.p_key_rate_limit, 60);
+    assert.equal(rpcPayload.p_new_device_limit, 20);
+    assert.equal(rpcPayload.p_audit_success, false);
+    assert.equal(body.session_expires_at - Number(body.server_time), 900);
   });
 
-  it("does not fall back to the Edge Function when the native RPC fails", async () => {
+  it("returns a short retryable response and does not fall back when the native RPC fails", async () => {
     const calls = [];
     globalThis.fetch = async (url) => {
       calls.push(String(url));
@@ -293,8 +298,12 @@ describe("verify-key gateway hardening", () => {
       baseEnv({ VERIFY_NATIVE_ENABLED: "1" }),
     );
 
-    assert.equal(response.status, 503);
-    assert.deepEqual(await response.json(), { ok: false, msg: "SERVER_ERROR" });
+    assert.equal(response.status, 429);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      msg: "RATE_LIMIT",
+      retry_after_seconds: 30,
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].includes("/rest/v1/rpc/verify_key_v10_1_atomic"), true);
     assert.equal(calls[0].includes("/functions/v1/verify-key"), false);

@@ -16,7 +16,9 @@ class PayloadTooLargeError extends Error {
 }
 
 function envInt(env, name, fallback, min, max) {
-  const parsed = Number(String(env?.[name] ?? "").trim());
+  const raw = String(env?.[name] ?? "").trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }

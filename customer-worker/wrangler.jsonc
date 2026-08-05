@@ -21,7 +21,7 @@
       "name": "VERIFY_RATE_LIMITER",
       "namespace_id": "2026080401",
       "simple": {
-        "limit": 120,
+        "limit": 300,
         "period": 60
       }
     }
@@ -32,14 +32,22 @@
     "zone_name": "mityangho.id.vn"
   },
 
+  "vars": {
+    "UPSTREAM_TIMEOUT_MS": "12000",
+    "VERIFY_SESSION_TTL_SECONDS": "900",
+    "VERIFY_RPC_TIMEOUT_MS": "12000",
+    "VERIFY_TRANSIENT_RETRY_SECONDS": "30",
+    "VERIFY_AUDIT_SUCCESS": "0"
+  },
+
   "keep_vars": true,
 
-"observability": {
-  "enabled": true,
-  "logs": {
+  "observability": {
     "enabled": true,
-    "invocation_logs": true,
-    "head_sampling_rate": 1
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
   }
-}
 }
