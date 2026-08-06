@@ -67,6 +67,7 @@ function normalizeProvider(row: any, index: number) {
   const api_token_secret = parsed.token;
   const api_url_template = normalizeApiBase(provider, parsed.api);
   const note = trim(row?.note, 512) || null;
+  const daily_quota_limit = Math.max(0, Math.min(1000000, Math.floor(Number(row?.daily_quota_limit ?? 0) || 0)));
   const enabled = row?.enabled !== false;
   const secondary_enabled = row?.secondary_enabled === true;
   const sort_order = (index + 1) * 10;
@@ -87,6 +88,7 @@ function normalizeProvider(row: any, index: number) {
     secondary_enabled,
     pass_scope,
     sort_order,
+    daily_quota_limit,
     note,
   };
 }
@@ -152,6 +154,7 @@ Deno.serve(async (req) => {
         secondary_enabled: row.secondary_enabled,
         pass_scope: row.pass_scope,
         sort_order: row.sort_order,
+        daily_quota_limit: row.daily_quota_limit,
         note: row.note,
       };
 
@@ -185,6 +188,34 @@ Deno.serve(async (req) => {
     }
 
     return json({ ok: true, saved: cleaned.length });
+  }
+
+  if (action === "reset_quota") {
+    const id = trim(body.id, 80);
+    if (!isUuid(id)) return json({ ok: false, code: "BAD_PROVIDER_ID", msg: "BAD_PROVIDER_ID" }, 400);
+
+    const provider = await db
+      .from("licenses_free_shortlink_providers")
+      .select("daily_quota_limit")
+      .eq("id", id)
+      .maybeSingle();
+    if (provider.error) return json({ ok: false, code: "PROVIDER_LOAD_FAILED", msg: provider.error.message }, 500);
+    if (!provider.data) return json({ ok: false, code: "PROVIDER_NOT_FOUND", msg: "PROVIDER_NOT_FOUND" }, 404);
+
+    const limit = Math.max(0, Math.floor(Number((provider.data as any).daily_quota_limit ?? 0) || 0));
+    const reset = await db
+      .from("licenses_free_shortlink_providers")
+      .update({
+        quota_used_today: 0,
+        quota_remaining: limit > 0 ? limit : null,
+        quota_date: null,
+        unavailable_until: null,
+        last_error: null,
+        fail_count: 0,
+      })
+      .eq("id", id);
+    if (reset.error) return json({ ok: false, code: "PROVIDER_QUOTA_RESET_FAILED", msg: reset.error.message }, 500);
+    return json({ ok: true, daily_quota_limit: limit, quota_used_today: 0 });
   }
 
   if (action === "delete") {

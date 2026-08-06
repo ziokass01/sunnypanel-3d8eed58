@@ -27,9 +27,31 @@ export function normalizeShortlinkMode(value: unknown) {
   return "round_robin";
 }
 
+export function providerDailyQuotaLimit(provider: any) {
+  const value = Number(provider?.daily_quota_limit ?? 0);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+export function providerDailyQuotaUsed(provider: any, today = vietnamDate()) {
+  if (String(provider?.quota_date ?? "").trim() !== today) return 0;
+  const value = Number(provider?.quota_used_today ?? 0);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+export function providerIsTemporarilyUnavailable(provider: any, now = new Date()) {
+  if (String(provider?.provider ?? "").trim().toLowerCase() === "gtraffic") return false;
+  const unavailableUntil = Date.parse(String(provider?.unavailable_until ?? ""));
+  return Number.isFinite(unavailableUntil) && unavailableUntil > now.getTime();
+}
+
 export function providerIsExhaustedToday(provider: any, today = vietnamDate()) {
-  if (String(provider?.provider ?? "").trim().toLowerCase() !== "gtraffic") return false;
   if (String(provider?.quota_date ?? "").trim() !== today) return false;
+
+  const localLimit = providerDailyQuotaLimit(provider);
+  if (localLimit > 0 && providerDailyQuotaUsed(provider, today) >= localLimit) return true;
+
   if (provider?.quota_remaining === null || provider?.quota_remaining === undefined || provider?.quota_remaining === "") return false;
   const remaining = Number(provider?.quota_remaining);
   return Number.isFinite(remaining) && remaining <= 0;

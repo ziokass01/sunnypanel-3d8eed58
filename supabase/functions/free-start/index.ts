@@ -9,6 +9,7 @@ import {
   orderedProvidersForPass,
   parseGtrafficResponse,
   providerIsExhaustedToday,
+  providerIsTemporarilyUnavailable,
   type ShortlinkChannel,
   type ProviderShortenResult,
   vietnamDate,
@@ -106,9 +107,16 @@ function isHtmlResponse(raw: string, contentType = "") {
   return type.includes("text/html") || value.startsWith("<!doctype html") || value.startsWith("<html");
 }
 
+function providerErrorPrefix(providerKind: string) {
+  const normalized = String(providerKind || "provider").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  return normalized || "PROVIDER";
+}
+
 function safeProviderError(error: unknown) {
   const raw = String((error as any)?.message ?? error ?? "SHORTLINK_FAILED");
-  if (isCloudflareChallenge(raw)) return "LINK4M_CLOUDFLARE_CHALLENGE";
+  const trimmed = raw.trim();
+  if (/^[A-Z0-9_]+_CLOUDFLARE_CHALLENGE$/.test(trimmed)) return trimmed;
+  if (isCloudflareChallenge(raw)) return "SHORTLINK_PROVIDER_CLOUDFLARE_CHALLENGE";
   if (isHtmlResponse(raw)) return "SHORTLINK_PROVIDER_HTML_RESPONSE";
   return raw
     .replace(/([?&](?:apikey|api|token|tokenUser)=)[^&\s]+/gi, "$1***")
@@ -144,20 +152,32 @@ async function readJsonOrText(url: string, providerKind = "custom") {
     "cache-control": "no-cache",
     "pragma": "no-cache",
   };
-  const profiles: Array<Record<string, string>> = providerKind === "link4m"
-    ? [
+  const normalizedProviderKind = String(providerKind || "custom").trim().toLowerCase();
+  let profiles: Array<Record<string, string>>;
+
+  if (normalizedProviderKind === "link4m") {
+    profiles = [
       {
         ...common,
         "user-agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
         "accept-language": "en-US,en;q=0.9,vi;q=0.8",
         "referer": "https://my.link4m.com/",
       },
+      { ...common, "user-agent": "SunnyPanel-FreeKey/1.2" },
+    ];
+  } else if (normalizedProviderKind === "layma") {
+    profiles = [
       {
         ...common,
-        "user-agent": "SunnyPanel-FreeKey/1.2",
+        "user-agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+        "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+        "referer": "https://layma.net/",
       },
-    ]
-    : [{ ...common, "user-agent": "SunnyPanel-FreeKey/1.2" }];
+      { ...common, "user-agent": "SunnyPanel-FreeKey/1.3" },
+    ];
+  } else {
+    profiles = [{ ...common, "user-agent": "SunnyPanel-FreeKey/1.3" }];
+  }
 
   let lastError: Error | null = null;
   for (const headers of profiles) {
@@ -165,7 +185,7 @@ async function readJsonOrText(url: string, providerKind = "custom") {
     const contentType = res.headers.get("content-type") || "";
 
     if (isCloudflareChallenge(raw)) {
-      lastError = new Error("LINK4M_CLOUDFLARE_CHALLENGE");
+      lastError = new Error(`${providerErrorPrefix(providerKind)}_CLOUDFLARE_CHALLENGE`);
       continue;
     }
     if (isHtmlResponse(raw, contentType) && !data) {
@@ -290,6 +310,9 @@ if (kind === "nhapma") {
   if (/\/st\?/i.test(requestUrl) && !isApiRequest) return { outboundUrl: requestUrl } satisfies ProviderShortenResult;
 
   const { data, raw } = await readJsonOrText(requestUrl, kind);
+  if (kind === "layma" && data?.success === false) {
+    throw new Error("LAYMA_API_REJECTED");
+  }
   const shortUrl = extractShortUrl(data, raw);
   if (!shortUrl) throw new Error(String(data?.message || data?.error || "SHORTLINK_RESPONSE_INVALID"));
   return { outboundUrl: shortUrl } satisfies ProviderShortenResult;
@@ -323,7 +346,7 @@ async function loadProviders(db: any, passNo: number, channel: ShortlinkChannel)
     .order("created_at", { ascending: true });
   if (res.error) throw res.error;
   return orderedProvidersForPass((res.data ?? []) as any[], passNo, channel)
-    .filter((provider) => !providerIsExhaustedToday(provider));
+    .filter((provider) => !providerIsExhaustedToday(provider) && !providerIsTemporarilyUnavailable(provider));
 }
 function fallbackProviderFromSettings(cfg: any, passNo: number) {
   const template = text(passNo === 2 ? (cfg.free_outbound_url_pass2 || cfg.free_outbound_url) : cfg.free_outbound_url, 4096);
@@ -401,6 +424,51 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
   return out;
 }
 
+async function configuredProviderDailyQuota(provider: any) {
+  const value = Number(provider?.daily_quota_limit ?? 0);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+async function reserveProviderQuota(db: any, provider: any) {
+  const limit = await configuredProviderDailyQuota(provider);
+  if (!provider?.id || limit <= 0) return { allowed: true, reserved: false };
+
+  const result = await db.rpc("reserve_free_shortlink_provider_quota", {
+    p_provider_id: provider.id,
+    p_today: vietnamDate(),
+  });
+  if (result.error) throw new Error("PROVIDER_QUOTA_RESERVE_FAILED");
+
+  const row = Array.isArray(result.data) ? result.data[0] : result.data;
+  return {
+    allowed: row?.allowed === true,
+    reserved: row?.allowed === true,
+  };
+}
+
+async function releaseProviderQuota(db: any, provider: any) {
+  const limit = await configuredProviderDailyQuota(provider);
+  if (!provider?.id || limit <= 0) return;
+  try {
+    await db.rpc("release_free_shortlink_provider_quota", {
+      p_provider_id: provider.id,
+      p_today: vietnamDate(),
+    });
+  } catch {
+    // Conservative failure: at most one local quota slot stays reserved.
+  }
+}
+
+function shouldTemporarilyCoolDownProvider(provider: any, error: unknown) {
+  if (text(provider?.provider, 32).toLowerCase() === "gtraffic") return false;
+  const message = safeProviderError(error).toUpperCase();
+  return message.includes("CLOUDFLARE_CHALLENGE")
+    || message.includes("SHORTLINK_TIMEOUT")
+    || message.includes("SHORTLINK_FETCH_FAILED")
+    || message.includes("LAYMA_API_REJECTED");
+}
+
 async function markProviderFailure(db: any, provider: any, error: unknown) {
   if (!provider?.id) return;
   const message = safeProviderError(error);
@@ -408,9 +476,14 @@ async function markProviderFailure(db: any, provider: any, error: unknown) {
     last_error: message,
     fail_count: Math.max(0, Number(provider?.fail_count ?? 0)) + 1,
   };
-  if (text(provider?.provider, 32).toLowerCase() === "gtraffic" && isQuotaExhaustedError(error)) {
+  if (isQuotaExhaustedError(error)) {
     patch.quota_remaining = 0;
     patch.quota_date = vietnamDate();
+    const localLimit = Math.max(0, Math.floor(Number(provider?.daily_quota_limit ?? 0) || 0));
+    if (localLimit > 0) patch.quota_used_today = localLimit;
+  }
+  if (shouldTemporarilyCoolDownProvider(provider, error)) {
+    patch.unavailable_until = new Date(Date.now() + 5 * 60 * 1000).toISOString();
   }
   try {
     await db.from("licenses_free_shortlink_providers").update(patch).eq("id", provider.id);
@@ -423,8 +496,9 @@ async function markProviderSuccess(db: any, provider: any, passNo: number, resul
     last_used_at: new Date().toISOString(),
     last_error: null,
     fail_count: 0,
+    unavailable_until: null,
   };
-  if (text(provider?.provider, 32).toLowerCase() === "gtraffic" && result.quotaRemaining !== null && result.quotaRemaining !== undefined) {
+  if (result.quotaRemaining !== null && result.quotaRemaining !== undefined) {
     providerPatch.quota_remaining = result.quotaRemaining;
     providerPatch.quota_date = result.quotaDate || vietnamDate();
   }
@@ -452,13 +526,27 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
   }
 
   for (const provider of candidates) {
+    let quotaReserved = false;
     try {
+      const quota = await reserveProviderQuota(db, provider);
+      quotaReserved = quota.reserved;
+      if (!quota.allowed) {
+        const quotaError = new Error("PROVIDER_DAILY_QUOTA_EXHAUSTED");
+        const quotaMessage = safeProviderError(quotaError);
+        failures.push(`${text(provider?.name || provider?.provider || "provider", 80)}: ${quotaMessage}`);
+        await markProviderFailure(db, provider, quotaError);
+        continue;
+      }
+
       const result = await shortenWithProvider(provider, gateUrl);
       const outboundUrl = result.outboundUrl;
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
       await markProviderSuccess(db, provider, passNo, result, channel);
       return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
+      if (quotaReserved && !isQuotaExhaustedError(error)) {
+        await releaseProviderQuota(db, provider);
+      }
       const message = safeProviderError(error);
       failures.push(`${text(provider?.name || provider?.provider || "provider", 80)}: ${message}`);
       await markProviderFailure(db, provider, error);

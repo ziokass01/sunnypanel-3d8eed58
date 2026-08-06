@@ -65,6 +65,20 @@ describe("GTraffic shortlink provider", () => {
     expect(providerIsExhaustedToday(provider, "2026-08-02")).toBe(false);
   });
 
+
+  it("supports a local 300/day limit for LayMa and resets on the next Vietnam date", () => {
+    const provider = {
+      provider: "layma",
+      daily_quota_limit: 300,
+      quota_used_today: 300,
+      quota_remaining: 0,
+      quota_date: "2026-08-06",
+    };
+    expect(providerIsExhaustedToday(provider, "2026-08-06")).toBe(true);
+    expect(providerIsExhaustedToday({ ...provider, quota_used_today: 299, quota_remaining: 1 }, "2026-08-06")).toBe(false);
+    expect(providerIsExhaustedToday(provider, "2026-08-07")).toBe(false);
+  });
+
   it("does not globally skip GTraffic because another session returned early", () => {
     const provider = {
       provider: "gtraffic",

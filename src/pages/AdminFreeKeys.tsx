@@ -93,6 +93,8 @@ type ShortlinkProviderRow = {
   fail_count?: number | null;
   quota_remaining?: number | null;
   quota_date?: string | null;
+  daily_quota_limit?: number | null;
+  quota_used_today?: number | null;
   note?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -206,8 +208,17 @@ type AdminTestResult = {
 function friendlyShortlinkError(value?: string | null) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-  if (/<title>just a moment|challenge-platform|cf-chl-|cloudflare ray id|<!doctype html/i.test(raw)) {
-    return "LINK4M_CLOUDFLARE_CHALLENGE";
+  if (/PROVIDER_DAILY_QUOTA_EXHAUSTED/i.test(raw)) {
+    return "Đã hết giới hạn rút gọn hôm nay; hệ thống tự chuyển API kế tiếp.";
+  }
+  if (/LAYMA_CLOUDFLARE_CHALLENGE/i.test(raw)) {
+    return "LayMa đang trả Cloudflare challenge; tạm bỏ qua dòng này và chuyển API kế tiếp.";
+  }
+  if (/LINK4M_CLOUDFLARE_CHALLENGE/i.test(raw)) {
+    return "Link4M đang trả Cloudflare challenge; tạm bỏ qua dòng này và chuyển API kế tiếp.";
+  }
+  if (/SHORTLINK_PROVIDER_CLOUDFLARE_CHALLENGE|<title>just a moment|challenge-platform|cf-chl-|cloudflare ray id|<!doctype html/i.test(raw)) {
+    return "Nhà cung cấp rút gọn đang trả Cloudflare challenge/HTML; hệ thống chuyển API kế tiếp.";
   }
   if (/GTRAFFIC_DAILY_QUOTA_EXHAUSTED|hết lượt|hết hạn mức/i.test(raw)) {
     return "GTraffic đã hết lượt hôm nay; hệ thống đang dùng link kế tiếp và sẽ tự thử lại sau 00:00.";
@@ -344,6 +355,25 @@ function getVietnamDateKey(date = new Date()) {
   const month = parts.find((p) => p.type === "month")?.value;
   const day = parts.find((p) => p.type === "day")?.value;
   return `${year}-${month}-${day}`;
+}
+
+
+function shortlinkProviderQuotaLabel(row: ShortlinkProviderRow) {
+  const limit = Math.max(0, Math.floor(Number(row.daily_quota_limit ?? 0) || 0));
+  const today = getVietnamDateKey();
+  const sameDay = String(row.quota_date ?? "") === today;
+  const used = sameDay ? Math.max(0, Math.floor(Number(row.quota_used_today ?? 0) || 0)) : 0;
+
+  if (limit > 0) {
+    const remaining = Math.max(0, limit - used);
+    return `Đã dùng ${used}/${limit} · còn ${remaining}`;
+  }
+
+  if (sameDay && row.quota_remaining !== null && row.quota_remaining !== undefined) {
+    return `Provider báo còn ${Math.max(0, Math.floor(Number(row.quota_remaining) || 0))}`;
+  }
+
+  return "Không giới hạn nội bộ";
 }
 
 function getVietnamDayRangeUtc(day: string) {
@@ -622,6 +652,8 @@ export function AdminFreeKeysPage() {
       ...row,
       api_token_secret: normalizeProviderToken(row),
       api_url_template: normalizeProviderApi(row),
+      daily_quota_limit: Math.max(0, Math.floor(Number(row.daily_quota_limit ?? 0) || 0)),
+      quota_used_today: Math.max(0, Math.floor(Number(row.quota_used_today ?? 0) || 0)),
       note: row.note ?? "",
     })));
   }, [providersQuery.data]);
@@ -634,6 +666,8 @@ export function AdminFreeKeysPage() {
       provider: "gtraffic",
       api_token_secret: "",
       api_url_template: defaultShortlinkApi("gtraffic"),
+      daily_quota_limit: 0,
+      quota_used_today: 0,
       enabled: true,
       secondary_enabled: false,
       pass_scope: "both",
@@ -889,6 +923,7 @@ export function AdminFreeKeysPage() {
             enabled: Boolean(row.enabled),
             secondary_enabled: Boolean(row.secondary_enabled),
             sort_order: (index + 1) * 10,
+            daily_quota_limit: Math.max(0, Math.min(1000000, Math.floor(Number(row.daily_quota_limit ?? 0) || 0))),
             note: String(row.note ?? "").trim(),
           };
         })
@@ -926,6 +961,33 @@ export function AdminFreeKeysPage() {
     },
     onError: (e: any) => {
       toast({ title: "Lưu API/token thất bại", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
+  const resetProviderQuota = useMutation({
+    mutationFn: async (id: string) => {
+      if (String(id).startsWith("tmp_")) {
+        setProviderDrafts((prev) => prev.map((row) => row.id === id
+          ? { ...row, quota_used_today: 0, quota_remaining: row.daily_quota_limit || null, quota_date: null, last_error: null, fail_count: 0 }
+          : row));
+        return true;
+      }
+      const sess = await supabase.auth.getSession();
+      const token = sess.data.session?.access_token;
+      if (!token) throw new Error("ADMIN_AUTH_REQUIRED");
+      const data = await postFunction<any>("/admin-free-shortlinks", {
+        action: "reset_quota",
+        id,
+      }, { authToken: token });
+      if (data?.ok === false) throw new Error(data?.msg || data?.code || "PROVIDER_QUOTA_RESET_FAILED");
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã reset lượt", description: "Bộ đếm provider đã về 0; dòng này có thể dùng lại ngay." });
+      await providersQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Reset lượt thất bại", description: e?.message ?? "Error", variant: "destructive" });
     },
   });
 
@@ -1738,6 +1800,8 @@ export function AdminFreeKeysPage() {
                     <TableHead className="min-w-[130px]">Provider</TableHead>
                     <TableHead className="min-w-[220px]">Token</TableHead>
                     <TableHead className="min-w-[310px]">API</TableHead>
+                    <TableHead className="min-w-[150px]">Giới hạn/ngày</TableHead>
+                    <TableHead className="min-w-[190px]">Đã dùng / còn</TableHead>
                     <TableHead className="min-w-[110px]">Pass</TableHead>
                     <TableHead className="min-w-[95px]">Key chính</TableHead>
                     <TableHead className="min-w-[95px]">Key phụ</TableHead>
@@ -1783,6 +1847,35 @@ export function AdminFreeKeysPage() {
                         <div className="mt-1 text-[11px] text-muted-foreground">Bắt buộc điền API base như https://link4m.co/api-shorten/v2. Nếu là custom template có thể dùng {"{token}"}, {"{url}"}, {"{url_enc}"}.</div>
                       </TableCell>
                       <TableCell>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={1000000}
+                          value={Math.max(0, Number(row.daily_quota_limit ?? 0) || 0)}
+                          onChange={(e) => updateProviderDraft(row.id, {
+                            daily_quota_limit: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                          })}
+                          placeholder="300"
+                        />
+                        <div className="mt-1 text-[11px] text-muted-foreground">0 = không giới hạn nội bộ.</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-xs font-medium">{shortlinkProviderQuotaLabel(row)}</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                          Reset tự động lúc 00:00 Việt Nam.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => resetProviderQuota.mutate(row.id)}
+                          disabled={resetProviderQuota.isPending}
+                        >
+                          Reset lượt
+                        </Button>
+                      </TableCell>
+                      <TableCell>
                         <Select value={row.pass_scope} onValueChange={(v) => updateProviderDraft(row.id, { pass_scope: v as ShortlinkProviderRow["pass_scope"] })}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
@@ -1816,7 +1909,7 @@ export function AdminFreeKeysPage() {
                     </TableRow>
                   )) : (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={11} className="py-6 text-center text-sm text-muted-foreground">
                         Chưa có API/token. Bấm “Thêm API” rồi điền API + Token, sau đó bấm Lưu API/token.
                       </TableCell>
                     </TableRow>
@@ -1826,7 +1919,7 @@ export function AdminFreeKeysPage() {
             </div>
 
             <div className="rounded-md bg-muted/50 p-3 text-xs leading-6 text-muted-foreground">
-              Thứ tự bảng là thứ tự ưu tiên thật cho từng chế độ. Với GTraffic, hãy đặt “Điều hướng khi hết mã” thành “Đi tới liên kết gốc”. Nếu một người quay về quá sớm, chỉ phiên của người đó chuyển xuống provider dự phòng; GTraffic vẫn tiếp tục phục vụ những người khác.
+              Thứ tự bảng là thứ tự ưu tiên thật. Ở chế độ “Ưu tiên theo thứ tự, hết lượt mới chuyển”, mỗi dòng dùng tới giới hạn/ngày rồi tự chuyển xuống dòng kế tiếp; bộ đếm reset lúc 00:00 Việt Nam. Với GTraffic, hãy đặt “Điều hướng khi hết mã” thành “Đi tới liên kết gốc”.
             </div>
           </div>
 
