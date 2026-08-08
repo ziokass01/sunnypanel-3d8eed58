@@ -31,6 +31,22 @@ export type LicenseRow = {
   app_code?: string | null;
 };
 
+
+export type LicenseExpiryHistoryRow = {
+  id: number;
+  original_license_id: string;
+  license_key: string;
+  app_code: string | null;
+  expired_at: string;
+  archived_at: string;
+  created_at: string | null;
+  first_used_at: string | null;
+  max_devices: number | null;
+  note: string | null;
+  device_count: number;
+  issue_count: number;
+};
+
 export type LicenseDeviceRow = {
   id: string;
   license_id: string;
@@ -227,6 +243,24 @@ export async function fetchDeletedLicenses(params: { q?: string } = {}) {
   const { data, error } = await query;
   if (error) throw error;
   return (data ?? []) as LicenseRow[];
+}
+
+
+export async function fetchLicenseExpiryHistory(params: { q?: string } = {}) {
+  const q = params.q?.trim();
+  let query = (supabase.from("license_expiry_history" as any) as any)
+    .select("id,original_license_id,license_key,app_code,expired_at,archived_at,created_at,first_used_at,max_devices,note,device_count,issue_count")
+    .order("archived_at", { ascending: false })
+    .range(0, 999);
+
+  if (q) {
+    const escaped = escapeILike(q);
+    query = query.or(`license_key.ilike.%${escaped}%,note.ilike.%${escaped}%,app_code.ilike.%${escaped}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as LicenseExpiryHistoryRow[];
 }
 
 export async function restoreLicense(id: string) {

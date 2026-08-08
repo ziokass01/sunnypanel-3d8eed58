@@ -1,4 +1,7 @@
 import { handleNativeVerify, isNativeVerifyEnabled, nativeVerifyReadiness } from "./verify-native.js";
+import { handleFreeStart } from "./free-start-native.js";
+import { handleFreeGate } from "./free-gate-native.js";
+import { createServiceClient, serviceClientReadiness } from "./supabase-rest.js";
 
 function trimTrailingSlash(value) {
   return String(value ?? "").trim().replace(/\/+$/, "");
@@ -160,6 +163,76 @@ function isUpstreamTimeoutError(error) {
     message.includes("UPSTREAM_TIMEOUT");
 }
 
+
+function boolVar(value, fallback = false) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+function freeNativeRouteEnabled(env, fnName) {
+  const general = boolVar(env?.FREE_NATIVE_ENABLED, false);
+  if (fnName === "free-start") {
+    const specific = String(env?.FREE_NATIVE_START_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-gate") {
+    const specific = String(env?.FREE_NATIVE_GATE_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  return false;
+}
+
+function freeMaintenanceEnabled(env) {
+  return boolVar(env?.FREE_MAINTENANCE_ENABLED, true);
+}
+
+async function runFreeDailyMaintenance(env) {
+  if (!freeMaintenanceEnabled(env)) {
+    return { ok: true, skipped: true, code: "MAINTENANCE_DISABLED" };
+  }
+  const db = createServiceClient(env);
+  const { data, error } = await db.rpc("sunny_daily_maintenance", {});
+  if (error) {
+    throw new Error(`SUNNY_DAILY_MAINTENANCE_FAILED: ${String(error?.message || error)}`);
+  }
+  return data ?? { ok: true };
+}
+
+function freeConfigCacheSeconds(env) {
+  return envInt(env, "FREE_CONFIG_CACHE_SECONDS", 30, 0, 300);
+}
+
+function freeConfigCacheKey(req) {
+  const appCode = String(req.headers.get("x-app-code") || "").trim().toLowerCase().slice(0, 64);
+  const url = new URL("https://sunny-worker-cache.invalid/free-config");
+  if (appCode) url.searchParams.set("app", appCode);
+  return new Request(url.toString(), { method: "GET" });
+}
+
+async function readFreeConfigCache(req, env) {
+  if (req.method !== "GET") return null;
+  if (freeConfigCacheSeconds(env) <= 0) return null;
+  if (!globalThis.caches?.default) return null;
+  return await globalThis.caches.default.match(freeConfigCacheKey(req));
+}
+
+async function writeFreeConfigCache(req, env, upstream) {
+  if (req.method !== "GET" || upstream.status !== 200) return;
+  const ttl = freeConfigCacheSeconds(env);
+  if (ttl <= 0 || !globalThis.caches?.default) return;
+  const body = await upstream.clone().arrayBuffer();
+  const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
+  const cached = new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": `public, max-age=${ttl}`,
+    },
+  });
+  await globalThis.caches.default.put(freeConfigCacheKey(req), cached);
+}
+
 function getAllowedFunctions(env) {
   const raw = String(env.ALLOWED_FUNCTIONS ?? "").trim();
   if (raw) {
@@ -299,6 +372,7 @@ export default {
     const route = extractRoute(url.pathname);
     if (route.kind === "health") {
       const nativeVerify = nativeVerifyReadiness(env);
+      const freeDb = serviceClientReadiness(env);
       return json({
         ok: true,
         service: "fixed-api-gateway-v34",
@@ -307,6 +381,11 @@ export default {
         verify_native_enabled: nativeVerify.enabled,
         verify_native_configured: nativeVerify.configured,
         verify_native_contract_ok: nativeVerify.contract_matches_released_menu,
+        free_native_start_enabled: freeNativeRouteEnabled(env, "free-start"),
+        free_native_gate_enabled: freeNativeRouteEnabled(env, "free-gate"),
+        free_native_db_ready: freeDb.url && freeDb.serviceRoleKey,
+        free_config_cache_seconds: freeConfigCacheSeconds(env),
+        free_maintenance_enabled: freeMaintenanceEnabled(env),
       }, 200, origin, env);
     }
 
@@ -330,6 +409,32 @@ export default {
 
     if (fnName === "verify-key" && req.method !== "POST") {
       return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if ((fnName === "free-start" || fnName === "free-gate") && req.method !== "POST") {
+      return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if (fnName === "free-start" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeStart(req, env);
+    }
+
+    if (fnName === "free-gate" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeGate(req, env);
+    }
+
+    if (fnName === "free-config") {
+      const cached = await readFreeConfigCache(req, env);
+      if (cached) {
+        const responseHeaders = new Headers(corsHeaders(origin, env));
+        responseHeaders.set("Content-Type", cached.headers.get("Content-Type") || "application/json; charset=utf-8");
+        responseHeaders.set("Cache-Control", "public, max-age=15");
+        responseHeaders.set("X-Content-Type-Options", "nosniff");
+        responseHeaders.set("Referrer-Policy", "no-referrer");
+        responseHeaders.set("X-Gateway-Project", "active");
+        responseHeaders.set("X-Free-Config-Cache", "HIT");
+        return new Response(cached.body, { status: cached.status, headers: responseHeaders });
+      }
     }
 
     if (fnName === "verify-key") {
@@ -388,6 +493,10 @@ export default {
       return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: "Upstream request failed" }, 502, origin, env);
     }
 
+    if (fnName === "free-config") {
+      try { await writeFreeConfigCache(req, env, upstream); } catch { /* cache is best-effort */ }
+    }
+
     const responseHeaders = new Headers(corsHeaders(origin, env));
     const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
     responseHeaders.set("Content-Type", contentType);
@@ -414,5 +523,12 @@ export default {
       status: upstream.status,
       headers: responseHeaders,
     });
+  },
+
+  async scheduled(_controller, env, ctx) {
+    const work = runFreeDailyMaintenance(env).catch((error) => {
+      console.error("sunny daily maintenance failed", String(error?.message || error));
+    });
+    ctx.waitUntil(work);
   },
 };

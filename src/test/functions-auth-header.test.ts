@@ -111,7 +111,7 @@ describe("functions auth headers", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/admin-rent");
   });
 
-  it("falls back to the gateway for GET when direct Supabase is temporarily unavailable", async () => {
+  it("prefers the gateway for Free Key hot-path GET and falls back to direct Supabase when unavailable", async () => {
     vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
 
     const fetchMock = vi
@@ -128,7 +128,32 @@ describe("functions auth headers", () => {
 
     expect(data).toEqual({ ok: true, source: "direct" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-config");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://mityangho.id.vn/api/free-config");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/free-config");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-config");
+  });
+
+  it("falls back to direct Supabase when native free-start has a gateway 5xx", async () => {
+    vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({ ok: false, code: "SERVER_ERROR", msg: "temporary native failure" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, source: "direct" }),
+      });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const data = await postFunction("/free-start", { key_type_code: "D1" });
+
+    expect(data).toEqual({ ok: true, source: "direct" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/free-start");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-start");
   });
 });

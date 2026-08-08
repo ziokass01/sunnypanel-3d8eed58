@@ -23,9 +23,10 @@ function normalizeFunctionPath(path: string) {
 }
 
 const DIRECT_SUPABASE_FUNCTIONS = new Set([
-  "/free-config",
-  "/free-start",
-  "/free-gate",
+  // The high-volume public hot path now prefers the Cloudflare gateway:
+  // free-config is edge-cached and free-start/free-gate execute natively in
+  // the Worker. Keep reveal/resolve/close on Supabase Edge for now because
+  // they mutate/issue final key state and are lower-volume.
   "/free-reveal",
   "/free-resolve",
   "/free-close",
@@ -225,7 +226,7 @@ async function invokeJson<T>(opts: {
         "/free-resolve",
         "/fake-lag-check",
       ]);
-      if (structuredPublicDenialPaths.has(normalizedCandidatePath) && data && typeof data === "object" && (data as any).ok === false) {
+      if (res.status < 500 && structuredPublicDenialPaths.has(normalizedCandidatePath) && data && typeof data === "object" && (data as any).ok === false) {
         return data as T;
       }
 

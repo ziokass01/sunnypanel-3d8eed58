@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { NavLink } from "@/components/NavLink";
-import { fetchDeletedLicenses, hardDeleteLicense, restoreLicense } from "@/features/licenses/licenses-api";
+import { fetchDeletedLicenses, fetchLicenseExpiryHistory, hardDeleteLicense, restoreLicense } from "@/features/licenses/licenses-api";
 import { getErrorMessage } from "@/lib/error-message";
 
 export function LicensesTrashPage() {
@@ -27,6 +27,12 @@ export function LicensesTrashPage() {
   const { data = [], isLoading, error } = useQuery({
     queryKey,
     queryFn: () => fetchDeletedLicenses({ q }),
+  });
+
+  const historyQueryKey = useMemo(() => ["licenses", "expiry-history", { q }] as const, [q]);
+  const { data: expiryHistory = [], isLoading: expiryHistoryLoading, error: expiryHistoryError } = useQuery({
+    queryKey: historyQueryKey,
+    queryFn: () => fetchLicenseExpiryHistory({ q }),
   });
 
   const restoreMutation = useMutation({
@@ -67,6 +73,7 @@ export function LicensesTrashPage() {
       </div>
 
       {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}
+      {expiryHistoryError ? <div className="text-sm text-destructive">{getErrorMessage(expiryHistoryError)}</div> : null}
 
       <div className="rounded-lg border">
         <Table>
@@ -124,6 +131,48 @@ export function LicensesTrashPage() {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="space-y-2">
+        <div>
+          <h2 className="text-lg font-semibold">Expired key history</h2>
+          <p className="text-sm text-muted-foreground">Key hết hạn hơn 1 ngày được tự động lưu lịch sử gọn tại đây rồi xóa khỏi bảng live.</p>
+        </div>
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Key</TableHead>
+                <TableHead className="hidden md:table-cell">Expired</TableHead>
+                <TableHead className="hidden lg:table-cell">Archived</TableHead>
+                <TableHead className="text-right">Devices</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {expiryHistoryLoading ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">Loading…</TableCell>
+                </TableRow>
+              ) : expiryHistory.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">Chưa có key hết hạn được lưu lịch sử.</TableCell>
+                </TableRow>
+              ) : (
+                expiryHistory.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <div className="font-mono text-xs md:text-sm">{row.license_key}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{row.app_code || "sunny-free-fire"}{row.note ? ` · ${row.note}` : ""}</div>
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">{new Date(row.expired_at).toLocaleString()}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{new Date(row.archived_at).toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{row.device_count}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? setDeleteTarget(null) : null)}>

@@ -27,11 +27,20 @@
     "pattern": "mityangho.id.vn/api/*",
     "zone_name": "mityangho.id.vn"
   },
+  "triggers": {
+    "crons": ["27 */6 * * *"]
+  },
   "vars": {
     "UPSTREAM_TIMEOUT_MS": "12000",
     "VERIFY_SESSION_TTL_SECONDS": "900",
     "VERIFY_RPC_TIMEOUT_MS": "12000",
-    "VERIFY_AUDIT_SUCCESS": "0"
+    "VERIFY_AUDIT_SUCCESS": "0",
+    "FREE_NATIVE_ENABLED": "1",
+    "FREE_NATIVE_START_ENABLED": "1",
+    "FREE_NATIVE_GATE_ENABLED": "1",
+    "FREE_CONFIG_CACHE_SECONDS": "30",
+    "FREE_NATIVE_DB_TIMEOUT_MS": "12000",
+    "FREE_MAINTENANCE_ENABLED": "1"
   },
   "keep_vars": true,
   "observability": {
