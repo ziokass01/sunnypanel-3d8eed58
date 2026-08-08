@@ -4,8 +4,8 @@
   "description": "Cloudflare gateway with optional native Sunny V10.1 verify-key execution.",
   "main": "index.js",
   "scripts": {
-    "test": "node --test index.test.js free-native.test.js",
-    "check:syntax": "node --check index.js && node --check verify-native.js && node --check supabase-rest.js && node --check free-start-native.js && node --check free-gate-native.js && node --check check-signing-key.mjs && node --check live-smoke.mjs",
+    "test": "node --test index.test.js free-native.test.js public-hotpath-native.test.js",
+    "check:syntax": "node --check index.js && node --check verify-native.js && node --check supabase-rest.js && node --check free-start-native.js && node --check free-gate-native.js && node --check free-close-native.js && node --check reset-key-native.js && node --check check-signing-key.mjs && node --check live-smoke.mjs",
     "check:signing-key": "node check-signing-key.mjs",
     "smoke:live": "node live-smoke.mjs"
   },

@@ -1,6 +1,8 @@
 import { handleNativeVerify, isNativeVerifyEnabled, nativeVerifyReadiness } from "./verify-native.js";
 import { handleFreeStart } from "./free-start-native.js";
 import { handleFreeGate } from "./free-gate-native.js";
+import { handleFreeClose } from "./free-close-native.js";
+import { handleResetKey, resetKeyNativeReadiness } from "./reset-key-native.js";
 import { createServiceClient, serviceClientReadiness } from "./supabase-rest.js";
 
 function trimTrailingSlash(value) {
@@ -180,7 +182,15 @@ function freeNativeRouteEnabled(env, fnName) {
     const specific = String(env?.FREE_NATIVE_GATE_ENABLED ?? "").trim();
     return specific ? boolVar(specific, general) : general;
   }
+  if (fnName === "free-close") {
+    const specific = String(env?.FREE_NATIVE_CLOSE_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
   return false;
+}
+
+function resetNativeEnabled(env) {
+  return boolVar(env?.RESET_NATIVE_ENABLED, false);
 }
 
 function freeMaintenanceEnabled(env) {
@@ -373,6 +383,7 @@ export default {
     if (route.kind === "health") {
       const nativeVerify = nativeVerifyReadiness(env);
       const freeDb = serviceClientReadiness(env);
+      const resetNative = resetKeyNativeReadiness(env);
       return json({
         ok: true,
         service: "fixed-api-gateway-v34",
@@ -383,6 +394,9 @@ export default {
         verify_native_contract_ok: nativeVerify.contract_matches_released_menu,
         free_native_start_enabled: freeNativeRouteEnabled(env, "free-start"),
         free_native_gate_enabled: freeNativeRouteEnabled(env, "free-gate"),
+        free_native_close_enabled: freeNativeRouteEnabled(env, "free-close"),
+        reset_native_enabled: resetNative.enabled,
+        reset_native_turnstile_configured: resetNative.turnstileConfigured,
         free_native_db_ready: freeDb.url && freeDb.serviceRoleKey,
         free_config_cache_seconds: freeConfigCacheSeconds(env),
         free_maintenance_enabled: freeMaintenanceEnabled(env),
@@ -411,7 +425,11 @@ export default {
       return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
-    if ((fnName === "free-start" || fnName === "free-gate") && req.method !== "POST") {
+    if ((fnName === "free-start" || fnName === "free-gate" || fnName === "free-close") && req.method !== "POST") {
+      return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if (fnName === "reset-key" && req.method !== "GET" && req.method !== "POST") {
       return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
@@ -421,6 +439,24 @@ export default {
 
     if (fnName === "free-gate" && freeNativeRouteEnabled(env, fnName)) {
       return await handleFreeGate(req, env);
+    }
+
+    if (fnName === "free-close" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeClose(req, env, {
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Free-Close-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
+    if (fnName === "reset-key" && resetNativeEnabled(env)) {
+      return await handleResetKey(req, env, {
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Reset-Key-Backend": "cloudflare-native",
+        }),
+      });
     }
 
     if (fnName === "free-config") {

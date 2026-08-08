@@ -23,13 +23,11 @@ function normalizeFunctionPath(path: string) {
 }
 
 const DIRECT_SUPABASE_FUNCTIONS = new Set([
-  // The high-volume public hot path now prefers the Cloudflare gateway:
-  // free-config is edge-cached and free-start/free-gate execute natively in
-  // the Worker. Keep reveal/resolve/close on Supabase Edge for now because
-  // they mutate/issue final key state and are lower-volume.
+  // The final reveal/resolve calls still prefer Supabase Edge because they issue
+  // protected key result state. free-start/free-gate/free-close and reset-key
+  // use the Cloudflare gateway first to avoid high-volume Edge invocations.
   "/free-reveal",
   "/free-resolve",
-  "/free-close",
 ]);
 
 function shouldPreferDirectSupabase(path?: string) {
@@ -38,10 +36,9 @@ function shouldPreferDirectSupabase(path?: string) {
 }
 
 function getPrimaryFunctionsBaseUrl(path?: string) {
-  // Free Key is stateful and must use the same Supabase project as the current
-  // frontend/auth/database. A stale public API gateway can otherwise forward
-  // free-start/free-gate to an older project and surface obsolete Link4M HTML
-  // errors even though the current project has already been fixed.
+  // The final key reveal/resolve calls remain on Supabase Edge because they
+  // issue protected result state. High-volume start/gate/close calls use the
+  // Cloudflare gateway first and still have the Edge Function proxy as a kill-switch fallback.
   if (shouldPreferDirectSupabase(path)) {
     return getSupabaseFunctionsBaseUrl() ?? getPublicApiBaseUrl();
   }

@@ -65,6 +65,7 @@ class RestQuery {
     this.head = false;
     this.returning = false;
     this.wantMaybeSingle = false;
+    this.limitValue = null;
   }
 
   clone() {
@@ -72,6 +73,7 @@ class RestQuery {
     Object.assign(q, this);
     q.filters = [...this.filters];
     q.orders = [...this.orders];
+    q.limitValue = this.limitValue;
     return q;
   }
 
@@ -140,6 +142,20 @@ class RestQuery {
     return this;
   }
 
+  or(expression) {
+    const raw = String(expression || "").trim();
+    if (raw) this.filters.push(["or", `(${raw})`]);
+    return this;
+  }
+
+  limit(value) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      this.limitValue = Math.max(1, Math.trunc(parsed));
+    }
+    return this;
+  }
+
   order(column, options = {}) {
     const direction = options?.ascending === false ? "desc" : "asc";
     this.orders.push(`${String(column)}.${direction}`);
@@ -162,6 +178,7 @@ class RestQuery {
       if (this.columns) url.searchParams.set("select", this.columns);
     }
     if (this.orders.length) url.searchParams.set("order", this.orders.join(","));
+    if (this.limitValue != null) url.searchParams.set("limit", String(this.limitValue));
 
     const headers = this.client.headers();
     const prefer = [];
