@@ -502,8 +502,14 @@ async function callVerifyRpc(env, payload) {
     }
 
     if (!response.ok || !data) {
-      console.error("verify native RPC failed", response.status, String(raw || "").slice(0, 240));
-      throw new Error("VERIFY_RPC_FAILED");
+      // Do not emit a second console.error here. The caller logs one structured
+      // error event, otherwise one failed request becomes two Cloudflare errors.
+      const error = new Error("VERIFY_RPC_FAILED");
+      error.name = "VerifyRpcError";
+      error.httpStatus = response.status;
+      error.responsePreview = String(raw || "").slice(0, 240);
+      error.retryAfter = String(response.headers.get("Retry-After") || "").slice(0, 32);
+      throw error;
     }
     return Array.isArray(data) ? data[0] : data;
   } finally {
@@ -709,7 +715,13 @@ export async function handleNativeVerify(req, env, context) {
   } catch (error) {
     const errorName = String(error?.name || "");
     const errorMessage = String(error?.message || "");
-    console.error("verify native RPC unavailable", errorName, errorMessage);
+    console.error("verify native RPC unavailable", JSON.stringify({
+      name: errorName,
+      message: errorMessage,
+      http_status: Number.isFinite(Number(error?.httpStatus)) ? Number(error.httpStatus) : null,
+      retry_after: String(error?.retryAfter || "") || null,
+      response_preview: String(error?.responsePreview || "").slice(0, 240) || null,
+    }));
     return json({ ok: false, msg: "SERVER_ERROR" }, 503);
   }
 

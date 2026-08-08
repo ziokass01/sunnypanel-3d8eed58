@@ -99,26 +99,90 @@ async function readJsonBody(req, maxBytes = 8192) {
 }
 
 function turnstileSecret(env) {
-  return String(env?.TURNSTILE_SECRET_KEY || env?.CLOUDFLARE_TURNSTILE_SECRET || "").trim();
+  // TURNSTILE_SECRET is the canonical Cloudflare Spin name.
+  // Keep the older aliases so an existing deployment does not break while rotating.
+  return String(
+    env?.TURNSTILE_SECRET ||
+    env?.TURNSTILE_SECRET_KEY ||
+    env?.CLOUDFLARE_TURNSTILE_SECRET ||
+    "",
+  ).trim();
 }
 
 async function verifyTurnstile(token, req, env) {
   const secret = turnstileSecret(env);
-  if (!secret || !token) return false;
+  if (!secret) {
+    return {
+      success: false,
+      errorCodes: ["missing-input-secret"],
+      hostname: "",
+      action: "",
+    };
+  }
+  if (!token || String(token).length > 2048) {
+    return {
+      success: false,
+      errorCodes: ["missing-input-response"],
+      hostname: "",
+      action: "",
+    };
+  }
+
+  const ip = req.headers.get("cf-connecting-ip") ||
+    (req.headers.get("x-forwarded-for") || "").split(",")[0].trim();
+
+  const form = new URLSearchParams();
+  form.set("secret", secret);
+  form.set("response", String(token));
+  if (ip) form.set("remoteip", ip);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException("TURNSTILE_SITEVERIFY_TIMEOUT", "AbortError"));
+  }, 10_000);
+
   try {
-    const form = new FormData();
-    form.append("secret", secret);
-    form.append("response", String(token));
-    const ip = req.headers.get("cf-connecting-ip") || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim();
-    if (ip) form.append("remoteip", ip);
     const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
       body: form,
+      signal: controller.signal,
     });
-    const body = await res.json().catch(() => ({}));
-    return Boolean(body?.success);
-  } catch {
-    return false;
+
+    const body = await res.json().catch(() => null);
+    const errorCodes = Array.isArray(body?.["error-codes"])
+      ? body["error-codes"].map((value) => String(value))
+      : [];
+
+    if (!res.ok || !body || typeof body !== "object") {
+      return {
+        success: false,
+        errorCodes: errorCodes.length ? errorCodes : [`siteverify-http-${res.status}`],
+        hostname: "",
+        action: "",
+      };
+    }
+
+    return {
+      success: body.success === true,
+      errorCodes,
+      hostname: typeof body.hostname === "string" ? body.hostname : "",
+      action: typeof body.action === "string" ? body.action : "",
+    };
+  } catch (error) {
+    const name = String(error?.name || "");
+    return {
+      success: false,
+      errorCodes: [
+        name === "AbortError" ? "siteverify-timeout" : "siteverify-network-error",
+      ],
+      hostname: "",
+      action: "",
+    };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -268,8 +332,16 @@ async function ensureTurnstile(req, env, settings, body, ctx) {
   if (!turnstileSecret(env)) {
     return ctx.json({ ok: false, msg: "TURNSTILE_NOT_CONFIGURED", code: "TURNSTILE_NOT_CONFIGURED" }, 503);
   }
-  const ok = await verifyTurnstile(body?.turnstile_token, req, env);
-  if (!ok) return ctx.json({ ok: false, msg: "TURNSTILE_FAILED" }, 403);
+
+  const result = await verifyTurnstile(body?.turnstile_token, req, env);
+  if (!result.success) {
+    console.warn("reset-key turnstile rejected", JSON.stringify({
+      error_codes: result.errorCodes,
+      hostname: result.hostname || null,
+      action: result.action || null,
+    }));
+    return ctx.json({ ok: false, msg: "TURNSTILE_FAILED", code: "TURNSTILE_FAILED" }, 403);
+  }
   return null;
 }
 
