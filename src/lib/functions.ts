@@ -14,6 +14,11 @@ function getSupabaseFunctionsBaseUrl() {
   return `${trimTrailingSlash(base)}/functions/v1`;
 }
 
+function getFreeConfigVpsBaseUrl() {
+  const configured = String(import.meta.env.VITE_FREE_CONFIG_API_BASE_URL ?? "").trim();
+  return trimTrailingSlash(configured || "https://free-api.mityangho.id.vn");
+}
+
 function getFunctionUrl(baseUrl: string, path: string) {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
@@ -38,6 +43,9 @@ function shouldPreferDirectSupabase(path?: string) {
 
 function getPrimaryFunctionsBaseUrl(path?: string) {
   const normalized = path ? normalizeFunctionPath(path) : "";
+  if (normalized === "/free-config") {
+    return getFreeConfigVpsBaseUrl();
+  }
   if (normalized && CLOUDFLARE_ONLY_FUNCTIONS.has(normalized)) {
     return getPublicApiBaseUrl();
   }
@@ -48,6 +56,9 @@ function getPrimaryFunctionsBaseUrl(path?: string) {
 }
 
 const NO_AUTOMATIC_FALLBACK_PATHS = new Set([
+  // free-config is served by the VPS tunnel. Do not silently fall back to
+  // Supabase/Worker and reintroduce the hot-path quota during an outage.
+  "/free-config",
   // free-start determines bonus duration and whether secondary is allowed.
   // Never bypass the Worker bonus policy by retrying a second backend.
   "/free-start",
