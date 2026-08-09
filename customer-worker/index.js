@@ -4,6 +4,7 @@ import { handleFreeGate } from "./free-gate-native.js";
 import { handleFreeClose } from "./free-close-native.js";
 import { handleFreeConfig } from "./free-config-native.js";
 import { handleFreeReveal } from "./free-reveal-native.js";
+import { handleFreeResolve } from "./free-resolve-native.js";
 import { handleResetKey, resetKeyNativeReadiness } from "./reset-key-native.js";
 import { createServiceClient, serviceClientReadiness } from "./supabase-rest.js";
 
@@ -194,6 +195,10 @@ function freeNativeRouteEnabled(env, fnName) {
   }
   if (fnName === "free-reveal") {
     const specific = String(env?.FREE_NATIVE_REVEAL_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-resolve") {
+    const specific = String(env?.FREE_NATIVE_RESOLVE_ENABLED ?? "").trim();
     return specific ? boolVar(specific, general) : general;
   }
   return false;
@@ -413,6 +418,10 @@ export default {
         free_native_close_enabled: freeNativeRouteEnabled(env, "free-close"),
         free_native_config_enabled: freeNativeRouteEnabled(env, "free-config"),
         free_native_reveal_enabled: freeNativeRouteEnabled(env, "free-reveal"),
+        free_native_resolve_enabled: freeNativeRouteEnabled(env, "free-resolve"),
+        free_reveal_rate_limit_configured: Boolean(env?.FREE_REVEAL_RATE_LIMITER),
+        free_resolve_rate_limit_configured: Boolean(env?.FREE_RESOLVE_RATE_LIMITER),
+        free_hotpath_global_rate_limit_configured: Boolean(env?.FREE_HOTPATH_GLOBAL_RATE_LIMITER),
         reset_native_enabled: resetNative.enabled,
         reset_native_turnstile_configured: resetNative.turnstileConfigured,
         free_native_db_ready: freeDb.url && freeDb.serviceRoleKey,
@@ -439,11 +448,35 @@ export default {
       return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
     }
 
+    // FREE_HOTPATH_DDOS_V1
+    // Chỉ bảo vệ free-resolve/free-reveal; không đổi verify-key/menu.
+    if (req.method !== "OPTIONS" && (fnName === "free-resolve" || fnName === "free-reveal")) {
+      const routeBinding = fnName === "free-resolve"
+        ? "FREE_RESOLVE_RATE_LIMITER"
+        : "FREE_REVEAL_RATE_LIMITER";
+
+      const routeLimit = await checkRateLimit(env, routeBinding, `${realIp}:${fnName}`);
+      if (!routeLimit.success) {
+        if (routeLimit.unavailable) {
+          return json({ ok: false, code: "RATE_LIMIT_UNAVAILABLE", msg: "SERVER_ERROR" }, 503, origin, env);
+        }
+        return json({ ok: false, code: "TOO_MANY_REQUESTS", msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+      }
+
+      const globalLimit = await checkRateLimit(env, "FREE_HOTPATH_GLOBAL_RATE_LIMITER", `global:${fnName}`);
+      if (!globalLimit.success) {
+        if (globalLimit.unavailable) {
+          return json({ ok: false, code: "RATE_LIMIT_UNAVAILABLE", msg: "SERVER_ERROR" }, 503, origin, env);
+        }
+        return json({ ok: false, code: "HOTPATH_BUSY", msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+      }
+    }
+
     if (fnName === "verify-key" && req.method !== "POST") {
       return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
-    if ((fnName === "free-start" || fnName === "free-gate" || fnName === "free-close" || fnName === "free-reveal") && req.method !== "POST") {
+    if ((fnName === "free-start" || fnName === "free-gate" || fnName === "free-close" || fnName === "free-reveal" || fnName === "free-resolve") && req.method !== "POST") {
       return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
@@ -468,6 +501,16 @@ export default {
         json: (data, status) => json(data, status, origin, env, {
           "X-Gateway-Project": "active",
           "X-Free-Close-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
+    if (fnName === "free-resolve" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeResolve(req, env, {
+        corsHeaders: corsHeaders(origin, env),
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Free-Resolve-Backend": "cloudflare-native",
         }),
       });
     }

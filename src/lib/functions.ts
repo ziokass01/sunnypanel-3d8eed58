@@ -22,10 +22,12 @@ function normalizeFunctionPath(path: string) {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-const DIRECT_SUPABASE_FUNCTIONS = new Set([
-  // The final reveal/resolve calls still prefer Supabase Edge because they issue
-  // protected key result state. free-start/free-gate/free-close and reset-key
-  // use the Cloudflare gateway first to avoid high-volume Edge invocations.
+const DIRECT_SUPABASE_FUNCTIONS = new Set<string>([
+  // Intentionally empty for public Free Key hot paths.
+]);
+
+const CLOUDFLARE_ONLY_FUNCTIONS = new Set([
+  "/free-reveal",
   "/free-resolve",
 ]);
 
@@ -35,9 +37,10 @@ function shouldPreferDirectSupabase(path?: string) {
 }
 
 function getPrimaryFunctionsBaseUrl(path?: string) {
-  // The final key reveal/resolve calls remain on Supabase Edge because they
-  // issue protected result state. High-volume start/gate/close calls use the
-  // Cloudflare gateway first and still have the Edge Function proxy as a kill-switch fallback.
+  const normalized = path ? normalizeFunctionPath(path) : "";
+  if (normalized && CLOUDFLARE_ONLY_FUNCTIONS.has(normalized)) {
+    return getPublicApiBaseUrl();
+  }
   if (shouldPreferDirectSupabase(path)) {
     return getSupabaseFunctionsBaseUrl() ?? getPublicApiBaseUrl();
   }
@@ -51,6 +54,8 @@ const NO_AUTOMATIC_FALLBACK_PATHS = new Set([
   // free-reveal is a one-time mint/lock mutation. The Worker owns the kill
   // switch fallback; the browser must never replay it on a second backend.
   "/free-reveal",
+  // free-resolve is high-volume; browser must not bypass Cloudflare.
+  "/free-resolve",
 ]);
 
 function getFallbackFunctionsBaseUrl(primaryBaseUrl?: string, path?: string) {

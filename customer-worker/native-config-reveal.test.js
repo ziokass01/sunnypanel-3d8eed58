@@ -12,6 +12,8 @@ function env() {
     SUPABASE_SERVICE_ROLE_KEY: "service-role-test-key",
     API_RATE_LIMITER: limiter(),
     VERIFY_RATE_LIMITER: limiter(),
+    FREE_REVEAL_RATE_LIMITER: limiter(),
+    FREE_HOTPATH_GLOBAL_RATE_LIMITER: limiter(),
     FREE_NATIVE_ENABLED: "1",
     FREE_NATIVE_START_ENABLED: "1",
     FREE_NATIVE_GATE_ENABLED: "1",

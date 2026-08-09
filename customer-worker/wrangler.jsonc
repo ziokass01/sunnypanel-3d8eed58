@@ -21,6 +21,30 @@
         "limit": 300,
         "period": 60
       }
+    },
+    {
+      "name": "FREE_RESOLVE_RATE_LIMITER",
+      "namespace_id": "2026080902",
+      "simple": {
+        "limit": 90,
+        "period": 60
+      }
+    },
+    {
+      "name": "FREE_REVEAL_RATE_LIMITER",
+      "namespace_id": "2026080903",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "FREE_HOTPATH_GLOBAL_RATE_LIMITER",
+      "namespace_id": "2026080904",
+      "simple": {
+        "limit": 1800,
+        "period": 60
+      }
     }
   ],
   "route": {
@@ -41,6 +65,7 @@
     "FREE_NATIVE_CLOSE_ENABLED": "1",
     "FREE_NATIVE_CONFIG_ENABLED": "1",
     "FREE_NATIVE_REVEAL_ENABLED": "1",
+    "FREE_NATIVE_RESOLVE_ENABLED": "1",
     "RESET_NATIVE_ENABLED": "1",
     "FREE_CONFIG_CACHE_SECONDS": "30",
     "FREE_NATIVE_DB_TIMEOUT_MS": "12000",

@@ -110,6 +110,35 @@ async function maybeAutoBlockGateFailures(db, args) {
   else await db.from("licenses_free_blocklist").insert(patch);
   await insertGateLog(db, { ...args, event_code: "AUTO_BLOCKED", detail: { fail_count_10m: failCount, blocked_until: blockedUntil, reason: "AUTO_GATE_FAIL_5_IN_10M" } });
 }
+async function readJsonBody(req, maxBytes = 8192) {
+  const rawLength = String(req.headers.get("content-length") || "").trim();
+  if (rawLength) {
+    const declared = Number(rawLength);
+    if (!Number.isSafeInteger(declared) || declared < 0 || declared > maxBytes) {
+      throw new Error("PAYLOAD_TOO_LARGE");
+    }
+  }
+  if (!req.body) return {};
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let textBody = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel("PAYLOAD_TOO_LARGE");
+      throw new Error("PAYLOAD_TOO_LARGE");
+    }
+    textBody += decoder.decode(value, { stream: true });
+  }
+  textBody += decoder.decode();
+  if (!textBody) return {};
+  return JSON.parse(textBody);
+}
+
 function validateBody(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const claim_token = text(body.claim_token, 512);
@@ -139,7 +168,16 @@ const FIND_DUMPS_CREDIT_META = {
 export async function handleFreeReveal(req, env, ctx) {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: ctx.corsHeaders });
   if (req.method !== "POST") return ctx.json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405);
-  const body = validateBody(await req.json().catch(() => null));
+  let rawBody;
+  try {
+    rawBody = await readJsonBody(req, 8192);
+  } catch (error) {
+    if (String(error?.message || "") === "PAYLOAD_TOO_LARGE") {
+      return ctx.json({ ok: false, code: "PAYLOAD_TOO_LARGE", msg: "PAYLOAD_TOO_LARGE" }, 413);
+    }
+    return ctx.json({ ok: false, msg: "INVALID_INPUT" }, 200);
+  }
+  const body = validateBody(rawBody);
   if (!body) return ctx.json({ ok: false, msg: "INVALID_INPUT" }, 200);
   const db = createServiceClient(env);
   if (!db) return ctx.json({ ok: false, msg: "SERVER_MISCONFIG" }, 500);

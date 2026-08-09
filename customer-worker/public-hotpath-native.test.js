@@ -19,10 +19,13 @@ function env() {
     SUPABASE_SERVICE_ROLE_KEY: "service-role-test-key",
     API_RATE_LIMITER: allowLimiter(),
     VERIFY_RATE_LIMITER: allowLimiter(),
+    FREE_RESOLVE_RATE_LIMITER: allowLimiter(),
+    FREE_HOTPATH_GLOBAL_RATE_LIMITER: allowLimiter(),
     FREE_NATIVE_ENABLED: "1",
     FREE_NATIVE_START_ENABLED: "1",
     FREE_NATIVE_GATE_ENABLED: "1",
     FREE_NATIVE_CLOSE_ENABLED: "1",
+    FREE_NATIVE_RESOLVE_ENABLED: "1",
     RESET_NATIVE_ENABLED: "1",
     FREE_NATIVE_DB_TIMEOUT_MS: "12000",
   };
@@ -183,6 +186,23 @@ describe("Cloudflare-native reset-key and free-close", () => {
     assert.equal(reset.ok, true);
     assert.equal(reset.msg, "RESET_OK");
     assert.equal(state.atomicResetCalls, 1);
+    assert.equal(state.edgeFunctionCalls.length, 0);
+  });
+
+  it("resolves a Free Key session without invoking the free-resolve Edge Function", async () => {
+    const state = installDbMock();
+    const response = await worker.fetch(new Request("https://mityangho.id.vn/api/free-resolve", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "203.0.113.53",
+      },
+      body: JSON.stringify({ out_token: "out_token_native_123456" }),
+    }), env());
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(body, { ok: true, session_id: "session-close-1" });
     assert.equal(state.edgeFunctionCalls.length, 0);
   });
 
