@@ -2,6 +2,8 @@
 import { createServiceClient } from "./supabase-rest.js";
 import { requiredFinalPass, tokenPairMatches, validateFinalGateProof } from "./free-shared/free-claim-guard.js";
 import { insertLicenseCompat } from "./free-shared/license-insert.js";
+import { resolveKeyTypeDurationSeconds } from "./free-shared/license-duration.js";
+import { effectiveBonusDuration, resolveFreeBonus } from "./free-shared/bonus.js";
 
 function toHex(bytes) {
   return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -162,7 +164,7 @@ export async function handleFreeReveal(req, env, ctx) {
   if (!body.out_token) return ctx.json({ ok: false, msg: "OUT_TOKEN_REQUIRED", code: "OUT_TOKEN_REQUIRED" }, 200);
 
   const debugLookup = debugEnabled ? { session_id_provided: Boolean(body.session_id), claim_token_len: body.claim_token.length, out_token_len: body.out_token.length, looked_up_by: "claim+out(any-pass)" } : null;
-  const sessionColumns = "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,gate_ok_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version";
+  const sessionColumns = "session_id,status,reveal_count,started_at,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,gate_ok_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version";
   const lookup = await db.from("licenses_free_sessions").select(sessionColumns).eq("claim_token_hash", claimHash)
     .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`).maybeSingle();
   if (lookup.error) return ctx.json({ ok: false, msg: "SESSION_LOOKUP_FAILED", code: "SESSION_LOOKUP_FAILED" }, 500);
@@ -334,8 +336,65 @@ export async function handleFreeReveal(req, env, ctx) {
     .select("session_id,status").maybeSingle();
   if (!lock.data) return ctx.json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
 
-  const dur = Math.max(60, Number(sess.duration_seconds ?? 0)), expires_at = new Date(Date.now() + dur * 1000).toISOString();
-  const keyTypeMeta = await getKeyTypeMeta(sess.key_type_code ?? null), key_type_label = keyTypeMeta?.label ?? null;
+  const keyTypeMeta = await getKeyTypeMeta(sess.key_type_code ?? null);
+  const keyTypeBaseDuration = resolveKeyTypeDurationSeconds(keyTypeMeta ?? {});
+  const bonusReferenceTime = sess.started_at && Number.isFinite(Date.parse(sess.started_at))
+    ? new Date(sess.started_at)
+    : new Date();
+  const bonusRuntimeAtStart = resolveFreeBonus(settings.free_bonus_config, bonusReferenceTime);
+  const recomputedBonusDuration = effectiveBonusDuration(
+    keyTypeBaseDuration,
+    bonusRuntimeAtStart,
+    sess.key_type_code ?? null,
+  );
+  const dur = Math.max(
+    60,
+    Number(sess.duration_seconds ?? 0),
+    Number(recomputedBonusDuration.effective_seconds ?? 0),
+  );
+  const bonusSecondsApplied = recomputedBonusDuration.applied
+    ? Math.max(0, Number(recomputedBonusDuration.bonus_seconds ?? 0))
+    : 0;
+  const expires_at = new Date(Date.now() + dur * 1000).toISOString();
+  const keyTypeBaseLabel = keyTypeMeta?.label ?? null;
+  const bonusLabel = bonusSecondsApplied > 0
+    ? (bonusSecondsApplied % 3600 === 0
+      ? `${bonusSecondsApplied / 3600}H`
+      : bonusSecondsApplied % 60 === 0
+        ? `${bonusSecondsApplied / 60}P`
+        : `${bonusSecondsApplied}S`)
+    : "";
+  const key_type_label = keyTypeBaseLabel && bonusLabel
+    ? `${keyTypeBaseLabel} 🔥 +${bonusLabel}`
+    : keyTypeBaseLabel;
+
+  if (Number(sess.duration_seconds ?? 0) !== dur) {
+    await db.from("licenses_free_sessions")
+      .update({
+        duration_seconds: dur,
+        selection_meta: {
+          ...(sess.selection_meta && typeof sess.selection_meta === "object" ? sess.selection_meta : {}),
+          base_duration_seconds: keyTypeBaseDuration,
+          bonus_seconds: bonusSecondsApplied,
+          effective_duration_seconds: dur,
+          bonus_reference_at: bonusReferenceTime.toISOString(),
+        },
+      })
+      .eq("session_id", sessionId)
+      .eq("status", "revealing");
+  }
+
+  const sessForIssue = {
+    ...sess,
+    duration_seconds: dur,
+    selection_meta: {
+      ...(sess.selection_meta && typeof sess.selection_meta === "object" ? sess.selection_meta : {}),
+      base_duration_seconds: keyTypeBaseDuration,
+      bonus_seconds: bonusSecondsApplied,
+      effective_duration_seconds: dur,
+      bonus_reference_at: bonusReferenceTime.toISOString(),
+    },
+  };
   const allowReset = Boolean(keyTypeMeta?.allow_reset ?? true);
   const appCode = normalizeAppCode(sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire");
   const keySignature = text(keyTypeMeta?.key_signature ?? "FF",32).toUpperCase();
@@ -343,8 +402,8 @@ export async function handleFreeReveal(req, env, ctx) {
 
   if (appCode === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) {
     try {
-      const issued = await issueAiSunnyRedeemKey(sess, keyTypeMeta);
-      return ctx.json({ ok: true, ...issued, key_type_label, warnings }, 200);
+      const issued = await issueAiSunnyRedeemKey(sessForIssue, keyTypeMeta);
+      return ctx.json({ ok: true, ...issued, key_type_label, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, warnings }, 200);
     } catch (error) {
       await db.from("licenses_free_sessions").update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "AI_REDEEM_KEY_FAILED" }).eq("session_id", sessionId).eq("status", "revealing");
       const code = String(error?.code ?? error?.message ?? "AI_REDEEM_KEY_FAILED");
@@ -354,9 +413,9 @@ export async function handleFreeReveal(req, env, ctx) {
 
   if (appCode === "find-dumps") {
     try {
-      const issued = await issueFindDumpsRedeemKey(sess, keyTypeMeta);
+      const issued = await issueFindDumpsRedeemKey(sessForIssue, keyTypeMeta);
       await db.from("licenses_free_sessions").update({ status: "revealed", last_error: null, revealed_at: issued.created_at, reveal_count: 1, claim_token_hash: null, claim_expires_at: null, out_token_hash: null, out_token_hash_pass2: null, out_expires_at: issued.created_at, close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(), copied_at: null }).eq("session_id", sessionId);
-      return ctx.json({ ok: true, key: issued.key, expires_at: issued.expires_at, key_type_label, key_type_code: sess.key_type_code ?? null, created_at: issued.created_at, session_id: sessionId, ip_hash: ipHash, allow_reset: false, app_code: issued.app_code, key_signature: issued.key_signature, reward_mode: issued.reward_mode, package_code: issued.package_code, credit_code: issued.credit_code, wallet_kind: issued.wallet_kind, entitlement_seconds: issued.entitlement_seconds, server_redeem_key_id: issued.server_redeem_key_id, trace_id: text(sess.trace_id,128) || null, warnings: warnings.length ? warnings : undefined }, 200);
+      return ctx.json({ ok: true, key: issued.key, expires_at: issued.expires_at, key_type_label, key_type_code: sess.key_type_code ?? null, created_at: issued.created_at, session_id: sessionId, ip_hash: ipHash, allow_reset: false, app_code: issued.app_code, key_signature: issued.key_signature, reward_mode: issued.reward_mode, package_code: issued.package_code, credit_code: issued.credit_code, wallet_kind: issued.wallet_kind, entitlement_seconds: issued.entitlement_seconds, server_redeem_key_id: issued.server_redeem_key_id, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, trace_id: text(sess.trace_id,128) || null, warnings: warnings.length ? warnings : undefined }, 200);
     } catch (error) {
       await db.from("licenses_free_sessions").update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "FIND_DUMPS_KEY_FAILED" }).eq("session_id", sessionId).eq("status", "revealing");
       const code = String(error?.code ?? error?.message ?? "FIND_DUMPS_KEY_FAILED");
@@ -398,5 +457,5 @@ export async function handleFreeReveal(req, env, ctx) {
     close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(), copied_at: null,
   }).eq("session_id", sessionId);
   await db.from("licenses_free_issues").insert({ license_id: inserted.id, key_mask: maskKey(inserted.key), expires_at, session_id: sessionId, ip_hash: ipHash, fingerprint_hash: fpHash, ua_hash: uaHash, app_code: appCode, key_signature: keySignature, server_redeem_key_id: null });
-  return ctx.json({ ok: true, key: inserted.key, expires_at, key_type_label, key_type_code: sess.key_type_code ?? null, created_at: new Date().toISOString(), session_id: sessionId, ip_hash: ipHash, allow_reset: allowReset, app_code: appCode, key_signature: keySignature, trace_id: text(sess.trace_id,128) || null, warnings: warnings.length ? warnings : undefined, debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
+  return ctx.json({ ok: true, key: inserted.key, expires_at, key_type_label, key_type_code: sess.key_type_code ?? null, created_at: new Date().toISOString(), session_id: sessionId, ip_hash: ipHash, allow_reset: allowReset, app_code: appCode, key_signature: keySignature, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, trace_id: text(sess.trace_id,128) || null, warnings: warnings.length ? warnings : undefined, debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
 }

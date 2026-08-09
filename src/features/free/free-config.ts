@@ -17,6 +17,7 @@ export type FreeKeyType = {
   default_credit_code?: string | null;
   default_wallet_kind?: string | null;
   bonus_active?: boolean;
+  bonus_replacement?: boolean;
   bonus_seconds?: number;
 };
 
@@ -62,9 +63,12 @@ export type FreeDownloadCard = {
 
 export type FreeBonusRule = {
   key_type_code: string;
+  app_code?: string;
   apply_bonus: boolean;
   bonus_seconds: number;
   sort_order: number;
+  bonus_only?: boolean;
+  replace_same_app?: boolean;
 };
 
 export type FreeBonusConfig = {

@@ -4,6 +4,8 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { resolveClientIp } from "../_shared/client-ip.ts";
 import { insertLicenseCompat } from "../_shared/license-insert.ts";
 import { requiredFinalPass, tokenPairMatches, validateFinalGateProof } from "../_shared/free-claim-guard.ts";
+import { resolveKeyTypeDurationSeconds } from "../_shared/license-duration.ts";
+import { effectiveBonusDuration, resolveFreeBonus } from "../_shared/free-bonus.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes))
@@ -395,7 +397,7 @@ Deno.serve(async (req) => {
     }
     : null;
 
-  const sessionColumns = "session_id,status,reveal_count,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,gate_ok_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version";
+  const sessionColumns = "session_id,status,reveal_count,started_at,expires_at,claim_token_hash,claim_expires_at,fingerprint_hash,ua_hash,ip_hash,key_type_code,duration_seconds,revealed_license_id,revealed_at,gate_ok_at,close_deadline_at,copied_at,out_token_hash,out_token_hash_pass2,passes_required,passes_completed,current_pass,app_code,package_code,credit_code,wallet_kind,issued_server_redeem_key_id,issued_server_reward_mode,selection_meta,trace_id,gate_flow_version";
   const sessionLookup = await sb
     .from("licenses_free_sessions")
     .select(sessionColumns)
@@ -814,10 +816,65 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
   }
 
-  const dur = Math.max(60, Number(sess.duration_seconds ?? 0));
-  const expires_at = new Date(Date.now() + dur * 1000).toISOString();
-  const key_type_label = await getKeyTypeLabel(sess.key_type_code ?? null);
   const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
+  const keyTypeBaseDuration = resolveKeyTypeDurationSeconds(keyTypeMeta ?? {});
+  const bonusReferenceTime = sess.started_at && Number.isFinite(Date.parse(sess.started_at))
+    ? new Date(sess.started_at)
+    : new Date();
+  const bonusRuntimeAtStart = resolveFreeBonus((settings as any)?.free_bonus_config, bonusReferenceTime);
+  const recomputedBonusDuration = effectiveBonusDuration(
+    keyTypeBaseDuration,
+    bonusRuntimeAtStart,
+    sess.key_type_code ?? null,
+  );
+  const dur = Math.max(
+    60,
+    Number(sess.duration_seconds ?? 0),
+    Number(recomputedBonusDuration.effective_seconds ?? 0),
+  );
+  const bonusSecondsApplied = recomputedBonusDuration.applied
+    ? Math.max(0, Number(recomputedBonusDuration.bonus_seconds ?? 0))
+    : 0;
+  const expires_at = new Date(Date.now() + dur * 1000).toISOString();
+  const keyTypeBaseLabel = keyTypeMeta?.label ?? null;
+  const bonusLabel = bonusSecondsApplied > 0
+    ? (bonusSecondsApplied % 3600 === 0
+      ? `${bonusSecondsApplied / 3600}H`
+      : bonusSecondsApplied % 60 === 0
+        ? `${bonusSecondsApplied / 60}P`
+        : `${bonusSecondsApplied}S`)
+    : "";
+  const key_type_label = keyTypeBaseLabel && bonusLabel
+    ? `${keyTypeBaseLabel} 🔥 +${bonusLabel}`
+    : keyTypeBaseLabel;
+
+  if (Number(sess.duration_seconds ?? 0) !== dur) {
+    await sb.from("licenses_free_sessions")
+      .update({
+        duration_seconds: dur,
+        selection_meta: {
+          ...((sess as any).selection_meta && typeof (sess as any).selection_meta === "object" ? (sess as any).selection_meta : {}),
+          base_duration_seconds: keyTypeBaseDuration,
+          bonus_seconds: bonusSecondsApplied,
+          effective_duration_seconds: dur,
+          bonus_reference_at: bonusReferenceTime.toISOString(),
+        },
+      })
+      .eq("session_id", sessionId)
+      .eq("status", "revealing");
+  }
+
+  const sessForIssue = {
+    ...sess,
+    duration_seconds: dur,
+    selection_meta: {
+      ...((sess as any).selection_meta && typeof (sess as any).selection_meta === "object" ? (sess as any).selection_meta : {}),
+      base_duration_seconds: keyTypeBaseDuration,
+      bonus_seconds: bonusSecondsApplied,
+      effective_duration_seconds: dur,
+      bonus_reference_at: bonusReferenceTime.toISOString(),
+    },
+  };
   const allowReset = Boolean(keyTypeMeta?.allow_reset ?? true);
   const appCode = normalizeAppCode(sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire");
   const keySignature = String(keyTypeMeta?.key_signature ?? "FF").trim().toUpperCase();
@@ -830,8 +887,8 @@ Deno.serve(async (req) => {
 
   if (appCode === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) {
       try {
-        const issued = await issueAiSunnyRedeemKey(sess, keyTypeMeta);
-        return json({ ok: true, ...issued, key_type_label: keyTypeMeta?.label ?? null, warnings }, 200);
+        const issued = await issueAiSunnyRedeemKey(sessForIssue, keyTypeMeta);
+        return json({ ok: true, ...issued, key_type_label, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, warnings }, 200);
       } catch (error) {
         await sb.from("licenses_free_sessions").update({
           status: "gate_ok",
@@ -847,7 +904,7 @@ Deno.serve(async (req) => {
     if (appCode === "find-dumps") {
     let issued: Awaited<ReturnType<typeof issueFindDumpsRedeemKey>>;
     try {
-      issued = await issueFindDumpsRedeemKey(sess, keyTypeMeta);
+      issued = await issueFindDumpsRedeemKey(sessForIssue, keyTypeMeta);
     } catch (error) {
       await sb.from("licenses_free_sessions").update({
         status: "gate_ok",
@@ -906,6 +963,10 @@ Deno.serve(async (req) => {
       wallet_kind: issued.wallet_kind,
       entitlement_seconds: issued.entitlement_seconds,
       server_redeem_key_id: issued.server_redeem_key_id,
+      duration_seconds: dur,
+      base_duration_seconds: keyTypeBaseDuration,
+      bonus_seconds: bonusSecondsApplied,
+      bonus_applied: bonusSecondsApplied > 0,
       trace_id: String((sess as any).trace_id ?? "").trim() || null,
       warnings: warnings.length ? warnings : undefined,
       debug: debugOut,
@@ -1039,6 +1100,10 @@ Deno.serve(async (req) => {
       allow_reset: allowReset,
       app_code: appCode,
       key_signature: keySignature,
+      duration_seconds: dur,
+      base_duration_seconds: keyTypeBaseDuration,
+      bonus_seconds: bonusSecondsApplied,
+      bonus_applied: bonusSecondsApplied > 0,
       trace_id: String((sess as any).trace_id ?? "").trim() || null,
       warnings: warnings.length ? warnings : undefined,
       debug: debugOut,

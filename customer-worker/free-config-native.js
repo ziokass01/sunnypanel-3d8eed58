@@ -268,7 +268,8 @@ export async function handleFreeConfig(req, env, ctx) {
         default_package_code: text(k.default_package_code, 128) || null,
         default_credit_code: text(k.default_credit_code, 128) || null,
         default_wallet_kind: text(k.default_wallet_kind, 32) || null,
-        bonus_active: Boolean(bonusRuntime.active && rule?.apply_bonus && Number(rule?.bonus_seconds ?? 0) > 0),
+        bonus_active: Boolean(bonusRuntime.active && rule?.apply_bonus && (Number(rule?.bonus_seconds ?? 0) > 0 || rule?.replace_same_app)),
+        bonus_replacement: Boolean(bonusRuntime.active && rule?.apply_bonus && rule?.replace_same_app),
         bonus_seconds: bonusRuntime.active && rule?.apply_bonus ? Math.max(0, Number(rule?.bonus_seconds ?? 0)) : 0,
       };
     }),

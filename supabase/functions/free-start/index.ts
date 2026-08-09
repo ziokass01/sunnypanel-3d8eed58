@@ -15,7 +15,7 @@ import {
   vietnamDate,
 } from "../_shared/gtraffic.ts";
 import { resolveKeyTypeDurationSeconds } from "../_shared/license-duration.ts";
-import { effectiveBonusDuration, publicFreeBonus, resolveFreeBonus } from "../_shared/free-bonus.ts";
+import { effectiveBonusDuration, keyTypeVisibleForBonus, publicFreeBonus, resolveFreeBonus } from "../_shared/free-bonus.ts";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -620,6 +620,11 @@ Deno.serve(async (req) => {
     return await deny("KEY_TYPE_LOAD_FAILED", { detail: String((error as any)?.message ?? error) });
   }
   if (!keyType || keyType.enabled === false) return await deny("KEY_TYPE_DISABLED");
+  if (!keyTypeVisibleForBonus(keyType, bonusRuntime)) {
+    return await deny(bonusRuntime.active ? "BONUS_KEY_REPLACED" : "KEY_TYPE_BONUS_ONLY", {
+      bonus_active: Boolean(bonusRuntime.active),
+    });
+  }
   const baseKeyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
   const bonusDuration = effectiveBonusDuration(baseKeyDurationSeconds, bonusRuntime, keyTypeCode);
   const keyDurationSeconds = bonusDuration.effective_seconds;

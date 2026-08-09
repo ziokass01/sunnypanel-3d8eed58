@@ -16,7 +16,7 @@ import {
   vietnamDate,
 } from "./free-shared/gtraffic.js";
 import { resolveKeyTypeDurationSeconds } from "./free-shared/license-duration.js";
-import { effectiveBonusDuration, publicFreeBonus, resolveFreeBonus } from "./free-shared/bonus.js";
+import { effectiveBonusDuration, keyTypeVisibleForBonus, publicFreeBonus, resolveFreeBonus } from "./free-shared/bonus.js";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -612,6 +612,11 @@ export async function handleFreeStart(req: Request, env: any) {
     return await deny("KEY_TYPE_LOAD_FAILED", { detail: String((error as any)?.message ?? error) });
   }
   if (!keyType || keyType.enabled === false) return await deny("KEY_TYPE_DISABLED");
+  if (!keyTypeVisibleForBonus(keyType, bonusRuntime)) {
+    return await deny(bonusRuntime.active ? "BONUS_KEY_REPLACED" : "KEY_TYPE_BONUS_ONLY", {
+      bonus_active: Boolean(bonusRuntime.active),
+    });
+  }
   const baseKeyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
   const bonusDuration = effectiveBonusDuration(baseKeyDurationSeconds, bonusRuntime, keyTypeCode);
   const keyDurationSeconds = bonusDuration.effective_seconds;

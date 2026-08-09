@@ -564,7 +564,8 @@ Deno.serve(async (req) => {
         default_package_code: String(k?.default_package_code ?? "").trim() || null,
         default_credit_code: String(k?.default_credit_code ?? "").trim() || null,
         default_wallet_kind: String(k?.default_wallet_kind ?? "").trim() || null,
-        bonus_active: Boolean(bonusRuntime.active && bonusRule?.apply_bonus && Number(bonusRule?.bonus_seconds ?? 0) > 0),
+        bonus_active: Boolean(bonusRuntime.active && bonusRule?.apply_bonus && (Number(bonusRule?.bonus_seconds ?? 0) > 0 || bonusRule?.replace_same_app)),
+        bonus_replacement: Boolean(bonusRuntime.active && bonusRule?.apply_bonus && bonusRule?.replace_same_app),
         bonus_seconds: bonusRuntime.active && bonusRule?.apply_bonus ? Math.max(0, Number(bonusRule?.bonus_seconds ?? 0)) : 0,
       });
       }),

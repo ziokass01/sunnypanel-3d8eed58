@@ -248,7 +248,7 @@ export function FreeLandingPage() {
           ...lastFreeKey,
           key: res.key,
           key_type: res.key_kind === "FREE"
-            ? "Key free"
+            ? (lastFreeKey.key_type || "Key free")
             : res.key_kind === "PAID"
               ? "Key mua / admin"
               : lastFreeKey.key_type,
@@ -694,11 +694,13 @@ export function FreeLandingPage() {
                     {(cfg?.key_types ?? []).map((k) => (
                       <SelectItem key={k.code} value={k.code}>
                         {k.label}
-                        {k.bonus_active && Number(k.bonus_seconds ?? 0) > 0
-                          ? ` 🔥 +${Number(k.bonus_seconds ?? 0) % 3600 === 0
-                            ? `${Number(k.bonus_seconds ?? 0) / 3600}H`
-                            : `${Math.floor(Number(k.bonus_seconds ?? 0) / 60)}P`}`
-                          : ""}
+                        {k.bonus_replacement
+                          ? " 🔥 BONUS"
+                          : k.bonus_active && Number(k.bonus_seconds ?? 0) > 0
+                            ? ` 🔥 +${Number(k.bonus_seconds ?? 0) % 3600 === 0
+                              ? `${Number(k.bonus_seconds ?? 0) / 3600}H`
+                              : `${Math.floor(Number(k.bonus_seconds ?? 0) / 60)}P`}`
+                            : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -799,20 +801,44 @@ export function FreeLandingPage() {
           }
         }
       }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{cfg?.free_bonus?.notice_title || "Khung giờ Bonus"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
-            <div className="rounded-2xl border bg-primary/5 p-4 leading-6">
+        <DialogContent
+          hideCloseButton
+          className="w-[calc(100vw-3.5rem)] max-w-[21rem] overflow-hidden rounded-[26px] border border-primary/20 bg-background/95 p-0 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:max-w-[22rem]"
+        >
+          <div className="bg-gradient-to-r from-primary/14 via-primary/6 to-transparent px-4 py-3.5">
+            <DialogHeader className="space-y-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-lg">🎁</div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-primary/80">Thông báo Bonus</div>
+                    <DialogTitle className="mt-1 line-clamp-2 text-left text-base font-semibold">
+                      {cfg?.free_bonus?.notice_title || "Khung giờ Bonus"}
+                    </DialogTitle>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBonusDialog(false)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/15 bg-background/75 text-muted-foreground transition hover:text-foreground"
+                  aria-label="Đóng thông báo Bonus"
+                >
+                  <span className="text-base leading-none">×</span>
+                </button>
+              </div>
+            </DialogHeader>
+          </div>
+
+          <div className="space-y-3 px-4 pb-4 pt-3 text-sm">
+            <div className="rounded-[18px] border border-primary/15 bg-primary/5 px-3.5 py-3 leading-6 text-muted-foreground">
               {cfg?.free_bonus?.notice_content || "Bonus đang diễn ra. Link phụ tạm đóng trong khung giờ này."}
             </div>
-            <div className="rounded-xl border p-3 text-muted-foreground">
-              Khung giờ: <span className="font-medium text-foreground">{cfg?.free_bonus?.start_time} – {cfg?.free_bonus?.end_time}</span> (Việt Nam).
-              Link chính vẫn hoạt động bình thường.
+            <div className="rounded-2xl border bg-muted/25 px-3.5 py-2.5 text-xs leading-5 text-muted-foreground">
+              <div>Khung giờ: <span className="font-medium text-foreground">{cfg?.free_bonus?.start_time} – {cfg?.free_bonus?.end_time}</span> (Việt Nam)</div>
+              <div>Link chính vẫn hoạt động bình thường.</div>
             </div>
             <div className="flex justify-end">
-              <Button type="button" onClick={() => setShowBonusDialog(false)}>Đã hiểu</Button>
+              <Button type="button" size="sm" variant="secondary" className="rounded-2xl" onClick={() => setShowBonusDialog(false)}>Đã hiểu</Button>
             </div>
           </div>
         </DialogContent>

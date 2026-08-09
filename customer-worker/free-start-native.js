@@ -2,7 +2,7 @@
 import { createServiceClient } from "./supabase-rest.js";
 import { buildGtrafficApiUrl, buildGtrafficBrowserUrl, isGtrafficBlockedResponse, isGtrafficEdgeIpBlock, isQuotaExhaustedError, normalizeShortlinkMode, orderedProvidersForPass, parseGtrafficResponse, providerIsExhaustedToday, providerIsTemporarilyUnavailable, vietnamDate, } from "./free-shared/gtraffic.js";
 import { resolveKeyTypeDurationSeconds } from "./free-shared/license-duration.js";
-import { effectiveBonusDuration, publicFreeBonus, resolveFreeBonus } from "./free-shared/bonus.js";
+import { effectiveBonusDuration, keyTypeVisibleForBonus, publicFreeBonus, resolveFreeBonus } from "./free-shared/bonus.js";
 const corsHeaders = {
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "authorization, x-client-info, apikey, content-type, x-fp, x-admin-key",
@@ -642,6 +642,11 @@ export async function handleFreeStart(req, env) {
     }
     if (!keyType || keyType.enabled === false)
         return await deny("KEY_TYPE_DISABLED");
+    if (!keyTypeVisibleForBonus(keyType, bonusRuntime)) {
+        return await deny(bonusRuntime.active ? "BONUS_KEY_REPLACED" : "KEY_TYPE_BONUS_ONLY", {
+            bonus_active: Boolean(bonusRuntime.active),
+        });
+    }
     const baseKeyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
     const bonusDuration = effectiveBonusDuration(baseKeyDurationSeconds, bonusRuntime, keyTypeCode);
     const keyDurationSeconds = bonusDuration.effective_seconds;

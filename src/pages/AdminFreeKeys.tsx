@@ -194,9 +194,12 @@ type DownloadCardEditorItem = {
 
 type BonusRuleEditor = {
   key_type_code: string;
+  app_code: string;
   apply_bonus: boolean;
   bonus_seconds: number;
   sort_order: number;
+  bonus_only: boolean;
+  replace_same_app: boolean;
 };
 
 type AdminTestResult = {
@@ -204,6 +207,13 @@ type AdminTestResult = {
   key?: string;
   expires_at?: string;
   duration_seconds?: number;
+  base_duration_seconds?: number;
+  bonus_seconds?: number;
+  bonus_applied?: boolean;
+  bonus_active?: boolean;
+  bonus_start_time?: string;
+  bonus_end_time?: string;
+  key_type_label?: string | null;
   session_expires_at?: string;
   ip_hash?: string | null;
   fp_hash?: string | null;
@@ -644,6 +654,8 @@ export function AdminFreeKeysPage() {
   const [publicLinksText, setPublicLinksText] = useState("");
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [downloadCards, setDownloadCards] = useState<DownloadCardEditorItem[]>([createEmptyDownloadCard()]);
+  const [keyOrderPanelOpen, setKeyOrderPanelOpen] = useState(false);
+  const [keyOrderDraft, setKeyOrderDraft] = useState<string[]>([]);
   const [bonusPanelOpen, setBonusPanelOpen] = useState(false);
   const [bonusEnabled, setBonusEnabled] = useState(false);
   const [bonusStartTime, setBonusStartTime] = useState("00:00");
@@ -778,9 +790,12 @@ export function AdminFreeKeysPage() {
     setBonusNoticeDismissSeconds(Math.max(60, Number(bonus.notice_dismiss_seconds ?? 3600)));
     setBonusRules(Array.isArray(bonus.rules) ? bonus.rules.map((rule: any, index: number) => ({
       key_type_code: String(rule?.key_type_code ?? ""),
+      app_code: String(rule?.app_code ?? "").trim().toLowerCase(),
       apply_bonus: Boolean(rule?.apply_bonus ?? rule?.enabled ?? false),
       bonus_seconds: Math.max(0, Math.floor(Number(rule?.bonus_seconds ?? 0) || 0)),
       sort_order: Math.max(0, Math.floor(Number(rule?.sort_order ?? ((index + 1) * 10)) || ((index + 1) * 10))),
+      bonus_only: Boolean(rule?.bonus_only ?? rule?.replace_same_app ?? false),
+      replace_same_app: Boolean(rule?.replace_same_app ?? false),
     })).filter((rule: BonusRuleEditor) => rule.key_type_code) : []);
     setNoticeEnabled(Boolean((s as any).free_notice_enabled ?? false));
     setNoticeTitle(String((s as any).free_notice_title ?? ""));
@@ -909,9 +924,12 @@ export function AdminFreeKeysPage() {
           notice_dismiss_seconds: Math.max(60, Math.min(86400, Math.floor(Number(bonusNoticeDismissSeconds) || 3600))),
           rules: bonusRules.map((rule, index) => ({
             key_type_code: rule.key_type_code,
-            apply_bonus: Boolean(rule.apply_bonus),
+            app_code: String(rule.app_code || "free-fire").trim().toLowerCase() || "free-fire",
+            apply_bonus: Boolean(rule.apply_bonus || rule.replace_same_app || Number(rule.bonus_seconds ?? 0) > 0),
             bonus_seconds: Math.max(0, Math.min(30 * 86400, Math.floor(Number(rule.bonus_seconds) || 0))),
             sort_order: (index + 1) * 10,
+            bonus_only: Boolean(rule.bonus_only || rule.replace_same_app),
+            replace_same_app: Boolean(rule.replace_same_app),
           })),
         },
         free_notice_enabled: Boolean(noticeEnabled && noticeContent.trim()),
@@ -1096,16 +1114,25 @@ export function AdminFreeKeysPage() {
   useEffect(() => {
     const rows = keyTypesQuery.data ?? [];
     if (!rows.length) return;
+
+    setKeyOrderDraft(rows
+      .slice()
+      .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+      .map((row) => row.code));
+
     setBonusRules((prev) => {
       const byCode = new Map(prev.map((rule) => [rule.key_type_code, rule]));
       return rows
         .map((row, index) => {
           const existing = byCode.get(row.code);
-          return existing ?? {
+          return {
             key_type_code: row.code,
-            apply_bonus: false,
-            bonus_seconds: 0,
-            sort_order: (index + 1) * 10,
+            app_code: String(existing?.app_code || row.app_code || "free-fire").trim().toLowerCase() || "free-fire",
+            apply_bonus: Boolean(existing?.apply_bonus ?? false),
+            bonus_seconds: Math.max(0, Number(existing?.bonus_seconds ?? 0)),
+            sort_order: Number(existing?.sort_order ?? ((index + 1) * 10)),
+            bonus_only: Boolean(existing?.bonus_only ?? false),
+            replace_same_app: Boolean(existing?.replace_same_app ?? false),
           };
         })
         .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
@@ -1113,8 +1140,72 @@ export function AdminFreeKeysPage() {
     });
   }, [keyTypesQuery.data]);
 
+  const moveKeyOrder = (code: string, dir: -1 | 1) => {
+    setKeyOrderDraft((prev) => {
+      const index = prev.indexOf(code);
+      const target = index + dir;
+      if (index < 0 || target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(index, 1);
+      next.splice(target, 0, item);
+      return next;
+    });
+  };
+
+  const saveKeyOrder = useMutation({
+    mutationFn: async () => {
+      for (const [index, code] of keyOrderDraft.entries()) {
+        const { error } = await supabase
+          .from("licenses_free_key_types")
+          .update({ sort_order: (index + 1) * 10 })
+          .eq("code", code);
+        if (error) throw error;
+      }
+      return true;
+    },
+    onSuccess: async () => {
+      toast({ title: "Đã lưu thứ tự key", description: "Trang người dùng sẽ ưu tiên key theo đúng thứ tự này." });
+      await keyTypesQuery.refetch();
+    },
+    onError: (e: any) => {
+      toast({ title: "Lưu thứ tự key thất bại", description: e?.message ?? "Error", variant: "destructive" });
+    },
+  });
+
   const updateBonusRule = (code: string, patch: Partial<BonusRuleEditor>) => {
     setBonusRules((prev) => prev.map((rule) => rule.key_type_code === code ? { ...rule, ...patch } : rule));
+  };
+
+  const setBonusReplacementKey = (code: string, enabled: boolean) => {
+    const row = (keyTypesQuery.data ?? []).find((item) => item.code === code);
+    const appCode = String(row?.app_code || "free-fire").trim().toLowerCase() || "free-fire";
+
+    setBonusRules((prev) => prev.map((rule) => {
+      const ruleApp = String(rule.app_code || (keyTypesQuery.data ?? []).find((item) => item.code === rule.key_type_code)?.app_code || "free-fire")
+        .trim()
+        .toLowerCase() || "free-fire";
+
+      if (rule.key_type_code === code) {
+        return {
+          ...rule,
+          app_code: appCode,
+          replace_same_app: enabled,
+          bonus_only: enabled,
+          apply_bonus: enabled || Number(rule.bonus_seconds ?? 0) > 0,
+        };
+      }
+
+      if (enabled && ruleApp === appCode && rule.replace_same_app) {
+        return {
+          ...rule,
+          replace_same_app: false,
+          bonus_only: false,
+          apply_bonus: Number(rule.bonus_seconds ?? 0) > 0,
+        };
+      }
+
+      return rule;
+    }));
   };
 
   const moveBonusRule = (code: string, dir: -1 | 1) => {
@@ -1663,6 +1754,9 @@ export function AdminFreeKeysPage() {
               <Button type="button" variant="outline" onClick={() => setDownloadPanelOpen((v) => !v)}>
                 Download links
               </Button>
+              <Button type="button" variant="outline" onClick={() => setKeyOrderPanelOpen((v) => !v)}>
+                <KeyRound className="mr-2 h-4 w-4" /> Sắp xếp key
+              </Button>
               <Button type="button" variant="outline" onClick={() => setBonusPanelOpen((v) => !v)}>
                 Bonus theo giờ
               </Button>
@@ -1799,6 +1893,49 @@ export function AdminFreeKeysPage() {
             </CollapsibleContent>
           </Collapsible>
 
+          <Collapsible open={keyOrderPanelOpen} onOpenChange={setKeyOrderPanelOpen}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
+                <span className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> Sắp xếp key trang người dùng</span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${keyOrderPanelOpen ? "rotate-180" : ""}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3">
+              <div className="space-y-4 rounded-2xl border bg-background/60 p-4">
+                <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+                  Thứ tự này là thứ tự thật ở ô “Chọn loại key” của người dùng. Đưa key cần ưu tiên lên đầu rồi bấm Lưu thứ tự.
+                  Key đang tắt vẫn có thể sắp trước để khi bật lại nó xuất hiện đúng vị trí.
+                </div>
+                <div className="space-y-2">
+                  {keyOrderDraft.map((code, index) => {
+                    const keyType = (keyTypesQuery.data ?? []).find((row) => row.code === code);
+                    if (!keyType) return null;
+                    return (
+                      <div key={code} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/15 p-3">
+                        <div className="min-w-0">
+                          <div className="font-medium">{keyType.label}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {keyType.app_label || keyType.app_code || "Free Fire"} · {keyType.code} · {keyType.enabled ? "Đang hiện" : "Đang tắt"}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={keyType.enabled ? "default" : "outline"}>{index + 1}</Badge>
+                          <Button type="button" variant="outline" size="icon" disabled={index === 0} onClick={() => moveKeyOrder(code, -1)}>↑</Button>
+                          <Button type="button" variant="outline" size="icon" disabled={index === keyOrderDraft.length - 1} onClick={() => moveKeyOrder(code, 1)}>↓</Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-end">
+                  <Button type="button" className="rounded-2xl" onClick={() => saveKeyOrder.mutate()} disabled={saveKeyOrder.isPending || !keyOrderDraft.length}>
+                    {saveKeyOrder.isPending ? "Đang lưu..." : "Lưu thứ tự key"}
+                  </Button>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
           <Collapsible open={bonusPanelOpen} onOpenChange={setBonusPanelOpen}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
@@ -1808,9 +1945,11 @@ export function AdminFreeKeysPage() {
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-3">
               <div className="space-y-4 rounded-2xl border bg-background/60 p-4">
-                <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                  Tự động theo giờ Việt Nam, không dùng cron bật/tắt. Ví dụ 00:00–12:00 +2 giờ:
-                  11:59 vẫn bonus, đúng 12:00 tự hết bonus và Get Key phụ tự mở lại.
+                <div className="rounded-2xl border bg-muted/20 p-4 text-sm leading-6 text-muted-foreground">
+                  Tự động theo giờ Việt Nam, không cần bật/tắt key bằng tay.
+                  Ví dụ Free Fire bình thường dùng key 10H, còn bạn đã tạo sẵn key 12H:
+                  bật “Key Bonus thay thế” ở key 12H. Trong giờ Bonus toàn bộ key Free Fire khác tự ẩn,
+                  chỉ 12H hiện; hết giờ 12H tự ẩn và các key thường tự hiện lại.
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
@@ -1855,9 +1994,10 @@ export function AdminFreeKeysPage() {
 
                 <div className="space-y-3">
                   <div>
-                    <div className="font-medium">Loại key + thời gian cộng + thứ tự trong khung Bonus</div>
-                    <div className="text-xs text-muted-foreground">
-                      Thứ tự này chỉ áp dụng lúc Bonus hoạt động; hết giờ sẽ tự trả về thứ tự key bình thường.
+                    <div className="font-medium">Key Bonus thay thế + thứ tự trong giờ Bonus</div>
+                    <div className="text-xs leading-5 text-muted-foreground">
+                      Key Bonus phải để Enabled ở phần tạo loại key. Hệ thống chỉ ẩn/hiện theo giờ, không tắt record trong DB.
+                      Mỗi app chỉ chọn 1 key thay thế. Nếu đã tạo sẵn 12H thì để “Cộng thêm” = 0.
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1865,29 +2005,57 @@ export function AdminFreeKeysPage() {
                       const keyType = (keyTypesQuery.data ?? []).find((row) => row.code === rule.key_type_code);
                       if (!keyType) return null;
                       const hours = Number(rule.bonus_seconds ?? 0) / 3600;
+                      const replacement = Boolean(rule.replace_same_app);
                       return (
-                        <div key={rule.key_type_code} className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1fr_auto_160px_auto] md:items-center">
-                          <div>
-                            <div className="font-medium">{keyType.label}</div>
-                            <div className="text-xs text-muted-foreground">{keyType.code} · gốc {Math.round(Number(keyType.duration_seconds ?? 0) / 3600 * 100) / 100}h</div>
+                        <div
+                          key={rule.key_type_code}
+                          className={`grid gap-3 rounded-2xl border p-3 md:grid-cols-[minmax(0,1fr)_230px_150px_auto] md:items-center ${replacement ? "border-primary/40 bg-primary/5" : ""}`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-medium">{keyType.label}</div>
+                              {replacement ? <Badge>Key Bonus</Badge> : null}
+                              {!keyType.enabled ? <Badge variant="destructive">Đang tắt</Badge> : null}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {keyType.app_label || keyType.app_code || "Free Fire"} · {keyType.code} · {Math.round(Number(keyType.duration_seconds ?? 0) / 3600 * 100) / 100}h
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Cộng bonus</span>
-                            <Switch checked={rule.apply_bonus} onCheckedChange={(v) => updateBonusRule(rule.key_type_code, { apply_bonus: Boolean(v) })} />
+
+                          <div className="rounded-xl border bg-background/70 p-2.5">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-medium">Key Bonus thay thế</div>
+                                <div className="text-[11px] leading-4 text-muted-foreground">
+                                  Bật = giờ Bonus chỉ hiện key này cho cùng app; ngoài giờ key này tự ẩn.
+                                </div>
+                              </div>
+                              <Switch
+                                checked={replacement}
+                                onCheckedChange={(v) => setBonusReplacementKey(rule.key_type_code, Boolean(v))}
+                              />
+                            </div>
                           </div>
+
                           <div className="space-y-1">
-                            <div className="text-xs text-muted-foreground">Thêm bao nhiêu giờ</div>
+                            <div className="text-xs text-muted-foreground">Cộng thêm giờ (tùy chọn)</div>
                             <Input
                               type="number"
                               min={0}
                               max={720}
                               step={0.5}
                               value={Math.round(hours * 100) / 100}
-                              onChange={(e) => updateBonusRule(rule.key_type_code, {
-                                bonus_seconds: Math.max(0, Math.round((Number(e.target.value) || 0) * 3600)),
-                              })}
+                              onChange={(e) => {
+                                const seconds = Math.max(0, Math.round((Number(e.target.value) || 0) * 3600));
+                                updateBonusRule(rule.key_type_code, {
+                                  bonus_seconds: seconds,
+                                  apply_bonus: replacement || seconds > 0,
+                                });
+                              }}
                             />
+                            <div className="text-[10px] text-muted-foreground">Key 12H tạo sẵn → để 0.</div>
                           </div>
+
                           <div className="flex gap-2">
                             <Button type="button" variant="outline" size="icon" disabled={index === 0} onClick={() => moveBonusRule(rule.key_type_code, -1)}>↑</Button>
                             <Button type="button" variant="outline" size="icon" disabled={index === ordered.length - 1} onClick={() => moveBonusRule(rule.key_type_code, 1)}>↓</Button>
@@ -2866,7 +3034,28 @@ export function AdminFreeKeysPage() {
                 </pre>
               ) : null}
               <div>Key: {adminTestResult.key || "-"}</div>
-              <div>Thời lượng key: {adminTestResult.duration_seconds ? `${Math.floor(adminTestResult.duration_seconds / 3600)}h ${Math.floor((adminTestResult.duration_seconds % 3600) / 60)}m` : "-"}</div>
+              <div>Loại key: {adminTestResult.key_type_label || "-"}</div>
+              <div>
+                Bonus lịch hiện tại: {adminTestResult.bonus_active ? "ĐANG BẬT" : "ĐANG TẮT"}
+                {adminTestResult.bonus_start_time && adminTestResult.bonus_end_time
+                  ? ` (${adminTestResult.bonus_start_time}–${adminTestResult.bonus_end_time}, giờ Việt Nam)`
+                  : ""}
+              </div>
+              <div>
+                Thời lượng gốc: {adminTestResult.base_duration_seconds
+                  ? `${Math.floor(adminTestResult.base_duration_seconds / 3600)}h ${Math.floor((adminTestResult.base_duration_seconds % 3600) / 60)}m`
+                  : "-"}
+              </div>
+              <div>
+                Bonus cộng thật: {Number(adminTestResult.bonus_seconds ?? 0) > 0
+                  ? `+${Math.floor(Number(adminTestResult.bonus_seconds) / 3600)}h ${Math.floor((Number(adminTestResult.bonus_seconds) % 3600) / 60)}m`
+                  : "+0h"}
+              </div>
+              <div className="font-semibold">
+                Thời lượng phát key cuối: {adminTestResult.duration_seconds
+                  ? `${Math.floor(adminTestResult.duration_seconds / 3600)}h ${Math.floor((adminTestResult.duration_seconds % 3600) / 60)}m`
+                  : "-"}
+              </div>
               <div>Key expires: {formatVnDateTime(adminTestResult.expires_at)}</div>
               <div>Test session expires: {formatVnDateTime(adminTestResult.session_expires_at)}</div>
               <div>IP hash: <span className="font-mono">{shortText(adminTestResult.ip_hash, 12)}</span></div>

@@ -25,6 +25,10 @@ type RevealOk = {
   session_id?: string | null;
   ip_hash?: string | null;
   allow_reset?: boolean | null;
+  duration_seconds?: number | null;
+  base_duration_seconds?: number | null;
+  bonus_seconds?: number | null;
+  bonus_applied?: boolean | null;
 };
 type RevealErr = { ok: false; msg: string; code?: string };
 
@@ -453,19 +457,30 @@ export function FreeClaimPage() {
         return;
       }
 
+      const okRes = res as RevealOk;
+      const responseBonusSeconds = Math.max(0, Number(okRes.bonus_seconds ?? 0));
+      const responseBonusLabel = responseBonusSeconds > 0
+        ? (responseBonusSeconds % 3600 === 0
+          ? `${responseBonusSeconds / 3600}H`
+          : `${Math.floor(responseBonusSeconds / 60)}P`)
+        : "";
+      const baseResponseLabel = okRes.key_type_label || selectedLabel;
+      const finalResponseLabel = okRes.bonus_applied && responseBonusLabel && !baseResponseLabel.includes("🔥")
+        ? `${baseResponseLabel} 🔥 +${responseBonusLabel}`
+        : baseResponseLabel;
+
       const st: RevealedState = {
-        key: (res as RevealOk).key,
-        expiresAt: (res as RevealOk).expires_at,
-        label: (res as RevealOk).key_type_label || selectedLabel,
+        key: okRes.key,
+        expiresAt: okRes.expires_at,
+        label: finalResponseLabel,
       };
 
       setRevealed(st);
 
       try {
-        const okRes = res as RevealOk;
         const payload = {
           key: okRes.key,
-          key_type: okRes.key_type_label || okRes.key_type_code || selectedLabel,
+          key_type: st.label || okRes.key_type_code || selectedLabel,
           created_at: okRes.created_at || new Date().toISOString(),
           expires_at: okRes.expires_at,
           ip_hash: okRes.ip_hash || null,

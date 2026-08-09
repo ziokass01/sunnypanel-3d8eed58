@@ -4,6 +4,7 @@ import { assertAdmin } from "../_shared/admin.ts";
 import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 import { insertLicenseCompat } from "../_shared/license-insert.ts";
 import { resolveKeyTypeDurationSeconds } from "../_shared/license-duration.ts";
+import { effectiveBonusDuration, resolveFreeBonus } from "../_shared/free-bonus.ts";
 
 function toHex(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -175,7 +176,36 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (!keyType || !keyType.enabled) return json({ ok: false, message: "KEY_TYPE_DISABLED" });
-  const durationSeconds = resolveKeyTypeDurationSeconds(keyType);
+
+  const baseDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
+  const bonusSettingsRes = await sb
+    .from("licenses_free_settings")
+    .select("free_bonus_config")
+    .eq("id", 1)
+    .maybeSingle();
+  if (bonusSettingsRes.error) {
+    return json({
+      ok: false,
+      message: "BONUS_SETTINGS_LOAD_FAILED",
+      detail: extractErrorMessage(bonusSettingsRes.error),
+    }, 500);
+  }
+
+  const now = new Date();
+  const bonusRuntime = resolveFreeBonus((bonusSettingsRes.data as any)?.free_bonus_config, now);
+  const bonusDuration = effectiveBonusDuration(baseDurationSeconds, bonusRuntime, keyType.code);
+  const durationSeconds = Math.max(60, Number(bonusDuration.effective_seconds ?? baseDurationSeconds));
+  const bonusSeconds = bonusDuration.applied ? Math.max(0, Number(bonusDuration.bonus_seconds ?? 0)) : 0;
+  const bonusMeta = {
+    key_type_label: String((keyType as any)?.label ?? ""),
+    base_duration_seconds: baseDurationSeconds,
+    bonus_seconds: bonusSeconds,
+    bonus_applied: Boolean(bonusDuration.applied && bonusSeconds > 0),
+    bonus_active: Boolean(bonusRuntime.active),
+    bonus_start_time: String(bonusRuntime.start_time || "00:00"),
+    bonus_end_time: String(bonusRuntime.end_time || "12:00"),
+    duration_seconds: durationSeconds,
+  };
 
   // AI_ADMIN_TEST_DETECT_BY_CODE_V2: some old rows may still have app_code null/legacy.
   // Treat aisunny_* or AI-SUNNY signature as AI Coding so it never falls into legacy licenses insert.
@@ -185,7 +215,6 @@ Deno.serve(async (req) => {
   const isAiCodingKeyType = rawAppCode === "ai-coding" || keyTypeCode.startsWith("aisunny") || detectedKeySignature === "AI-SUNNY";
   const appCode = isAiCodingKeyType ? "ai-coding" : rawAppCode;
 
-  const now = new Date();
   const traceId = crypto.randomUUID();
   const sessionExp = new Date(now.getTime() + 20 * 60 * 1000).toISOString();
   const insSess = await sb
@@ -203,6 +232,17 @@ Deno.serve(async (req) => {
       expires_at: sessionExp,
       trace_id: traceId,
       app_code: appCode,
+      selection_meta: {
+        marker: "ADMIN_TEST_BONUS_SNAPSHOT_V4",
+        base_duration_seconds: baseDurationSeconds,
+        bonus_seconds: bonusSeconds,
+        effective_duration_seconds: durationSeconds,
+        bonus_applied: Boolean(bonusDuration.applied && bonusSeconds > 0),
+        bonus_active: Boolean(bonusRuntime.active),
+        bonus_start_time: String(bonusRuntime.start_time || "00:00"),
+        bonus_end_time: String(bonusRuntime.end_time || "12:00"),
+        bonus_reference_at: now.toISOString(),
+      },
     })
     .select("session_id")
     .single();
@@ -237,6 +277,7 @@ Deno.serve(async (req) => {
       expires_at: new Date(now.getTime() + durationSeconds * 1000).toISOString(),
       duration_seconds: durationSeconds,
       session_expires_at: sessionExp,
+      ...bonusMeta,
     });
   }
 
@@ -337,7 +378,7 @@ Deno.serve(async (req) => {
       },
     }).eq("session_id", sessionId);
 
-    return json({ ok: true, message: "ADMIN_TEST_OK", key: rawKey, expires_at: expiresAt, duration_seconds: durationSeconds, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+    return json({ ok: true, message: "ADMIN_TEST_OK", key: rawKey, expires_at: expiresAt, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, ...bonusMeta });
   }
 
   // Find Dumps free key types are server-app redeem keys, not legacy rows in public.licenses.
@@ -479,7 +520,7 @@ Deno.serve(async (req) => {
       },
     }).eq("session_id", sessionId);
 
-    return json({ ok: true, message: "ADMIN_TEST_OK", key: inserted.redeem_key, expires_at: expiresAt, duration_seconds: durationSeconds, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+    return json({ ok: true, message: "ADMIN_TEST_OK", key: inserted.redeem_key, expires_at: expiresAt, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, ...bonusMeta });
   }
 
   let fakeLagRule: any = null;
@@ -586,5 +627,5 @@ Deno.serve(async (req) => {
     .update({ status: "revealed", reveal_count: 1, revealed_at: now.toISOString(), revealed_license_id: licenseId })
     .eq("session_id", sessionId);
 
-  return json({ ok: true, message: "ADMIN_TEST_OK", key, expires_at: expiresAt, duration_seconds: durationSeconds, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId });
+  return json({ ok: true, message: "ADMIN_TEST_OK", key, expires_at: expiresAt, session_expires_at: sessionExp, ip_hash: ipHash, fp_hash: fpHash, session_id: sessionId, ...bonusMeta });
 });
