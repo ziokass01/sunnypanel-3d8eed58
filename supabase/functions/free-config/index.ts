@@ -1,5 +1,6 @@
 import { resolveCorsOrigin } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { freeBonusRuleFor, publicFreeBonus, resolveFreeBonus, sortKeyTypesForBonus } from "../_shared/free-bonus.ts";
 
 function normalizePublicBaseUrl(value?: string | null) {
   const raw = String(value ?? "").trim().replace(/\/+$/, "");
@@ -245,6 +246,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: sErr.message }, 503);
     }
 
+    const bonusRuntime = resolveFreeBonus((settings as any)?.free_bonus_config);
     const rawOutbound = settings?.free_outbound_url;
     // Do not expose shortener API/token templates to public clients.
     // free-start builds shortlinks server-side from licenses_free_shortlink_providers.
@@ -331,11 +333,12 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("enabled", true);
     if (requestedAppCode) keyTypesQuery = keyTypesQuery.eq("app_code", requestedAppCode);
-    const { data: keyTypes, error: kErr } = await keyTypesQuery.order("sort_order", { ascending: true });
+    const { data: keyTypesRaw, error: kErr } = await keyTypesQuery.order("sort_order", { ascending: true });
 
     if (kErr) {
       return jsonResponse({ ok: false, code: "FREE_NOT_READY", msg: kErr.message }, 503);
     }
+    const keyTypes = sortKeyTypesForBonus(keyTypesRaw ?? [], bonusRuntime);
 
     const appCodes = [...new Set((keyTypes ?? []).map((k: any) => String(k?.app_code ?? "free-fire").trim().toLowerCase() || "free-fire"))];
     const findDumpsRewards: Record<string, any> = {};
@@ -541,8 +544,11 @@ Deno.serve(async (req) => {
         badge: free_external_download_badge,
         icon_url: free_external_download_icon_url,
       },
+      free_bonus: publicFreeBonus(bonusRuntime),
       find_dumps_rewards: findDumpsRewards,
-      key_types: (keyTypes ?? []).map((k: any) => ({
+      key_types: (keyTypes ?? []).map((k: any) => {
+        const bonusRule = freeBonusRuleFor(bonusRuntime, k.code);
+        return ({
         code: k.code,
         label: k.label,
         kind: k.kind,
@@ -558,7 +564,10 @@ Deno.serve(async (req) => {
         default_package_code: String(k?.default_package_code ?? "").trim() || null,
         default_credit_code: String(k?.default_credit_code ?? "").trim() || null,
         default_wallet_kind: String(k?.default_wallet_kind ?? "").trim() || null,
-      })),
+        bonus_active: Boolean(bonusRuntime.active && bonusRule?.apply_bonus && Number(bonusRule?.bonus_seconds ?? 0) > 0),
+        bonus_seconds: bonusRuntime.active && bonusRule?.apply_bonus ? Math.max(0, Number(bonusRule?.bonus_seconds ?? 0)) : 0,
+      });
+      }),
       turnstile_enabled,
       turnstile_site_key: null,
       missing,

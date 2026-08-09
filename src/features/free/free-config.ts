@@ -16,6 +16,8 @@ export type FreeKeyType = {
   default_package_code?: string | null;
   default_credit_code?: string | null;
   default_wallet_kind?: string | null;
+  bonus_active?: boolean;
+  bonus_seconds?: number;
 };
 
 
@@ -56,6 +58,26 @@ export type FreeDownloadCard = {
   button_label: string | null;
   badge: string | null;
   icon_url: string | null;
+};
+
+export type FreeBonusRule = {
+  key_type_code: string;
+  apply_bonus: boolean;
+  bonus_seconds: number;
+  sort_order: number;
+};
+
+export type FreeBonusConfig = {
+  enabled: boolean;
+  active: boolean;
+  timezone: "Asia/Ho_Chi_Minh";
+  start_time: string;
+  end_time: string;
+  disable_secondary: boolean;
+  notice_title: string;
+  notice_content: string;
+  notice_dismiss_seconds: number;
+  rules: FreeBonusRule[];
 };
 
 export type FreeExternalDownload = {
@@ -120,6 +142,7 @@ export type FreeConfig = {
   free_download_cards?: FreeDownloadCard[];
   free_notice?: FreeNoticeConfig;
   free_external_download?: FreeExternalDownload;
+  free_bonus?: FreeBonusConfig;
 
   key_types: FreeKeyType[];
   find_dumps_rewards?: Record<string, FindDumpsRewardConfig>;

@@ -16,6 +16,7 @@ import {
   vietnamDate,
 } from "./free-shared/gtraffic.js";
 import { resolveKeyTypeDurationSeconds } from "./free-shared/license-duration.js";
+import { effectiveBonusDuration, publicFreeBonus, resolveFreeBonus } from "./free-shared/bonus.js";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -592,7 +593,9 @@ export async function handleFreeStart(req: Request, env: any) {
   const { data: settings, error: settingsErr } = await db.from("licenses_free_settings").select("*").eq("id", 1).maybeSingle();
   if (settingsErr) return await deny("FREE_SETTINGS_LOAD_FAILED", { detail: settingsErr.message });
   const cfg = (settings ?? {}) as any;
+  const bonusRuntime = resolveFreeBonus(cfg.free_bonus_config);
   if (linkChannel === "primary" && cfg.free_enabled === false) return await deny("FREE_DISABLED", { msg: cfg.free_disabled_message || "FREE_DISABLED" });
+  if (linkChannel === "secondary" && bonusRuntime.active && bonusRuntime.disable_secondary) return await deny("BONUS_SECONDARY_DISABLED", { bonus: publicFreeBonus(bonusRuntime) });
   if (linkChannel === "secondary" && cfg.free_secondary_enabled === false) return await deny("SECONDARY_SHORTLINK_NOT_READY");
 
   await closeStale(db, ipHash, fpHash);
@@ -609,7 +612,9 @@ export async function handleFreeStart(req: Request, env: any) {
     return await deny("KEY_TYPE_LOAD_FAILED", { detail: String((error as any)?.message ?? error) });
   }
   if (!keyType || keyType.enabled === false) return await deny("KEY_TYPE_DISABLED");
-  const keyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
+  const baseKeyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
+  const bonusDuration = effectiveBonusDuration(baseKeyDurationSeconds, bonusRuntime, keyTypeCode);
+  const keyDurationSeconds = bonusDuration.effective_seconds;
 
   const requiresDoubleGate = Boolean(keyType.requires_double_gate ?? false);
   if (linkChannel === "secondary") {

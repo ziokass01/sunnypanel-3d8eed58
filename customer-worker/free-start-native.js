@@ -2,6 +2,7 @@
 import { createServiceClient } from "./supabase-rest.js";
 import { buildGtrafficApiUrl, buildGtrafficBrowserUrl, isGtrafficBlockedResponse, isGtrafficEdgeIpBlock, isQuotaExhaustedError, normalizeShortlinkMode, orderedProvidersForPass, parseGtrafficResponse, providerIsExhaustedToday, providerIsTemporarilyUnavailable, vietnamDate, } from "./free-shared/gtraffic.js";
 import { resolveKeyTypeDurationSeconds } from "./free-shared/license-duration.js";
+import { effectiveBonusDuration, publicFreeBonus, resolveFreeBonus } from "./free-shared/bonus.js";
 const corsHeaders = {
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "authorization, x-client-info, apikey, content-type, x-fp, x-admin-key",
@@ -619,8 +620,11 @@ export async function handleFreeStart(req, env) {
     if (settingsErr)
         return await deny("FREE_SETTINGS_LOAD_FAILED", { detail: settingsErr.message });
     const cfg = (settings ?? {});
+    const bonusRuntime = resolveFreeBonus(cfg.free_bonus_config);
     if (linkChannel === "primary" && cfg.free_enabled === false)
         return await deny("FREE_DISABLED", { msg: cfg.free_disabled_message || "FREE_DISABLED" });
+    if (linkChannel === "secondary" && bonusRuntime.active && bonusRuntime.disable_secondary)
+        return await deny("BONUS_SECONDARY_DISABLED", { bonus: publicFreeBonus(bonusRuntime) });
     if (linkChannel === "secondary" && cfg.free_secondary_enabled === false)
         return await deny("SECONDARY_SHORTLINK_NOT_READY");
     await closeStale(db, ipHash, fpHash);
@@ -638,7 +642,9 @@ export async function handleFreeStart(req, env) {
     }
     if (!keyType || keyType.enabled === false)
         return await deny("KEY_TYPE_DISABLED");
-    const keyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
+    const baseKeyDurationSeconds = resolveKeyTypeDurationSeconds(keyType);
+    const bonusDuration = effectiveBonusDuration(baseKeyDurationSeconds, bonusRuntime, keyTypeCode);
+    const keyDurationSeconds = bonusDuration.effective_seconds;
     const requiresDoubleGate = Boolean(keyType.requires_double_gate ?? false);
     if (linkChannel === "secondary") {
         const pass1Providers = await loadProviders(db, 1, "secondary").catch(() => []);

@@ -54,6 +54,7 @@ type LastFreeKey = {
 };
 
 const LAST_FREE_KEY_STORAGE = "lastFreeKey";
+const BONUS_NOTICE_HIDDEN_UNTIL = "sunny_free_bonus_notice_hidden_until";
 
 type FreeKeySummaryMeta = {
   label: string;
@@ -160,6 +161,27 @@ function readLastFreeKeySnapshot(): LastFreeKey | null {
   }
 }
 
+function msUntilVietnamClock(clock: string, nowMs = Date.now()) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(clock || ""));
+  if (!match) return 60_000;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const offsetMs = 7 * 60 * 60 * 1000;
+  const vietnamNow = new Date(nowMs + offsetMs);
+  let targetLocalMs = Date.UTC(
+    vietnamNow.getUTCFullYear(),
+    vietnamNow.getUTCMonth(),
+    vietnamNow.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0,
+  );
+  const currentLocalMs = nowMs + offsetMs;
+  if (targetLocalMs <= currentLocalMs) targetLocalMs += 24 * 60 * 60 * 1000;
+  return Math.max(1000, targetLocalMs - currentLocalMs);
+}
+
 export function FreeLandingPage() {
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -168,6 +190,7 @@ export function FreeLandingPage() {
   const [lastFreeKey, setLastFreeKey] = useState<LastFreeKey | null>(null);
   const [deviceHistory, setDeviceHistory] = useState(() => readFreeDeviceHistory());
   const [showClosedDialog, setShowClosedDialog] = useState(false);
+  const [showBonusDialog, setShowBonusDialog] = useState(false);
 
   const isPendingSessionError = useMemo(() => {
     const message = String(err ?? "").toLowerCase();
@@ -294,6 +317,29 @@ export function FreeLandingPage() {
     };
   }, []);
 
+  // A page can stay open across the Bonus start/end boundary. Refresh exactly
+  // at the next Vietnam-time boundary instead of polling every minute.
+  useEffect(() => {
+    const bonus = cfg?.free_bonus;
+    if (!bonus?.enabled) return;
+    const boundary = bonus.active ? bonus.end_time : bonus.start_time;
+    const delay = Math.min(24 * 60 * 60 * 1000, msUntilVietnamClock(boundary) + 1200);
+    const id = window.setTimeout(() => {
+      void fetchFreeConfig({ fingerprint: getOrCreateFingerprint() })
+        .then((next) => {
+          setCfg(next);
+          setSelected((current) => {
+            if (current && (next.key_types ?? []).some((item) => item.code === current)) return current;
+            return next.key_types?.[0]?.code ?? "";
+          });
+        })
+        .catch(() => {
+          // Keep the current screen; backend remains authoritative when user clicks.
+        });
+    }, delay);
+    return () => window.clearTimeout(id);
+  }, [cfg?.free_bonus?.active, cfg?.free_bonus?.enabled, cfg?.free_bonus?.end_time, cfg?.free_bonus?.start_time]);
+
 
   const selectedKeyMeta = useMemo(() => (cfg?.key_types ?? []).find((item) => item.code === selected) ?? null, [cfg?.key_types, selected]);
   const selectedAppCode = useMemo(() => inferFreeAppCodeFromKeyType(selectedKeyMeta), [selectedKeyMeta]);
@@ -382,6 +428,19 @@ export function FreeLandingPage() {
   const canGet = hasTypes && !loading && !missingText;
 
   async function startKey(linkChannel: "primary" | "secondary") {
+    if (linkChannel === "secondary" && cfg?.free_bonus?.active && cfg.free_bonus.disable_secondary) {
+      let hiddenUntil = 0;
+      try { hiddenUntil = Number(localStorage.getItem(BONUS_NOTICE_HIDDEN_UNTIL) || 0); } catch { hiddenUntil = 0; }
+      if (Date.now() >= hiddenUntil) {
+        setShowBonusDialog(true);
+      } else {
+        toast({
+          title: cfg.free_bonus.notice_title || "Khung giờ Bonus",
+          description: `Link phụ tạm đóng đến ${cfg.free_bonus.end_time}.`,
+        });
+      }
+      return;
+    }
     if (linkChannel === "secondary" && cfg?.free_secondary_enabled === false) {
       toast({ title: "Link phụ chưa sẵn sàng" });
       return;
@@ -430,6 +489,12 @@ export function FreeLandingPage() {
 
       if (!res.ok) {
         const r = res as StartErr;
+        if (r.code === "BONUS_SECONDARY_DISABLED") {
+          markFreeAttemptFail(r.code);
+          setDeviceHistory(readFreeDeviceHistory());
+          setShowBonusDialog(true);
+          return;
+        }
         if (r.code === "SECONDARY_SHORTLINK_NOT_READY") {
           markFreeAttemptFail(r.code);
           setDeviceHistory(readFreeDeviceHistory());
@@ -629,6 +694,11 @@ export function FreeLandingPage() {
                     {(cfg?.key_types ?? []).map((k) => (
                       <SelectItem key={k.code} value={k.code}>
                         {k.label}
+                        {k.bonus_active && Number(k.bonus_seconds ?? 0) > 0
+                          ? ` 🔥 +${Number(k.bonus_seconds ?? 0) % 3600 === 0
+                            ? `${Number(k.bonus_seconds ?? 0) / 3600}H`
+                            : `${Math.floor(Number(k.bonus_seconds ?? 0) / 60)}P`}`
+                          : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -715,6 +785,38 @@ export function FreeLandingPage() {
           </Card>
         </main>
       </div>
+
+      <Dialog open={showBonusDialog} onOpenChange={(open) => {
+        setShowBonusDialog(open);
+        if (!open && cfg?.free_bonus?.active) {
+          try {
+            localStorage.setItem(
+              BONUS_NOTICE_HIDDEN_UNTIL,
+              String(Date.now() + Math.max(60, Number(cfg.free_bonus.notice_dismiss_seconds ?? 3600)) * 1000),
+            );
+          } catch {
+            // ignore
+          }
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{cfg?.free_bonus?.notice_title || "Khung giờ Bonus"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="rounded-2xl border bg-primary/5 p-4 leading-6">
+              {cfg?.free_bonus?.notice_content || "Bonus đang diễn ra. Link phụ tạm đóng trong khung giờ này."}
+            </div>
+            <div className="rounded-xl border p-3 text-muted-foreground">
+              Khung giờ: <span className="font-medium text-foreground">{cfg?.free_bonus?.start_time} – {cfg?.free_bonus?.end_time}</span> (Việt Nam).
+              Link chính vẫn hoạt động bình thường.
+            </div>
+            <div className="flex justify-end">
+              <Button type="button" onClick={() => setShowBonusDialog(false)}>Đã hiểu</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showClosedDialog} onOpenChange={setShowClosedDialog}>
         <DialogContent

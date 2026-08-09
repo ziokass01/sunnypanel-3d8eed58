@@ -167,6 +167,11 @@ class RestQuery {
     return this.execute();
   }
 
+  single() {
+    this.wantMaybeSingle = true;
+    return this.execute();
+  }
+
   then(resolve, reject) {
     return this.execute().then(resolve, reject);
   }

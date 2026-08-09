@@ -26,7 +26,6 @@ const DIRECT_SUPABASE_FUNCTIONS = new Set([
   // The final reveal/resolve calls still prefer Supabase Edge because they issue
   // protected key result state. free-start/free-gate/free-close and reset-key
   // use the Cloudflare gateway first to avoid high-volume Edge invocations.
-  "/free-reveal",
   "/free-resolve",
 ]);
 
@@ -45,7 +44,17 @@ function getPrimaryFunctionsBaseUrl(path?: string) {
   return getPublicApiBaseUrl() ?? getSupabaseFunctionsBaseUrl();
 }
 
+const NO_AUTOMATIC_FALLBACK_PATHS = new Set([
+  // free-start determines bonus duration and whether secondary is allowed.
+  // Never bypass the Worker bonus policy by retrying a second backend.
+  "/free-start",
+  // free-reveal is a one-time mint/lock mutation. The Worker owns the kill
+  // switch fallback; the browser must never replay it on a second backend.
+  "/free-reveal",
+]);
+
 function getFallbackFunctionsBaseUrl(primaryBaseUrl?: string, path?: string) {
+  if (path && NO_AUTOMATIC_FALLBACK_PATHS.has(normalizeFunctionPath(path))) return undefined;
   const fallback = shouldPreferDirectSupabase(path)
     ? getPublicApiBaseUrl()
     : getSupabaseFunctionsBaseUrl();

@@ -2,6 +2,8 @@ import { handleNativeVerify, isNativeVerifyEnabled, nativeVerifyReadiness } from
 import { handleFreeStart } from "./free-start-native.js";
 import { handleFreeGate } from "./free-gate-native.js";
 import { handleFreeClose } from "./free-close-native.js";
+import { handleFreeConfig } from "./free-config-native.js";
+import { handleFreeReveal } from "./free-reveal-native.js";
 import { handleResetKey, resetKeyNativeReadiness } from "./reset-key-native.js";
 import { createServiceClient, serviceClientReadiness } from "./supabase-rest.js";
 
@@ -186,6 +188,14 @@ function freeNativeRouteEnabled(env, fnName) {
     const specific = String(env?.FREE_NATIVE_CLOSE_ENABLED ?? "").trim();
     return specific ? boolVar(specific, general) : general;
   }
+  if (fnName === "free-config") {
+    const specific = String(env?.FREE_NATIVE_CONFIG_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-reveal") {
+    const specific = String(env?.FREE_NATIVE_REVEAL_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
   return false;
 }
 
@@ -215,8 +225,14 @@ function freeConfigCacheSeconds(env) {
 
 function freeConfigCacheKey(req) {
   const appCode = String(req.headers.get("x-app-code") || "").trim().toLowerCase().slice(0, 64);
+  // free-config contains per-fingerprint and per-IP quota state. Never let one
+  // visitor receive another visitor's cached quota counters.
+  const fingerprint = String(req.headers.get("x-fp") || "").trim().slice(0, 160);
+  const realIp = String(req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "").trim().slice(0, 80);
   const url = new URL("https://sunny-worker-cache.invalid/free-config");
   if (appCode) url.searchParams.set("app", appCode);
+  if (fingerprint) url.searchParams.set("fp", fingerprint);
+  if (realIp) url.searchParams.set("ip", realIp);
   return new Request(url.toString(), { method: "GET" });
 }
 
@@ -395,6 +411,8 @@ export default {
         free_native_start_enabled: freeNativeRouteEnabled(env, "free-start"),
         free_native_gate_enabled: freeNativeRouteEnabled(env, "free-gate"),
         free_native_close_enabled: freeNativeRouteEnabled(env, "free-close"),
+        free_native_config_enabled: freeNativeRouteEnabled(env, "free-config"),
+        free_native_reveal_enabled: freeNativeRouteEnabled(env, "free-reveal"),
         reset_native_enabled: resetNative.enabled,
         reset_native_turnstile_configured: resetNative.turnstileConfigured,
         free_native_db_ready: freeDb.url && freeDb.serviceRoleKey,
@@ -425,7 +443,11 @@ export default {
       return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
-    if ((fnName === "free-start" || fnName === "free-gate" || fnName === "free-close") && req.method !== "POST") {
+    if ((fnName === "free-start" || fnName === "free-gate" || fnName === "free-close" || fnName === "free-reveal") && req.method !== "POST") {
+      return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if (fnName === "free-config" && req.method !== "GET") {
       return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
     }
 
@@ -450,6 +472,16 @@ export default {
       });
     }
 
+    if (fnName === "free-reveal" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeReveal(req, env, {
+        corsHeaders: corsHeaders(origin, env),
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Free-Reveal-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
     if (fnName === "reset-key" && resetNativeEnabled(env)) {
       return await handleResetKey(req, env, {
         json: (data, status) => json(data, status, origin, env, {
@@ -470,6 +502,16 @@ export default {
         responseHeaders.set("X-Gateway-Project", "active");
         responseHeaders.set("X-Free-Config-Cache", "HIT");
         return new Response(cached.body, { status: cached.status, headers: responseHeaders });
+      }
+      if (freeNativeRouteEnabled(env, fnName)) {
+        const nativeResponse = await handleFreeConfig(req, env, {
+          json: (data, status) => json(data, status, origin, env, {
+            "X-Gateway-Project": "active",
+            "X-Free-Config-Backend": "cloudflare-native",
+          }),
+        });
+        try { await writeFreeConfigCache(req, env, nativeResponse); } catch { /* cache is best-effort */ }
+        return nativeResponse;
       }
     }
 
