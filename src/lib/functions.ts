@@ -15,7 +15,11 @@ function getSupabaseFunctionsBaseUrl() {
 }
 
 function getFreeConfigVpsBaseUrl() {
-  const configured = String(import.meta.env.VITE_FREE_CONFIG_API_BASE_URL ?? "").trim();
+  const configured = String(
+    import.meta.env.VITE_FREE_API_BASE_URL ??
+    import.meta.env.VITE_FREE_CONFIG_API_BASE_URL ??
+    "",
+  ).trim();
   const base = trimTrailingSlash(configured || "https://free-api.mityangho.id.vn");
   return base.endsWith("/api") ? base : `${base}/api`;
 }
@@ -32,9 +36,13 @@ const DIRECT_SUPABASE_FUNCTIONS = new Set<string>([
   // Intentionally empty for public Free Key hot paths.
 ]);
 
-const CLOUDFLARE_ONLY_FUNCTIONS = new Set([
-  "/free-reveal",
+const VPS_FREE_FUNCTIONS = new Set([
+  "/free-config",
+  "/free-start",
+  "/free-gate",
+  "/free-close",
   "/free-resolve",
+  "/free-reveal",
 ]);
 
 function shouldPreferDirectSupabase(path?: string) {
@@ -44,11 +52,8 @@ function shouldPreferDirectSupabase(path?: string) {
 
 function getPrimaryFunctionsBaseUrl(path?: string) {
   const normalized = path ? normalizeFunctionPath(path) : "";
-  if (normalized === "/free-config") {
+  if (normalized && VPS_FREE_FUNCTIONS.has(normalized)) {
     return getFreeConfigVpsBaseUrl();
-  }
-  if (normalized && CLOUDFLARE_ONLY_FUNCTIONS.has(normalized)) {
-    return getPublicApiBaseUrl();
   }
   if (shouldPreferDirectSupabase(path)) {
     return getSupabaseFunctionsBaseUrl() ?? getPublicApiBaseUrl();
@@ -57,16 +62,14 @@ function getPrimaryFunctionsBaseUrl(path?: string) {
 }
 
 const NO_AUTOMATIC_FALLBACK_PATHS = new Set([
-  // free-config is served by the VPS tunnel. Do not silently fall back to
-  // Supabase/Worker and reintroduce the hot-path quota during an outage.
+  // Public Free Key hot paths are served by the VPS tunnel. Do not silently
+  // fall back to Supabase/Worker and reintroduce the Worker daily quota or
+  // replay state-changing requests on a second backend.
   "/free-config",
-  // free-start determines bonus duration and whether secondary is allowed.
-  // Never bypass the Worker bonus policy by retrying a second backend.
   "/free-start",
-  // free-reveal is a one-time mint/lock mutation. The Worker owns the kill
-  // switch fallback; the browser must never replay it on a second backend.
+  "/free-gate",
+  "/free-close",
   "/free-reveal",
-  // free-resolve is high-volume; browser must not bypass Cloudflare.
   "/free-resolve",
 ]);
 
