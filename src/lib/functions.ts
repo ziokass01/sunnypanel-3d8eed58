@@ -20,7 +20,7 @@ function getFreeConfigVpsBaseUrl() {
     import.meta.env.VITE_FREE_CONFIG_API_BASE_URL ??
     "",
   ).trim();
-  const base = trimTrailingSlash(configured || "https://free-api.mityangho.id.vn");
+  const base = trimTrailingSlash(configured || "https://api.mityangho.id.vn");
   return base.endsWith("/api") ? base : `${base}/api`;
 }
 
