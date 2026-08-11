@@ -52,6 +52,10 @@ SHA-256 của `customer-worker/verify-native.js` trước và sau đều là:
 - `supabase/migrations/20260811090000_free_gate_opaque_shortlinks_only.sql`
 - `src/pages/FreeLanding.tsx`
 - `src/pages/FreeGate.tsx`
+- `tools/db_push_password_auth.sh`
+- `tools/migration_history_guard.sh`
+- `.github/workflows/supabase-deploy.yml`
+- `.github/workflows/supabase-functions.yml`
 
 `customer-worker/free-native.test.js` là test hồi quy, không bắt buộc ở runtime
 nhưng nên giữ trong source.
