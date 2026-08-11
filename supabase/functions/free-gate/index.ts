@@ -1,7 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   buildGtrafficApiUrl,
-  buildGtrafficBrowserUrl,
   isGtrafficBlockedResponse,
   isGtrafficEdgeIpBlock,
   isQuotaExhaustedError,
@@ -68,6 +67,31 @@ function gateUrlFromToken(gateToken: string, passNo: number) {
   url.searchParams.set("p", String(passNo));
   return url.toString();
 }
+function outboundConcealsGateSecret(outboundUrl: string, gateUrl: string) {
+  const outbound = String(outboundUrl ?? "").trim();
+  const target = String(gateUrl ?? "").trim();
+  if (!outbound || !target) return false;
+
+  let gateToken = "";
+  try {
+    gateToken = new URL(target).searchParams.get("t") || "";
+  } catch {
+    return false;
+  }
+
+  let candidate = outbound;
+  for (let i = 0; i < 4; i += 1) {
+    if ((gateToken && candidate.includes(gateToken)) || candidate.includes(target)) return false;
+    try {
+      const decoded = decodeURIComponent(candidate);
+      if (decoded === candidate) break;
+      candidate = decoded;
+    } catch {
+      break;
+    }
+  }
+  return true;
+}
 async function claimTokenForGate(gateToken: string, sessionId: string) {
   const secret = Deno.env.get("FREE_CLAIM_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "sunny-free-claim-v1";
   const digest = await sha256Hex(`claim-v1:${secret}:${sessionId}:${gateToken}`);
@@ -131,6 +155,7 @@ function safeProviderError(error: unknown) {
   if (isHtmlResponse(raw)) return "SHORTLINK_PROVIDER_HTML_RESPONSE";
   return raw
     .replace(/([?&](?:apikey|api|token|tokenUser)=)[^&\s]+/gi, "$1***")
+    .replace(/gt_[A-Za-z0-9_-]{16,}/g, "gt_***")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 300);
@@ -257,14 +282,20 @@ const isLink4M = providerHint.includes("link4m");
 let requestUrl = "";
 if (isLink4M) {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
-  // Several legacy Link4M rows were saved under another provider kind.
-  // Detect them by all row metadata before traffic68/custom handling so
-  // round-robin cannot alternate between a working /st row and an old
-  // server-side api-shorten row that Cloudflare challenges.
-  const outbound = new URL("https://link4m.co/st");
-  outbound.searchParams.set("api", token);
-  outbound.searchParams.set("url", gateUrl);
-  return { outboundUrl: outbound.toString() } satisfies ProviderShortenResult;
+  // Browser quick-links expose their destination (including the gate secret).
+  // Only return an opaque short URL created by the provider API.
+  const base = apiUrl || "https://link4m.co/api-shorten/v2";
+  requestUrl = renderTemplate(
+    base.includes("{url") || base.includes("{token")
+      ? base
+      : `${base}${base.includes("?") ? "&" : "?"}api={token}&url={url_enc}`,
+    gateUrl,
+    token,
+  );
+  const { data, raw } = await readJsonOrText(requestUrl, "link4m");
+  const shortUrl = extractShortUrl(data, raw);
+  if (!shortUrl) throw new Error(String(data?.message || data?.error || "LINK4M_RESPONSE_INVALID"));
+  return { outboundUrl: shortUrl } satisfies ProviderShortenResult;
 }
 if (kind === "gtraffic") {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
@@ -275,12 +306,8 @@ if (kind === "gtraffic") {
     return parseGtrafficResponse(data, shortBaseUrl);
   } catch (error) {
     if (!isGtrafficEdgeIpBlock(error)) throw error;
-    const browserBaseUrl = Deno.env.get("GTRAFFIC_BROWSER_BASE_URL") || "https://gtraffic.io/st";
-    return {
-      outboundUrl: buildGtrafficBrowserUrl(browserBaseUrl, token, gateUrl),
-      quotaDate: vietnamDate(),
-      browserBridge: true,
-    } satisfies ProviderShortenResult;
+    // Browser bridge URLs embed gateUrl and would disclose the gate token.
+    throw new Error("GTRAFFIC_EDGE_IP_BLOCKED_OPAQUE_LINK_REQUIRED");
   }
 }
 if (kind === "traffic68") {
@@ -517,6 +544,9 @@ async function shortenWithFailover(db: any, cfg: any, passNo: number, gateUrl: s
       const result = await shortenWithProvider(provider, gateUrl);
       const outboundUrl = result.outboundUrl;
       if (!outboundUrl) throw new Error("SHORTLINK_RESPONSE_EMPTY");
+      if (!outboundConcealsGateSecret(outboundUrl, gateUrl)) {
+        throw new Error("SHORTLINK_GATE_SECRET_EXPOSED");
+      }
       await markProviderSuccess(db, provider, passNo, result, channel);
       return { provider, outboundUrl, degraded: false, failures: [] as string[] };
     } catch (error) {
@@ -734,7 +764,6 @@ Deno.serve(async (req) => {
               ok: true,
               next: "SHORTLINK_FALLBACK",
               outbound_url: replacement.outboundUrl,
-              gate_url: gateUrl,
               min_delay_seconds: replacementDelay,
               gate_token_life_seconds: gateLifeSeconds,
             }, 200);
@@ -809,7 +838,6 @@ Deno.serve(async (req) => {
         ok: true,
         next: "PASS2",
         outbound_url: next.outboundUrl,
-        gate_url: next.gateUrl,
         min_delay_seconds: next.delay,
         gate_token_life_seconds: next.gateLifeSeconds,
         shortlink_degraded: Boolean(next.degraded),

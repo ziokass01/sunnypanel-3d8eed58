@@ -34,10 +34,11 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
   });
 }
 
-function installFreeDbMock() {
+function installFreeDbMock({ requiresDoubleGate = false, providerKind = "link4m" } = {}) {
   const state = {
     session: null,
     gate: null,
+    shortlinkTargets: [],
     edgeFunctionCalls: [],
     restCalls: [],
   };
@@ -65,12 +66,14 @@ function installFreeDbMock() {
     value: 1,
     kind: "day",
     free_selection_mode: "none",
-    requires_double_gate: false,
+    requires_double_gate: requiresDoubleGate,
   };
   const provider = {
-    id: "provider-none",
-    name: "Native test provider",
-    provider: "none",
+    id: "provider-link4m",
+    name: providerKind === "link4m" ? "Link4M opaque test provider" : "Unsafe embedded-target provider",
+    provider: providerKind,
+    api_url_template: "https://shortener.test/api-shorten/v2",
+    api_token_secret: "test-provider-token",
     enabled: true,
     secondary_enabled: true,
     pass_scope: "both",
@@ -82,6 +85,12 @@ function installFreeDbMock() {
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     const method = String(init.method || "GET").toUpperCase();
+
+    if (url.hostname === "shortener.test") {
+      const target = String(url.searchParams.get("url") || "");
+      state.shortlinkTargets.push(target);
+      return jsonResponse({ shortenedUrl: `https://link4m.test/opaque-${state.shortlinkTargets.length}` });
+    }
 
     if (url.pathname.includes("/functions/v1/")) {
       state.edgeFunctionCalls.push(url.pathname);
@@ -145,7 +154,7 @@ function installFreeDbMock() {
 }
 
 describe("Cloudflare-native Free Key hot path", () => {
-  it("runs free-start and free-gate without invoking Supabase Edge Functions", async () => {
+  it("requires the opaque short-link destination before free-gate can issue a claim", async () => {
     const state = installFreeDbMock();
     const headers = {
       "Content-Type": "application/json",
@@ -169,16 +178,42 @@ describe("Cloudflare-native Free Key hot path", () => {
     assert.equal(startResponse.status, 200);
     assert.equal(start.ok, true);
     assert.equal(start.passes_required, 1);
-    assert.match(start.gate_url, /^https:\/\/mityangho\.id\.vn\/free\/gate\?/);
+    assert.equal(start.outbound_url, "https://link4m.test/opaque-1");
+    assert.equal(Object.hasOwn(start, "gate_token"), false);
+    assert.equal(Object.hasOwn(start, "gate_url"), false);
+    assert.equal(Object.hasOwn(start, "gate_url_pass2"), false);
+    assert.equal(JSON.stringify(start).includes("gt_"), false);
     assert.ok(state.session);
     assert.ok(state.gate);
+    assert.equal(state.shortlinkTargets.length, 1);
     assert.equal(state.edgeFunctionCalls.length, 0);
+
+    // Reproduce the reported exploit: session_id + out_token alone must fail.
+    const bypassResponse = await worker.fetch(new Request("https://mityangho.id.vn/api/free-gate", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        out_token: start.out_token,
+        session_id: start.session_id,
+        pass: 1,
+        fingerprint: "test-fingerprint",
+      }),
+    }), env());
+    const bypass = await bypassResponse.json();
+    assert.equal(bypass.ok, false);
+    assert.equal(bypass.code, "TOKENIZED_GATE_REQUIRED");
+    assert.equal(state.gate.status, "pending");
+
+    // Simulate the provider redirecting to the destination it kept server-side.
+    const gateUrl = new URL(state.shortlinkTargets[0]);
+    const gateToken = gateUrl.searchParams.get("t");
+    assert.match(gateToken, /^gt_/);
 
     const gateResponse = await worker.fetch(new Request("https://mityangho.id.vn/api/free-gate", {
       method: "POST",
       headers,
       body: JSON.stringify({
-        gate_token: start.gate_token,
+        gate_token: gateToken,
         out_token: start.out_token,
         session_id: start.session_id,
         pass: 1,
@@ -195,6 +230,77 @@ describe("Cloudflare-native Free Key hot path", () => {
     assert.equal(state.edgeFunctionCalls.length, 0);
     assert.equal(state.gate.status, "used");
     assert.equal(state.session.status, "gate_ok");
+  });
+
+  it("keeps the second-pass gate secret out of the PASS2 API response", async () => {
+    const state = installFreeDbMock({ requiresDoubleGate: true });
+    const headers = {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": "203.0.113.30",
+      "User-Agent": "Sunny-Free-Native-Test",
+      "x-fp": "test-fingerprint-vip",
+    };
+
+    const startResponse = await worker.fetch(new Request("https://mityangho.id.vn/api/free-start", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        key_type_code: "D1",
+        app_code: "free-fire",
+        fingerprint: "test-fingerprint-vip",
+        link_channel: "primary",
+      }),
+    }), env());
+    const start = await startResponse.json();
+    const pass1Token = new URL(state.shortlinkTargets[0]).searchParams.get("t");
+
+    const pass1Response = await worker.fetch(new Request("https://mityangho.id.vn/api/free-gate", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        gate_token: pass1Token,
+        out_token: start.out_token,
+        session_id: start.session_id,
+        pass: 1,
+        fingerprint: "test-fingerprint-vip",
+      }),
+    }), env());
+    const pass1 = await pass1Response.json();
+
+    assert.equal(pass1.ok, true);
+    assert.equal(pass1.next, "PASS2");
+    assert.equal(pass1.outbound_url, "https://link4m.test/opaque-2");
+    assert.equal(Object.hasOwn(pass1, "gate_token"), false);
+    assert.equal(Object.hasOwn(pass1, "gate_url"), false);
+    assert.equal(JSON.stringify(pass1).includes("gt_"), false);
+    assert.equal(state.shortlinkTargets.length, 2);
+    assert.match(new URL(state.shortlinkTargets[1]).searchParams.get("t"), /^gt_/);
+  });
+
+  it("fails closed when a provider embeds the gate destination in outbound_url", async () => {
+    const state = installFreeDbMock({ providerKind: "traffic68" });
+    const response = await worker.fetch(new Request("https://mityangho.id.vn/api/free-start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "203.0.113.40",
+        "User-Agent": "Sunny-Free-Native-Test",
+        "x-fp": "test-fingerprint-unsafe-provider",
+      },
+      body: JSON.stringify({
+        key_type_code: "D1",
+        app_code: "free-fire",
+        fingerprint: "test-fingerprint-unsafe-provider",
+        link_channel: "primary",
+      }),
+    }), env());
+    const result = await response.json();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "SHORTLINK_CREATE_FAILED");
+    assert.equal(JSON.stringify(result).includes("gt_"), false);
+    assert.equal(state.session, null);
+    assert.equal(state.gate, null);
   });
 
   it("keeps free-start proxy fallback available when native mode is disabled", async () => {

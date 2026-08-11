@@ -34,8 +34,6 @@ type StartOk = {
   session_id?: string;
   outbound_url: string;
   outbound_url_pass2?: string | null;
-  gate_url: string;
-  gate_url_pass2?: string | null;
   claim_base_url: string;
   min_delay_seconds: number;
   min_delay_seconds_pass2?: number;
@@ -574,10 +572,6 @@ export function FreeLandingPage() {
 
       const outbound = String(res.outbound_url ?? "").trim();
       if (!outbound) {
-        if (testMode) {
-          window.location.assign(res.gate_url);
-          return;
-        }
         setErr("OUTBOUND_URL_MISSING: Chưa cấu hình Link4M outbound đúng. Vui lòng báo admin kiểm tra free_outbound_url.");
         return;
       }

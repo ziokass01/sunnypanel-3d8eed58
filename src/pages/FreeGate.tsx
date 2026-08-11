@@ -9,8 +9,8 @@ import { FreeFlowSteps, markFreeAttemptFail } from "@/features/free/flow-ux";
 import { readBundle, writeBundle } from "@/lib/freeFlow";
 import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
-type GateNextPass2 = { ok: true; next: "PASS2"; out_token?: string; outbound_url: string; gate_url?: string | null; min_delay_seconds: number; gate_token_life_seconds?: number };
-type GateNextFallback = { ok: true; next: "SHORTLINK_FALLBACK"; outbound_url: string; gate_url?: string | null; min_delay_seconds: number; gate_token_life_seconds?: number };
+type GateNextPass2 = { ok: true; next: "PASS2"; out_token?: string; outbound_url: string; min_delay_seconds: number; gate_token_life_seconds?: number };
+type GateNextFallback = { ok: true; next: "SHORTLINK_FALLBACK"; outbound_url: string; min_delay_seconds: number; gate_token_life_seconds?: number };
 type GateNextClaim = { ok: true; next: "CLAIM"; session_id?: string; claim_token: string; claim_url?: string | null };
 type GateOk = GateNextPass2 | GateNextFallback | GateNextClaim;
 type GateErr = { ok: false; msg: string; code?: string; detail?: any; retry_after_ms?: number };
@@ -233,8 +233,8 @@ export function FreeGatePage() {
         }
 
         if (ok.next === "PASS2") {
-          // Transition to Pass2. Prefer the pre-issued pass2 token/outbound captured at /free-start
-          // so Link4M pass2 can stay fixed and we do not depend on generating a new token here.
+          // Transition to Pass2. The gate secret exists only inside the opaque
+          // short-link destination and is never returned by either API response.
           let nextTok = String(ok.out_token || "").trim();
           try {
             if (!nextTok && !gateTok) nextTok = readFlowItem("free_out_token_pass2").trim();
