@@ -10,6 +10,7 @@ import { FreeNotice } from "@/features/free/FreeNotice";
 import { FreeDownloadCards } from "@/features/free/FreeDownloadCards";
 import { PublicInfo } from "@/features/free/PublicInfo";
 import { FreeDeviceHistoryCard, FreeFlowSteps, markFreeAttempt, markFreeAttemptFail, readFreeDeviceHistory, syncFreeNextEligibleAt } from "@/features/free/flow-ux";
+import { getFreeSuccessTodayForApp, resolveFreeRemainingToday } from "@/features/free/quota-display";
 import { getFunction, postFunction } from "@/lib/functions";
 import { clearBundle, readBundle, writeBundle } from "@/lib/freeFlow";
 import { getFindDumpsFreeFlowDefaults, roundCredit } from "@/lib/serverAppPolicies";
@@ -407,12 +408,31 @@ export function FreeLandingPage() {
   // Card "Thiết bị hiện tại" phải hiện số còn lại theo thiết bị.
   // Free Fire là key gốc của tab Free Key/server admin, không lấy min(IP) làm tụt về 0.
   // IP quota vẫn hiển thị riêng bên dưới và server vẫn tự kiểm khi bấm Get Key.
-  const selectedRemainingToday = useMemo(() => {
+  const selectedRemainingTodayServer = useMemo(() => {
     if (selectedAppCode === "free-fire") {
       return selectedQuotaMeta?.remaining_fingerprint ?? cfg?.free_quota_remaining_today ?? null;
     }
     return selectedQuotaMeta?.remaining_today ?? cfg?.free_quota_remaining_today ?? null;
   }, [cfg?.free_quota_remaining_today, selectedAppCode, selectedQuotaMeta]);
+
+  const selectedSuccessToday = useMemo(
+    () => getFreeSuccessTodayForApp(deviceHistory, selectedAppCode),
+    [deviceHistory, selectedAppCode],
+  );
+  const selectedRemainingToday = useMemo(() => resolveFreeRemainingToday({
+    appCode: selectedAppCode,
+    serverRemaining: selectedRemainingTodayServer,
+    fingerprintLimit: selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0,
+    ipLimit: selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0,
+    localSuccessToday: selectedSuccessToday,
+  }), [
+    cfg?.free_daily_limit_per_fingerprint,
+    cfg?.free_daily_limit_per_ip,
+    selectedAppCode,
+    selectedQuotaMeta,
+    selectedRemainingTodayServer,
+    selectedSuccessToday,
+  ]);
 
   const missingText = useMemo(() => {
     const m = cfg?.missing ?? [];
@@ -668,9 +688,12 @@ export function FreeLandingPage() {
 
               <FreeDeviceHistoryCard
                 history={deviceHistory}
-                remainingTodayServer={selectedRemainingToday}
+                remainingTodayServer={selectedRemainingToday.remaining}
+                remainingTodayEstimated={selectedRemainingToday.estimated}
+                quotaUnlimited={selectedRemainingToday.unlimited}
                 lastKeyExpiresAt={lastFreeKey?.expires_at ?? null}
                 selectedKeyLabel={selectedKeySummaryMeta.label}
+                successToday={selectedSuccessToday}
                 selectedQuotaFingerprint={selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0}
                 selectedQuotaIp={selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0}
               />

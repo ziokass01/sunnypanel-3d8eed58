@@ -12,6 +12,7 @@ import {
   getFreeStartMeta,
   getOrCreateFingerprint,
   getOutToken,
+  getSelectedAppCode,
   getSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
 
@@ -488,7 +489,7 @@ export function FreeClaimPage() {
           allow_reset: okRes.allow_reset !== false,
         };
         localStorage.setItem(LAST_FREE_KEY_STORAGE, JSON.stringify(payload));
-        markFreeSuccess({ keyLabel: payload.key_type, nextEligibleAt: okRes.expires_at || null });
+        markFreeSuccess({ appCode: getSelectedAppCode(), keyLabel: payload.key_type, nextEligibleAt: okRes.expires_at || null });
       } catch {
         // ignore
       }

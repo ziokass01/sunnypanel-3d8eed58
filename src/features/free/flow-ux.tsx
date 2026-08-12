@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { normalizeFreeAppCode } from "@/features/free/quota-display";
 
 export type FreeFlowStep = 1 | 2 | 3 | 4;
 
@@ -54,6 +55,7 @@ export function FreeFlowSteps({ current, compact = false }: FreeFlowStepsProps) 
 export type FreeFlowDeviceHistory = {
   attemptsToday: number;
   successToday: number;
+  successTodayByApp?: Record<string, number>;
   lastAttemptAt?: string | null;
   lastSuccessAt?: string | null;
   lastFailCode?: string | null;
@@ -87,9 +89,15 @@ export function readFreeDeviceHistory(): FreeFlowDeviceHistory {
     if (parsed.day !== todayKey()) {
       return { attemptsToday: 0, successToday: 0 };
     }
+    const successTodayByApp = Object.fromEntries(
+      Object.entries(parsed.successTodayByApp ?? {})
+        .slice(0, 32)
+        .map(([appCode, count]) => [normalizeFreeAppCode(appCode), Math.max(0, Math.floor(Number(count) || 0))]),
+    );
     return {
       attemptsToday: Math.max(0, Number(parsed.attemptsToday ?? 0)),
       successToday: Math.max(0, Number(parsed.successToday ?? 0)),
+      successTodayByApp,
       lastAttemptAt: parsed.lastAttemptAt ?? null,
       lastSuccessAt: parsed.lastSuccessAt ?? null,
       lastFailCode: parsed.lastFailCode ?? null,
@@ -133,11 +141,21 @@ export function markFreeAttemptFail(code?: string | null) {
   });
 }
 
-export function markFreeSuccess(args: { keyLabel?: string | null; nextEligibleAt?: string | null }) {
+export function markFreeSuccess(args: { appCode?: string | null; keyLabel?: string | null; nextEligibleAt?: string | null }) {
   const prev = readFreeDeviceHistory();
+  const appCode = normalizeFreeAppCode(args.appCode);
+  const successTodayByApp = { ...(prev.successTodayByApp ?? {}) };
+  if (!Object.prototype.hasOwnProperty.call(successTodayByApp, "free-fire") && prev.successToday > 0) {
+    successTodayByApp["free-fire"] = Math.max(0, Number(prev.successToday));
+  }
+  const previousForApp = Math.max(0, Number(successTodayByApp[appCode] ?? 0));
   writeHistory({
     ...prev,
     successToday: prev.successToday + 1,
+    successTodayByApp: {
+      ...successTodayByApp,
+      [appCode]: previousForApp + 1,
+    },
     lastSuccessAt: new Date().toISOString(),
     lastKeyLabel: args.keyLabel ?? null,
     nextEligibleAt: args.nextEligibleAt ?? null,
@@ -178,6 +196,9 @@ export function FreeDeviceHistoryCard({
   selectedKeyLabel,
   selectedQuotaFingerprint,
   selectedQuotaIp,
+  successToday,
+  remainingTodayEstimated = false,
+  quotaUnlimited = false,
 }: {
   history: FreeFlowDeviceHistory;
   remainingTodayServer?: number | null;
@@ -185,6 +206,9 @@ export function FreeDeviceHistoryCard({
   selectedKeyLabel?: string | null;
   selectedQuotaFingerprint?: number | null;
   selectedQuotaIp?: number | null;
+  successToday?: number | null;
+  remainingTodayEstimated?: boolean;
+  quotaUnlimited?: boolean;
 }) {
   const timingTarget = lastKeyExpiresAt ?? history.nextEligibleAt ?? null;
   const timingTitle = lastKeyExpiresAt ? "Key gần nhất còn lại" : "Có thể thử lại";
@@ -214,15 +238,16 @@ export function FreeDeviceHistoryCard({
 
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Còn lại hôm nay</div>
-            <div className="mt-1 text-2xl font-semibold text-foreground">{remainingTodayServer ?? "-"}</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{quotaUnlimited ? "∞" : (remainingTodayServer ?? "-")}</div>
             <div className="text-xs text-muted-foreground">
               quota: thiết bị {selectedQuotaFingerprint ?? "-"} / IP {selectedQuotaIp ?? "-"}
             </div>
+            {remainingTodayEstimated ? <div className="text-xs text-muted-foreground">theo lịch sử thiết bị; server vẫn kiểm tra quota thật</div> : null}
             <div className="text-xs text-muted-foreground">reset lúc 00:00 (GMT+7)</div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thành công</div>
-            <div className="mt-1 text-2xl font-semibold text-foreground">{history.successToday}</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{successToday ?? history.successToday}</div>
             <div className="text-xs text-muted-foreground">lượt đã nhận key</div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">

@@ -1,15 +1,40 @@
-Bản vá này sửa 2 lỗi:
+SUNNYPANEL - FIX HIEN SO KEY CON LAI HOM NAY (2026-08-12)
 
-1) /free bị trắng
-- Nguyên nhân: file src/pages/FreeLanding.tsx có gọi readBundle(...) trong JSX nhưng import lại chỉ có clearBundle, writeBundle.
-- Kết quả: khi render đoạn hiển thị Trace của key gần nhất, trang có thể crash trắng.
-- Cách sửa: thêm readBundle vào import từ "@/lib/freeFlow".
+Pham vi:
+- Chi sua giao dien va lich su quota tren trinh duyet.
+- Khong thay server VPS, Nginx, FREE API, verify-key hay menu V10.4.
+- Giu cache chung chong DDoS; khong bat lai cache theo IP/fingerprint.
 
-2) /rent phần admin popup Edit bị mất thao tác
-- Nguyên nhân: route hiện dùng bản gọn src/pages/RentAdminCustomerSetup.tsx nên popup Edit chỉ còn setup khách.
-- Kết quả: mất các nhóm thao tác quan trọng như tạo activation key, xóa key, tạo reset code, reset pass, rotate HMAC secret, xóa mật khẩu xem HMAC.
-- Cách sửa: ghép lại đầy đủ các nhóm thao tác đó vào chính popup Edit của RentAdminCustomerSetupPage, đồng thời vẫn giữ RentClientIntegrationSection để không mất luồng setup khách.
+Ket qua:
+- Khi cache chung an quota ca nhan, giao dien tinh so con lai tu gioi han da cau hinh
+  va so key thanh cong cua dung app tren thiet bi hien tai.
+- Neu backend tra quota that, so tu backend luon duoc uu tien.
+- Quota bang 0/0 hien ky hieu vo han thay vi dau tru.
+- Lich su cu duoc chuyen an toan ve bucket Free Fire; app khac khong bi tru nham.
+- Server van la noi quyet dinh va chan quota that khi nguoi dung nhan key.
 
-File cần thay:
-- src/pages/FreeLanding.tsx
-- src/pages/RentAdminCustomerSetup.tsx
+CAI TU TERMUX VA PUSH GITHUB
+
+1. Vao repo SunnyPanel da clone:
+   cd /duong-dan/toi/repo
+
+2. Tao thu muc tam va giai nen goi fix (doi duong dan Downloads neu can):
+   FIX_TMP="$(mktemp -d)"
+   unzip -o "$HOME/storage/downloads/SunnyPanel_FIX_SO_KEY_HOM_NAY_20260812.zip" -d "$FIX_TMP"
+
+3. Chep dung cac file sua vao repo:
+   cp -R "$FIX_TMP/quota_today_fix_20260812/src/." ./src/
+
+4. Kiem tra truoc khi push:
+   npm install
+   npm test -- --run src/test/free-quota-display.test.ts src/test/free-history-quota.test.tsx
+   npm run build
+   git status --short
+
+5. Push dung nhanh hien tai:
+   git add src/features/free/quota-display.ts src/features/free/flow-ux.tsx src/pages/FreeLanding.tsx src/pages/FreeClaim.tsx src/test/free-quota-display.test.ts src/test/free-history-quota.test.tsx
+   git commit -m "fix: show today's remaining free-key quota"
+   git push origin "$(git branch --show-current)"
+
+Sau khi Vercel deploy xong, mo trang /free va hard refresh. Neu trinh duyet con asset cu,
+xoa cache cua rieng mityangho.id.vn roi mo lai.
