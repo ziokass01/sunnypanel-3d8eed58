@@ -44,6 +44,12 @@ export function providerIsExhaustedToday(provider, today = vietnamDate()) {
     const localLimit = providerDailyQuotaLimit(provider);
     if (localLimit > 0 && providerDailyQuotaUsed(provider, today) >= localLimit)
         return true;
+    // quota_remaining belongs to the external provider. Legacy local-quota
+    // RPCs also wrote here, so a stale zero must not disable generic providers
+    // after the admin changes their local limit to 0 (unlimited).
+    const providerKind = String(provider?.provider ?? "").trim().toLowerCase();
+    if (providerKind !== "gtraffic")
+        return false;
     if (provider?.quota_remaining === null || provider?.quota_remaining === undefined || provider?.quota_remaining === "")
         return false;
     const remaining = Number(provider?.quota_remaining);
@@ -51,10 +57,10 @@ export function providerIsExhaustedToday(provider, today = vietnamDate()) {
 }
 export function isQuotaExhaustedError(error) {
     const message = String(error?.message ?? error ?? "").toLowerCase();
-    return message.includes("daily limit")
-        || message.includes("http_429")
-        || message.includes("too many requests")
-        || message.includes("quota")
+    return message.includes("provider_daily_quota_exhausted")
+        || message.includes("gtraffic_daily_quota_exhausted")
+        || message.includes("daily limit")
+        || (message.includes("quota") && (message.includes("exhausted") || message.includes("exceeded") || message.includes("limit")))
         || message.includes("remaining: 0")
         || message.includes("remaining=0")
         || message.includes("hết lượt")

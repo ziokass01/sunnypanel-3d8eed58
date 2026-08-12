@@ -387,7 +387,7 @@ function shortlinkProviderQuotaLabel(row: ShortlinkProviderRow) {
     return `Đã dùng ${used}/${limit} · còn ${remaining}`;
   }
 
-  if (sameDay && row.quota_remaining !== null && row.quota_remaining !== undefined) {
+  if (row.provider === "gtraffic" && sameDay && row.quota_remaining !== null && row.quota_remaining !== undefined) {
     return `Provider báo còn ${Math.max(0, Math.floor(Number(row.quota_remaining) || 0))}`;
   }
 
@@ -1036,7 +1036,7 @@ export function AdminFreeKeysPage() {
     mutationFn: async (id: string) => {
       if (String(id).startsWith("tmp_")) {
         setProviderDrafts((prev) => prev.map((row) => row.id === id
-          ? { ...row, quota_used_today: 0, quota_remaining: row.daily_quota_limit || null, quota_date: null, last_error: null, fail_count: 0 }
+          ? { ...row, quota_used_today: 0, quota_remaining: null, quota_date: null, last_error: null, fail_count: 0 }
           : row));
         return true;
       }

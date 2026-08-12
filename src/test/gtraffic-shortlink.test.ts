@@ -56,7 +56,11 @@ describe("GTraffic shortlink provider", () => {
   it("marks a zero-quota response as exhausted", () => {
     expect(() => parseGtrafficResponse({ remaining: 0 })).toThrow("GTRAFFIC_DAILY_QUOTA_EXHAUSTED");
     expect(isQuotaExhaustedError(new Error("GTRAFFIC_DAILY_QUOTA_EXHAUSTED"))).toBe(true);
-    expect(isQuotaExhaustedError(new Error("HTTP_429"))).toBe(true);
+    // HTTP 429 can be a temporary provider rate limit. It must not disable the
+    // provider for the rest of the Vietnam day.
+    expect(isQuotaExhaustedError(new Error("HTTP_429"))).toBe(false);
+    expect(isQuotaExhaustedError(new Error("Too Many Requests"))).toBe(false);
+    expect(isQuotaExhaustedError(new Error("quota service unavailable"))).toBe(false);
   });
 
   it("skips quota zero only for the same Vietnam date", () => {
@@ -77,6 +81,17 @@ describe("GTraffic shortlink provider", () => {
     expect(providerIsExhaustedToday(provider, "2026-08-06")).toBe(true);
     expect(providerIsExhaustedToday({ ...provider, quota_used_today: 299, quota_remaining: 1 }, "2026-08-06")).toBe(false);
     expect(providerIsExhaustedToday(provider, "2026-08-07")).toBe(false);
+  });
+
+  it("does not keep a generic provider disabled by a stale local quota zero after switching to unlimited", () => {
+    const provider = {
+      provider: "layma",
+      daily_quota_limit: 0,
+      quota_used_today: 1,
+      quota_remaining: 0,
+      quota_date: "2026-08-06",
+    };
+    expect(providerIsExhaustedToday(provider, "2026-08-06")).toBe(false);
   });
 
   it("does not globally skip GTraffic because another session returned early", () => {

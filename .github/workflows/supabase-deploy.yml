@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           test -f tools/migration_list_parser.py || { echo "::error::Missing tools/migration_list_parser.py"; exit 1; }
           chmod +x tools/migration_history_guard.sh tools/db_push_password_auth.sh tools/migration_list_parser.py
-          ALLOWED_PENDING_VERSIONS="20260804120000 20260804160000 20260805020000 20260805030000 20260805210000 20260806123000 20260808073000 20260809093000 20260811090000" \
+          ALLOWED_PENDING_VERSIONS="20260804120000 20260804160000 20260805020000 20260805030000 20260805210000 20260806123000 20260808073000 20260809093000 20260811090000 20260812190000" \
             MIN_SAFE_PENDING_VERSION="20260804120000" \
             tools/db_push_password_auth.sh --yes
 

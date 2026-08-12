@@ -52,6 +52,13 @@ export function providerIsExhaustedToday(provider: any, today = vietnamDate()) {
   const localLimit = providerDailyQuotaLimit(provider);
   if (localLimit > 0 && providerDailyQuotaUsed(provider, today) >= localLimit) return true;
 
+  // quota_remaining is the external provider's counter. Older quota RPCs also
+  // wrote the local counter into this column, so it must never disable generic
+  // providers when local limit is 0 (unlimited). GTraffic is currently the only
+  // provider in this flow that returns an authoritative `remaining` value.
+  const providerKind = String(provider?.provider ?? "").trim().toLowerCase();
+  if (providerKind !== "gtraffic") return false;
+
   if (provider?.quota_remaining === null || provider?.quota_remaining === undefined || provider?.quota_remaining === "") return false;
   const remaining = Number(provider?.quota_remaining);
   return Number.isFinite(remaining) && remaining <= 0;
@@ -59,10 +66,10 @@ export function providerIsExhaustedToday(provider: any, today = vietnamDate()) {
 
 export function isQuotaExhaustedError(error: unknown) {
   const message = String((error as any)?.message ?? error ?? "").toLowerCase();
-  return message.includes("daily limit")
-    || message.includes("http_429")
-    || message.includes("too many requests")
-    || message.includes("quota")
+  return message.includes("provider_daily_quota_exhausted")
+    || message.includes("gtraffic_daily_quota_exhausted")
+    || message.includes("daily limit")
+    || (message.includes("quota") && (message.includes("exhausted") || message.includes("exceeded") || message.includes("limit")))
     || message.includes("remaining: 0")
     || message.includes("remaining=0")
     || message.includes("hết lượt")

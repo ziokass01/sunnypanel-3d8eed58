@@ -145,7 +145,22 @@ Deno.serve(async (req) => {
       .filter((row) => row.provider === "none" || row.name || row.api_token_secret || row.api_url_template);
 
     for (const row of cleaned) {
-      const payload = {
+      let previous: any = null;
+      if (row.id) {
+        const current = await db
+          .from("licenses_free_shortlink_providers")
+          .select("daily_quota_limit")
+          .eq("id", row.id)
+          .maybeSingle();
+        if (current.error) {
+          return json({ ok: false, code: "PROVIDER_LOAD_FAILED", msg: current.error.message }, 500);
+        }
+        previous = current.data;
+      }
+
+      const previousLimit = Math.max(0, Math.floor(Number(previous?.daily_quota_limit ?? 0) || 0));
+      const quotaLimitChanged = Boolean(row.id && previous && previousLimit !== row.daily_quota_limit);
+      const payload: Record<string, unknown> = {
         name: row.name,
         provider: row.provider,
         api_token_secret: row.api_token_secret,
@@ -158,13 +173,45 @@ Deno.serve(async (req) => {
         note: row.note,
       };
 
+      // The old local quota RPC reused quota_remaining (the external provider
+      // counter). When an admin changed 1/day back to 0=unlimited, the stale
+      // zero kept the provider disabled. Reset only runtime counters whenever
+      // the configured limit changes; credentials/order are untouched.
+      if (quotaLimitChanged) {
+        payload.quota_used_today = 0;
+        payload.quota_remaining = null;
+        payload.quota_date = null;
+        payload.unavailable_until = null;
+        payload.last_error = null;
+        payload.fail_count = 0;
+      }
+
+      // Read the value back in the same request. This avoids a false "saved"
+      // toast when a stale function/schema silently fails to persist the limit.
       const result = row.id
-        ? await db.from("licenses_free_shortlink_providers").update(payload).eq("id", row.id)
-        : await db.from("licenses_free_shortlink_providers").insert(payload);
+        ? await db
+          .from("licenses_free_shortlink_providers")
+          .update(payload)
+          .eq("id", row.id)
+          .select("id,daily_quota_limit")
+          .maybeSingle()
+        : await db
+          .from("licenses_free_shortlink_providers")
+          .insert(payload)
+          .select("id,daily_quota_limit")
+          .single();
       if (result.error) {
         const msg = String(result.error.message || "");
         const code = /schema cache|could not find|does not exist/i.test(msg) ? "DB_MIGRATION_REQUIRED" : "PROVIDER_SAVE_FAILED";
         return json({ ok: false, code, msg }, 500);
+      }
+      const savedLimit = Math.max(0, Math.floor(Number(result.data?.daily_quota_limit ?? -1)));
+      if (!result.data?.id || savedLimit !== row.daily_quota_limit) {
+        return json({
+          ok: false,
+          code: "PROVIDER_QUOTA_SAVE_MISMATCH",
+          msg: `LIMIT_SAVE_MISMATCH_${row.name}`,
+        }, 409);
       }
     }
 
@@ -207,7 +254,9 @@ Deno.serve(async (req) => {
       .from("licenses_free_shortlink_providers")
       .update({
         quota_used_today: 0,
-        quota_remaining: limit > 0 ? limit : null,
+        // quota_remaining belongs only to an external provider response.
+        // The local limit is stored in daily_quota_limit.
+        quota_remaining: null,
         quota_date: null,
         unavailable_until: null,
         last_error: null,
