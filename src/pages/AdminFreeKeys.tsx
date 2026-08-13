@@ -94,6 +94,7 @@ type ShortlinkProviderRow = {
   fail_count?: number | null;
   quota_remaining?: number | null;
   quota_date?: string | null;
+  daily_quota_enabled?: boolean;
   daily_quota_limit?: number | null;
   quota_used_today?: number | null;
   note?: string | null;
@@ -378,20 +379,21 @@ function getVietnamDateKey(date = new Date()) {
 
 function shortlinkProviderQuotaLabel(row: ShortlinkProviderRow) {
   const limit = Math.max(0, Math.floor(Number(row.daily_quota_limit ?? 0) || 0));
+  const quotaEnabled = row.daily_quota_enabled ?? limit > 0;
   const today = getVietnamDateKey();
   const sameDay = String(row.quota_date ?? "") === today;
   const used = sameDay ? Math.max(0, Math.floor(Number(row.quota_used_today ?? 0) || 0)) : 0;
 
-  if (limit > 0) {
+  if (quotaEnabled && limit > 0) {
     const remaining = Math.max(0, limit - used);
     return `Đã dùng ${used}/${limit} · còn ${remaining}`;
   }
 
   if (row.provider === "gtraffic" && sameDay && row.quota_remaining !== null && row.quota_remaining !== undefined) {
-    return `Provider báo còn ${Math.max(0, Math.floor(Number(row.quota_remaining) || 0))}`;
+    return `Không giới hạn · GTraffic báo ${Math.max(0, Math.floor(Number(row.quota_remaining) || 0))} (tham khảo)`;
   }
 
-  return "Không giới hạn nội bộ";
+  return "Không giới hạn";
 }
 
 function getVietnamDayRangeUtc(day: string) {
@@ -682,6 +684,7 @@ export function AdminFreeKeysPage() {
       ...row,
       api_token_secret: normalizeProviderToken(row),
       api_url_template: normalizeProviderApi(row),
+      daily_quota_enabled: row.daily_quota_enabled ?? Math.max(0, Math.floor(Number(row.daily_quota_limit ?? 0) || 0)) > 0,
       daily_quota_limit: Math.max(0, Math.floor(Number(row.daily_quota_limit ?? 0) || 0)),
       quota_used_today: Math.max(0, Math.floor(Number(row.quota_used_today ?? 0) || 0)),
       note: row.note ?? "",
@@ -696,6 +699,7 @@ export function AdminFreeKeysPage() {
       provider: "gtraffic",
       api_token_secret: "",
       api_url_template: defaultShortlinkApi("gtraffic"),
+      daily_quota_enabled: false,
       daily_quota_limit: 0,
       quota_used_today: 0,
       enabled: true,
@@ -991,6 +995,7 @@ export function AdminFreeKeysPage() {
             enabled: Boolean(row.enabled),
             secondary_enabled: Boolean(row.secondary_enabled),
             sort_order: (index + 1) * 10,
+            daily_quota_enabled: Boolean(row.daily_quota_enabled),
             daily_quota_limit: Math.max(0, Math.min(1000000, Math.floor(Number(row.daily_quota_limit ?? 0) || 0))),
             note: String(row.note ?? "").trim(),
           };
@@ -2163,7 +2168,8 @@ export function AdminFreeKeysPage() {
                     <TableHead className="min-w-[130px]">Provider</TableHead>
                     <TableHead className="min-w-[220px]">Token</TableHead>
                     <TableHead className="min-w-[310px]">API</TableHead>
-                    <TableHead className="min-w-[150px]">Giới hạn/ngày</TableHead>
+                    <TableHead className="min-w-[145px]">Dùng giới hạn</TableHead>
+                    <TableHead className="min-w-[160px]">Số lượt/ngày</TableHead>
                     <TableHead className="min-w-[190px]">Đã dùng / còn</TableHead>
                     <TableHead className="min-w-[110px]">Pass</TableHead>
                     <TableHead className="min-w-[95px]">Key chính</TableHead>
@@ -2210,17 +2216,36 @@ export function AdminFreeKeysPage() {
                         <div className="mt-1 text-[11px] text-muted-foreground">Bắt buộc điền API base như https://link4m.co/api-shorten/v2. Nếu là custom template có thể dùng {"{token}"}, {"{url}"}, {"{url_enc}"}.</div>
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={Boolean(row.daily_quota_enabled)}
+                            onCheckedChange={(checked) => updateProviderDraft(row.id, {
+                              daily_quota_enabled: checked,
+                              daily_quota_limit: checked
+                                ? Math.max(1, Math.floor(Number(row.daily_quota_limit ?? 0) || 0))
+                                : row.daily_quota_limit,
+                            })}
+                            aria-label={`Bật giới hạn lượt cho ${row.name || "provider"}`}
+                          />
+                          <span className="text-xs font-medium">{row.daily_quota_enabled ? "Bật" : "Tắt"}</span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                          Tắt = luôn thử link, không bị bộ đếm khóa.
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <Input
                           type="number"
-                          min={0}
+                          min={1}
                           max={1000000}
                           value={Math.max(0, Number(row.daily_quota_limit ?? 0) || 0)}
                           onChange={(e) => updateProviderDraft(row.id, {
-                            daily_quota_limit: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                            daily_quota_limit: Math.max(1, Math.floor(Number(e.target.value) || 0)),
                           })}
+                          disabled={!row.daily_quota_enabled}
                           placeholder="300"
                         />
-                        <div className="mt-1 text-[11px] text-muted-foreground">0 = không giới hạn nội bộ.</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">Chỉ áp dụng khi công tắc đang bật.</div>
                       </TableCell>
                       <TableCell>
                         <div className="text-xs font-medium">{shortlinkProviderQuotaLabel(row)}</div>

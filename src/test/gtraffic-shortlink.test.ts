@@ -8,6 +8,7 @@ import {
   normalizeShortlinkMode,
   orderedProvidersForPass,
   parseGtrafficResponse,
+  providerDailyQuotaLimit,
   providerIsExhaustedToday,
   vietnamDate,
 } from "../../supabase/functions/_shared/gtraffic";
@@ -64,7 +65,7 @@ describe("GTraffic shortlink provider", () => {
   });
 
   it("skips quota zero only for the same Vietnam date", () => {
-    const provider = { provider: "gtraffic", quota_remaining: 0, quota_date: "2026-08-01" };
+    const provider = { provider: "gtraffic", daily_quota_enabled: true, daily_quota_limit: 1, quota_remaining: 0, quota_date: "2026-08-01" };
     expect(providerIsExhaustedToday(provider, "2026-08-01")).toBe(true);
     expect(providerIsExhaustedToday(provider, "2026-08-02")).toBe(false);
   });
@@ -73,6 +74,7 @@ describe("GTraffic shortlink provider", () => {
   it("supports a local 300/day limit for LayMa and resets on the next Vietnam date", () => {
     const provider = {
       provider: "layma",
+      daily_quota_enabled: true,
       daily_quota_limit: 300,
       quota_used_today: 300,
       quota_remaining: 0,
@@ -86,12 +88,26 @@ describe("GTraffic shortlink provider", () => {
   it("does not keep a generic provider disabled by a stale local quota zero after switching to unlimited", () => {
     const provider = {
       provider: "layma",
+      daily_quota_enabled: false,
       daily_quota_limit: 0,
       quota_used_today: 1,
       quota_remaining: 0,
       quota_date: "2026-08-06",
     };
     expect(providerIsExhaustedToday(provider, "2026-08-06")).toBe(false);
+  });
+
+  it("keeps GTraffic unlimited when its per-provider quota switch is off", () => {
+    const provider = {
+      provider: "gtraffic",
+      daily_quota_enabled: false,
+      daily_quota_limit: 500,
+      quota_used_today: 500,
+      quota_remaining: 0,
+      quota_date: "2026-08-13",
+    };
+    expect(providerDailyQuotaLimit(provider)).toBe(0);
+    expect(providerIsExhaustedToday(provider, "2026-08-13")).toBe(false);
   });
 
   it("does not globally skip GTraffic because another session returned early", () => {

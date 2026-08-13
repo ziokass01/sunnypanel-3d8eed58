@@ -18,7 +18,15 @@ export function normalizeShortlinkMode(value) {
         return "priority_failover";
     return "round_robin";
 }
+export function providerDailyQuotaEnabled(provider) {
+    if (typeof provider?.daily_quota_enabled === "boolean")
+        return provider.daily_quota_enabled;
+    const legacyLimit = Number(provider?.daily_quota_limit ?? 0);
+    return Number.isFinite(legacyLimit) && legacyLimit > 0;
+}
 export function providerDailyQuotaLimit(provider) {
+    if (!providerDailyQuotaEnabled(provider))
+        return 0;
     const value = Number(provider?.daily_quota_limit ?? 0);
     if (!Number.isFinite(value))
         return 0;
@@ -39,6 +47,10 @@ export function providerIsTemporarilyUnavailable(provider, now = new Date()) {
     return Number.isFinite(unavailableUntil) && unavailableUntil > now.getTime();
 }
 export function providerIsExhaustedToday(provider, today = vietnamDate()) {
+    // Switch off means always try this provider. Cached remaining=0 is only
+    // informational and cannot keep GTraffic disabled across its reset cycle.
+    if (!providerDailyQuotaEnabled(provider))
+        return false;
     if (String(provider?.quota_date ?? "").trim() !== today)
         return false;
     const localLimit = providerDailyQuotaLimit(provider);

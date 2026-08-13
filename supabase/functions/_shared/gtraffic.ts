@@ -27,7 +27,14 @@ export function normalizeShortlinkMode(value: unknown) {
   return "round_robin";
 }
 
+export function providerDailyQuotaEnabled(provider: any) {
+  if (typeof provider?.daily_quota_enabled === "boolean") return provider.daily_quota_enabled;
+  const legacyLimit = Number(provider?.daily_quota_limit ?? 0);
+  return Number.isFinite(legacyLimit) && legacyLimit > 0;
+}
+
 export function providerDailyQuotaLimit(provider: any) {
+  if (!providerDailyQuotaEnabled(provider)) return 0;
   const value = Number(provider?.daily_quota_limit ?? 0);
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
@@ -47,6 +54,10 @@ export function providerIsTemporarilyUnavailable(provider: any, now = new Date()
 }
 
 export function providerIsExhaustedToday(provider: any, today = vietnamDate()) {
+  // When the per-provider switch is off, neither the local counter nor a
+  // cached GTraffic remaining=0 may disable this row. The live API is tried on
+  // every request; a real provider error can still fail over for that request.
+  if (!providerDailyQuotaEnabled(provider)) return false;
   if (String(provider?.quota_date ?? "").trim() !== today) return false;
 
   const localLimit = providerDailyQuotaLimit(provider);

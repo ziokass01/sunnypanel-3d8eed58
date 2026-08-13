@@ -68,6 +68,9 @@ function normalizeProvider(row: any, index: number) {
   const api_url_template = normalizeApiBase(provider, parsed.api);
   const note = trim(row?.note, 512) || null;
   const daily_quota_limit = Math.max(0, Math.min(1000000, Math.floor(Number(row?.daily_quota_limit ?? 0) || 0)));
+  const daily_quota_enabled = typeof row?.daily_quota_enabled === "boolean"
+    ? row.daily_quota_enabled
+    : daily_quota_limit > 0;
   const enabled = row?.enabled !== false;
   const secondary_enabled = row?.secondary_enabled === true;
   const sort_order = (index + 1) * 10;
@@ -76,6 +79,9 @@ function normalizeProvider(row: any, index: number) {
     if (!api_url_template) throw new Error(`MISSING_API_ROW_${index + 1}`);
     if (!/^https?:\/\//i.test(api_url_template)) throw new Error(`API_MUST_BE_HTTPS_ROW_${index + 1}`);
     if (!api_token_secret) throw new Error(`MISSING_TOKEN_ROW_${index + 1}`);
+  }
+  if (daily_quota_enabled && daily_quota_limit <= 0) {
+    throw new Error(`QUOTA_LIMIT_REQUIRED_ROW_${index + 1}`);
   }
 
   return {
@@ -88,6 +94,7 @@ function normalizeProvider(row: any, index: number) {
     secondary_enabled,
     pass_scope,
     sort_order,
+    daily_quota_enabled,
     daily_quota_limit,
     note,
   };
@@ -149,7 +156,7 @@ Deno.serve(async (req) => {
       if (row.id) {
         const current = await db
           .from("licenses_free_shortlink_providers")
-          .select("daily_quota_limit")
+          .select("daily_quota_enabled,daily_quota_limit")
           .eq("id", row.id)
           .maybeSingle();
         if (current.error) {
@@ -159,7 +166,11 @@ Deno.serve(async (req) => {
       }
 
       const previousLimit = Math.max(0, Math.floor(Number(previous?.daily_quota_limit ?? 0) || 0));
-      const quotaLimitChanged = Boolean(row.id && previous && previousLimit !== row.daily_quota_limit);
+      const previousEnabled = previous?.daily_quota_enabled === true;
+      const quotaLimitChanged = Boolean(row.id && previous && (
+        previousLimit !== row.daily_quota_limit
+        || previousEnabled !== row.daily_quota_enabled
+      ));
       const payload: Record<string, unknown> = {
         name: row.name,
         provider: row.provider,
@@ -169,6 +180,7 @@ Deno.serve(async (req) => {
         secondary_enabled: row.secondary_enabled,
         pass_scope: row.pass_scope,
         sort_order: row.sort_order,
+        daily_quota_enabled: row.daily_quota_enabled,
         daily_quota_limit: row.daily_quota_limit,
         note: row.note,
       };
@@ -193,12 +205,12 @@ Deno.serve(async (req) => {
           .from("licenses_free_shortlink_providers")
           .update(payload)
           .eq("id", row.id)
-          .select("id,daily_quota_limit")
+          .select("id,daily_quota_enabled,daily_quota_limit")
           .maybeSingle()
         : await db
           .from("licenses_free_shortlink_providers")
           .insert(payload)
-          .select("id,daily_quota_limit")
+          .select("id,daily_quota_enabled,daily_quota_limit")
           .single();
       if (result.error) {
         const msg = String(result.error.message || "");
@@ -206,7 +218,8 @@ Deno.serve(async (req) => {
         return json({ ok: false, code, msg }, 500);
       }
       const savedLimit = Math.max(0, Math.floor(Number(result.data?.daily_quota_limit ?? -1)));
-      if (!result.data?.id || savedLimit !== row.daily_quota_limit) {
+      const savedEnabled = result.data?.daily_quota_enabled === true;
+      if (!result.data?.id || savedLimit !== row.daily_quota_limit || savedEnabled !== row.daily_quota_enabled) {
         return json({
           ok: false,
           code: "PROVIDER_QUOTA_SAVE_MISMATCH",
@@ -243,7 +256,7 @@ Deno.serve(async (req) => {
 
     const provider = await db
       .from("licenses_free_shortlink_providers")
-      .select("daily_quota_limit")
+      .select("daily_quota_enabled,daily_quota_limit")
       .eq("id", id)
       .maybeSingle();
     if (provider.error) return json({ ok: false, code: "PROVIDER_LOAD_FAILED", msg: provider.error.message }, 500);
@@ -264,7 +277,12 @@ Deno.serve(async (req) => {
       })
       .eq("id", id);
     if (reset.error) return json({ ok: false, code: "PROVIDER_QUOTA_RESET_FAILED", msg: reset.error.message }, 500);
-    return json({ ok: true, daily_quota_limit: limit, quota_used_today: 0 });
+    return json({
+      ok: true,
+      daily_quota_enabled: (provider.data as any).daily_quota_enabled === true,
+      daily_quota_limit: limit,
+      quota_used_today: 0,
+    });
   }
 
   if (action === "delete") {

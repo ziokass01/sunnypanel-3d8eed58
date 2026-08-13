@@ -429,6 +429,7 @@ async function providerCandidates(db: any, cfg: any, passNo: number, selected: a
 }
 
 async function configuredProviderDailyQuota(provider: any) {
+  if (provider?.daily_quota_enabled === false) return 0;
   const value = Number(provider?.daily_quota_limit ?? 0);
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
@@ -482,7 +483,7 @@ async function markProviderFailure(db: any, provider: any, error: unknown) {
   if (isQuotaExhaustedError(error)) {
     patch.quota_remaining = 0;
     patch.quota_date = vietnamDate();
-    const localLimit = Math.max(0, Math.floor(Number(provider?.daily_quota_limit ?? 0) || 0));
+    const localLimit = await configuredProviderDailyQuota(provider);
     if (localLimit > 0) patch.quota_used_today = localLimit;
   }
   if (shouldTemporarilyCoolDownProvider(provider, error)) {
