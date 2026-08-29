@@ -111,49 +111,32 @@ describe("functions auth headers", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/admin-rent");
   });
 
-  it("prefers the gateway for Free Key hot-path GET and falls back to direct Supabase when unavailable", async () => {
+  it("does not replay the Free Key config request against Supabase when the gateway is unavailable", async () => {
     vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
 
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("gateway down"))
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true, source: "direct" }),
-      });
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error("gateway down"));
     vi.stubGlobal("fetch", fetchMock as any);
 
-    const data = await getFunction("/free-config");
-
-    expect(data).toEqual({ ok: true, source: "direct" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/free-config");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-config");
+    await expect(getFunction("/free-config")).rejects.toMatchObject({ code: "FETCH_FAILED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.mityangho.id.vn/api/free-config");
   });
 
-  it("falls back to direct Supabase when native free-start has a gateway 5xx", async () => {
+  it("does not replay a state-changing Free Key start request after a gateway 5xx", async () => {
     vi.stubEnv("VITE_PUBLIC_API_BASE_URL", "https://mityangho.id.vn/api");
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 503,
-        json: async () => ({ ok: false, code: "SERVER_ERROR", msg: "temporary native failure" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true, source: "direct" }),
-      });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ ok: false, code: "SERVER_ERROR", msg: "temporary native failure" }),
+    });
     vi.stubGlobal("fetch", fetchMock as any);
 
-    const data = await postFunction("/free-start", { key_type_code: "D1" });
-
-    expect(data).toEqual({ ok: true, source: "direct" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://mityangho.id.vn/api/free-start");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://ijvhlhdrncxtxosmnbtt.supabase.co/functions/v1/free-start");
+    await expect(postFunction("/free-start", { key_type_code: "D1" })).rejects.toMatchObject({
+      code: "SERVER_ERROR",
+      status: 503,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.mityangho.id.vn/api/free-start");
   });
 });
