@@ -1,0 +1,7 @@
+2026-04-12 hotfix
+- admin/free test for find-dumps now mints real runtime redeem keys in server_app_redeem_keys
+- find-dumps default pricing tuned for classic/go/plus/pro and repeated-use tools
+- runtime app sends BuildConfig.VERSION_NAME and sanitizes redeem key input
+- app image assets downsized to avoid blank squares on low-memory devices
+- runtime toasts/messages cleaned up slightly
+- migration center auto-analyzes after both dumps are chosen and when remap/batch is requested before analysis

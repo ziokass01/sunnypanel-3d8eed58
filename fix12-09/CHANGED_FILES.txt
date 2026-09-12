@@ -1,0 +1,12 @@
+.github/workflows/supabase-deploy.yml
+.github/workflows/supabase-functions.yml
+src/pages/FreeLanding.tsx
+src/pages/ServiceLanding.tsx
+supabase/functions/admin-free-shortlinks/index.ts
+supabase/functions/free-admin-test/index.ts
+supabase/functions/free-gate/index.ts
+supabase/functions/free-reveal/index.ts
+supabase/functions/free-start/index.ts
+supabase/migrations/20260702153000_free_link4m_endpoint_normalize.sql
+FIX_20260702_FREE_LINK4M_ADMIN_TEST_AI_HIDE.md
+FIX_20260702_GITHUB_ACTIONS_SUPABASE_CLI.md

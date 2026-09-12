@@ -1,0 +1,4 @@
+2026-04-12 hotfix
+- Find Dumps runtime redeem now accepts both issued redeem keys and direct package_code aliases from server_app_reward_packages.
+- This lets app users enter values like package_2 or 10 if those are the exact package_code values configured for Find Dumps.
+- Free Fire or other app codes still require a key or alias that belongs to that same app.

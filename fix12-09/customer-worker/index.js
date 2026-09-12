@@ -1,0 +1,655 @@
+import { handleNativeVerify, isNativeVerifyEnabled, nativeVerifyReadiness } from "./verify-native.js";
+import { handleFreeStart } from "./free-start-native.js";
+import { handleFreeGate } from "./free-gate-native.js";
+import { handleFreeClose } from "./free-close-native.js";
+import { handleFreeConfig } from "./free-config-native.js";
+import { handleFreeReveal } from "./free-reveal-native.js";
+import { handleFreeResolve } from "./free-resolve-native.js";
+import { handleResetKey, resetKeyNativeReadiness } from "./reset-key-native.js";
+import { createServiceClient, serviceClientReadiness } from "./supabase-rest.js";
+
+function trimTrailingSlash(value) {
+  return String(value ?? "").trim().replace(/\/+$/, "");
+}
+
+const VERIFY_MAX_BODY_BYTES = 8 * 1024;
+const DEFAULT_MAX_BODY_BYTES = 64 * 1024;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 12_000;
+
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super("PAYLOAD_TOO_LARGE");
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+function envInt(env, name, fallback, min, max) {
+  const raw = String(env?.[name] ?? "").trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
+
+function maxBodyBytesForRoute(fnName, env) {
+  if (fnName === "verify-key") {
+    return envInt(env, "VERIFY_MAX_BODY_BYTES", VERIFY_MAX_BODY_BYTES, 1024, 64 * 1024);
+  }
+  return envInt(env, "API_MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES, 1024, 1024 * 1024);
+}
+
+async function readBodyBytes(req, maxBytes) {
+  const rawLength = (req.headers.get("Content-Length") || "").trim();
+  if (rawLength) {
+    const declaredLength = Number(rawLength);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > maxBytes) {
+      throw new PayloadTooLargeError();
+    }
+  }
+  if (!req.body) return new ArrayBuffer(0);
+
+  const reader = req.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel("PAYLOAD_TOO_LARGE");
+      throw new PayloadTooLargeError();
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body.buffer;
+}
+
+async function checkRateLimit(env, bindingName, key) {
+  const limiter = env?.[bindingName];
+  if (!limiter || typeof limiter.limit !== "function") {
+    // Production must never silently lose DDoS protection because a binding
+    // was removed or the wrong wrangler config was deployed. Local testing may
+    // opt out explicitly with ALLOW_UNBOUND_RATE_LIMITS=1.
+    const allowUnbound = String(env?.ALLOW_UNBOUND_RATE_LIMITS ?? "").trim() === "1";
+    return {
+      configured: false,
+      success: allowUnbound,
+      unavailable: !allowUnbound,
+    };
+  }
+  try {
+    const result = await limiter.limit({ key });
+    return { configured: true, success: Boolean(result?.success) };
+  } catch {
+    return { configured: true, success: false, unavailable: true };
+  }
+}
+
+
+function toHex(bytes) {
+  return Array.from(new Uint8Array(bytes))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256HexBytes(bytes) {
+  return toHex(await crypto.subtle.digest("SHA-256", bytes));
+}
+
+async function hmacSha256Hex(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return toHex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+}
+
+function randomHex(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function allowedOrigin(origin, env) {
+  const raw = String(env.ALLOWED_ORIGINS ?? "").trim();
+  if (!raw) return origin || "*";
+  const list = raw.split(",").map((v) => v.trim()).filter(Boolean);
+  if (list.includes("*")) return origin || "*";
+  if (origin && list.includes(origin)) return origin;
+  return "";
+}
+
+function corsHeaders(origin, env) {
+  const allowOrigin = allowedOrigin(origin, env);
+  const headers = {
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,apikey,Hmac,X-Client-Info,X-Gateway-Project,x-ts,x-nonce,x-sig,x-build-id,x-fp,x-admin-key,x-rent-token",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+  if (allowOrigin) headers["Access-Control-Allow-Origin"] = allowOrigin;
+  return headers;
+}
+
+function json(data, status, origin, env, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      ...corsHeaders(origin, env),
+      ...extraHeaders,
+    },
+  });
+}
+
+function isUpstreamTimeoutError(error) {
+  if (!error) return false;
+  const name = String(error.name || "");
+  const message = String(error.message || "");
+  return name === "AbortError" ||
+    name === "TimeoutError" ||
+    message === "UPSTREAM_TIMEOUT" ||
+    message.includes("UPSTREAM_TIMEOUT");
+}
+
+
+function boolVar(value, fallback = false) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+function freeNativeRouteEnabled(env, fnName) {
+  const general = boolVar(env?.FREE_NATIVE_ENABLED, false);
+  if (fnName === "free-start") {
+    const specific = String(env?.FREE_NATIVE_START_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-gate") {
+    const specific = String(env?.FREE_NATIVE_GATE_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-close") {
+    const specific = String(env?.FREE_NATIVE_CLOSE_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-config") {
+    const specific = String(env?.FREE_NATIVE_CONFIG_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-reveal") {
+    const specific = String(env?.FREE_NATIVE_REVEAL_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  if (fnName === "free-resolve") {
+    const specific = String(env?.FREE_NATIVE_RESOLVE_ENABLED ?? "").trim();
+    return specific ? boolVar(specific, general) : general;
+  }
+  return false;
+}
+
+function resetNativeEnabled(env) {
+  return boolVar(env?.RESET_NATIVE_ENABLED, false);
+}
+
+function freeMaintenanceEnabled(env) {
+  return boolVar(env?.FREE_MAINTENANCE_ENABLED, true);
+}
+
+async function runFreeDailyMaintenance(env) {
+  if (!freeMaintenanceEnabled(env)) {
+    return { ok: true, skipped: true, code: "MAINTENANCE_DISABLED" };
+  }
+  const db = createServiceClient(env);
+  const { data, error } = await db.rpc("sunny_daily_maintenance", {});
+  if (error) {
+    throw new Error(`SUNNY_DAILY_MAINTENANCE_FAILED: ${String(error?.message || error)}`);
+  }
+  return data ?? { ok: true };
+}
+
+function freeConfigCacheSeconds(env) {
+  return envInt(env, "FREE_CONFIG_CACHE_SECONDS", 30, 0, 300);
+}
+
+function freeConfigCacheKey(req) {
+  const appCode = String(req.headers.get("x-app-code") || "").trim().toLowerCase().slice(0, 64);
+  // free-config contains per-fingerprint and per-IP quota state. Never let one
+  // visitor receive another visitor's cached quota counters.
+  const fingerprint = String(req.headers.get("x-fp") || "").trim().slice(0, 160);
+  const realIp = String(req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "").trim().slice(0, 80);
+  const url = new URL("https://sunny-worker-cache.invalid/free-config");
+  if (appCode) url.searchParams.set("app", appCode);
+  if (fingerprint) url.searchParams.set("fp", fingerprint);
+  if (realIp) url.searchParams.set("ip", realIp);
+  return new Request(url.toString(), { method: "GET" });
+}
+
+async function readFreeConfigCache(req, env) {
+  if (req.method !== "GET") return null;
+  if (freeConfigCacheSeconds(env) <= 0) return null;
+  if (!globalThis.caches?.default) return null;
+  return await globalThis.caches.default.match(freeConfigCacheKey(req));
+}
+
+async function writeFreeConfigCache(req, env, upstream) {
+  if (req.method !== "GET" || upstream.status !== 200) return;
+  const ttl = freeConfigCacheSeconds(env);
+  if (ttl <= 0 || !globalThis.caches?.default) return;
+  const body = await upstream.clone().arrayBuffer();
+  const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
+  const cached = new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": `public, max-age=${ttl}`,
+    },
+  });
+  await globalThis.caches.default.put(freeConfigCacheKey(req), cached);
+}
+
+function getAllowedFunctions(env) {
+  const raw = String(env.ALLOWED_FUNCTIONS ?? "").trim();
+  if (raw) {
+    return new Set(raw.split(",").map((item) => item.trim()).filter(Boolean));
+  }
+  return new Set([
+    "verify-key",
+    "rent-verify-key",
+    "free-config",
+    "free-start",
+    "free-gate",
+    "free-reveal",
+    "free-resolve",
+    "free-close",
+    "reset-key",
+    "generate-license-key",
+    "admin-free-test",
+    "free-admin-test",
+    "admin-free-block",
+    "admin-free-delete-session",
+    "admin-free-delete-issued",
+    "admin-rent",
+    "admin-rent-integrations",
+    "rent-user",
+    "server-app-runtime",
+    "server-app-runtime-ops",
+    "fake-lag-check",
+    "fake-lag-auth",
+  ]);
+}
+
+function resolveFunctionsBase(env) {
+  const direct = trimTrailingSlash(env.ACTIVE_FUNCTIONS_BASE_URL || env.UPSTREAM_FUNCTIONS_BASE_URL || "");
+  if (direct) return direct;
+  const supabase = trimTrailingSlash(env.ACTIVE_SUPABASE_URL || env.UPSTREAM_SUPABASE_URL || env.SUPABASE_URL || "");
+  if (!supabase) return "";
+  return `${supabase}/functions/v1`;
+}
+
+function extractRoute(pathname) {
+  if (pathname === "/health" || pathname === "/api/health") {
+    return { kind: "health" };
+  }
+
+  const clean = pathname.replace(/^\/+/, "");
+  const parts = clean.split("/").filter(Boolean);
+  if (!parts.length) return { kind: "none" };
+
+  if (parts[0] === "api") {
+    if (parts.length !== 2) return { kind: "none" };
+    return { kind: "function", name: parts[1] };
+  }
+
+  if (parts.length !== 1) return { kind: "none" };
+  return { kind: "function", name: parts[0] };
+}
+
+function buildForwardHeaders(req, env, fnName = "") {
+  const headers = new Headers();
+  const contentType = req.headers.get("Content-Type");
+  if (contentType) headers.set("Content-Type", contentType);
+
+  const auth = req.headers.get("Authorization");
+  if (auth) headers.set("Authorization", auth);
+
+  const rentToken = (req.headers.get("x-rent-token") || "").trim();
+  if (rentToken && fnName === "rent-user") headers.set("Authorization", `Bearer ${rentToken}`);
+
+  const apikey = req.headers.get("apikey") || String(env.UPSTREAM_ANON_KEY || env.UPSTREAM_APIKEY || "").trim();
+  if (apikey) headers.set("apikey", apikey);
+
+  const hmac = req.headers.get("Hmac");
+  if (hmac) headers.set("Hmac", hmac);
+  for (const name of ["x-ts", "x-nonce", "x-sig", "x-build-id", "X-Client-Info", "x-fp", "x-admin-key"]) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  // Never forward client-controlled gateway identity headers.
+  for (const name of [
+    "x-gateway-ts", "x-gateway-nonce", "x-gateway-ip",
+    "x-gateway-body-sha256", "x-gateway-signature",
+  ]) headers.delete(name);
+  return headers;
+}
+
+async function forwardRequest(req, upstreamUrl, env, fnName = "") {
+  const method = req.method.toUpperCase();
+  const headers = buildForwardHeaders(req, env, fnName);
+  let bodyBytes = new ArrayBuffer(0);
+  if (method !== "GET" && method !== "HEAD") {
+    bodyBytes = await readBodyBytes(req, maxBodyBytesForRoute(fnName, env));
+  }
+
+  if (fnName === "verify-key") {
+    const secret = String(env.GATEWAY_SHARED_SECRET || "").trim();
+    if (!secret) throw new Error("GATEWAY_SHARED_SECRET_MISSING");
+    const realIp = String(req.headers.get("CF-Connecting-IP") || "").trim();
+    if (!realIp) throw new Error("CF_CONNECTING_IP_MISSING");
+    const ts = String(Math.floor(Date.now() / 1000));
+    const nonce = randomHex(16);
+    const bodyHash = await sha256HexBytes(bodyBytes);
+    const canonical = ["v1", method, fnName, ts, nonce, realIp, bodyHash].join("\n");
+    const signature = await hmacSha256Hex(secret, canonical);
+    headers.set("x-gateway-ts", ts);
+    headers.set("x-gateway-nonce", nonce);
+    headers.set("x-gateway-ip", realIp);
+    headers.set("x-gateway-body-sha256", bodyHash);
+    headers.set("x-gateway-signature", signature);
+    headers.set("X-Forwarded-For", realIp);
+  }
+
+  const init = { method, headers };
+  if (method !== "GET" && method !== "HEAD") init.body = bodyBytes;
+  const timeoutMs = envInt(env, "UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS, 1000, 30_000);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException("UPSTREAM_TIMEOUT", "AbortError"));
+  }, timeoutMs);
+  init.signal = controller.signal;
+  try {
+    return await fetch(upstreamUrl, init);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export default {
+  async fetch(req, env) {
+    const origin = req.headers.get("Origin") || "";
+    const url = new URL(req.url);
+
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin, env) });
+    }
+
+    const route = extractRoute(url.pathname);
+    if (route.kind === "health") {
+      const nativeVerify = nativeVerifyReadiness(env);
+      const freeDb = serviceClientReadiness(env);
+      const resetNative = resetKeyNativeReadiness(env);
+      return json({
+        ok: true,
+        service: "fixed-api-gateway-v34",
+        public_api_base_url: trimTrailingSlash(env.PUBLIC_API_BASE_URL || `${url.origin}/api`),
+        gateway_auth: Boolean(String(env.GATEWAY_SHARED_SECRET || "").trim()),
+        verify_native_enabled: nativeVerify.enabled,
+        verify_native_configured: nativeVerify.configured,
+        verify_native_contract_ok: nativeVerify.contract_matches_released_menu,
+        free_native_start_enabled: freeNativeRouteEnabled(env, "free-start"),
+        free_native_gate_enabled: freeNativeRouteEnabled(env, "free-gate"),
+        free_native_close_enabled: freeNativeRouteEnabled(env, "free-close"),
+        free_native_config_enabled: freeNativeRouteEnabled(env, "free-config"),
+        free_native_reveal_enabled: freeNativeRouteEnabled(env, "free-reveal"),
+        free_native_resolve_enabled: freeNativeRouteEnabled(env, "free-resolve"),
+        free_reveal_rate_limit_configured: Boolean(env?.FREE_REVEAL_RATE_LIMITER),
+        free_resolve_rate_limit_configured: Boolean(env?.FREE_RESOLVE_RATE_LIMITER),
+        free_hotpath_global_rate_limit_configured: Boolean(env?.FREE_HOTPATH_GLOBAL_RATE_LIMITER),
+        reset_native_enabled: resetNative.enabled,
+        reset_native_turnstile_configured: resetNative.turnstileConfigured,
+        free_native_db_ready: freeDb.url && freeDb.serviceRoleKey,
+        free_config_cache_seconds: freeConfigCacheSeconds(env),
+        free_maintenance_enabled: freeMaintenanceEnabled(env),
+      }, 200, origin, env);
+    }
+
+    if (route.kind !== "function") {
+      return json({ ok: false, code: "NOT_FOUND" }, 404, origin, env);
+    }
+
+    const fnName = String(route.name || "").trim();
+    const allowed = getAllowedFunctions(env);
+    if (!allowed.has(fnName)) {
+      return json({ ok: false, code: "FUNCTION_NOT_ALLOWED", function_name: fnName }, 403, origin, env);
+    }
+
+    const realIp = String(req.headers.get("CF-Connecting-IP") || "").trim();
+    if (!realIp) return json({ ok: false, msg: "GATEWAY_REQUIRED" }, 403, origin, env);
+    const apiRateLimit = await checkRateLimit(env, "API_RATE_LIMITER", `${realIp}:api`);
+    if (!apiRateLimit.success) {
+      if (apiRateLimit.unavailable) return json({ ok: false, msg: "SERVER_ERROR" }, 503, origin, env);
+      return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+    }
+
+    // FREE_HOTPATH_DDOS_V1
+    // Chỉ bảo vệ free-resolve/free-reveal; không đổi verify-key/menu.
+    if (req.method !== "OPTIONS" && (fnName === "free-resolve" || fnName === "free-reveal")) {
+      const routeBinding = fnName === "free-resolve"
+        ? "FREE_RESOLVE_RATE_LIMITER"
+        : "FREE_REVEAL_RATE_LIMITER";
+
+      const routeLimit = await checkRateLimit(env, routeBinding, `${realIp}:${fnName}`);
+      if (!routeLimit.success) {
+        if (routeLimit.unavailable) {
+          return json({ ok: false, code: "RATE_LIMIT_UNAVAILABLE", msg: "SERVER_ERROR" }, 503, origin, env);
+        }
+        return json({ ok: false, code: "TOO_MANY_REQUESTS", msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+      }
+
+      const globalLimit = await checkRateLimit(env, "FREE_HOTPATH_GLOBAL_RATE_LIMITER", `global:${fnName}`);
+      if (!globalLimit.success) {
+        if (globalLimit.unavailable) {
+          return json({ ok: false, code: "RATE_LIMIT_UNAVAILABLE", msg: "SERVER_ERROR" }, 503, origin, env);
+        }
+        return json({ ok: false, code: "HOTPATH_BUSY", msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+      }
+    }
+
+    if (fnName === "verify-key" && req.method !== "POST") {
+      return json({ ok: false, msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if ((fnName === "free-start" || fnName === "free-gate" || fnName === "free-close" || fnName === "free-reveal" || fnName === "free-resolve") && req.method !== "POST") {
+      return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if (fnName === "free-config" && req.method !== "GET") {
+      return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if (fnName === "reset-key" && req.method !== "GET" && req.method !== "POST") {
+      return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405, origin, env);
+    }
+
+    if (fnName === "free-start" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeStart(req, env);
+    }
+
+    if (fnName === "free-gate" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeGate(req, env);
+    }
+
+    if (fnName === "free-close" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeClose(req, env, {
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Free-Close-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
+    if (fnName === "free-resolve" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeResolve(req, env, {
+        corsHeaders: corsHeaders(origin, env),
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Free-Resolve-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
+    if (fnName === "free-reveal" && freeNativeRouteEnabled(env, fnName)) {
+      return await handleFreeReveal(req, env, {
+        corsHeaders: corsHeaders(origin, env),
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Free-Reveal-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
+    if (fnName === "reset-key" && resetNativeEnabled(env)) {
+      return await handleResetKey(req, env, {
+        json: (data, status) => json(data, status, origin, env, {
+          "X-Gateway-Project": "active",
+          "X-Reset-Key-Backend": "cloudflare-native",
+        }),
+      });
+    }
+
+    if (fnName === "free-config") {
+      const cached = await readFreeConfigCache(req, env);
+      if (cached) {
+        const responseHeaders = new Headers(corsHeaders(origin, env));
+        responseHeaders.set("Content-Type", cached.headers.get("Content-Type") || "application/json; charset=utf-8");
+        responseHeaders.set("Cache-Control", "public, max-age=15");
+        responseHeaders.set("X-Content-Type-Options", "nosniff");
+        responseHeaders.set("Referrer-Policy", "no-referrer");
+        responseHeaders.set("X-Gateway-Project", "active");
+        responseHeaders.set("X-Free-Config-Cache", "HIT");
+        return new Response(cached.body, { status: cached.status, headers: responseHeaders });
+      }
+      if (freeNativeRouteEnabled(env, fnName)) {
+        const nativeResponse = await handleFreeConfig(req, env, {
+          json: (data, status) => json(data, status, origin, env, {
+            "X-Gateway-Project": "active",
+            "X-Free-Config-Backend": "cloudflare-native",
+          }),
+        });
+        try { await writeFreeConfigCache(req, env, nativeResponse); } catch { /* cache is best-effort */ }
+        return nativeResponse;
+      }
+    }
+
+    if (fnName === "verify-key") {
+      const rateLimit = await checkRateLimit(env, "VERIFY_RATE_LIMITER", `${realIp}:verify-key`);
+      if (!rateLimit.success) {
+        if (rateLimit.unavailable) return json({ ok: false, msg: "SERVER_ERROR" }, 503, origin, env);
+        return json({ ok: false, msg: "RATE_LIMIT", retry_after_seconds: 60 }, 429, origin, env);
+      }
+
+      if (isNativeVerifyEnabled(env)) {
+        let bodyBytes;
+        try {
+          bodyBytes = await readBodyBytes(req, maxBodyBytesForRoute(fnName, env));
+        } catch (error) {
+          if (error instanceof PayloadTooLargeError) {
+            return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env, {
+              "X-Gateway-Project": "active",
+            });
+          }
+          return json({ ok: false, msg: "INVALID_INPUT" }, 400, origin, env, {
+            "X-Gateway-Project": "active",
+          });
+        }
+
+        return handleNativeVerify(req, env, {
+          bodyBytes,
+          realIp,
+          json: (data, status) => json(data, status, origin, env, {
+            "X-Gateway-Project": "active",
+            "X-Verify-Backend": "cloudflare-native",
+          }),
+        });
+      }
+    }
+
+    const functionsBase = resolveFunctionsBase(env);
+    if (!functionsBase) {
+      return json({ ok: false, code: "SERVER_MISCONFIG", msg: "Missing ACTIVE_FUNCTIONS_BASE_URL or ACTIVE_SUPABASE_URL" }, 503, origin, env);
+    }
+
+    const search = url.search || "";
+    const upstreamUrl = `${functionsBase}/${fnName}${search}`;
+
+    let upstream;
+    try {
+      upstream = await forwardRequest(req, upstreamUrl, env, fnName);
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) return json({ ok: false, msg: "INVALID_INPUT" }, 413, origin, env);
+      if (isUpstreamTimeoutError(error)) {
+        return json({
+          ok: false,
+          code: "UPSTREAM_TIMEOUT",
+          msg: "Upstream request timed out",
+        }, 504, origin, env);
+      }
+      return json({ ok: false, code: "UPSTREAM_FETCH_FAILED", msg: "Upstream request failed" }, 502, origin, env);
+    }
+
+    if (fnName === "free-config") {
+      try { await writeFreeConfigCache(req, env, upstream); } catch { /* cache is best-effort */ }
+    }
+
+    const responseHeaders = new Headers(corsHeaders(origin, env));
+    const contentType = upstream.headers.get("Content-Type") || "application/json; charset=utf-8";
+    responseHeaders.set("Content-Type", contentType);
+    responseHeaders.set("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
+    responseHeaders.set("Pragma", "no-cache");
+    responseHeaders.set("Expires", "0");
+    responseHeaders.set("X-Content-Type-Options", "nosniff");
+    responseHeaders.set("Referrer-Policy", "no-referrer");
+    responseHeaders.set("X-Gateway-Project", "active");
+
+    const lowerContentType = String(contentType || "").toLowerCase();
+    const looksHtml = lowerContentType.includes("text/html") || lowerContentType.includes("text/plain");
+    if (upstream.status >= 500 && looksHtml) {
+      return json({
+        ok: false,
+        code: "UPSTREAM_BAD_GATEWAY",
+        function_name: fnName,
+        upstream_status: upstream.status,
+        msg: "Upstream edge runtime returned a non-JSON gateway error",
+      }, 502, origin, env);
+    }
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  },
+
+  async scheduled(_controller, env, ctx) {
+    const work = runFreeDailyMaintenance(env).catch((error) => {
+      console.error("sunny daily maintenance failed", String(error?.message || error));
+    });
+    ctx.waitUntil(work);
+  },
+};

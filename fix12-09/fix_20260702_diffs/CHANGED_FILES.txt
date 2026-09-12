@@ -1,0 +1,10 @@
+supabase/functions/free-start/index.ts
+supabase/functions/free-gate/index.ts
+supabase/functions/admin-free-shortlinks/index.ts
+supabase/functions/free-admin-test/index.ts
+supabase/functions/free-reveal/index.ts
+supabase/migrations/20260702153000_free_link4m_endpoint_normalize.sql
+src/pages/AdminFreeKeys.tsx
+src/pages/ServiceLanding.tsx
+src/pages/FreeLanding.tsx
+FIX_20260702_FREE_LINK4M_ADMIN_TEST_AI_HIDE.md
