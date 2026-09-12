@@ -192,7 +192,7 @@ set search_path = pg_catalog, public
 as $$
 declare
   v_uid uuid := auth.uid();
-  v_action text := lower(trim(coalesce(p_action, ''));
+  v_action text := lower(trim(coalesce(p_action, '')));
   v_patch jsonb := coalesce(p_patch, '{}'::jsonb);
   v_license public.licenses%rowtype;
   v_key text;
