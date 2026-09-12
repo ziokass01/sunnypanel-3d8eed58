@@ -29,9 +29,11 @@ import {
   fetchLicenseDevices,
   fetchLicenseIpBindings,
   reactivateOrRenewLicense,
+  resetLicenseActivation,
+  resetLicenseDevices,
   resetLicenseDevicesPenalty,
+  repairLicenseDeviceSession,
   softDeleteLicense,
-  updateLicense,
 } from "@/features/licenses/licenses-api";
 import { isoToLocal, localToIso } from "@/features/licenses/license-utils";
 import { formatDurationDHMS, formatRemainingFromExpires } from "@/features/licenses/time-format";
@@ -47,13 +49,13 @@ function computeStatus(lic: {
   first_used_at?: string | null;
   starts_on_first_use?: boolean;
   activated_at?: string | null;
-}) {
+}, nowMs = Date.now()) {
   if (lic.deleted_at) return { label: "DELETED", variant: "secondary" as const };
   if (!lic.is_active) return { label: "BLOCKED", variant: "destructive" as const };
   const startOnFirstUse = Boolean(lic.start_on_first_use || lic.starts_on_first_use);
   const firstUsedAt = lic.first_used_at ?? lic.activated_at ?? null;
   if (startOnFirstUse && !firstUsedAt) return { label: "Not started", variant: "outline" as const };
-  if (lic.expires_at && new Date(lic.expires_at).getTime() < Date.now()) return { label: "EXPIRED", variant: "outline" as const };
+  if (lic.expires_at && new Date(lic.expires_at).getTime() < nowMs) return { label: "EXPIRED", variant: "outline" as const };
   return { label: "ACTIVE", variant: "default" as const };
 }
 
@@ -102,8 +104,8 @@ export function LicenseDetailPage() {
 
   const status = useMemo(() => {
     if (!licQuery.data) return null;
-    return computeStatus(licQuery.data);
-  }, [licQuery.data]);
+    return computeStatus(licQuery.data, nowMs);
+  }, [licQuery.data, nowMs]);
 
   const removeDeviceMutation = useMutation({
     mutationFn: async (deviceRowId: string) => deleteLicenseDevice(deviceRowId),
@@ -117,12 +119,29 @@ export function LicenseDetailPage() {
     },
   });
 
+  const repairDeviceMutation = useMutation({
+    mutationFn: async (deviceId: string) => repairLicenseDeviceSession(licenseId, deviceId),
+    onSuccess: async (result: any) => {
+      await queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] });
+      toast({
+        title: "Đã sửa mốc phiên thiết bị",
+        description: typeof result?.generation_floor === "number"
+          ? `Generation floor: ${result.generation_floor}`
+          : undefined,
+      });
+    },
+    onError: (err) => {
+      toast({ title: "Sửa mốc phiên thất bại", description: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
   const resetDevicesMutation = useMutation({
-    mutationFn: async () => resetLicenseDevicesPenalty(licenseId),
+    mutationFn: async () => resetLicenseDevices(licenseId),
     onSuccess: async (result: any) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
         queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_ip_bindings", licenseId] }),
       ]);
       const penaltyText = typeof result?.penalty_pct === "number" ? " • trừ " + result.penalty_pct + "% thời gian còn lại" : "";
       toast({ title: "Đã reset thiết bị theo chính sách", description: "Đã xóa thiết bị" + penaltyText });
@@ -139,6 +158,7 @@ export function LicenseDetailPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
         queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_ip_bindings", licenseId] }),
       ]);
 
       const remainingText =
@@ -173,16 +193,17 @@ export function LicenseDetailPage() {
         throw new Error("CANNOT_CLEAR_EXPIRES");
       }
 
-      await reactivateOrRenewLicense(licenseId, { expires_at });
-      if (reactivateResetDevices) {
-        await resetLicenseDevicesPenalty(licenseId);
-      }
+      await reactivateOrRenewLicense(licenseId, {
+        expires_at,
+        reset_devices: reactivateResetDevices,
+      });
     },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["licenses"] }),
         queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
         queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_ip_bindings", licenseId] }),
       ]);
       toast({ title: "License reactivated/renewed" });
       setReactivateOpen(false);
@@ -212,15 +233,13 @@ export function LicenseDetailPage() {
   });
 
   const resetActivationMutation = useMutation({
-    mutationFn: async () => {
-      await updateLicense(licenseId, {
-        first_used_at: null,
-        expires_at: null,
-        activated_at: null,
-      } as any);
-    },
+    mutationFn: async () => resetLicenseActivation(licenseId),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["license", licenseId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["licenses"] }),
+        queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
+        queryClient.invalidateQueries({ queryKey: ["license_devices", licenseId] }),
+      ]);
       toast({ title: "Activation reset" });
       setResetActivationOpen(false);
     },
@@ -277,7 +296,7 @@ export function LicenseDetailPage() {
             onClick={() => setResetOpen(true)}
             disabled={!licenseId || resetDevicesMutation.isPending}
           >
-            Reset devices theo %
+            Reset devices
           </Button>
 
           {isAdmin ? (
@@ -350,7 +369,7 @@ export function LicenseDetailPage() {
         </div>
       ) : null}
 
-      {licQuery.error ? <div className="text-sm text-destructive">{String(licQuery.error)}</div> : null}
+      {licQuery.error ? <div className="text-sm text-destructive">{getErrorMessage(licQuery.error)}</div> : null}
       {!licQuery.isLoading && !licQuery.error && !licQuery.data ? (
         <div className="text-sm text-muted-foreground">Not found.</div>
       ) : null}
@@ -492,13 +511,14 @@ export function LicenseDetailPage() {
               <CardTitle className="text-base">Devices</CardTitle>
             </CardHeader>
             <CardContent>
-              {devicesQuery.error ? <div className="text-sm text-destructive">{String(devicesQuery.error)}</div> : null}
+              {devicesQuery.error ? <div className="text-sm text-destructive">{getErrorMessage(devicesQuery.error)}</div> : null}
 
               <div className="rounded-lg border">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Device</TableHead>
+                      <TableHead className="hidden lg:table-cell">Session</TableHead>
                       <TableHead className="hidden md:table-cell">First seen</TableHead>
                       <TableHead className="hidden md:table-cell">Last seen</TableHead>
                       <TableHead className="text-right">Action</TableHead>
@@ -510,6 +530,9 @@ export function LicenseDetailPage() {
                         <TableRow key={`sk-${idx}`}>
                           <TableCell>
                             <Skeleton className="h-4 w-[min(520px,100%)]" />
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            <Skeleton className="h-4 w-16" />
                           </TableCell>
                           <TableCell className="hidden md:table-cell">
                             <Skeleton className="h-4 w-40" />
@@ -524,7 +547,7 @@ export function LicenseDetailPage() {
                       ))
                     ) : (devicesQuery.data ?? []).length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
                           No devices yet.
                         </TableCell>
                       </TableRow>
@@ -535,19 +558,37 @@ export function LicenseDetailPage() {
                             <div className="font-mono">{d.device_id}</div>
                             {d.device_name ? <div className="mt-1 text-muted-foreground">{d.device_name}</div> : null}
                           </TableCell>
+                          <TableCell className="hidden lg:table-cell font-mono text-xs">
+                            {typeof d.session_generation === "number" ? d.session_generation : "—"}
+                          </TableCell>
                           <TableCell className="hidden md:table-cell text-sm">{new Date(d.first_seen).toLocaleString()}</TableCell>
                           <TableCell className="hidden md:table-cell text-sm">{new Date(d.last_seen).toLocaleString()}</TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              size="sm"
-                              variant="soft"
-                              onClick={() => {
-                                setRemoveTarget({ id: d.id, device_id: d.device_id });
-                              }}
-                              disabled={removeDeviceMutation.isPending}
-                            >
-                              Remove
-                            </Button>
+                            <div className="flex justify-end gap-2">
+                              {isAdmin ? (
+                                <Button
+                                  size="sm"
+                                  variant="soft"
+                                  onClick={() => {
+                                    if (!confirm("Đẩy mốc phiên lên để sửa lỗi phiên bảo mật cũ?")) return;
+                                    repairDeviceMutation.mutate(d.device_id);
+                                  }}
+                                  disabled={repairDeviceMutation.isPending}
+                                >
+                                  Repair session
+                                </Button>
+                              ) : null}
+                              <Button
+                                size="sm"
+                                variant="soft"
+                                onClick={() => {
+                                  setRemoveTarget({ id: d.id, device_id: d.device_id });
+                                }}
+                                disabled={removeDeviceMutation.isPending || repairDeviceMutation.isPending}
+                              >
+                                Remove
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
@@ -564,7 +605,7 @@ export function LicenseDetailPage() {
                 <CardTitle className="text-base">IP bindings</CardTitle>
               </CardHeader>
               <CardContent>
-                {ipBindingsQuery.error ? <div className="text-sm text-destructive">{String(ipBindingsQuery.error)}</div> : null}
+                {ipBindingsQuery.error ? <div className="text-sm text-destructive">{getErrorMessage(ipBindingsQuery.error)}</div> : null}
                 <div className="rounded-lg border">
                   <Table>
                     <TableHeader><TableRow><TableHead>IP hash</TableHead><TableHead>Verify</TableHead><TableHead>First seen</TableHead><TableHead>Last seen</TableHead></TableRow></TableHeader>
@@ -613,9 +654,9 @@ export function LicenseDetailPage() {
       <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset thiết bị theo chính sách?</AlertDialogTitle>
+            <AlertDialogTitle>Reset thiết bị?</AlertDialogTitle>
             <AlertDialogDescription>
-              Hệ thống sẽ xóa thiết bị và trừ thời gian theo đúng % đã cấu hình. Key free và key admin/paid được tách riêng để không bị lẫn cơ chế bù trừ.
+              Hệ thống sẽ xóa toàn bộ device và IP binding của key. Thời hạn key được giữ nguyên; dùng nút -20% nếu muốn áp dụng phạt thời gian.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -624,7 +665,7 @@ export function LicenseDetailPage() {
               onClick={() => resetDevicesMutation.mutate()}
               disabled={resetDevicesMutation.isPending}
             >
-              {resetDevicesMutation.isPending ? "Đang reset…" : "Reset theo %"}
+              {resetDevicesMutation.isPending ? "Đang reset…" : "Reset devices"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -710,7 +751,7 @@ export function LicenseDetailPage() {
             <AlertDialogTitle>Reset activation?</AlertDialogTitle>
             <AlertDialogDescription>
               This will set <span className="font-mono">first_used_at = null</span> and <span className="font-mono">expires_at = null</span>.
-              The next successful verify will start the countdown again.
+              The next successful verify will start the countdown again. Device bindings stay attached and their signed-session generation is advanced so old leases cannot be mixed with the new activation.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

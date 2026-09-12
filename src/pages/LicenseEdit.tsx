@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ const schema = z.object({
   // even when the legacy duration unit cannot be inferred cleanly in the UI.
   duration_value: z.preprocess(
     (value) => (value === "" || value == null ? undefined : Number(value)),
-    z.number().int().min(1).max(999999).optional(),
+    z.number().int().min(1).max(24855).optional(),
   ),
   duration_unit: z.enum(["minutes", "hours", "days"]).optional().default("days"),
   max_devices: z.coerce.number().int().min(1),
@@ -58,6 +58,7 @@ function getFirstUsedAt(data: any) {
 export function LicenseEditPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const licenseId = id ?? "";
 
   const { data, isLoading, error } = useQuery({
@@ -80,6 +81,9 @@ export function LicenseEditPage() {
 
   useEffect(() => {
     if (!data) return;
+    // A background refetch must never overwrite values the operator is
+    // currently editing.  The query cache remains authoritative after save.
+    if (form.formState.isDirty) return;
     form.reset({
       expires_at: isoToLocal(data.expires_at),
       ...(getStartOnFirstUse(data)
@@ -94,7 +98,6 @@ export function LicenseEditPage() {
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
       const startOnFirstUse = getStartOnFirstUse(data);
-      const firstUsedAt = getFirstUsedAt(data);
 
       const patch: Record<string, unknown> = {
         max_devices: values.max_devices,
@@ -103,27 +106,24 @@ export function LicenseEditPage() {
       };
 
       if (startOnFirstUse) {
-        // For start-on-first-use licenses, expires_at is managed by verify-key.
-        // Allow editing duration ONLY before first use.
-        if (!firstUsedAt) {
-          patch.duration_seconds = fieldsToSeconds(values);
-          // keep v2 days field unused
-          patch.duration_days = null;
-          patch.expires_at = null;
-        }
+        // Duration is the source of truth for both unstarted and started
+        // countdown keys.  The lifecycle RPC recomputes expires_at from the
+        // original first_used_at when the key has already started.
+        patch.duration_seconds = fieldsToSeconds(values);
       } else {
         // Standard fixed-expiry licenses keep the legacy flow.
         patch.expires_at = values.expires_at ? localToIso(values.expires_at) : null;
-        // Ensure constraints stay satisfied.
-        patch.duration_seconds = null;
-        patch.duration_days = null;
-        patch.first_used_at = null;
-        patch.activated_at = null;
       }
 
       await updateLicense(licenseId, patch as any);
     },
-    onSuccess: () => navigate(`/licenses/${licenseId}`),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["licenses"] }),
+        queryClient.invalidateQueries({ queryKey: ["license", licenseId] }),
+      ]);
+      navigate(`/licenses/${licenseId}`);
+    },
   });
 
   return (
@@ -151,14 +151,12 @@ export function LicenseEditPage() {
                   id="duration_value"
                   type="number"
                   min={1}
-                  max={999999}
-                  disabled={Boolean(getFirstUsedAt(data))}
+                  max={24855}
                   {...form.register("duration_value")}
                 />
                 <Select
                   value={form.watch("duration_unit") ?? "days"}
                   onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
-                  disabled={Boolean(getFirstUsedAt(data))}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Unit" />
@@ -172,7 +170,7 @@ export function LicenseEditPage() {
               </div>
               <div className="text-xs text-muted-foreground">
                 {Boolean(getFirstUsedAt(data))
-                  ? "Already started. Use Reset activation on the detail page to change duration."
+                  ? "Already started. Saving a new duration recalculates expiry from the original first-use time."
                   : "Countdown will start on first successful verify."}
               </div>
             </div>

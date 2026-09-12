@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { queryClient } from "@/lib/queryClient";
 
 type AuthContextValue = {
   session: Session | null;
@@ -15,10 +16,25 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const currentUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     let didResolveInitialSession = false;
+    let sessionEventVersion = 0;
+
+    const commitSession = (nextSession: Session | null) => {
+      const nextUserId = nextSession?.user?.id ?? null;
+      if (currentUserIdRef.current !== nextUserId) {
+        // A TanStack cache is process-wide.  Never let private license data
+        // survive an account switch, while allowing token refreshes for the
+        // same user to keep the current route and form mounted.
+        queryClient.clear();
+        currentUserIdRef.current = nextUserId;
+      }
+      setSession(nextSession);
+      setLoading(false);
+    };
 
     // IMPORTANT: subscribe BEFORE calling getSession
     const {
@@ -31,22 +47,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // If we flip loading=false here, AuthGate can redirect to /login prematurely.
       if (event === "INITIAL_SESSION" && !didResolveInitialSession) return;
 
-      setSession(nextSession);
-      setLoading(false);
+      sessionEventVersion += 1;
+      commitSession(nextSession);
     });
 
+    const getSessionVersion = sessionEventVersion;
     supabase.auth
       .getSession()
       .then(({ data }) => {
         if (!mounted) return;
         didResolveInitialSession = true;
-        setSession(data.session ?? null);
+        // A SIGNED_OUT/SIGNED_IN event that arrived first is newer than this
+        // initial snapshot.  Do not resurrect the old account after logout.
+        if (sessionEventVersion === getSessionVersion) {
+          commitSession(data.session ?? null);
+        }
         setLoading(false);
       })
       .catch(() => {
         if (!mounted) return;
         didResolveInitialSession = true;
-        setSession(null);
+        if (sessionEventVersion === getSessionVersion) commitSession(null);
         setLoading(false);
       });
 
@@ -63,7 +84,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       refresh: async () => {
         const { data } = await supabase.auth.getSession();
-        setSession(data.session ?? null);
+        const nextSession = data.session ?? null;
+        const nextUserId = nextSession?.user?.id ?? null;
+        if (currentUserIdRef.current !== nextUserId) {
+          queryClient.clear();
+          currentUserIdRef.current = nextUserId;
+        }
+        setSession(nextSession);
       },
       signOut: async () => {
         await supabase.auth.signOut();

@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:contracts": "node --test tests/*.test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

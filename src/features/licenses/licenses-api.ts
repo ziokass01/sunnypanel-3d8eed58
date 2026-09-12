@@ -55,7 +55,14 @@ export type LicenseDeviceRow = {
   last_seen: string;
 };
 
-export { fetchLicenseDevices, fetchLicenseIpBindings, deleteLicenseDevice, resetLicenseDevices, resetLicenseDevicesPenalty } from "./licenses-devices-api";
+export {
+  fetchLicenseDevices,
+  fetchLicenseIpBindings,
+  deleteLicenseDevice,
+  resetLicenseDevices,
+  resetLicenseDevicesPenalty,
+  repairLicenseDeviceSession,
+} from "./licenses-devices-api";
 
 // Note: backend schema evolved (deleted_at). Types file may lag, so we intentionally loosen typing here.
 const licensesTable = "licenses" as any;
@@ -186,17 +193,22 @@ export async function createLicense(input: {
 }
 
 export async function updateLicense(id: string, patch: Partial<Omit<LicenseRow, "id" | "created_at" | "key">>) {
-  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
-    .select("key")
-    .eq("id", id)
-    .maybeSingle();
-  if (fetchErr) throw fetchErr;
-  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
-
-  const { error } = await (supabase.from(licensesTable) as any).update(patch).eq("id", id);
+  const { error } = await supabase.rpc("panel_mutate_license" as any, {
+    p_license_id: id,
+    p_action: "edit",
+    p_patch: patch as any,
+  } as any);
   if (error) throw error;
+}
 
-  await logAudit("UPDATE", before.key, { patch });
+export async function resetLicenseActivation(id: string) {
+  const { data, error } = await supabase.rpc("panel_mutate_license" as any, {
+    p_license_id: id,
+    p_action: "reset_activation",
+    p_patch: {},
+  } as any);
+  if (error) throw error;
+  return data as any;
 }
 
 export async function softDeleteLicense(id: string) {
@@ -296,24 +308,20 @@ export async function hardDeleteLicense(id: string) {
   if (error) throw error;
 }
 
-export async function reactivateOrRenewLicense(id: string, params: { expires_at: string | null }) {
-  const { data: before, error: fetchErr } = await (supabase.from(licensesTable) as any)
-    .select("key")
-    .eq("id", id)
-    .maybeSingle();
-  if (fetchErr) throw fetchErr;
-  if (!before?.key) throw new Error("LICENSE_NOT_FOUND");
-
-  const patch = {
-    deleted_at: null,
-    is_active: true,
-    expires_at: params.expires_at,
-  };
-
-  const { error } = await (supabase.from(licensesTable) as any).update(patch).eq("id", id);
+export async function reactivateOrRenewLicense(
+  id: string,
+  params: { expires_at: string | null; reset_devices?: boolean },
+) {
+  const { data, error } = await supabase.rpc("panel_mutate_license" as any, {
+    p_license_id: id,
+    p_action: "renew",
+    p_patch: {
+      expires_at: params.expires_at,
+      reset_devices: Boolean(params.reset_devices),
+    },
+  } as any);
   if (error) throw error;
-
-  await logAudit("REACTIVATE_RENEW", before.key, { license_id: id, ...patch });
+  return data as any;
 }
 
 

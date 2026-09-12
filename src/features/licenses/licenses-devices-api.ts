@@ -5,6 +5,7 @@ export type LicenseDeviceRow = {
   license_id: string;
   device_id: string;
   device_name?: string | null;
+  session_generation?: number | null;
   first_seen: string;
   last_seen: string;
 };
@@ -22,7 +23,7 @@ export type LicenseIpBindingRow = {
 export async function fetchLicenseDevices(licenseId: string) {
   const { data, error } = await supabase
     .from("license_devices")
-    .select("id,license_id,device_id,device_name,first_seen,last_seen")
+    .select("id,license_id,device_id,device_name,session_generation,first_seen,last_seen")
     .eq("license_id", licenseId)
     .order("last_seen", { ascending: false });
   if (error) throw error;
@@ -40,39 +41,33 @@ export async function fetchLicenseIpBindings(licenseId: string) {
 }
 
 export async function deleteLicenseDevice(deviceRowId: string) {
-  const { error } = await supabase.from("license_devices").delete().eq("id", deviceRowId);
+  const { error } = await supabase.rpc("panel_remove_license_device" as any, {
+    p_device_row_id: deviceRowId,
+  } as any);
   if (error) throw error;
 }
 
 export async function resetLicenseDevices(licenseId: string) {
-  const { data: before, error: beforeErr } = await supabase
-    .from("licenses")
-    .select("key")
-    .eq("id", licenseId)
-    .single();
-  if (beforeErr) throw beforeErr;
-
-  const { count, error: countErr } = await supabase
-    .from("license_devices")
-    .select("id", { count: "exact", head: true })
-    .eq("license_id", licenseId);
-  if (countErr) throw countErr;
-
-  const { error } = await supabase.from("license_devices").delete().eq("license_id", licenseId);
+  const { data, error } = await supabase.rpc("panel_reset_license_devices" as any, {
+    p_license_id: licenseId,
+  } as any);
   if (error) throw error;
-
-  const { error: auditErr } = await supabase.rpc("log_audit", {
-    p_action: "RESET_DEVICES",
-    p_license_key: before.key,
-    p_detail: { license_id: licenseId, devices_removed: count ?? 0 },
-  });
-  if (auditErr) throw auditErr;
+  return data as any;
 }
 
 export async function resetLicenseDevicesPenalty(licenseId: string) {
   const { data, error } = await supabase.rpc("admin_reset_devices_penalty", {
     p_license_id: licenseId,
   });
+  if (error) throw error;
+  return data as any;
+}
+
+export async function repairLicenseDeviceSession(licenseId: string, deviceId: string) {
+  const { data, error } = await supabase.rpc("admin_repair_license_session" as any, {
+    p_license_id: licenseId,
+    p_device_id: deviceId,
+  } as any);
   if (error) throw error;
   return data as any;
 }
