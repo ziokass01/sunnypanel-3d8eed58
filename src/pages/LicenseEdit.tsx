@@ -55,6 +55,20 @@ function getFirstUsedAt(data: any) {
   return data?.first_used_at ?? data?.activated_at ?? null;
 }
 
+function remainingSecondsForStartedEdit(data: any) {
+  const expiresAt = data?.expires_at ? new Date(data.expires_at).getTime() : NaN;
+  if (Number.isFinite(expiresAt)) {
+    const remaining = Math.ceil((expiresAt - Date.now()) / 1000);
+    if (remaining > 0) return remaining;
+  }
+  const stored = typeof data?.duration_seconds === "number" && data.duration_seconds > 0
+    ? data.duration_seconds
+    : typeof data?.duration_days === "number" && data.duration_days > 0
+      ? data.duration_days * 86400
+      : null;
+  return stored;
+}
+
 export function LicenseEditPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -87,7 +101,9 @@ export function LicenseEditPage() {
     form.reset({
       expires_at: isoToLocal(data.expires_at),
       ...(getStartOnFirstUse(data)
-        ? secondsToFields((data as any).duration_seconds ?? ((data as any).duration_days ? (data as any).duration_days * 86400 : null))
+        ? secondsToFields(getFirstUsedAt(data)
+          ? remainingSecondsForStartedEdit(data)
+          : ((data as any).duration_seconds ?? ((data as any).duration_days ? (data as any).duration_days * 86400 : null)))
         : { duration_value: 2, duration_unit: "hours" as const }),
       max_devices: data.max_devices,
       is_active: data.is_active,
@@ -106,10 +122,13 @@ export function LicenseEditPage() {
       };
 
       if (startOnFirstUse) {
-        // Duration is the source of truth for both unstarted and started
-        // countdown keys.  The lifecycle RPC recomputes expires_at from the
-        // original first_used_at when the key has already started.
-        patch.duration_seconds = fieldsToSeconds(values);
+        // A running countdown must not be extended just because the operator
+        // changed note/device/active fields. Only an explicit duration edit
+        // changes remaining time.
+        const durationWasEdited = Boolean(
+          form.formState.dirtyFields.duration_value || form.formState.dirtyFields.duration_unit
+        );
+        if (durationWasEdited) patch.duration_seconds = fieldsToSeconds(values);
       } else {
         // Standard fixed-expiry licenses keep the legacy flow.
         patch.expires_at = values.expires_at ? localToIso(values.expires_at) : null;
@@ -170,7 +189,7 @@ export function LicenseEditPage() {
               </div>
               <div className="text-xs text-muted-foreground">
                 {Boolean(getFirstUsedAt(data))
-                  ? "Already started. Saving a new duration recalculates expiry from the original first-use time."
+                  ? "Already started. The value shown is remaining time. Changing it sets expiry to save time + the new duration; editing other fields does not extend the key."
                   : "Countdown will start on first successful verify."}
               </div>
             </div>

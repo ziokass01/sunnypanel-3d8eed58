@@ -10,9 +10,9 @@ class SessionLedger {
     this.devices = new Map();
   }
 
-  insert(key, device) {
+  insert(key, device, recoveryFloor = 1_800_000_000_000) {
     const id = `${key}:${device}`;
-    const floor = this.highWater.get(id) ?? 0;
+    const floor = Math.max(this.highWater.get(id) ?? 0, recoveryFloor);
     const row = { key, device, generation: floor };
     this.devices.set(id, row);
     return row;
@@ -30,10 +30,10 @@ class SessionLedger {
     this.devices.delete(`${key}:${device}`);
   }
 
-  resetActivation(key) {
+  resetActivation(key, recoveryFloor = 1_800_000_000_000) {
     for (const row of this.devices.values()) {
       if (row.key !== key) continue;
-      row.generation += 1;
+      row.generation = Math.max(row.generation + 1, recoveryFloor);
       this.highWater.set(`${row.key}:${row.device}`, row.generation);
     }
   }
@@ -56,9 +56,10 @@ test("device deletion and recreation cannot restart the signed lease generation"
   for (let i = 0; i < 7; i += 1) ledger.issue(key, device);
   ledger.deleteDevice(key, device);
   const recreated = ledger.insert(key, device);
+  const recreatedFloor = recreated.generation;
 
-  assert.equal(recreated.generation, 7);
-  assert.equal(ledger.issue(key, device), 8);
+  assert.ok(recreatedFloor >= 1_800_000_000_000);
+  assert.equal(ledger.issue(key, device), recreatedFloor + 1);
 });
 
 test("reset activation invalidates old leases by increasing, never lowering, the floor", () => {
@@ -68,9 +69,10 @@ test("reset activation invalidates old leases by increasing, never lowering, the
   ledger.issue(key, "device-b");
   ledger.resetActivation(key);
 
-  assert.equal(ledger.highWater.get(`${key}:device-a`), 2);
-  assert.equal(ledger.highWater.get(`${key}:device-b`), 2);
-  assert.equal(ledger.issue(key, "device-a"), 3);
+  assert.ok(ledger.highWater.get(`${key}:device-a`) >= 1_800_000_000_000);
+  assert.ok(ledger.highWater.get(`${key}:device-b`) >= 1_800_000_000_000);
+  const floor = ledger.highWater.get(`${key}:device-a`);
+  assert.equal(ledger.issue(key, "device-a"), floor + 1);
 });
 
 test("one-time repair only moves a generation floor forward", () => {
@@ -78,11 +80,12 @@ test("one-time repair only moves a generation floor forward", () => {
   const key = "SUNNY-AAAA-BBBB-CCCC";
   const device = "device-a";
   ledger.issue(key, device);
+  const currentFloor = ledger.highWater.get(`${key}:${device}`);
 
-  assert.equal(ledger.repair(key, device, 1000), 1000);
-  assert.equal(ledger.repair(key, device, 2), 1000);
+  assert.equal(ledger.repair(key, device, 1000), currentFloor);
+  assert.equal(ledger.repair(key, device, 2), currentFloor);
   ledger.deleteDevice(key, device);
-  assert.equal(ledger.insert(key, device).generation, 1000);
+  assert.equal(ledger.insert(key, device).generation, currentFloor);
 });
 
 test("migration contains the database safeguards required by the client anchor", async () => {
@@ -115,4 +118,14 @@ test("lifecycle migration exposes atomic panel operations", async () => {
   ]) {
     assert.match(migration, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+});
+
+
+test("follow-up migration automatically recovers legacy-low generations", async () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const migration = await readFile(resolve(here, "../supabase/migrations/20260912104000_session_generation_and_edit_followup.sql"), "utf8");
+  assert.match(migration, /pg_catalog, public, extensions/);
+  assert.match(migration, /extract\(epoch from clock_timestamp\(\)\) \* 1000/);
+  assert.match(migration, /REMAINING_FROM_SAVE_TIME/);
+  assert.match(migration, /update public\.license_devices/);
 });

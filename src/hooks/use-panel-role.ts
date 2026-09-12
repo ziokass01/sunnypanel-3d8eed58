@@ -27,7 +27,7 @@ export function usePanelRole() {
     staleTime: 5 * 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
+    refetchOnReconnect: false,
   });
 
   const role = userId ? roleQuery.data ?? null : null;

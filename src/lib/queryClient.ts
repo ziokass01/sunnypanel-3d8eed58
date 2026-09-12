@@ -12,7 +12,7 @@ export const queryClient = new QueryClient({
       staleTime: 30_000,
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
+      refetchOnReconnect: false,
       // Keep cached route data when the operator leaves a tab and comes back;
       // mutations explicitly invalidate the affected license queries.
       refetchOnMount: false,
