@@ -116,6 +116,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          deploy_with_retry() {
+            local fn="$1"
+            local verify_mode="$2"
+            local attempt delay
+            local -a args=(functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api)
+            if [ "$verify_mode" = "no-verify" ]; then
+              args+=(--no-verify-jwt)
+            fi
+
+            for attempt in 1 2 3 4 5; do
+              echo "Deploying ${fn} (attempt ${attempt}/5)"
+              if supabase "${args[@]}"; then
+                echo "Deployed ${fn}"
+                sleep 3
+                return 0
+              fi
+
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::Supabase API deploy failed for ${fn} after 5 attempts"
+                return 1
+              fi
+
+              delay=$((attempt * 15))
+              echo "::warning::Deploy ${fn} failed; retrying in ${delay}s"
+              sleep "$delay"
+            done
+          }
+
           no_verify_functions=(
             admin-free-block admin-free-delete-issued admin-free-delete-session admin-free-test admin-free-shortlinks
             admin-rent admin-rent-integrations free-admin-test free-close free-config free-gate
@@ -124,8 +153,7 @@ jobs:
           )
           for fn in "${no_verify_functions[@]}"; do
             if [ -d "supabase/functions/${fn}" ]; then
-              echo "Deploying ${fn} with --no-verify-jwt"
-              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --no-verify-jwt --use-api
+              deploy_with_retry "$fn" "no-verify"
             fi
           done
 
@@ -133,10 +161,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          deploy_with_retry() {
+            local fn="$1"
+            local attempt delay
+            local -a args=(functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api)
+
+            for attempt in 1 2 3 4 5; do
+              echo "Deploying ${fn} (attempt ${attempt}/5)"
+              if supabase "${args[@]}"; then
+                echo "Deployed ${fn}"
+                sleep 3
+                return 0
+              fi
+
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::Supabase API deploy failed for ${fn} after 5 attempts"
+                return 1
+              fi
+
+              delay=$((attempt * 15))
+              echo "::warning::Deploy ${fn} failed; retrying in ${delay}s"
+              sleep "$delay"
+            done
+          }
+
           remaining_functions=(mobile-auth-email)
           for fn in "${remaining_functions[@]}"; do
             if [ -d "supabase/functions/${fn}" ]; then
-              echo "Deploying ${fn}"
-              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api
+              deploy_with_retry "$fn"
             fi
           done
