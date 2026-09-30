@@ -92,7 +92,14 @@ function installFreeDbMock({ requiresDoubleGate = false, providerKind = "link4m"
       state.shortlinkTargets.push(target);
       state.shortlinkRequests.push(url.toString());
       if (providerKind === "ontops") {
-        return jsonResponse({ data: { short_link: `https://ontops.test/opaque-${state.shortlinkTargets.length}` } });
+        if (state.shortlinkRequests.length === 1) {
+          return jsonResponse({ message: "temporary provider error" }, 500);
+        }
+        return jsonResponse({
+          id: `opaque-${state.shortlinkTargets.length}`,
+          url: target,
+          remaining: -1,
+        });
       }
       return jsonResponse({ shortenedUrl: `https://link4m.test/opaque-${state.shortlinkTargets.length}` });
     }
@@ -306,8 +313,8 @@ describe("Cloudflare-native Free Key hot path", () => {
 
     assert.equal(response.status, 200);
     assert.equal(result.ok, true);
-    assert.equal(result.outbound_url, "https://ontops.test/opaque-1");
-    assert.equal(state.shortlinkRequests.length, 1);
+    assert.equal(result.outbound_url, "https://ontops.link/opaque-2");
+    assert.equal(state.shortlinkRequests.length, 2);
     const apiRequest = new URL(state.shortlinkRequests[0]);
     assert.equal(apiRequest.searchParams.get("apikey"), "test-provider-token");
     assert.match(apiRequest.searchParams.get("url") || "", /^https:\/\/mityangho\.id\.vn\/free\/gate\?/);

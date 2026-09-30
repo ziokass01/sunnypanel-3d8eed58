@@ -193,6 +193,12 @@ async function readJsonOrText(url: string, providerKind = "custom") {
       },
       { ...common, "user-agent": "SunnyPanel-FreeKey/1.2" },
     ];
+  } else if (normalizedProviderKind === "ontops") {
+    profiles = [
+      { ...common, "user-agent": "SunnyPanel-FreeKey/1.3" },
+      { ...common, "user-agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36" },
+      { ...common },
+    ];
   } else if (normalizedProviderKind === "layma") {
     profiles = [
       { "accept": "application/json" },
@@ -218,6 +224,10 @@ async function readJsonOrText(url: string, providerKind = "custom") {
     if (!res.ok) {
       if (providerKind === "gtraffic" && isGtrafficBlockedResponse(res.status, data)) {
         throw new Error("GTRAFFIC_EDGE_IP_BLOCKED");
+      }
+      if (normalizedProviderKind === "ontops" && res.status >= 500) {
+        lastError = new Error(`HTTP_${res.status}`);
+        continue;
       }
       const reason = String(data?.message || data?.error || `HTTP_${res.status}`).trim();
       throw new Error(reason || `HTTP_${res.status}`);
@@ -264,6 +274,23 @@ function extractShortUrl(data: any, raw: string) {
   return "";
 }
 
+function buildOntopsApiUrl(apiUrl: string, apiToken: string, gateUrl: string) {
+  const endpoint = new URL(apiUrl || "https://api-management.ontops.link/api/public/create-short-link");
+  endpoint.searchParams.set("apikey", apiToken);
+  endpoint.searchParams.set("url", gateUrl);
+  return endpoint.toString();
+}
+function parseOntopsResponse(data: any, shortBaseUrl = "https://ontops.link") {
+  const id = String(data?.id ?? data?.data?.id ?? data?.result?.id ?? "").trim().slice(0, 128);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    const reason = String(data?.message ?? data?.error ?? "ONTOPS_RESPONSE_INVALID").trim().slice(0, 300);
+    throw new Error(reason || "ONTOPS_RESPONSE_INVALID");
+  }
+  const base = String(shortBaseUrl || "https://ontops.link").trim().replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(base)) throw new Error("ONTOPS_SHORT_BASE_INVALID");
+  return { outboundUrl: `${base}/${encodeURIComponent(id)}` } satisfies ProviderShortenResult;
+}
+
 async function shortenWithProvider(provider: any, gateUrl: string, env: any) {
   const kind = text(provider?.provider || "custom", 32).toLowerCase() || "custom";
   const token = text(provider?.api_token_secret, 4096);
@@ -300,18 +327,10 @@ if (isLink4M) {
 }
 if (kind === "ontops") {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
-  const base = apiUrl || "https://api-management.ontops.link/api/public/create-short-link";
-  requestUrl = renderTemplate(
-    base.includes("{url") || base.includes("{token")
-      ? base
-      : `${base}${base.includes("?") ? "&" : "?"}apikey={token}&url={url_enc}`,
-    gateUrl,
-    token,
-  );
-  const { data, raw } = await readJsonOrText(requestUrl, "ontops");
-  const shortUrl = extractShortUrl(data, raw);
-  if (!shortUrl) throw new Error(String(data?.message || data?.error || "ONTOPS_RESPONSE_INVALID"));
-  return { outboundUrl: shortUrl } satisfies ProviderShortenResult;
+  requestUrl = buildOntopsApiUrl(apiUrl, token, gateUrl);
+  const { data } = await readJsonOrText(requestUrl, "ontops");
+  const shortBaseUrl = env?.ONTOPS_SHORT_BASE_URL || "https://ontops.link";
+  return parseOntopsResponse(data, shortBaseUrl);
 }
 if (kind === "gtraffic") {
   if (!token) throw new Error("SHORTLINK_TOKEN_MISSING");
