@@ -118,7 +118,7 @@ jobs:
           for fn in "${no_verify_functions[@]}"; do
             if [ -d "supabase/functions/${fn}" ]; then
               echo "Deploying ${fn} with --no-verify-jwt"
-              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --no-verify-jwt
+              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --no-verify-jwt --use-api
             fi
           done
 
@@ -130,6 +130,6 @@ jobs:
           for fn in "${remaining_functions[@]}"; do
             if [ -d "supabase/functions/${fn}" ]; then
               echo "Deploying ${fn}"
-              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF"
+              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api
             fi
           done
