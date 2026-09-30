@@ -234,11 +234,17 @@ function extractShortUrl(data, raw) {
         data?.shortened_url,
         data?.shortUrl,
         data?.short_url,
+        data?.shortLink,
+        data?.short_link,
         data?.url,
         data?.html,
         data?.short,
         data?.result?.shortenedUrl,
         data?.result?.shortened_url,
+        data?.result?.shortUrl,
+        data?.result?.short_url,
+        data?.result?.shortLink,
+        data?.result?.short_link,
         data?.result?.url,
         data?.result,
         data?.data?.shortenedUrl,
@@ -246,6 +252,8 @@ function extractShortUrl(data, raw) {
         data?.data?.shortened_url,
         data?.data?.shortUrl,
         data?.data?.short_url,
+        data?.data?.shortLink,
+        data?.data?.short_link,
         data?.data?.url,
         raw,
     ];
@@ -285,6 +293,19 @@ async function shortenWithProvider(provider, gateUrl, env) {
         const shortUrl = extractShortUrl(data, raw);
         if (!shortUrl)
             throw new Error(String(data?.message || data?.error || "LINK4M_RESPONSE_INVALID"));
+        return { outboundUrl: shortUrl };
+    }
+    if (kind === "ontops") {
+        if (!token)
+            throw new Error("SHORTLINK_TOKEN_MISSING");
+        const base = apiUrl || "https://api-management.ontops.link/api/public/create-short-link";
+        requestUrl = renderTemplate(base.includes("{url") || base.includes("{token")
+            ? base
+            : `${base}${base.includes("?") ? "&" : "?"}apikey={token}&url={url_enc}`, gateUrl, token);
+        const { data, raw } = await readJsonOrText(requestUrl, "ontops");
+        const shortUrl = extractShortUrl(data, raw);
+        if (!shortUrl)
+            throw new Error(String(data?.message || data?.error || "ONTOPS_RESPONSE_INVALID"));
         return { outboundUrl: shortUrl };
     }
     if (kind === "gtraffic") {

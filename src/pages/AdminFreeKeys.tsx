@@ -82,7 +82,7 @@ type SettingsRow = {
 type ShortlinkProviderRow = {
   id: string;
   name: string;
-  provider: "custom" | "link4m" | "gtraffic" | "traffic68" | "nhapma" | "layma" | "none";
+  provider: "custom" | "link4m" | "gtraffic" | "ontops" | "traffic68" | "nhapma" | "layma" | "none";
   api_token_secret: string | null;
   api_url_template: string | null;
   enabled: boolean;
@@ -275,6 +275,7 @@ function createEmptyDownloadCard(): DownloadCardEditorItem {
 function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
   if (provider === "link4m") return "https://link4m.co/api-shorten/v2";
   if (provider === "gtraffic") return "https://manager.gtraffic.io/api/cong-khai/tao-lien-ket";
+  if (provider === "ontops") return "https://api-management.ontops.link/api/public/create-short-link";
   if (provider === "traffic68") return "https://traffic68.com/api/quicklink/st";
   if (provider === "nhapma") return "https://service.nhapma.com/api";
   if (provider === "layma") return "https://api.layma.net/api/admin/shortlink/quicklink";
@@ -284,6 +285,7 @@ function defaultShortlinkApi(provider: ShortlinkProviderRow["provider"]) {
 function shortlinkProviderName(provider: ShortlinkProviderRow["provider"]) {
   if (provider === "link4m") return "Link4M";
   if (provider === "gtraffic") return "GTraffic";
+  if (provider === "ontops") return "Ontops";
   if (provider === "traffic68") return "Traffic68";
   if (provider === "nhapma") return "NhapMa";
   if (provider === "layma") return "LayMa";
@@ -2189,7 +2191,7 @@ export function AdminFreeKeysPage() {
                         <Select value={row.provider} onValueChange={(v) => {
                           const provider = v as ShortlinkProviderRow["provider"];
                           const currentApi = String(row.api_url_template ?? "").trim();
-                          const knownDefaults = [defaultShortlinkApi("link4m"), defaultShortlinkApi("gtraffic"), defaultShortlinkApi("traffic68"), defaultShortlinkApi("nhapma"), defaultShortlinkApi("layma")];
+                          const knownDefaults = [defaultShortlinkApi("link4m"), defaultShortlinkApi("gtraffic"), defaultShortlinkApi("ontops"), defaultShortlinkApi("traffic68"), defaultShortlinkApi("nhapma"), defaultShortlinkApi("layma")];
                           updateProviderDraft(row.id, {
                             provider,
                             name: row.name || shortlinkProviderName(provider),
@@ -2200,6 +2202,7 @@ export function AdminFreeKeysPage() {
                           <SelectContent>
                             <SelectItem value="link4m">Link4M</SelectItem>
                             <SelectItem value="gtraffic">GTraffic</SelectItem>
+                            <SelectItem value="ontops">Ontops</SelectItem>
                             <SelectItem value="traffic68">Traffic68</SelectItem>
                             <SelectItem value="nhapma">NhapMa</SelectItem>
                             <SelectItem value="layma">LayMa</SelectItem>

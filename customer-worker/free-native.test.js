@@ -39,6 +39,7 @@ function installFreeDbMock({ requiresDoubleGate = false, providerKind = "link4m"
     session: null,
     gate: null,
     shortlinkTargets: [],
+    shortlinkRequests: [],
     edgeFunctionCalls: [],
     restCalls: [],
   };
@@ -89,6 +90,10 @@ function installFreeDbMock({ requiresDoubleGate = false, providerKind = "link4m"
     if (url.hostname === "shortener.test") {
       const target = String(url.searchParams.get("url") || "");
       state.shortlinkTargets.push(target);
+      state.shortlinkRequests.push(url.toString());
+      if (providerKind === "ontops") {
+        return jsonResponse({ data: { short_link: `https://ontops.test/opaque-${state.shortlinkTargets.length}` } });
+      }
       return jsonResponse({ shortenedUrl: `https://link4m.test/opaque-${state.shortlinkTargets.length}` });
     }
 
@@ -275,6 +280,38 @@ describe("Cloudflare-native Free Key hot path", () => {
     assert.equal(JSON.stringify(pass1).includes("gt_"), false);
     assert.equal(state.shortlinkTargets.length, 2);
     assert.match(new URL(state.shortlinkTargets[1]).searchParams.get("t"), /^gt_/);
+  });
+
+
+  it("creates Ontops links server-side with apikey + encoded gate url", async () => {
+    const state = installFreeDbMock({ providerKind: "ontops" });
+    const headers = {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": "203.0.113.55",
+      "User-Agent": "Sunny-Free-Native-Test",
+      "x-fp": "test-fingerprint-ontops",
+    };
+
+    const response = await worker.fetch(new Request("https://mityangho.id.vn/api/free-start", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        key_type_code: "D1",
+        app_code: "free-fire",
+        fingerprint: "test-fingerprint-ontops",
+        link_channel: "primary",
+      }),
+    }), env());
+    const result = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(result.ok, true);
+    assert.equal(result.outbound_url, "https://ontops.test/opaque-1");
+    assert.equal(state.shortlinkRequests.length, 1);
+    const apiRequest = new URL(state.shortlinkRequests[0]);
+    assert.equal(apiRequest.searchParams.get("apikey"), "test-provider-token");
+    assert.match(apiRequest.searchParams.get("url") || "", /^https:\/\/mityangho\.id\.vn\/free\/gate\?/);
+    assert.equal(result.outbound_url.includes("gt_"), false);
   });
 
   it("fails closed when a provider embeds the gate destination in outbound_url", async () => {

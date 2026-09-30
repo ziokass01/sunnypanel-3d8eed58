@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { assertAdmin } from "../_shared/admin.ts";
 import { buildCorsHeaders, handleOptions } from "../_shared/cors.ts";
 
-const PROVIDERS = new Set(["custom", "link4m", "gtraffic", "traffic68", "nhapma", "layma", "none"]);
+const PROVIDERS = new Set(["custom", "link4m", "gtraffic", "ontops", "traffic68", "nhapma", "layma", "none"]);
 const PASS_SCOPES = new Set(["both", "pass1", "pass2"]);
 const MODES = new Set(["round_robin", "random", "priority_failover"]);
 
@@ -17,6 +17,7 @@ function isUuid(value: unknown) {
 function providerName(provider: string) {
   if (provider === "link4m") return "Link4M";
   if (provider === "gtraffic") return "GTraffic";
+  if (provider === "ontops") return "Ontops";
   if (provider === "traffic68") return "Traffic68";
   if (provider === "nhapma") return "NhapMa";
   if (provider === "layma") return "LayMa";
@@ -27,6 +28,7 @@ function providerName(provider: string) {
 function defaultApiFor(provider: string) {
   if (provider === "link4m") return "https://link4m.co/api-shorten/v2";
   if (provider === "gtraffic") return "https://manager.gtraffic.io/api/cong-khai/tao-lien-ket";
+  if (provider === "ontops") return "https://api-management.ontops.link/api/public/create-short-link";
   if (provider === "traffic68") return "https://traffic68.com/api/quicklink/st";
   if (provider === "nhapma") return "https://service.nhapma.com/api";
   if (provider === "layma") return "https://api.layma.net/api/admin/shortlink/quicklink";
