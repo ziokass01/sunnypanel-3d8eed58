@@ -1,3 +1,4 @@
+import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -367,13 +368,14 @@ export function FreeGatePage() {
   }, [configReady, gateAntiBypassEnabled, pass, effectiveSessionId, outToken, gateTokenFromQuery]);
 
   return (
-    <div className="min-h-svh bg-background">
-      <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+    <div className="sunny-public min-h-svh bg-background">
+        <PublicHeader />
+      <main className="sunny-flow-main mx-auto flex max-w-3xl items-start p-4">
         <Card className="w-full overflow-hidden border shadow-sm">
           <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-1">
-                <CardTitle className="text-xl">{pass === 2 ? "Đang xác thực key 🔑 VIP💰" : "Đang xác thực key 🔑"}</CardTitle>
+                <CardTitle className="text-xl">{pass === 2 ? "Xác thực key VIP" : "Xác thực key"}</CardTitle>
                 <CardDescription>Hệ thống đang kiểm tra bước vượt link trước khi chuyển sang bước nhận key.</CardDescription>
               </div>
               <Badge variant="outline" className="rounded-full">Bước 3 / 4</Badge>
@@ -421,6 +423,7 @@ export function FreeGatePage() {
                 Quay lại Get Key
               </Button>
             ) : null}
+          <CommunityBanner />
           </CardContent>
         </Card>
       </main>

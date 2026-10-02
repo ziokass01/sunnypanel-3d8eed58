@@ -33,10 +33,10 @@ export function PublicInfo({
 
   return (
     <div className={cn("space-y-3", className)}>
-      {hasNote ? <div className="rounded-md border p-3 text-sm whitespace-pre-wrap">{note}</div> : null}
+      {hasNote ? <div className="rounded-xl border bg-slate-50 p-4 text-sm leading-7 whitespace-pre-wrap break-words">{note}</div> : null}
 
       {hasLinks ? (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {list.map((l, idx) => {
             const Icon = pickIcon(l.icon, l.label);
             return (

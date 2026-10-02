@@ -19,7 +19,7 @@ const STEP_LABELS = [
 
 export function FreeFlowSteps({ current, compact = false }: FreeFlowStepsProps) {
   return (
-    <div className={cn("grid gap-2", compact ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-4")}>
+    <div className={cn("sunny-flow-steps grid gap-2", compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4")}>
       {STEP_LABELS.map((label, idx) => {
         const step = (idx + 1) as FreeFlowStep;
         const done = step < current;
@@ -28,16 +28,16 @@ export function FreeFlowSteps({ current, compact = false }: FreeFlowStepsProps) 
           <div
             key={label}
             className={cn(
-              "relative overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all",
+              "relative min-w-0 overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all",
               done && "border-primary/40 bg-primary/[0.07]",
               active && "border-primary bg-primary/[0.10] shadow-sm ring-1 ring-primary/10",
               !done && !active && "bg-muted/25 text-muted-foreground",
             )}
           >
             <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/70 via-primary/40 to-transparent" />
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Bước {step}</span>
-              <Badge variant={done || active ? "default" : "outline"} className="min-w-[72px] justify-center rounded-full px-2.5 py-0.5 text-[10px] leading-none text-center">
+              <Badge variant={done || active ? "default" : "outline"} className="shrink-0 justify-center rounded-full px-2.5 py-0.5 text-[10px] leading-none text-center">
                 {done ? "Xong" : active ? "Đang xử lý" : "Chờ"}
               </Badge>
             </div>
@@ -230,7 +230,7 @@ export function FreeDeviceHistoryCard({
           <Badge variant="outline" className="rounded-full px-3 py-1 text-center leading-none min-w-[74px]">Hôm nay</Badge>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên key</div>
             <div className="mt-1 text-sm font-semibold text-foreground">{keyLabel}</div>
@@ -239,8 +239,8 @@ export function FreeDeviceHistoryCard({
           <div className="rounded-2xl border bg-background/80 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Còn lại hôm nay</div>
             <div className="mt-1 text-2xl font-semibold text-foreground">{quotaUnlimited ? "∞" : (remainingTodayServer ?? "-")}</div>
-            <div className="text-xs text-muted-foreground">
-              quota: thiết bị {selectedQuotaFingerprint ?? "-"} / IP {selectedQuotaIp ?? "-"}
+            <div className="text-xs leading-5 text-muted-foreground">
+              Giới hạn: thiết bị {selectedQuotaFingerprint ?? "-"} / IP {selectedQuotaIp ?? "-"}
             </div>
             {remainingTodayEstimated ? <div className="text-xs text-muted-foreground">theo lịch sử thiết bị; server vẫn kiểm tra quota thật</div> : null}
             <div className="text-xs text-muted-foreground">reset lúc 00:00 (GMT+7)</div>

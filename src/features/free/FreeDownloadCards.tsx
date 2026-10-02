@@ -20,7 +20,7 @@ function DownloadCard({
   onClick: () => void;
 }) {
   return (
-    <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/20 p-4 shadow-sm">
+    <div className="flex h-full flex-col gap-3 rounded-2xl border bg-gradient-to-br from-background to-muted/20 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-background/90">
@@ -30,13 +30,14 @@ function DownloadCard({
               <FileText className="h-5 w-5 text-primary" />
             )}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-foreground">{title}</div>
-            <div className="mt-1 text-xs leading-5 text-muted-foreground">{description}</div>
+
           </div>
         </div>
       </div>
-      <Button type="button" className="h-11 w-full rounded-2xl sm:w-auto" onClick={onClick}>
+      <div className="download-notes space-y-2 border-t pt-3 text-sm leading-6 text-slate-600">{description.split(/\n+/).filter(Boolean).map((line, i) => <p key={i} className="whitespace-pre-wrap break-words">{line}</p>)}</div>
+      <Button type="button" className="mt-auto h-11 w-full rounded-xl" onClick={onClick}>
         <Download className="mr-2 h-4 w-4" /> {buttonLabel}
       </Button>
     </div>
@@ -87,7 +88,9 @@ export function FreeDownloadCards({ cfg }: { cfg: FreeConfig | null }) {
   if (!cards.length) return null;
 
   return (
-    <div className="space-y-3">
+    <section id="downloads" className="scroll-mt-24 space-y-4">
+      <div><h2 className="text-lg font-semibold">Tải ứng dụng</h2><p className="mt-1 text-sm text-muted-foreground">Chọn đúng bản và đọc ghi chú trước khi tải.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
       {cards.map((card, index) => (
         <DownloadCard
           key={`${card.url || "card"}-${index}`}
@@ -98,6 +101,7 @@ export function FreeDownloadCards({ cfg }: { cfg: FreeConfig | null }) {
           onClick={() => openSafe(card.url as string)}
         />
       ))}
-    </div>
+      </div>
+    </section>
   );
 }

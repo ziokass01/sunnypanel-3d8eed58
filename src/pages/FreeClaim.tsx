@@ -1,3 +1,4 @@
+import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -540,15 +541,16 @@ export function FreeClaimPage() {
   }, [revealed, returnSeconds]);
 
   return (
-    <div className="min-h-svh bg-background">
-      <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
+    <div className="sunny-public min-h-svh bg-background">
+        <PublicHeader />
+      <main className="sunny-flow-main mx-auto flex max-w-3xl items-start p-4">
         <Card className="w-full overflow-hidden border shadow-sm">
           <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
                 <div>
-                  <CardTitle className="text-xl">Nhận Key 🔑</CardTitle>
+                  <CardTitle className="text-xl">Nhận key</CardTitle>
                   <div className="mt-1 text-sm text-muted-foreground">Bước cuối cùng. Khi phiên hợp lệ, key sẽ hiện ngay ở bên dưới.</div>
                 </div>
               </div>
@@ -681,6 +683,7 @@ export function FreeClaimPage() {
                 </div>
               </div>
             )}
+          <CommunityBanner />
           </CardContent>
         </Card>
       </main>

@@ -1,3 +1,4 @@
+import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle } from "lucide-react";
@@ -631,42 +632,32 @@ export function FreeLandingPage() {
 
   return (
     <>
-      <div className="min-h-svh bg-background">
-        <main className="mx-auto flex min-h-svh max-w-xl items-center p-4">
-          <Card className="w-full">
+      <div className="sunny-public min-h-svh bg-background">
+        <PublicHeader />
+        <main className="sunny-landing-main mx-auto flex max-w-6xl items-start p-4">
+          <Card className="sunny-key-card w-full overflow-hidden">
             <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
               <div className="flex items-center gap-3">
                 <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
                 <div className="space-y-1">
-                  <CardTitle className="text-xl">Get Key 🔑</CardTitle>
+                  <CardTitle className="text-xl">Lấy key miễn phí</CardTitle>
                   <p className="text-sm text-muted-foreground">Chào mừng mọi người đến với trang web của Sunny Mod.</p>
                 </div>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Flow</div>
-                  <div className="mt-1 text-sm font-semibold">4 bước rõ ràng</div>
-                </div>
-                <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thiết bị</div>
-                  <div className="mt-1 text-sm font-semibold">Giữ đúng một phiên</div>
-                </div>
-                <div className="rounded-2xl border bg-background/80 px-3 py-2">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Trạng thái</div>
-                  <div className="mt-1 text-sm font-semibold">Tự chuyển bước</div>
-                </div>
-              </div>
+
             </CardHeader>
 
-            <CardContent className="space-y-4">
+            <div className="px-4 pt-4 sm:px-7"><CommunityBanner compact /></div>
+            <CardContent className="sunny-key-content space-y-4">
+              <div className="sunny-key-primary space-y-4">
               <FreeFlowSteps current={1} />
 
               <FreeNotice notice={cfg?.free_notice} />
 
-              <div className="rounded-2xl border bg-gradient-to-br from-muted/50 to-background p-4 text-sm text-muted-foreground shadow-sm">
-                <div className="font-semibold text-foreground">Cách dùng nhanh</div>
-                <div className="mt-1 leading-6">Chọn loại key phù hợp, bấm <span className="font-medium text-foreground">Get Key</span>, vượt Link4M rồi hệ thống sẽ tự dẫn bạn qua bước xác thực và nhận key.</div>
-              </div>
+              <details className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
+                <summary className="cursor-pointer font-semibold text-foreground">Hướng dẫn lấy key</summary>
+                <p className="mt-2 leading-6">Chọn loại key, bấm <span className="font-medium text-foreground">Get Key</span> và hoàn tất trang vượt link. Giữ nguyên trình duyệt để xác thực và nhận key.</p>
+              </details>
 
               {err && !isPendingSessionError ? (
                 <div className="space-y-2">
@@ -683,20 +674,6 @@ export function FreeLandingPage() {
                 </div>
               ) : null}
 
-              <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
-
-
-              <FreeDeviceHistoryCard
-                history={deviceHistory}
-                remainingTodayServer={selectedRemainingToday.remaining}
-                remainingTodayEstimated={selectedRemainingToday.estimated}
-                quotaUnlimited={selectedRemainingToday.unlimited}
-                lastKeyExpiresAt={lastFreeKey?.expires_at ?? null}
-                selectedKeyLabel={selectedKeySummaryMeta.label}
-                successToday={selectedSuccessToday}
-                selectedQuotaFingerprint={selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0}
-                selectedQuotaIp={selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0}
-              />
 
               <div className="space-y-2 rounded-2xl border bg-background/70 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -731,7 +708,7 @@ export function FreeLandingPage() {
                 disabled={!canGet}
                 onClick={() => void startKey("primary")}
               >
-                {loading ? "Đang chuyển hướng…" : "Get Key 🔑"}
+                {loading ? "Đang chuyển hướng…" : "Get Key"}
               </Button>
 
               <div className="flex justify-center">
@@ -746,6 +723,17 @@ export function FreeLandingPage() {
                 </Button>
               </div>
 
+              <FreeDeviceHistoryCard
+                history={deviceHistory}
+                remainingTodayServer={selectedRemainingToday.remaining}
+                remainingTodayEstimated={selectedRemainingToday.estimated}
+                quotaUnlimited={selectedRemainingToday.unlimited}
+                lastKeyExpiresAt={lastFreeKey?.expires_at ?? null}
+                selectedKeyLabel={selectedKeySummaryMeta.label}
+                successToday={selectedSuccessToday}
+                selectedQuotaFingerprint={selectedQuotaMeta?.free_daily_limit_per_fingerprint ?? cfg?.free_daily_limit_per_fingerprint ?? 0}
+                selectedQuotaIp={selectedQuotaMeta?.free_daily_limit_per_ip ?? cfg?.free_daily_limit_per_ip ?? 0}
+              />
               {lastFreeKey ? (
                 <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-background to-muted/30 p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
@@ -798,7 +786,13 @@ export function FreeLandingPage() {
                   <div className="text-[11px] text-muted-foreground">IP hash: {shortHash(lastFreeKey.ip_hash, 12)}</div>
                 </div>
               ) : null}
-              <FreeDownloadCards cfg={cfg} />
+              </div>
+              <aside className="sunny-key-aside space-y-5">
+                <section className="rounded-2xl border bg-white p-4"><h2 className="mb-3 text-base font-semibold">Thông tin từ SunnyMod</h2>
+              <PublicInfo note={cfg?.free_public_note} links={cfg?.free_public_links} />
+                </section>
+                <FreeDownloadCards cfg={cfg} />
+              </aside>
 
             </CardContent>
           </Card>

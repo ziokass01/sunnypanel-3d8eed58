@@ -1,9 +1,13 @@
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
-const ZALO_URL = "https://zalo.me/84373752504";
-const TELEGRAM_URL = "https://t.me/SunnyModCommunity";
-const TELEGRAM_NOTICE = "Tham gia vào nhóm để biết thêm thông tin mới nhất";
+import { useSupport } from "@/features/support/config";
+import { SupportLinks } from "@/features/support/SupportViews";
 
 type Pos = { x: number; y: number };
 
@@ -17,14 +21,17 @@ function clampPosition(x: number, y: number) {
 }
 
 export default function ZaloGetKeyBubble() {
+  const { config } = useSupport();
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
-  const [showNotice, setShowNotice] = useState(true);
+  const [showNotice, setShowNotice] = useState(() => typeof window !== "undefined" && window.innerWidth >= 640);
   const [dragging, setDragging] = useState(false);
-  const [pos, setPos] = useState<Pos>(() => clampPosition(
-    (typeof window !== "undefined" ? window.innerWidth : 360) - 82,
-    (typeof window !== "undefined" ? window.innerHeight : 720) - 118,
-  ));
+  const [pos, setPos] = useState<Pos>(() =>
+    clampPosition(
+      (typeof window !== "undefined" ? window.innerWidth : 360) - 82,
+      (typeof window !== "undefined" ? window.innerHeight : 720) - 118,
+    ),
+  );
 
   const drag = useRef({
     active: false,
@@ -42,7 +49,10 @@ export default function ZaloGetKeyBubble() {
   }, []);
 
   useEffect(() => {
-    const onResize = () => setPos((current) => clampPosition(current.x, current.y));
+    const onResize = () => {
+      if (window.innerWidth < 100 || window.innerHeight < 100) return;
+      setPos((current) => clampPosition(current.x, current.y));
+    };
     const onPointerMove = (event: PointerEvent) => {
       if (!drag.current.active) return;
       const dx = event.clientX - drag.current.startX;
@@ -85,10 +95,26 @@ export default function ZaloGetKeyBubble() {
     setShowNotice(false);
   };
 
-  if (!mounted || typeof document === "undefined") return null;
+  if (
+    !mounted ||
+    !config.bubble_enabled ||
+    !config.links.some((l) => l.enabled) ||
+    typeof document === "undefined"
+  )
+    return null;
 
   const alignRight = pos.x > window.innerWidth / 2;
-  const popupSideStyle = alignRight ? { right: 0 } : { left: 0 };
+  const popupWidth = Math.min(320, window.innerWidth - 24);
+  const positionPopup = (width: number) => ({
+    left:
+      Math.max(
+        12,
+        Math.min(
+          alignRight ? pos.x + 64 - width : pos.x,
+          window.innerWidth - width - 12,
+        ),
+      ) - pos.x,
+  });
 
   return createPortal(
     <div
@@ -96,20 +122,21 @@ export default function ZaloGetKeyBubble() {
         position: "fixed",
         left: pos.x,
         top: pos.y,
-        zIndex: 2147483647,
+        zIndex: 40,
         width: 64,
         height: 64,
         userSelect: "none",
         WebkitUserSelect: "none",
       }}
     >
-      {showNotice && !open ? (
+      {showNotice && config.notice && !open ? (
         <div
           role="status"
           style={{
             position: "absolute",
-            bottom: 76,
-            width: 250,
+            bottom: pos.y > window.innerHeight / 2 ? 76 : undefined,
+            top: pos.y > window.innerHeight / 2 ? undefined : 76,
+            width: Math.min(250, window.innerWidth - 24),
             padding: "11px 13px",
             borderRadius: 16,
             color: "#f8fafc",
@@ -119,10 +146,10 @@ export default function ZaloGetKeyBubble() {
             fontSize: 13,
             fontWeight: 650,
             lineHeight: 1.35,
-            ...popupSideStyle,
+            ...positionPopup(Math.min(250, window.innerWidth - 24)),
           }}
         >
-          {TELEGRAM_NOTICE}
+          {config.notice}
           <span
             style={{
               position: "absolute",
@@ -142,105 +169,43 @@ export default function ZaloGetKeyBubble() {
         <div
           style={{
             position: "absolute",
-            bottom: 76,
-            width: 286,
+            bottom: pos.y > window.innerHeight / 2 ? 76 : undefined,
+            top: pos.y > window.innerHeight / 2 ? undefined : 76,
+            width: popupWidth,
+            maxHeight: Math.max(
+              80,
+              pos.y > window.innerHeight / 2
+                ? pos.y - 88
+                : window.innerHeight - pos.y - 88,
+            ),
+            overflowY: "auto",
             padding: 12,
             borderRadius: 20,
             background: "rgba(255, 255, 255, 0.98)",
             border: "1px solid rgba(148, 163, 184, 0.35)",
             boxShadow: "0 20px 48px rgba(15, 23, 42, 0.24)",
             backdropFilter: "blur(14px)",
-            ...popupSideStyle,
+            ...positionPopup(popupWidth),
           }}
         >
-          <div style={{ padding: "2px 4px 10px", color: "#0f172a", fontSize: 14, fontWeight: 800 }}>
-            Kết nối với SunnyMod
+          <div
+            style={{
+              padding: "2px 4px 10px",
+              color: "#0f172a",
+              fontSize: 14,
+              fontWeight: 800,
+            }}
+          >
+            {config.title}
           </div>
 
-          <a
-            href={ZALO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 11,
-              padding: 10,
-              borderRadius: 15,
-              color: "#0f172a",
-              textDecoration: "none",
-              background: "#eff6ff",
-              border: "1px solid #dbeafe",
-            }}
-          >
-            <span
-              style={{
-                display: "grid",
-                placeItems: "center",
-                width: 43,
-                height: 43,
-                flexShrink: 0,
-                borderRadius: "50%",
-                color: "white",
-                background: "linear-gradient(145deg, #60a5fa, #2563eb)",
-                fontSize: 13,
-                fontWeight: 850,
-                boxShadow: "0 7px 18px rgba(37, 99, 235, 0.30)",
-              }}
-            >
-              Zalo
-            </span>
-            <span style={{ lineHeight: 1.25 }}>
-              <strong style={{ display: "block", fontSize: 14 }}>Liên hệ Admin</strong>
-              <span style={{ color: "#64748b", fontSize: 12 }}>Hỗ trợ trực tiếp qua Zalo</span>
-            </span>
-          </a>
-
-          <a
-            href={TELEGRAM_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 11,
-              marginTop: 8,
-              padding: 10,
-              borderRadius: 15,
-              color: "#0f172a",
-              textDecoration: "none",
-              background: "#f0f9ff",
-              border: "1px solid #bae6fd",
-            }}
-          >
-            <span
-              style={{
-                display: "grid",
-                placeItems: "center",
-                width: 43,
-                height: 43,
-                flexShrink: 0,
-                borderRadius: "50%",
-                color: "white",
-                background: "linear-gradient(145deg, #38bdf8, #0284c7)",
-                boxShadow: "0 7px 18px rgba(2, 132, 199, 0.30)",
-              }}
-            >
-              <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M21.4 3.6 18.2 19c-.2 1.1-.9 1.4-1.8.9l-4.9-3.6-2.4 2.3c-.3.3-.5.5-1 .5l.4-5 9.1-8.2c.4-.4-.1-.6-.6-.2L5.8 12.8 1 11.3c-1-.3-1.1-1 .2-1.5L20 2.6c.9-.3 1.6.2 1.4 1Z" fill="currentColor" />
-              </svg>
-            </span>
-            <span style={{ lineHeight: 1.25 }}>
-              <strong style={{ display: "block", fontSize: 14 }}>Telegram</strong>
-              <span style={{ color: "#64748b", fontSize: 12 }}>{TELEGRAM_NOTICE}</span>
-            </span>
-          </a>
+          <SupportLinks config={config} />
         </div>
       ) : null}
 
       <button
         type="button"
-        aria-label={open ? "Đóng liên hệ" : "Mở Zalo và Telegram"}
+        aria-label={open ? "Đóng liên hệ" : "Mở liên hệ SunnyMod"}
         aria-expanded={open}
         onPointerDown={startDrag}
         onClick={toggleMenu}
@@ -262,8 +227,18 @@ export default function ZaloGetKeyBubble() {
           touchAction: "none",
         }}
       >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M5 18.5 3.8 21l3.4-1.2c1.4.8 3 1.2 4.8 1.2 5 0 9-3.6 9-8s-4-8-9-8-9 3.6-9 8c0 2.1.8 4 2 5.5Z" fill="currentColor" opacity=".98" />
+        <svg
+          width="28"
+          height="28"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M5 18.5 3.8 21l3.4-1.2c1.4.8 3 1.2 4.8 1.2 5 0 9-3.6 9-8s-4-8-9-8-9 3.6-9 8c0 2.1.8 4 2 5.5Z"
+            fill="currentColor"
+            opacity=".98"
+          />
           <circle cx="8" cy="13" r="1.1" fill="#2563eb" />
           <circle cx="12" cy="13" r="1.1" fill="#2563eb" />
           <circle cx="16" cy="13" r="1.1" fill="#2563eb" />

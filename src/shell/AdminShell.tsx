@@ -14,6 +14,7 @@ import {
   ChevronRight,
   AppWindow,
   Bot,
+  Users,
 } from "lucide-react";
 
 import {
@@ -83,6 +84,7 @@ export function AdminShell() {
     { label: "Reset Logs", to: "/settings/reset-logs", icon: History, show: true, adminOnly: true },
     { label: "Server app", to: "/admin/apps", icon: AppWindow, show: true, adminOnly: true },
     { label: "SunnyMod AI", to: "/admin/ai", icon: Bot, show: true, adminOnly: true },
+    { label: "Support Member", to: "/admin/support-member", icon: Users, show: true, adminOnly: true },
   ] as const;
 
   const activeLabel = items.find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))?.label ?? "Admin Console";
@@ -108,7 +110,7 @@ export function AdminShell() {
           <SidebarMenu>
             {items.filter((item) => item.show).map((item) => {
               const Icon = item.icon;
-              const isLocked = Boolean(item.adminOnly && !isAdmin);
+              const isLocked = Boolean("adminOnly" in item && item.adminOnly && !isAdmin);
               const isActive = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
 
               return (

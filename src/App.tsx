@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -48,6 +49,9 @@ import { FakeLagPortalPage } from "@/pages/FakeLagPortal";
 import { AdminFakeLagLicensesPage } from "@/pages/AdminFakeLagLicenses";
 import { AdminSunnyModAIPage } from "@/pages/AdminSunnyModAI";
 import { SunnyModCodingAIPage } from "@/pages/SunnyModCodingAI";
+const AdminSupportMemberPage = lazy(() => import("@/pages/AdminSupportMember").then(module => ({ default: module.AdminSupportMemberPage })));
+import "@/features/support/public.css";
+
 function ControlHostEntry() {
   const { user, loading } = useAuth();
   const isAppHost = isAppHostName();
@@ -132,6 +136,7 @@ const App = () => {
                   <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
                   <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
                   <Route path="/admin/ai" element={<AdminRoute><AdminSunnyModAIPage /></AdminRoute>} />
+                  <Route path="/admin/support-member" element={<AdminRoute><Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Đang tải Support Member…</div>}><AdminSupportMemberPage /></Suspense></AdminRoute>} />
                   <Route path="/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
                   <Route
                     path="/admin/apps/:appCode"

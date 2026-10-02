@@ -35,7 +35,7 @@ function getNoticeKey(notice: FreeNoticeConfig) {
 
 function NoticeBody({ content }: { content: string }) {
   return (
-    <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+    <div className="space-y-2 break-words text-sm leading-7 text-slate-700">
       {content.split(/\n+/).filter(Boolean).map((line, index) => (
         <p key={`${index}-${line.slice(0, 24)}`}>{line}</p>
       ))}
@@ -109,17 +109,17 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
           onPointerDownOutside={(event) => {
             if (!normalized.closable) event.preventDefault();
           }}
-          className="w-[calc(100vw-2.5rem)] max-w-[24rem] overflow-hidden rounded-[28px] border border-primary/20 bg-[#101010]/95 p-0 text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:max-w-md"
+          className="w-[calc(100vw-2.5rem)] max-w-[24rem] max-h-[85svh] overflow-y-auto rounded-[28px] border border-primary/20 bg-white p-0 text-foreground shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:max-w-md"
         >
           <div className="bg-gradient-to-r from-primary/18 via-primary/8 to-transparent px-5 py-4">
             <DialogHeader className="space-y-0">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary shadow-sm">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-amber-700 shadow-sm">
                     <AlertTriangle className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-primary/80">Thông báo</div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-amber-700">Thông báo</div>
                     <DialogTitle className="mt-1 text-left text-base font-semibold sm:text-lg">
                       {normalized.title}
                     </DialogTitle>
@@ -173,7 +173,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
   }
 
   return (
-    <div className="mx-auto max-w-[28rem] rounded-[26px] border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background p-4 shadow-[0_20px_60px_rgba(0,0,0,0.24)]">
+    <div className="w-full rounded-[26px] border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background p-4 shadow-sm">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 rounded-2xl border border-primary/25 bg-primary/10 p-2.5 text-primary">
           <AlertTriangle className="h-4 w-4" />
@@ -182,7 +182,7 @@ export function FreeNotice({ notice }: { notice?: FreeNoticeConfig | null }) {
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-primary/80">Thông báo</div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-amber-700">Thông báo</div>
               <div className="mt-1 text-sm font-semibold text-foreground sm:text-base">{normalized.title}</div>
             </div>
 
