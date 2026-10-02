@@ -1,7 +1,14 @@
+import { PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { postFunction } from "@/lib/functions";
 import { TurnstileWidget } from "@/components/turnstile/TurnstileWidget";
@@ -51,11 +58,18 @@ type ResetKeyPayload = {
 const PUBLIC_KEY_RE = /^[A-Z0-9]{2,16}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i;
 
 function normalizePublicKey(value: string) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
 }
 
 function keyPrefix(value?: string | null) {
-  return String(value || "").split("-")[0]?.toUpperCase() || "";
+  return (
+    String(value || "")
+      .split("-")[0]
+      ?.toUpperCase() || ""
+  );
 }
 
 function formatDateTime(value?: string | null) {
@@ -126,18 +140,24 @@ function keyKindLabel(result: ResetKeyPayload) {
   if (kind === "FREE") return "Key free";
   if (kind === "PAID") return "Key mua / admin";
   if (kind.includes("FAKE") || prefix === "FAKELAG") return "Fake Lag";
-  if (kind.includes("FIND") || prefix === "FD" || prefix === "FND") return "Find Dumps";
+  if (kind.includes("FIND") || prefix === "FD" || prefix === "FND")
+    return "Find Dumps";
   if (prefix === "SUNNY") return "Free Fire / SUNNY";
   return kind || prefix || "Không rõ";
 }
 
 function describeResultMessage(result: ResetKeyPayload | null) {
   const msg = String(result?.msg ?? "");
-  if (msg === "TURNSTILE_REQUIRED") return "Vui lòng xác minh Turnstile trước khi bấm Reset. Check key không cần Turnstile.";
-  if (msg === "TURNSTILE_FAILED") return "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng xác minh lại rồi thử tiếp.";
-  if (msg === "RATE_LIMIT") return "Bạn thao tác quá nhanh trên cùng IP hoặc cùng key. Vui lòng chờ một lúc rồi thử lại.";
-  if (msg === "KEY_UNAVAILABLE") return "Key không tồn tại, đã bị xóa, bị chặn, hết hạn hoặc không thuộc hệ thống reset public.";
-  if (msg === "KEY_RESET_DISABLED") return "Key này đã bị admin khóa reset, không thể reset từ trang public.";
+  if (msg === "TURNSTILE_REQUIRED")
+    return "Vui lòng xác minh Turnstile trước khi bấm Reset. Check key không cần Turnstile.";
+  if (msg === "TURNSTILE_FAILED")
+    return "Xác minh Turnstile không hợp lệ hoặc đã hết hạn. Vui lòng xác minh lại rồi thử tiếp.";
+  if (msg === "RATE_LIMIT")
+    return "Bạn thao tác quá nhanh trên cùng IP hoặc cùng key. Vui lòng chờ một lúc rồi thử lại.";
+  if (msg === "KEY_UNAVAILABLE")
+    return "Key không tồn tại, đã bị xóa, bị chặn, hết hạn hoặc không thuộc hệ thống reset public.";
+  if (msg === "KEY_RESET_DISABLED")
+    return "Key này đã bị admin khóa reset, không thể reset từ trang public.";
   if (msg === "RESET_OK") return "Reset key thành công.";
   if (msg === "OK") return "Đã lấy thông tin mới nhất từ hệ thống.";
   return msg || "Có lỗi xảy ra.";
@@ -145,13 +165,19 @@ function describeResultMessage(result: ResetKeyPayload | null) {
 
 export function ResetKeyPage() {
   const [key, setKey] = useState("");
-  const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(null);
+  const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(
+    null,
+  );
   const [result, setResult] = useState<ResetKeyPayload | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileNonce, setTurnstileNonce] = useState(0);
-  const [lastCompletedAction, setLastCompletedAction] = useState<"check" | "reset" | null>(null);
-  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
+  const [lastCompletedAction, setLastCompletedAction] = useState<
+    "check" | "reset" | null
+  >(null);
+  const turnstileSiteKey = (
+    import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined
+  )?.trim();
 
   const normalizedKey = useMemo(() => normalizePublicKey(key), [key]);
 
@@ -172,17 +198,17 @@ export function ResetKeyPage() {
   }, [result]);
 
   const licenseResetLocked = Boolean(
-    result?.ok
-      && result?.key
-      && normalizePublicKey(result.key) === normalizedKey
-      && result.public_reset_disabled,
+    result?.ok &&
+    result?.key &&
+    normalizePublicKey(result.key) === normalizedKey &&
+    result.public_reset_disabled,
   );
 
   const nextResetHardExpire = Boolean(
-    result?.ok
-      && result?.key
-      && normalizePublicKey(result.key) === normalizedKey
-      && result.next_reset_will_expire,
+    result?.ok &&
+    result?.key &&
+    normalizePublicKey(result.key) === normalizedKey &&
+    result.next_reset_will_expire,
   );
 
   const toUiError = useCallback((e: any): ResetKeyPayload => {
@@ -222,7 +248,12 @@ export function ResetKeyPage() {
       // If an older deployed backend answers only OK/partial payload, immediately re-check the key
       // so the page does not show the confusing "Không thể lấy thông tin key / OK" state.
       let finalRes = res;
-      if (action === "reset" && (!res?.key || !res?.status || String(res?.msg ?? "").toUpperCase() === "OK")) {
+      if (
+        action === "reset" &&
+        (!res?.key ||
+          !res?.status ||
+          String(res?.msg ?? "").toUpperCase() === "OK")
+      ) {
         try {
           const fresh = await postFunction<ResetKeyPayload>("/reset-key", {
             action: "check",
@@ -256,204 +287,295 @@ export function ResetKeyPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Reset Key</h1>
-        <p className="text-sm text-muted-foreground">
-          Kiểm tra và reset key Free Fire, Find Dumps, Fake Lag. Hệ thống nhận dạng theo chữ ký key: SUNNY, FAKELAG, FD/FND.
-        </p>
-      </div>
+    <div className="sunny-public min-h-svh">
+      <PublicHeader />
+      <main className="sunny-reset mx-auto w-full max-w-3xl space-y-5 p-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Reset Key</h1>
+          <p className="text-sm text-muted-foreground">
+            Kiểm tra và reset key Free Fire, Find Dumps, Fake Lag. Nhập key của
+            bạn để xem trạng thái hoặc reset.
+          </p>
+        </div>
 
-      <Card className="rounded-2xl">
-        <CardHeader>
-          <CardTitle>Dán key để kiểm tra hoặc reset</CardTitle>
-          <CardDescription>
-            Check key dùng để xem trạng thái. Reset sẽ xóa lượt dùng/thiết bị theo đúng loại key và chính sách server.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Input
-            value={key}
-            onChange={(e) => setKey(e.target.value.toUpperCase())}
-            placeholder="SUNNY-XXXX-XXXX-XXXX hoặc FAKELAG-XXXX-XXXX-XXXX"
-            className="font-mono"
-          />
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="soft"
-              disabled={!normalizedKey || loadingAction !== null}
-              onClick={() => void runAction("check")}
-            >
-              {loadingAction === "check" ? "Đang kiểm tra..." : "Check key"}
-            </Button>
-
-            <Button
-              disabled={!normalizedKey || loadingAction !== null || licenseResetLocked}
-              onClick={() => setConfirmOpen(true)}
-            >
-              {loadingAction === "reset" ? "Đang reset..." : "Reset key"}
-            </Button>
-          </div>
-
-          {result?.reset_enabled === false ? (
-            <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-              {result.disabled_message || "Tính năng reset đang tạm đóng."}
-            </div>
-          ) : null}
-
-          {licenseResetLocked ? (
-            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-              Key này đang bị admin khóa reset. Bạn vẫn có thể Check key, nhưng không thể Reset key từ trang public.
-            </div>
-          ) : null}
-
-          {nextResetHardExpire ? (
-            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700">
-              Cảnh báo: nếu reset lần này, key sẽ bị hủy về trạng thái hết hạn theo luật giới hạn số lần reset hiện tại.
-            </div>
-          ) : null}
-
-          <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-            Vì lý do chống dò key và chống abuse, hệ thống sẽ giới hạn tần suất kiểm tra/reset và có thể trả thông báo chung khi key không khả dụng.
-          </div>
-
-          {!turnstileSiteKey ? (
-            <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-              Turnstile chưa được cấu hình ở frontend. Check vẫn hoạt động; nếu backend bắt buộc Turnstile thì reset sẽ yêu cầu bổ sung xác minh.
-            </div>
-          ) : (
-            <>
-              <TurnstileWidget
-                key={turnstileNonce}
-                className="rounded-xl border p-3"
-                siteKey={turnstileSiteKey}
-                onTokenChange={setTurnstileToken}
-              />
-              <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-                Chỉ cần xác minh Turnstile trước khi bấm <span className="font-medium text-foreground">Reset</span>. Check key không cần Turnstile.
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {result?.ok && hasValidData && lastCompletedAction === "reset" ? (
-        <Card className="rounded-2xl border-primary/30 bg-gradient-to-br from-primary/10 via-background to-background shadow-sm">
-          <CardContent className="flex items-start gap-3 p-4">
-            <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/30 bg-primary/15 text-primary">
-              <CheckCircle2 className="h-5 w-5" />
-            </div>
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold text-foreground">Reset Key thành công</div>
-                <Badge className="rounded-full">Đã áp dụng</Badge>
-              </div>
-              <div className="text-sm text-muted-foreground">
-                Hệ thống đã cập nhật key này. Kiểm tra chi tiết bên dưới để xác nhận trạng thái mới.
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {result?.ok && hasValidData ? (
         <Card className="rounded-2xl">
-          <CardHeader className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>Trạng thái key</CardTitle>
-              <Badge variant={statusVariant(result.status)}>{statusLabel(result.status)}</Badge>
-            </div>
-            <CardDescription>{describeResultMessage(result)}</CardDescription>
+          <CardHeader>
+            <CardTitle className="text-lg">Kiểm tra và reset key</CardTitle>
+            <CardDescription>
+              Check key dùng để xem trạng thái. Reset sẽ xóa lượt dùng/thiết bị
+              theo đúng loại key và chính sách server.
+            </CardDescription>
           </CardHeader>
-
           <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <Info label="Key" value={result.key ?? normalizedKey} mono />
-              <Info label="Loại key" value={keyKindLabel(result)} />
-              <Info label="Tạo lúc" value={formatDateTime(result.created_at)} />
-              <Info label="Hết hạn" value={result.status === "not_started" ? "Chưa kích hoạt" : result.expires_at ? formatDateTime(result.expires_at) : "Không giới hạn"} />
-              <Info label="Thời gian còn lại" value={result.remaining_seconds == null ? "Không giới hạn" : formatRemaining(result.remaining_seconds)} />
-              <Info label="Thiết bị" value={`${result.device_count ?? 0}/${result.max_devices ?? 0}`} />
-              <Info label="IP" value={`${result.ip_count ?? 0}/${result.max_ips ?? 0}`} />
-              <Info label="Lượt verify" value={`${result.verify_count ?? 0}/${result.max_verify ?? 0}`} />
-              <Info label="Public reset" value={String(result.public_reset_count ?? 0)} />
-              <Info label="Admin reset" value={String(result.admin_reset_count ?? 0)} />
-              <Info label="Reset public" value={result.public_reset_disabled ? "Đã khóa bởi admin" : "Được phép"} />
-              <Info
-                label="Lần reset kế tiếp"
-                value={result.next_reset_will_expire
-                  ? "Sẽ hủy key"
-                  : typeof result.next_reset_penalty_pct === "number"
-                    ? `Trừ ${result.next_reset_penalty_pct}%`
-                    : "Theo luật hiện tại"}
-              />
+            <Input
+              value={key}
+              onChange={(e) => setKey(e.target.value.toUpperCase())}
+              placeholder="SUNNY-XXXX-XXXX-XXXX hoặc FAKELAG-XXXX-XXXX-XXXX"
+              className="h-12 font-mono text-sm"
+              aria-label="Key cần kiểm tra hoặc reset"
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                variant="default"
+                className="h-11"
+                disabled={!normalizedKey || loadingAction !== null}
+                onClick={() => void runAction("check")}
+              >
+                {loadingAction === "check"
+                  ? "Đang kiểm tra..."
+                  : "Kiểm tra key"}
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-11"
+                disabled={
+                  !normalizedKey || loadingAction !== null || licenseResetLocked
+                }
+                onClick={() => setConfirmOpen(true)}
+              >
+                {loadingAction === "reset" ? "Đang reset..." : "Reset key"}
+              </Button>
             </div>
 
-            {typeof result.penalty_pct === "number" && result.penalty_pct > 0 ? (
-              <div className="rounded-xl border p-3 text-sm">
-                Hệ thống vừa áp dụng mức trừ <span className="font-semibold">{result.penalty_pct}%</span>
-                {typeof result.penalty_seconds === "number" ? `, tương đương ${formatRemaining(result.penalty_seconds)}.` : "."}
+            {result?.reset_enabled === false ? (
+              <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+                {result.disabled_message || "Tính năng reset đang tạm đóng."}
               </div>
             ) : null}
 
-            {typeof result.devices_removed === "number" && result.devices_removed > 0 ? (
-              <div className="rounded-xl border p-3 text-sm text-muted-foreground">
-                Đã xóa/reset {result.devices_removed} lượt dùng hoặc thiết bị khỏi key này.
+            {licenseResetLocked ? (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                Key này đang bị admin khóa reset. Bạn vẫn có thể Check key,
+                nhưng không thể Reset key từ trang public.
               </div>
             ) : null}
+
+            {nextResetHardExpire ? (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700">
+                Cảnh báo: nếu reset lần này, key sẽ bị hủy về trạng thái hết hạn
+                theo luật giới hạn số lần reset hiện tại.
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+              Vì lý do chống dò key và chống abuse, hệ thống sẽ giới hạn tần
+              suất kiểm tra/reset và có thể trả thông báo chung khi key không
+              khả dụng.
+            </div>
+
+            {!turnstileSiteKey ? (
+              <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+                Turnstile chưa được cấu hình ở frontend. Check vẫn hoạt động;
+                nếu backend bắt buộc Turnstile thì reset sẽ yêu cầu bổ sung xác
+                minh.
+              </div>
+            ) : (
+              <>
+                <TurnstileWidget
+                  key={turnstileNonce}
+                  className="rounded-xl border p-3"
+                  siteKey={turnstileSiteKey}
+                  onTokenChange={setTurnstileToken}
+                />
+                <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+                  Chỉ cần xác minh Turnstile trước khi bấm{" "}
+                  <span className="font-medium text-foreground">Reset</span>.
+                  Check key không cần Turnstile.
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
-      ) : null}
 
-      {result && !hasValidData ? (
-        <Card className="rounded-2xl border-destructive/50">
-          <CardHeader className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>Không thể lấy thông tin key</CardTitle>
-              <Badge variant="destructive">Lỗi</Badge>
-            </div>
-            <CardDescription>{describeResultMessage(result)}</CardDescription>
-          </CardHeader>
-        </Card>
-      ) : null}
+        {result?.ok && hasValidData && lastCompletedAction === "reset" ? (
+          <Card className="rounded-2xl border-primary/30 bg-gradient-to-br from-primary/10 via-background to-background shadow-sm">
+            <CardContent className="flex items-start gap-3 p-4">
+              <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/30 bg-primary/15 text-primary">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-sm font-semibold text-foreground">
+                    Reset Key thành công
+                  </div>
+                  <Badge className="rounded-full">Đã áp dụng</Badge>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  Hệ thống đã cập nhật key này. Kiểm tra chi tiết bên dưới để
+                  xác nhận trạng thái mới.
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Xác nhận reset key?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {licenseResetLocked
-                ? "Key này đang bị admin khóa reset, không thể reset từ trang public."
-                : nextResetHardExpire
-                  ? "Cảnh báo: nếu reset lần này, key có thể bị hủy về trạng thái hết hạn theo rule hiện tại."
-                  : "Hệ thống sẽ reset lượt dùng/thiết bị của key này theo đúng loại key. Với một số key, thời gian còn lại có thể bị trừ theo chính sách server."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+        {result?.ok && hasValidData ? (
+          <Card className="rounded-2xl">
+            <CardHeader className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>Trạng thái key</CardTitle>
+                <Badge variant={statusVariant(result.status)}>
+                  {statusLabel(result.status)}
+                </Badge>
+              </div>
+              <CardDescription>{describeResultMessage(result)}</CardDescription>
+            </CardHeader>
 
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={loadingAction === "reset"}>Hủy</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={loadingAction === "reset" || !normalizedKey || licenseResetLocked}
-              onClick={() => {
-                setConfirmOpen(false);
-                void runAction("reset");
-              }}
-            >
-              {loadingAction === "reset" ? "Đang reset..." : "Xác nhận reset"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Info label="Key" value={result.key ?? normalizedKey} mono />
+                <Info label="Loại key" value={keyKindLabel(result)} />
+                <Info
+                  label="Tạo lúc"
+                  value={formatDateTime(result.created_at)}
+                />
+                <Info
+                  label="Hết hạn"
+                  value={
+                    result.status === "not_started"
+                      ? "Chưa kích hoạt"
+                      : result.expires_at
+                        ? formatDateTime(result.expires_at)
+                        : "Không giới hạn"
+                  }
+                />
+                <Info
+                  label="Thời gian còn lại"
+                  value={
+                    result.remaining_seconds == null
+                      ? "Không giới hạn"
+                      : formatRemaining(result.remaining_seconds)
+                  }
+                />
+                <Info
+                  label="Thiết bị"
+                  value={`${result.device_count ?? 0}/${result.max_devices ?? 0}`}
+                />
+                <Info
+                  label="IP"
+                  value={`${result.ip_count ?? 0}/${result.max_ips ?? 0}`}
+                />
+                <Info
+                  label="Lượt verify"
+                  value={`${result.verify_count ?? 0}/${result.max_verify ?? 0}`}
+                />
+                <Info
+                  label="Public reset"
+                  value={String(result.public_reset_count ?? 0)}
+                />
+                <Info
+                  label="Admin reset"
+                  value={String(result.admin_reset_count ?? 0)}
+                />
+                <Info
+                  label="Reset public"
+                  value={
+                    result.public_reset_disabled
+                      ? "Đã khóa bởi admin"
+                      : "Được phép"
+                  }
+                />
+                <Info
+                  label="Lần reset kế tiếp"
+                  value={
+                    result.next_reset_will_expire
+                      ? "Sẽ hủy key"
+                      : typeof result.next_reset_penalty_pct === "number"
+                        ? `Trừ ${result.next_reset_penalty_pct}%`
+                        : "Theo luật hiện tại"
+                  }
+                />
+              </div>
+
+              {typeof result.penalty_pct === "number" &&
+              result.penalty_pct > 0 ? (
+                <div className="rounded-xl border p-3 text-sm">
+                  Hệ thống vừa áp dụng mức trừ{" "}
+                  <span className="font-semibold">{result.penalty_pct}%</span>
+                  {typeof result.penalty_seconds === "number"
+                    ? `, tương đương ${formatRemaining(result.penalty_seconds)}.`
+                    : "."}
+                </div>
+              ) : null}
+
+              {typeof result.devices_removed === "number" &&
+              result.devices_removed > 0 ? (
+                <div className="rounded-xl border p-3 text-sm text-muted-foreground">
+                  Đã xóa/reset {result.devices_removed} lượt dùng hoặc thiết bị
+                  khỏi key này.
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {result && !hasValidData ? (
+          <Card className="rounded-2xl border-destructive/50">
+            <CardHeader className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>Không thể lấy thông tin key</CardTitle>
+                <Badge variant="destructive">Lỗi</Badge>
+              </div>
+              <CardDescription>{describeResultMessage(result)}</CardDescription>
+            </CardHeader>
+          </Card>
+        ) : null}
+
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Xác nhận reset key?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {licenseResetLocked
+                  ? "Key này đang bị admin khóa reset, không thể reset từ trang public."
+                  : nextResetHardExpire
+                    ? "Cảnh báo: nếu reset lần này, key có thể bị hủy về trạng thái hết hạn theo rule hiện tại."
+                    : "Hệ thống sẽ reset lượt dùng/thiết bị của key này theo đúng loại key. Với một số key, thời gian còn lại có thể bị trừ theo chính sách server."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={loadingAction === "reset"}>
+                Hủy
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={
+                  loadingAction === "reset" ||
+                  !normalizedKey ||
+                  licenseResetLocked
+                }
+                onClick={() => {
+                  setConfirmOpen(false);
+                  void runAction("reset");
+                }}
+              >
+                {loadingAction === "reset" ? "Đang reset..." : "Xác nhận reset"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </main>
     </div>
   );
 }
 
-function Info({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function Info({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 break-all text-sm ${mono ? "font-mono" : ""}`}>{value}</div>
+      <div className={`mt-1 break-all text-sm ${mono ? "font-mono" : ""}`}>
+        {value}
+      </div>
     </div>
   );
 }

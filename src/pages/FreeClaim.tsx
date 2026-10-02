@@ -1,4 +1,4 @@
-import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
+import { PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -683,7 +683,7 @@ export function FreeClaimPage() {
                 </div>
               </div>
             )}
-          <CommunityBanner />
+
           </CardContent>
         </Card>
       </main>

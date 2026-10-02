@@ -1,3 +1,5 @@
+import { AdaptiveRow } from "@/features/free-admin/AdaptiveRow";
+import { FreeAdminWorkspace, FreeAdminSection, type FreeAdminTab } from "@/features/free-admin/Workspace";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -1727,49 +1729,32 @@ export function AdminFreeKeysPage() {
     },
   });
 
+  const [activeTab, setActiveTab] = useState<FreeAdminTab>(() => { const focus = new URLSearchParams(window.location.search).get('focus'); return focus === 'test' ? 'monitor' : focus ? 'types' : 'overview'; });
+
   const dashboardStatsView = {
     ...dashboardStats,
     ...(dashboardStatsQuery.data ?? {}),
   };
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-5">
+    <FreeAdminWorkspace active={activeTab} onChange={setActiveTab} toolbar={<div className="flex flex-wrap gap-2">
+            <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
+              Save settings
+            </Button>
+            <Button variant="secondary" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching}>
+              Reload
+            </Button>
+          </div>}>
+      <FreeAdminSection show={activeTab === 'overview'}><div className="grid gap-3 md:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Key free hôm nay</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.issueCount}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Phiên gate</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.sessionCount}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Verify fail</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.verifyFail}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Auto blocked</div><div className="mt-1 text-2xl font-semibold">{dashboardStatsView.activeBlocks}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Lỗi nổi bật</div><div className="mt-1 text-sm font-semibold break-all">{dashboardStatsView.topErrorLabel}</div><div className="mt-1 text-xs text-muted-foreground">Pass1: {dashboardStatsView.pass1Hits} · Pass2: {dashboardStatsView.pass2Hits}</div></CardContent></Card>
-      </div>
+      </div></FreeAdminSection>
 
-      <Card>
-        <CardHeader className="space-y-3 pb-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle className="text-xl">Free GetKey Settings</CardTitle>
-              <CardDescription>
-                Admin toàn quyền: mở/tắt trang GetKey, cấu hình Link4M, delay, auto-return, limit theo fingerprint. Phần trên cùng là dashboard nhanh để bạn nhìn tình hình trong ngày.
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="soft" onClick={() => openUrl(getKeyUrl)}>
-                Open GetKey
-              </Button>
-              <Button type="button" variant="outline" onClick={() => copyText(getKeyUrl)}>
-                Copy GetKey URL
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setDownloadPanelOpen((v) => !v)}>
-                Download links
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setKeyOrderPanelOpen((v) => !v)}>
-                <KeyRound className="mr-2 h-4 w-4" /> Sắp xếp key
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setBonusPanelOpen((v) => !v)}>
-                Bonus theo giờ
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
+      <FreeAdminSection show={['flow','providers','types','content'].includes(activeTab)}><Card>
+        <CardHeader className="pb-3"><CardTitle className="text-lg">{activeTab === 'flow' ? 'Cấu hình luồng lấy key' : activeTab === 'providers' ? 'Nguồn vượt link' : activeTab === 'types' ? 'Thứ tự & Bonus' : 'Nội dung hiển thị'}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {freeSchemaHint ? (
             <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
@@ -1784,7 +1769,7 @@ export function AdminFreeKeysPage() {
             </div>
           ) : null}
 
-          <Collapsible open={downloadPanelOpen} onOpenChange={setDownloadPanelOpen}>
+          <FreeAdminSection show={activeTab === 'content'}><Collapsible open={downloadPanelOpen} onOpenChange={setDownloadPanelOpen}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
                 <span className="flex items-center gap-2"><Download className="h-4 w-4" /> Download links</span>
@@ -1898,9 +1883,9 @@ export function AdminFreeKeysPage() {
                 </Button>
               </div>
             </CollapsibleContent>
-          </Collapsible>
+          </Collapsible></FreeAdminSection>
 
-          <Collapsible open={keyOrderPanelOpen} onOpenChange={setKeyOrderPanelOpen}>
+          <FreeAdminSection show={activeTab === 'types'}><Collapsible open={keyOrderPanelOpen} onOpenChange={setKeyOrderPanelOpen}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
                 <span className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> Sắp xếp key trang người dùng</span>
@@ -1941,9 +1926,9 @@ export function AdminFreeKeysPage() {
                 </div>
               </div>
             </CollapsibleContent>
-          </Collapsible>
+          </Collapsible></FreeAdminSection>
 
-          <Collapsible open={bonusPanelOpen} onOpenChange={setBonusPanelOpen}>
+          <FreeAdminSection show={activeTab === 'types'}><Collapsible open={bonusPanelOpen} onOpenChange={setBonusPanelOpen}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="outline" className="w-full justify-between rounded-2xl">
                 <span className="flex items-center gap-2">🎁 Bonus theo giờ</span>
@@ -2078,9 +2063,9 @@ export function AdminFreeKeysPage() {
                 </div>
               </div>
             </CollapsibleContent>
-          </Collapsible>
+          </Collapsible></FreeAdminSection>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <FreeAdminSection show={activeTab === 'flow'}><div className="grid gap-3 md:grid-cols-2">
             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
               <div>
                 <div className="font-medium">Bật/tắt Get Key chính</div>
@@ -2095,9 +2080,9 @@ export function AdminFreeKeysPage() {
               </div>
               <Switch checked={secondaryEnabled} onCheckedChange={setSecondaryEnabled} />
             </div>
-          </div>
+          </div></FreeAdminSection>
 
-          <div className="space-y-4 rounded-md border p-4">
+          <FreeAdminSection show={activeTab === 'providers'}><div className="space-y-4 rounded-md border p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="font-medium">API / Token rút gọn dùng cho Free Key</div>
@@ -2182,12 +2167,12 @@ export function AdminFreeKeysPage() {
                 </TableHeader>
                 <TableBody>
                   {providerDrafts.length ? providerDrafts.map((row, index) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
+                    <AdaptiveRow kind="provider" key={row.id}>
+                      <TableCell data-label="Tên">
                         <Input value={row.name ?? ""} onChange={(e) => updateProviderDraft(row.id, { name: e.target.value })} placeholder="VD: Link4M chính" />
                         {row.last_error ? <div className="mt-1 break-words text-[11px] text-destructive">{friendlyShortlinkError(row.last_error)}</div> : null}
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Provider">
                         <Select value={row.provider} onValueChange={(v) => {
                           const provider = v as ShortlinkProviderRow["provider"];
                           const currentApi = String(row.api_url_template ?? "").trim();
@@ -2211,14 +2196,14 @@ export function AdminFreeKeysPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Token">
                         <Input value={row.api_token_secret ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_token_secret: e.target.value })} placeholder="VD: 68b34de2680eb7758e19a22a" />
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="API">
                         <Input value={row.api_url_template ?? ""} onChange={(e) => updateProviderDraft(row.id, { api_url_template: e.target.value })} placeholder="VD: https://link4m.co/api-shorten/v2" />
                         <div className="mt-1 text-[11px] text-muted-foreground">Bắt buộc điền API base như https://link4m.co/api-shorten/v2. Nếu là custom template có thể dùng {"{token}"}, {"{url}"}, {"{url_enc}"}.</div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Dùng giới hạn">
                         <div className="flex items-center gap-2">
                           <Switch
                             checked={Boolean(row.daily_quota_enabled)}
@@ -2236,7 +2221,7 @@ export function AdminFreeKeysPage() {
                           Tắt = luôn thử link, không bị bộ đếm khóa.
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Số lượt/ngày">
                         <Input
                           type="number"
                           min={1}
@@ -2250,7 +2235,7 @@ export function AdminFreeKeysPage() {
                         />
                         <div className="mt-1 text-[11px] text-muted-foreground">Chỉ áp dụng khi công tắc đang bật.</div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Đã dùng / còn">
                         <div className="text-xs font-medium">{shortlinkProviderQuotaLabel(row)}</div>
                         <div className="mt-1 text-[11px] text-muted-foreground">
                           Reset tự động lúc 00:00 Việt Nam.
@@ -2266,7 +2251,7 @@ export function AdminFreeKeysPage() {
                           Reset lượt
                         </Button>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Pass">
                         <Select value={row.pass_scope} onValueChange={(v) => updateProviderDraft(row.id, { pass_scope: v as ShortlinkProviderRow["pass_scope"] })}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
@@ -2276,28 +2261,28 @@ export function AdminFreeKeysPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Key chính">
                         <Switch checked={Boolean(row.enabled)} onCheckedChange={(v) => updateProviderDraft(row.id, { enabled: v })} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Key phụ">
                         <Switch
                           checked={Boolean(row.secondary_enabled)}
                           onCheckedChange={(v) => updateProviderDraft(row.id, { secondary_enabled: v })}
                           aria-label={`Dùng ${row.name || "API"} cho Get Key phụ`}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Thứ tự">
                         <div className="flex gap-2">
                           <Button type="button" variant="outline" size="sm" onClick={() => moveProviderDraft(row.id, -1)} disabled={index === 0}>↑</Button>
                           <Button type="button" variant="outline" size="sm" onClick={() => moveProviderDraft(row.id, 1)} disabled={index === providerDrafts.length - 1}>↓</Button>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Xóa">
                         <Button type="button" variant="destructive" size="sm" onClick={() => deleteProvider.mutate(row.id)} disabled={deleteProvider.isPending}>
                           <Trash2 className="mr-2 h-4 w-4" /> Xóa
                         </Button>
                       </TableCell>
-                    </TableRow>
+                    </AdaptiveRow>
                   )) : (
                     <TableRow>
                       <TableCell colSpan={11} className="py-6 text-center text-sm text-muted-foreground">
@@ -2312,9 +2297,9 @@ export function AdminFreeKeysPage() {
             <div className="rounded-md bg-muted/50 p-3 text-xs leading-6 text-muted-foreground">
               Thứ tự bảng là thứ tự ưu tiên thật. Ở chế độ “Ưu tiên theo thứ tự, hết lượt mới chuyển”, mỗi dòng dùng tới giới hạn/ngày rồi tự chuyển xuống dòng kế tiếp; bộ đếm reset lúc 00:00 Việt Nam. Với GTraffic, hãy đặt “Điều hướng khi hết mã” thành “Đi tới liên kết gốc”.
             </div>
-          </div>
+          </div></FreeAdminSection>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <FreeAdminSection show={activeTab === 'flow'}><div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <div className="text-sm font-medium">Giới hạn session đang chờ / fingerprint</div>
               <Input type="number" value={sessionWaitingLimit} onChange={(e) => setSessionWaitingLimit(Number(e.target.value))} min={1} />
@@ -2439,9 +2424,9 @@ export function AdminFreeKeysPage() {
               </div>
               <Switch checked={requireRef} onCheckedChange={setRequireRef} />
             </div>
-          </div>
+          </div></FreeAdminSection>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <FreeAdminSection show={activeTab === 'content'}><div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <div className="text-sm font-medium">Ghi chú (hiện cho người dùng)</div>
               <Textarea
@@ -2465,9 +2450,9 @@ export function AdminFreeKeysPage() {
                 Format: <span className="font-mono">label|url|icon</span> (icon optional: zalo/youtube/telegram).
               </div>
             </div>
-          </div>
+          </div></FreeAdminSection>
 
-          <div className="space-y-3 rounded-md border p-4">
+          <FreeAdminSection show={activeTab === 'content'}><div className="space-y-3 rounded-md border p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="font-medium">Thông báo quan trọng</div>
@@ -2506,9 +2491,9 @@ export function AdminFreeKeysPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </div></FreeAdminSection>
 
-          <div className="rounded-md border p-3 space-y-3">
+          <FreeAdminSection show={activeTab === 'flow'}><div className="rounded-md border p-3 space-y-3">
             <div>
               <div className="font-medium">Link gốc (để copy/open)</div>
               <div className="text-xs text-muted-foreground">Trang nhận key dùng claim token, link gốc là base.</div>
@@ -2552,24 +2537,17 @@ export function AdminFreeKeysPage() {
                 </Button>
               </div>
             </div>
-          </div>
+          </div></FreeAdminSection>
 
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
-              Save settings
-            </Button>
-            <Button variant="secondary" onClick={() => settingsQuery.refetch()} disabled={settingsQuery.isFetching}>
-              Reload
-            </Button>
-          </div>
+          
 
           <div className="text-xs text-muted-foreground">
             Updated: {formatVnDateTime(settingsQuery.data?.updated_at ?? "")}
           </div>
         </CardContent>
-      </Card>
+      </Card></FreeAdminSection>
 
-      <Card>
+      <FreeAdminSection show={activeTab === 'types'}><Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
           <div>
             <CardTitle>Key types (giờ/ngày)</CardTitle>
@@ -2794,33 +2772,33 @@ export function AdminFreeKeysPage() {
               </TableHeader>
               <TableBody>
                 {(keyTypesQuery.data ?? []).map((k) => (
-                  <TableRow key={k.code}>
-                    <TableCell className="w-16">
+                  <AdaptiveRow kind="key" key={k.code}>
+                    <TableCell data-label="On" className="w-16">
                       <Switch
                         checked={k.enabled}
                         onCheckedChange={(v) => toggleKeyType.mutate({ code: k.code, enabled: Boolean(v) })}
                       />
                     </TableCell>
-                    <TableCell>{k.app_label || getAppMeta(k.app_code).label}</TableCell>
-                    <TableCell className="font-mono">{k.code}</TableCell>
-                    <TableCell>{k.label}</TableCell>
-                    <TableCell className="font-mono">{k.key_signature || getAppMeta(k.app_code).signature}</TableCell>
-                    <TableCell>{k.kind}</TableCell>
-                    <TableCell>{k.value}</TableCell>
-                    <TableCell className="font-mono">{k.duration_seconds}</TableCell>
-                    <TableCell className="w-24">
+                    <TableCell data-label="App">{k.app_label || getAppMeta(k.app_code).label}</TableCell>
+                    <TableCell data-label="Code" className="font-mono">{k.code}</TableCell>
+                    <TableCell data-label="Label">{k.label}</TableCell>
+                    <TableCell data-label="Signature" className="font-mono">{k.key_signature || getAppMeta(k.app_code).signature}</TableCell>
+                    <TableCell data-label="Kind">{k.kind}</TableCell>
+                    <TableCell data-label="Value">{k.value}</TableCell>
+                    <TableCell data-label="Seconds" className="font-mono">{k.duration_seconds}</TableCell>
+                    <TableCell data-label="Reset" className="w-24">
                       <Switch
                         checked={Boolean(k.allow_reset ?? true)}
                         onCheckedChange={(v) => toggleAllowReset.mutate({ code: k.code, allow_reset: Boolean(v) })}
                       />
                     </TableCell>
-                    <TableCell className="w-24">
+                    <TableCell data-label="VIP 2-pass" className="w-24">
                       <Switch
                         checked={Boolean((k as any).requires_double_gate ?? false)}
                         onCheckedChange={(v) => toggleVipKeyType.mutate({ code: k.code, requires_double_gate: Boolean(v) })}
                       />
                     </TableCell>
-                    <TableCell className="min-w-[220px] align-top">
+                    <TableCell data-label="Cấu hình /free" className="min-w-[220px] align-top">
                       {String(k.app_code || "") === "find-dumps" ? (
                         <div className="space-y-2">
                           <Select
@@ -2854,7 +2832,7 @@ export function AdminFreeKeysPage() {
                         <span className="text-xs text-muted-foreground">Dùng flow thường</span>
                       )}
                     </TableCell>
-                    <TableCell className="min-w-[220px] align-top">
+                    <TableCell data-label="Mặc định" className="min-w-[220px] align-top">
                       {String(k.app_code || "") === "find-dumps" ? (
                         <Select
                           value={String((k.free_selection_mode === "credit" ? (k.default_credit_code || "credit-normal") : (k.default_package_code || "classic")))}
@@ -2876,7 +2854,7 @@ export function AdminFreeKeysPage() {
                         <span className="text-xs text-muted-foreground">Không áp dụng</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell data-label="Actions" className="text-right">
                       <Button
                         variant="ghost"
                         size="icon"
@@ -2889,7 +2867,7 @@ export function AdminFreeKeysPage() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
-                  </TableRow>
+                  </AdaptiveRow>
                 ))}
                 {!keyTypesQuery.data?.length ? (
                   <TableRow>
@@ -2902,9 +2880,9 @@ export function AdminFreeKeysPage() {
             </Table>
           </div>
         </CardContent>
-      </Card>
+      </Card></FreeAdminSection>
 
-      <Card>
+      <FreeAdminSection show={activeTab === 'monitor'}><Card>
         <CardHeader className="space-y-3 pb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
@@ -2968,9 +2946,9 @@ export function AdminFreeKeysPage() {
             </CollapsibleContent>
           </Collapsible>
         </CardContent>
-      </Card>
+      </Card></FreeAdminSection>
 
-      <div ref={adminTestRef}><Card>
+      <FreeAdminSection show={activeTab === 'monitor'}><div ref={adminTestRef}><details className="free-monitor-fold" open={new URLSearchParams(window.location.search).get("focus") === "test"}><summary>Kiểm thử quản trị</summary><Card>
         <CardHeader>
           <CardTitle>🧪 Admin Test GetKey</CardTitle>
           <CardDescription>
@@ -3092,9 +3070,9 @@ export function AdminFreeKeysPage() {
             </div>
           ) : null}
         </CardContent>
-      </Card>
+      </Card></details>
 
-      <Card>
+      <details className="free-monitor-fold" ><summary>Phiên gần đây</summary><Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
           <div className="space-y-1">
             <CardTitle>Sessions</CardTitle>
@@ -3149,16 +3127,16 @@ export function AdminFreeKeysPage() {
               <TableBody>
                 {(sessionsQuery.data ?? []).map((s) => (
                   <TableRow key={s.session_id}>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
-                    <TableCell><Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
-                    <TableCell className="font-mono">
+                    <TableCell data-label="Created" className="whitespace-nowrap">{formatVnDateTime(s.created_at)}</TableCell>
+                    <TableCell data-label="Status"><Badge variant={statusBadgeVariant(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
+                    <TableCell data-label="Type" className="font-mono">
                       {s.key_type_code ?? "-"} {s.duration_seconds ? `(${s.duration_seconds}s)` : ""}
                     </TableCell>
-                    <TableCell>{s.reveal_count}</TableCell>
-                    <TableCell className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
-                    <TableCell className="text-xs">{s.last_error ?? ""}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell data-label="Reveal">{s.reveal_count}</TableCell>
+                    <TableCell data-label="IP hash" className="font-mono">{shortText(s.ip_hash, 12)}</TableCell>
+                    <TableCell data-label="FP hash" className="font-mono">{shortText(s.fingerprint_hash, 12)}</TableCell>
+                    <TableCell data-label="Error" className="text-xs">{s.last_error ?? ""}</TableCell>
+                    <TableCell data-label="Action" className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
                           size="sm"
@@ -3205,9 +3183,9 @@ export function AdminFreeKeysPage() {
             </Table>
           </div>
         </CardContent>
-      </Card>
+      </Card></details>
 
-      <Card>
+      <details className="free-monitor-fold" ><summary>Nhật ký Gate / Claim</summary><Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
           <div className="space-y-1">
             <CardTitle>Gate / Claim logs</CardTitle>
@@ -3258,14 +3236,14 @@ export function AdminFreeKeysPage() {
               <TableBody>
                 {(gateLogsQuery.data ?? []).map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(row.created_at)}</TableCell>
-                    <TableCell><Badge variant={statusBadgeVariant(row.event_code)}>{row.event_code}</Badge></TableCell>
-                    <TableCell className="font-mono">{row.key_type_code ?? "-"}</TableCell>
-                    <TableCell>{row.pass_no ?? "-"}</TableCell>
-                    <TableCell className="font-mono">{shortText(row.session_id, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(row.ip_hash, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(row.fingerprint_hash, 12)}</TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell data-label="Time" className="whitespace-nowrap">{formatVnDateTime(row.created_at)}</TableCell>
+                    <TableCell data-label="Event"><Badge variant={statusBadgeVariant(row.event_code)}>{row.event_code}</Badge></TableCell>
+                    <TableCell data-label="Type" className="font-mono">{row.key_type_code ?? "-"}</TableCell>
+                    <TableCell data-label="Pass">{row.pass_no ?? "-"}</TableCell>
+                    <TableCell data-label="Session" className="font-mono">{shortText(row.session_id, 12)}</TableCell>
+                    <TableCell data-label="IP hash" className="font-mono">{shortText(row.ip_hash, 12)}</TableCell>
+                    <TableCell data-label="FP hash" className="font-mono">{shortText(row.fingerprint_hash, 12)}</TableCell>
+                    <TableCell data-label="Detail" className="text-xs">
                       <pre className="max-w-[26rem] whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2">{compactJson(row.detail)}</pre>
                     </TableCell>
                   </TableRow>
@@ -3281,9 +3259,9 @@ export function AdminFreeKeysPage() {
             </Table>
           </div>
         </CardContent>
-      </Card>
+      </Card></details>
 
-      <Card>
+      <details className="free-monitor-fold" ><summary>Key đã phát</summary><Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
           <div className="space-y-1">
             <CardTitle>Issued keys</CardTitle>
@@ -3309,12 +3287,12 @@ export function AdminFreeKeysPage() {
               <TableBody>
                 {(issuesQuery.data ?? []).map((i) => (
                   <TableRow key={i.issue_id}>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
-                    <TableCell className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
-                    <TableCell className="font-mono">{i.key_mask}</TableCell>
-                    <TableCell className="font-mono">{shortText(i.session_id, 12)}</TableCell>
-                    <TableCell className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
+                    <TableCell data-label="Created" className="whitespace-nowrap">{formatVnDateTime(i.created_at)}</TableCell>
+                    <TableCell data-label="Expires" className="whitespace-nowrap">{formatVnDateTime(i.expires_at)}</TableCell>
+                    <TableCell data-label="Key" className="font-mono">{i.key_mask}</TableCell>
+                    <TableCell data-label="Session" className="font-mono">{shortText(i.session_id, 12)}</TableCell>
+                    <TableCell data-label="IP hash" className="font-mono">{shortText(i.ip_hash, 12)}</TableCell>
+                    <TableCell data-label="Action" className="text-right whitespace-nowrap">
                       <div className="flex justify-end gap-2">
                         <Button variant="secondary" size="sm" onClick={() => openUrl(`/licenses/${i.license_id}`)}>
                           Open
@@ -3358,8 +3336,8 @@ export function AdminFreeKeysPage() {
             </Table>
           </div>
         </CardContent>
-      </Card>
-    </div>
-    </div>
+      </Card></details>
+    </div></FreeAdminSection>
+    </FreeAdminWorkspace>
   );
 }

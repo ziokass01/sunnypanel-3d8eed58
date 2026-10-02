@@ -1,6 +1,5 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 import { normalizeFreeAppCode } from "@/features/free/quota-display";
 
 export type FreeFlowStep = 1 | 2 | 3 | 4;
@@ -10,44 +9,33 @@ type FreeFlowStepsProps = {
   compact?: boolean;
 };
 
-const STEP_LABELS = [
-  "Chọn key",
-  "Vượt link",
-  "Xác thực",
-  "Nhận key",
-] as const;
+const STEP_LABELS = ["Chọn key", "Vượt link", "Xác thực", "Nhận key"] as const;
 
-export function FreeFlowSteps({ current, compact = false }: FreeFlowStepsProps) {
+export function FreeFlowSteps({ current }: FreeFlowStepsProps) {
   return (
-    <div className={cn("sunny-flow-steps grid gap-2", compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4")}>
-      {STEP_LABELS.map((label, idx) => {
-        const step = (idx + 1) as FreeFlowStep;
-        const done = step < current;
-        const active = step === current;
-        return (
-          <div
-            key={label}
-            className={cn(
-              "relative min-w-0 overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all",
-              done && "border-primary/40 bg-primary/[0.07]",
-              active && "border-primary bg-primary/[0.10] shadow-sm ring-1 ring-primary/10",
-              !done && !active && "bg-muted/25 text-muted-foreground",
-            )}
-          >
-            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/70 via-primary/40 to-transparent" />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Bước {step}</span>
-              <Badge variant={done || active ? "default" : "outline"} className="shrink-0 justify-center rounded-full px-2.5 py-0.5 text-[10px] leading-none text-center">
-                {done ? "Xong" : active ? "Đang xử lý" : "Chờ"}
-              </Badge>
-            </div>
-            <div className="mt-2 text-sm font-semibold leading-tight text-foreground">{label}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {done ? "Hoàn tất bước này" : active ? "Bạn đang ở bước hiện tại" : "Hệ thống sẽ tự chuyển tiếp"}
-            </div>
-          </div>
-        );
-      })}
+    <div className="free-progress" aria-label="Tiến trình lấy key">
+      <ol>
+        {STEP_LABELS.map((label, idx) => {
+          const step = idx + 1;
+          const done = step < current;
+          const active = step === current;
+          return (
+            <li
+              key={label}
+              data-done={done}
+              aria-current={active ? "step" : undefined}
+            >
+              <span className="free-progress-dot" aria-hidden="true">
+                {done ? "✓" : step}
+              </span>
+              <span>{label}</span>
+            </li>
+          );
+        })}
+      </ol>
+      <p>
+        Bước {current}/4 · {STEP_LABELS[current - 1]}
+      </p>
     </div>
   );
 }
@@ -85,14 +73,19 @@ export function readFreeDeviceHistory(): FreeFlowDeviceHistory {
     if (!raw) {
       return { attemptsToday: 0, successToday: 0 };
     }
-    const parsed = JSON.parse(raw) as Partial<FreeFlowDeviceHistory> & { day?: string };
+    const parsed = JSON.parse(raw) as Partial<FreeFlowDeviceHistory> & {
+      day?: string;
+    };
     if (parsed.day !== todayKey()) {
       return { attemptsToday: 0, successToday: 0 };
     }
     const successTodayByApp = Object.fromEntries(
       Object.entries(parsed.successTodayByApp ?? {})
         .slice(0, 32)
-        .map(([appCode, count]) => [normalizeFreeAppCode(appCode), Math.max(0, Math.floor(Number(count) || 0))]),
+        .map(([appCode, count]) => [
+          normalizeFreeAppCode(appCode),
+          Math.max(0, Math.floor(Number(count) || 0)),
+        ]),
     );
     return {
       attemptsToday: Math.max(0, Number(parsed.attemptsToday ?? 0)),
@@ -141,11 +134,18 @@ export function markFreeAttemptFail(code?: string | null) {
   });
 }
 
-export function markFreeSuccess(args: { appCode?: string | null; keyLabel?: string | null; nextEligibleAt?: string | null }) {
+export function markFreeSuccess(args: {
+  appCode?: string | null;
+  keyLabel?: string | null;
+  nextEligibleAt?: string | null;
+}) {
   const prev = readFreeDeviceHistory();
   const appCode = normalizeFreeAppCode(args.appCode);
   const successTodayByApp = { ...(prev.successTodayByApp ?? {}) };
-  if (!Object.prototype.hasOwnProperty.call(successTodayByApp, "free-fire") && prev.successToday > 0) {
+  if (
+    !Object.prototype.hasOwnProperty.call(successTodayByApp, "free-fire") &&
+    prev.successToday > 0
+  ) {
     successTodayByApp["free-fire"] = Math.max(0, Number(prev.successToday));
   }
   const previousForApp = Math.max(0, Number(successTodayByApp[appCode] ?? 0));
@@ -211,54 +211,101 @@ export function FreeDeviceHistoryCard({
   quotaUnlimited?: boolean;
 }) {
   const timingTarget = lastKeyExpiresAt ?? history.nextEligibleAt ?? null;
-  const timingTitle = lastKeyExpiresAt ? "Key gần nhất còn lại" : "Có thể thử lại";
+  const timingTitle = lastKeyExpiresAt
+    ? "Key gần nhất còn lại"
+    : "Có thể thử lại";
   const timingHint = history.lastFailCode
     ? `Lỗi gần nhất: ${friendlyFailLabel(history.lastFailCode)}`
     : lastKeyExpiresAt
       ? "Đồng bộ theo key gần nhất"
       : `${history.attemptsToday} lượt đã bắt đầu hôm nay`;
-  const keyLabel = String(selectedKeyLabel || "Key đang chọn").trim() || "Key đang chọn";
+  const keyLabel =
+    String(selectedKeyLabel || "Key đang chọn").trim() || "Key đang chọn";
 
   return (
     <Card className="overflow-hidden border-dashed bg-gradient-to-br from-background to-muted/30">
       <CardContent className="space-y-3 p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Thiết bị hiện tại</div>
-            <div className="mt-1 text-sm font-medium text-foreground">Theo dõi nhanh lượt nhận key trong hôm nay</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Thiết bị hiện tại
+            </div>
+            <div className="mt-1 text-sm font-medium text-foreground">
+              Theo dõi nhanh lượt nhận key trong hôm nay
+            </div>
           </div>
-          <Badge variant="outline" className="rounded-full px-3 py-1 text-center leading-none min-w-[74px]">Hôm nay</Badge>
+          <Badge
+            variant="outline"
+            className="rounded-full px-3 py-1 text-center leading-none min-w-[74px]"
+          >
+            Hôm nay
+          </Badge>
         </div>
 
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
           <div className="rounded-2xl border bg-background/80 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tên key</div>
-            <div className="mt-1 text-sm font-semibold text-foreground">{keyLabel}</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Tên key
+            </div>
+            <div className="mt-1 text-sm font-semibold text-foreground">
+              {keyLabel}
+            </div>
           </div>
 
           <div className="rounded-2xl border bg-background/80 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Còn lại hôm nay</div>
-            <div className="mt-1 text-2xl font-semibold text-foreground">{quotaUnlimited ? "∞" : (remainingTodayServer ?? "-")}</div>
-            <div className="text-xs leading-5 text-muted-foreground">
-              Giới hạn: thiết bị {selectedQuotaFingerprint ?? "-"} / IP {selectedQuotaIp ?? "-"}
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Còn lại hôm nay
             </div>
-            {remainingTodayEstimated ? <div className="text-xs text-muted-foreground">theo lịch sử thiết bị; server vẫn kiểm tra quota thật</div> : null}
-            <div className="text-xs text-muted-foreground">reset lúc 00:00 (GMT+7)</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">
+              {quotaUnlimited ? "∞" : (remainingTodayServer ?? "-")}
+            </div>
+            <div className="text-xs leading-5 text-muted-foreground">
+              Giới hạn: thiết bị {selectedQuotaFingerprint ?? "-"} / IP{" "}
+              {selectedQuotaIp ?? "-"}
+            </div>
+            {remainingTodayEstimated ? (
+              <div className="text-xs text-muted-foreground">
+                theo lịch sử thiết bị; server vẫn kiểm tra quota thật
+              </div>
+            ) : null}
+            <div className="text-xs text-muted-foreground">
+              reset lúc 00:00 (GMT+7)
+            </div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Thành công</div>
-            <div className="mt-1 text-2xl font-semibold text-foreground">{successToday ?? history.successToday}</div>
-            <div className="text-xs text-muted-foreground">lượt đã nhận key</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Thành công
+            </div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">
+              {successToday ?? history.successToday}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              lượt đã nhận key
+            </div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Lần gần nhất</div>
-            <div className="mt-1 text-sm font-semibold text-foreground">{history.lastSuccessAt ? new Date(history.lastSuccessAt).toLocaleString("vi-VN") : "Chưa có"}</div>
-            <div className="line-clamp-1 text-xs text-muted-foreground">{history.lastKeyLabel || "Chưa lưu key gần nhất"}</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Lần gần nhất
+            </div>
+            <div className="mt-1 text-sm font-semibold text-foreground">
+              {history.lastSuccessAt
+                ? new Date(history.lastSuccessAt).toLocaleString("vi-VN")
+                : "Chưa có"}
+            </div>
+            <div className="line-clamp-1 text-xs text-muted-foreground">
+              {history.lastKeyLabel || "Chưa lưu key gần nhất"}
+            </div>
           </div>
           <div className="rounded-2xl border bg-background/80 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{timingTitle}</div>
-            <div className="mt-1 text-sm font-semibold text-foreground">{formatRelativeCountdown(timingTarget)}</div>
-            <div className="line-clamp-1 text-xs text-muted-foreground">{timingHint}</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              {timingTitle}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-foreground">
+              {formatRelativeCountdown(timingTarget)}
+            </div>
+            <div className="line-clamp-1 text-xs text-muted-foreground">
+              {timingHint}
+            </div>
           </div>
         </div>
       </CardContent>

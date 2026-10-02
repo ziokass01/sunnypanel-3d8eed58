@@ -1,7 +1,7 @@
 import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, KeyRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -638,7 +638,7 @@ export function FreeLandingPage() {
           <Card className="sunny-key-card w-full overflow-hidden">
             <CardHeader className="space-y-4 border-b bg-gradient-to-br from-primary/10 via-background to-background pb-5">
               <div className="flex items-center gap-3">
-                <img src="/brand.png" alt="SUNNY" className="h-11 w-11 rounded-2xl border bg-background p-1 shadow-sm" />
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-800"><KeyRound className="h-6 w-6" /></span>
                 <div className="space-y-1">
                   <CardTitle className="text-xl">Lấy key miễn phí</CardTitle>
                   <p className="text-sm text-muted-foreground">Chào mừng mọi người đến với trang web của Sunny Mod.</p>

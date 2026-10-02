@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Download, KeyRound, RotateCcw } from "lucide-react";
+import { ArrowRight, KeyRound, RotateCcw } from "lucide-react";
 import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import ZaloGetKeyBubble from "@/components/ZaloGetKeyBubble";
 
@@ -18,26 +18,6 @@ export function ServiceLandingPage() {
               <br />
               <span className="text-sky-700">ngay tại đây.</span>
             </h1>
-            <p className="mt-5 max-w-lg text-base leading-7 text-slate-600">
-              Lấy key, tải ứng dụng và nhận hỗ trợ từ cộng đồng SunnyMod. Chọn
-              mục bên dưới để bắt đầu.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link
-                to="/free"
-                className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-amber-300 px-6 font-semibold text-slate-950 hover:bg-amber-200"
-              >
-                Lấy key miễn phí
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <a
-                href="/free#downloads"
-                className="inline-flex min-h-12 items-center gap-2 rounded-xl border bg-white px-5 font-semibold"
-              >
-                <Download className="h-4 w-4" />
-                Tải ứng dụng
-              </a>
-            </div>
           </div>
           <CommunityBanner />
         </section>

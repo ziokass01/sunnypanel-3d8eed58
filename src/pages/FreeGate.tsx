@@ -1,4 +1,4 @@
-import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
+import { PublicHeader } from "@/features/support/SupportViews";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -423,7 +423,7 @@ export function FreeGatePage() {
                 Quay lại Get Key
               </Button>
             ) : null}
-          <CommunityBanner />
+
           </CardContent>
         </Card>
       </main>

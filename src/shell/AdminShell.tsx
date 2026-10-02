@@ -153,7 +153,7 @@ export function AdminShell() {
         </SidebarFooter>
       </Sidebar>
 
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <header className="sticky top-0 z-20 border-b border-white/70 bg-background/85 backdrop-blur-md">
           <div className="page-wrap flex items-center gap-3 py-4">
             <SidebarTrigger className="bg-white text-slate-600 shadow-sm hover:bg-slate-100 md:hidden" />
@@ -165,7 +165,7 @@ export function AdminShell() {
           </div>
         </header>
 
-        <main className="page-wrap flex-1 py-6">
+        <main className="admin-console page-wrap flex-1 py-5">
           <div className={cn("rounded-[2rem] border border-white/60 bg-white/65 p-4 shadow-[0_26px_80px_-50px_rgba(15,23,42,0.22)] backdrop-blur-sm sm:p-5") }>
             <Outlet />
           </div>
