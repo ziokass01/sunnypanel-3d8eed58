@@ -27,6 +27,7 @@ export function validateFinalGateProof(session, gate) {
 }
 export function tokenPairMatches(claimHash, outHash, session) {
   const storedClaimHash = String(session?.claim_token_hash ?? "").trim();
-  const accepted = [String(session?.out_token_hash ?? "").trim(), String(session?.out_token_hash_pass2 ?? "").trim()].filter(Boolean);
-  return Boolean(claimHash) && Boolean(outHash) && storedClaimHash === claimHash && accepted.includes(outHash);
+  const expected = requiredFinalPass(session) === 2 ? String(session?.out_token_hash_pass2 ?? "").trim() : String(session?.out_token_hash ?? "").trim();
+  return Boolean(claimHash) && Boolean(outHash) && storedClaimHash === claimHash && expected === outHash;
+
 }

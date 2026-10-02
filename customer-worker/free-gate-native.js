@@ -15,7 +15,7 @@ function text(value, max = 4096) {
     return String(value ?? "").trim().slice(0, max);
 }
 function getIp(req) {
-    return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() ?? "0.0.0.0";
+    return (req.headers.get("cf-connecting-ip") || "").trim();
 }
 async function sha256Hex(input) {
     const data = new TextEncoder().encode(String(input ?? ""));
@@ -292,7 +292,6 @@ function parseOntopsResponse(data, shortBaseUrl = "https://ontops.link") {
         throw new Error("ONTOPS_SHORT_BASE_INVALID");
     return { outboundUrl: `${base}/${encodeURIComponent(id)}` };
 }
-
 async function shortenWithProvider(provider, gateUrl, env) {
     const kind = text(provider?.provider || "custom", 32).toLowerCase() || "custom";
     const token = text(provider?.api_token_secret, 4096);
@@ -624,8 +623,9 @@ async function shortenWithFailover(db, cfg, passNo, gateUrl, channel, env, exclu
             const outboundUrl = result.outboundUrl;
             if (!outboundUrl)
                 throw new Error("SHORTLINK_RESPONSE_EMPTY");
-            if (!outboundConcealsGateSecret(outboundUrl, gateUrl))
+            if (!outboundConcealsGateSecret(outboundUrl, gateUrl)) {
                 throw new Error("SHORTLINK_GATE_SECRET_EXPOSED");
+            }
             await markProviderSuccess(db, provider, passNo, result, channel);
             return { provider, outboundUrl, degraded: false, failures: [] };
         }
@@ -641,15 +641,16 @@ async function shortenWithFailover(db, cfg, passNo, gateUrl, channel, env, exclu
     // Fail closed: a provider error must never expose the gate URL directly.
     throw new Error(`ALL_SHORTLINK_PROVIDERS_FAILED${failures.length ? ` | ${failures.join(" | ")}` : ""}`);
 }
-async function createNextGateToken(db, cfg, session, passNo, hashes, env) {
+async function createNextGateToken(db, cfg, session, passNo, hashes, env, excludeIds = []) {
     const gateToken = randomToken("gt");
     const gateHash = await sha256Hex(gateToken);
-    const configuredDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : (passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) ?? 0) || 0);
+    const antiDelay = cfg.free_gate_antibypass_enabled === true ? Math.max(0, Number(cfg.free_gate_antibypass_seconds) || 0) : 0;
+    const configuredDelay = Math.max(antiDelay, Number(cfg.free_min_delay_enabled === false ? 0 : (passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) ?? 0) || 0);
     const gateLifeSeconds = clampSeconds(cfg.free_gate_token_life_seconds ?? session?.gate_token_life_seconds, 600, 60, 1800);
     const nowMs = Date.now();
     const channel = String(session?.shortlink_channel ?? "primary") === "secondary" ? "secondary" : "primary";
     const gateUrl = gateUrlFromToken(gateToken, passNo, env);
-    const shortened = await shortenWithFailover(db, cfg, passNo, gateUrl, channel, env);
+    const shortened = await shortenWithFailover(db, cfg, passNo, gateUrl, channel, env, excludeIds);
     const provider = shortened.provider;
     const outboundUrl = shortened.outboundUrl;
     const degraded = Boolean(shortened.degraded);
@@ -657,22 +658,14 @@ async function createNextGateToken(db, cfg, session, passNo, hashes, env) {
     const delay = degraded ? 0 : configuredDelay;
     const activateAfterAt = new Date(nowMs + delay * 1000).toISOString();
     const gateExpiresAt = new Date(nowMs + (delay + gateLifeSeconds) * 1000).toISOString();
-    const ins = await db.from("licenses_free_gate_tokens").insert({
-        session_id: session.session_id,
-        pass_no: passNo,
-        token_hash: gateHash,
-        status: "pending",
-        activate_after_at: activateAfterAt,
-        expires_at: gateExpiresAt,
-        provider_id: provider?.id ?? null,
-        shortlink_channel: channel,
-        short_url: outboundUrl,
-        ip_hash: hashes.ipHash,
-        ua_hash: hashes.uaHash,
-        fingerprint_hash: hashes.fpHash || hashes.ipHash,
+    const ins = await db.rpc("free_flow_publish_gate", {
+        p_pass: passNo,
+        p_session_id: session.session_id, p_out_hash: passNo === 2 ? session.out_token_hash_pass2 : session.out_token_hash,
+        p_gate_hash: gateHash, p_short_url: outboundUrl, p_provider_id: provider?.id ?? null,
+        p_delay: delay, p_life: gateLifeSeconds, p_channel: channel,
     });
-    if (ins.error)
-        throw ins.error;
+    if (ins.error || ins.data?.ok !== true)
+        throw new Error(ins.data?.code || ins.error?.message || "PASS2_PUBLISH_FAILED");
     return { gateToken, gateUrl, outboundUrl, provider, delay, gateLifeSeconds, gateExpiresAt, activateAfterAt, degraded, failures };
 }
 async function loadSession(db, sessionId) {
@@ -690,260 +683,62 @@ export async function handleFreeGate(req, env) {
     if (!db)
         return json({ ok: false, code: "SERVER_NOT_READY", msg: "SERVER_NOT_READY" }, 503);
     const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object")
-        return json({ ok: false, code: "BAD_JSON", msg: "BAD_JSON" }, 200);
-    const passNoFromBody = Number(body.pass ?? 1) === 2 ? 2 : 1;
+    if (!body || typeof body !== "object" || Array.isArray(body))
+        return json({ ok: false, code: "BAD_JSON", msg: "BAD_JSON" }, 400);
     const gateToken = text(body.gate_token || body.gateToken, 4096);
-    const sessionIdFromBody = text(body.session_id, 128);
     const outToken = text(body.out_token, 4096);
+    if (!gateToken)
+        return json({ ok: false, code: "TOKENIZED_GATE_REQUIRED", msg: "TOKENIZED_GATE_REQUIRED" }, 200);
+    if (!outToken)
+        return json({ ok: false, code: "OUT_TOKEN_REQUIRED", msg: "OUT_TOKEN_REQUIRED" }, 200);
     const fingerprint = text(body.fingerprint, 512);
-    const currentUrl = text(body.current_url, 2048);
-    const referrer = text(body.referrer, 2048);
     const ip = getIp(req);
-    const ua = req.headers.get("user-agent") ?? "";
-    const ipHash = await sha256Hex(ip);
-    const uaHash = await sha256Hex(ua);
-    const fpHash = fingerprint ? await sha256Hex(fingerprint) : "";
-    const { data: settings } = await db.from("licenses_free_settings").select("*").eq("id", 1).maybeSingle();
-    const cfg = (settings ?? {});
-    let baseLog = {
-        session_id: sessionIdFromBody || null,
-        pass_no: passNoFromBody,
-        ip_hash: ipHash,
-        ua_hash: uaHash,
-        fingerprint_hash: fpHash || null,
-        detail: { route: "free-gate", current_url: currentUrl || null, referrer: referrer || null, tokenized: Boolean(gateToken) },
-    };
-    async function deny(code, extra = {}) {
-        const sid = text(baseLog.session_id, 128);
-        if (sid)
-            await updateSession(db, sid, { last_error: code });
-        await logGate(db, { ...baseLog, event_code: code, detail: { ...baseLog.detail, ...extra } });
-        return json({ ok: false, code, msg: code, ...extra }, 200);
+    if (!ip)
+        return json({ ok: false, code: "CLIENT_IP_REQUIRED", msg: "CLIENT_IP_REQUIRED" }, 400);
+    const hashes = { ipHash: await sha256Hex(ip), uaHash: await sha256Hex(req.headers.get("user-agent") ?? ""), fpHash: fingerprint ? await sha256Hex(fingerprint) : "" };
+    const settings = await db.from("licenses_free_settings").select("*").eq("id", 1).maybeSingle();
+    if (settings.error || !settings.data)
+        return json({ ok: false, code: "SETTINGS_LOAD_FAILED", msg: "SETTINGS_LOAD_FAILED" }, 503);
+    const cfg = settings.data;
+    const gateHash = await sha256Hex(gateToken);
+    // New independent pair for pass 2. Gate secret stays inside the provider's
+    // destination; the browser only receives the new out_token after commit.
+    const nextOutToken = randomToken("out");
+    const claimToken = await claimTokenForGate(gateToken, "gate", env);
+    const decision = await db.rpc("free_flow_consume_gate", {
+        p_gate_hash: gateHash, p_out_hash: await sha256Hex(outToken),
+        p_fp_hash: hashes.fpHash, p_ip_hash: hashes.ipHash, p_ua_hash: hashes.uaHash,
+        p_session_id: text(body.session_id, 128), p_pass: Number(body.pass ?? 1),
+        p_next_out_hash: await sha256Hex(nextOutToken), p_claim_hash: await sha256Hex(claimToken),
+        p_claim_window: clampSeconds(cfg.free_claim_window_seconds, 180, 30, 600),
+    });
+    if (decision.error || !decision.data || typeof decision.data.ok !== "boolean")
+        return json({ ok: false, code: "FREE_GUARD_NOT_READY", msg: "FREE_GUARD_NOT_READY" }, 503);
+    const result = decision.data;
+    if (result.ok !== true) {
+        await logGate(db, { session_id: result.session_id || null, event_code: result.code || "GATE_DENIED", ip_hash: hashes.ipHash, ua_hash: hashes.uaHash, fingerprint_hash: hashes.fpHash || null });
+        return json({ ok: false, code: result.code || "GATE_DENIED", msg: result.code || "GATE_DENIED" }, 200);
     }
-    // Tokenized gate flow: gate token comes from the URL; the matching start
-    // token must still be supplied from the same browser's protected flow state.
-    if (gateToken) {
-        const gateHash = await sha256Hex(gateToken);
-        const tokenRes = await db.from("licenses_free_gate_tokens").select("*").eq("token_hash", gateHash).maybeSingle();
-        if (tokenRes.error)
-            return await deny("GATE_TOKEN_LOAD_FAILED", { detail: tokenRes.error.message });
-        const gateRow = tokenRes.data;
-        if (!gateRow)
-            return await deny("GATE_TOKEN_INVALID");
-        const session = await loadSession(db, String(gateRow.session_id));
+    await logGate(db, { session_id: result.session_id, pass_no: Number(body.pass ?? 1),
+        event_code: result.next === "SHORTLINK_FALLBACK" ? "shortlink_early_return_fallback" : result.next === "PASS2" ? "pass1_ok_tokenized" : "gate_ok_tokenized",
+        detail: { next: result.next }, ip_hash: hashes.ipHash, ua_hash: hashes.uaHash, fingerprint_hash: hashes.fpHash });
+    if (result.next === "PASS2" || result.next === "SHORTLINK_FALLBACK") {
+        const session = await loadSession(db, result.session_id);
         if (!session)
-            return await deny("SESSION_NOT_FOUND");
-        session.shortlink_channel = String(gateRow.shortlink_channel ?? session.shortlink_channel ?? "primary") === "secondary" ? "secondary" : "primary";
-        baseLog = { ...baseLog, session_id: session.session_id, pass_no: Number(gateRow.pass_no ?? passNoFromBody), key_type_code: session.key_type_code ?? null };
-        if (session.closed_at || String(session.status ?? "").toLowerCase() === "closed")
-            return await deny("SESSION_CLOSED");
-        if (secondsUntil(session.expires_at) <= 0)
-            return await deny("SESSION_EXPIRED");
-        // Both start token and single-use gate token must belong to this session.
-        if (!outToken)
-            return await deny("OUT_TOKEN_REQUIRED");
-        const outHash = await sha256Hex(outToken);
-        const acceptedOutHashes = [text(session.out_token_hash, 128), text(session.out_token_hash_pass2, 128)].filter(Boolean);
-        if (!acceptedOutHashes.length || !acceptedOutHashes.includes(outHash))
-            return await deny("OUT_TOKEN_MISMATCH");
-        const passNo = Number(gateRow.pass_no ?? passNoFromBody) === 2 ? 2 : 1;
-        let requiresDoubleGate = Number(session.passes_required ?? 1) >= 2;
-        if (!requiresDoubleGate && session.key_type_code) {
-            try {
-                const { data: keyType } = await db.from("licenses_free_key_types").select("requires_double_gate").eq("code", session.key_type_code).maybeSingle();
-                requiresDoubleGate = Boolean(keyType?.requires_double_gate ?? false);
-            }
-            catch { /* ignore */ }
+            return json({ ok: false, code: "SESSION_NOT_FOUND", msg: "SESSION_NOT_FOUND" }, 503);
+        try {
+            const next = await createNextGateToken(db, cfg, session, result.next === "PASS2" ? 2 : result.pass_no, hashes, env, result.exclude_provider_id ? [String(result.exclude_provider_id)] : []);
+            return json({ ok: true, next: result.next, session_id: result.session_id,
+                out_token: nextOutToken, outbound_url: next.outboundUrl,
+                min_delay_seconds: next.delay, gate_token_life_seconds: next.gateLifeSeconds }, 200);
         }
-        const status = String(gateRow.status ?? "").toLowerCase();
-        if (status !== "pending") {
-            if (status === "used" && String(gateRow.fail_reason ?? "") === "GTRAFFIC_EARLY_RETURN_FALLBACK") {
-                return json({
-                    ok: false,
-                    code: "GTRAFFIC_ROTATION_IN_PROGRESS",
-                    msg: "GTRAFFIC_ROTATION_IN_PROGRESS",
-                    retry_after_ms: 800,
-                }, 200);
-            }
-            return await deny(status === "burned_early" ? "GATE_TOKEN_BURNED" : status === "expired" ? "GATE_TOKEN_EXPIRED" : "GATE_TOKEN_ALREADY_USED", { token_status: status });
+        catch (error) {
+            await db.rpc("free_flow_burn", { p_session_id: result.session_id, p_reason: "PASS2_SHORTLINK_FAILED" });
+            return json({ ok: false, code: "PASS2_SHORTLINK_FAILED", msg: "PASS2_SHORTLINK_FAILED" }, 200);
         }
-        if (session.revealed_at || String(session.status ?? "").toLowerCase() === "revealed")
-            return await deny("ALREADY_REVEALED");
-        const requireIp = Boolean(cfg.free_gate_require_ip_match ?? false);
-        const requireUa = Boolean(cfg.free_gate_require_ua_match ?? false);
-        if (requireIp && text(gateRow.ip_hash || session.ip_hash, 128) && text(gateRow.ip_hash || session.ip_hash, 128) !== ipHash)
-            return await deny("DEVICE_MISMATCH", { field: "ip" });
-        if (requireUa && text(gateRow.ua_hash || session.ua_hash, 128) && text(gateRow.ua_hash || session.ua_hash, 128) !== uaHash)
-            return await deny("DEVICE_MISMATCH", { field: "ua" });
-        if (fpHash && text(gateRow.fingerprint_hash || session.fingerprint_hash, 128) && text(gateRow.fingerprint_hash || session.fingerprint_hash, 128) !== fpHash)
-            return await deny("DEVICE_MISMATCH", { field: "fingerprint" });
-        const activateMs = Date.parse(String(gateRow.activate_after_at ?? ""));
-        const expiresMs = Date.parse(String(gateRow.expires_at ?? ""));
-        const nowMs = Date.now();
-        if (Number.isFinite(activateMs) && nowMs < activateMs) {
-            const providerRes = gateRow.provider_id
-                ? await db.from("licenses_free_shortlink_providers").select("*").eq("id", gateRow.provider_id).maybeSingle()
-                : { data: null };
-            const currentProvider = providerRes.data;
-            const isGtrafficEarlyReturn = String(currentProvider?.provider ?? "").trim().toLowerCase() === "gtraffic";
-            // GTraffic can be configured to "Đi tới liên kết gốc" when a short code
-            // expires. That returns to this gate immediately. It is still too early
-            // to receive a key, but it is a reliable signal to move to the next
-            // configured shortener instead of killing the session.
-            if (isGtrafficEarlyReturn) {
-                const lock = await db.from("licenses_free_gate_tokens")
-                    .update({ status: "used", fail_reason: "GTRAFFIC_EARLY_RETURN_FALLBACK" })
-                    .eq("id", gateRow.id)
-                    .eq("status", "pending")
-                    .select("id")
-                    .maybeSingle();
-                if (lock.data) {
-                    const channel = String(gateRow.shortlink_channel ?? session.shortlink_channel ?? "primary") === "secondary" ? "secondary" : "primary";
-                    const gateUrl = gateUrlFromToken(gateToken, passNo, env);
-                    try {
-                        const replacement = await shortenWithFailover(db, cfg, passNo, gateUrl, channel, env, [String(currentProvider.id)]);
-                        const replacementDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : (passNo === 2 ? cfg.free_min_delay_seconds_pass2 : cfg.free_min_delay_seconds) ?? 0) || 0);
-                        const gateLifeSeconds = clampSeconds(cfg.free_gate_token_life_seconds ?? session?.gate_token_life_seconds, 600, 60, 1800);
-                        const replacementNow = Date.now();
-                        const replacementActivateAt = new Date(replacementNow + replacementDelay * 1000).toISOString();
-                        const replacementExpiresAt = new Date(replacementNow + (replacementDelay + gateLifeSeconds) * 1000).toISOString();
-                        await db.from("licenses_free_gate_tokens").update({
-                            status: "pending",
-                            provider_id: replacement.provider?.id ?? null,
-                            short_url: replacement.outboundUrl,
-                            shortlink_channel: channel,
-                            activate_after_at: replacementActivateAt,
-                            expires_at: replacementExpiresAt,
-                            fail_reason: null,
-                            burned_at: null,
-                        }).eq("id", gateRow.id);
-                        await updateSession(db, session.session_id, {
-                            status: passNo === 2 ? "waiting_pass2" : "waiting",
-                            shortlink_channel: channel,
-                            ...(passNo === 2 ? { provider_id_pass2: replacement.provider?.id ?? null } : { provider_id_pass1: replacement.provider?.id ?? null }),
-                            last_error: null,
-                        });
-                        await logGate(db, {
-                            ...baseLog,
-                            event_code: "gtraffic_expired_fallback",
-                            detail: {
-                                ...baseLog.detail,
-                                scope: "session_only",
-                                from_provider_id: currentProvider.id,
-                                to_provider_id: replacement.provider?.id ?? null,
-                                to_provider_name: replacement.provider?.name ?? null,
-                                channel,
-                            },
-                        });
-                        return json({
-                            ok: true,
-                            next: "SHORTLINK_FALLBACK",
-                            outbound_url: replacement.outboundUrl,
-                            min_delay_seconds: replacementDelay,
-                            gate_token_life_seconds: gateLifeSeconds,
-                        }, 200);
-                    }
-                    catch (error) {
-                        await db.from("licenses_free_gate_tokens").update({ status: "burned_early", burned_at: new Date().toISOString(), fail_reason: "GTRAFFIC_FALLBACK_FAILED" }).eq("id", gateRow.id);
-                        await updateSession(db, session.session_id, { status: "closed", closed_at: new Date().toISOString(), last_error: "GTRAFFIC_FALLBACK_FAILED" });
-                        return await deny("GTRAFFIC_FALLBACK_FAILED", { detail: safeProviderError(error) });
-                    }
-                }
-                // A duplicate browser request may arrive while the first request is
-                // replacing this session's link. Never burn or close the session from
-                // the losing request; ask the same browser to poll briefly instead.
-                return json({
-                    ok: false,
-                    code: "GTRAFFIC_ROTATION_IN_PROGRESS",
-                    msg: "GTRAFFIC_ROTATION_IN_PROGRESS",
-                    retry_after_ms: 800,
-                }, 200);
-            }
-            await db.from("licenses_free_gate_tokens").update({ status: "burned_early", burned_at: new Date().toISOString(), fail_reason: "GATE_TOO_EARLY" }).eq("id", gateRow.id).eq("status", "pending");
-            await updateSession(db, session.session_id, { status: "closed", closed_at: new Date().toISOString(), out_expires_at: new Date().toISOString(), last_error: "GATE_TOO_EARLY" });
-            await logGate(db, { ...baseLog, event_code: "GATE_TOO_EARLY", detail: { ...baseLog.detail, activate_after_at: gateRow.activate_after_at, wait_seconds: Math.ceil((activateMs - nowMs) / 1000) }, fingerprint_hash: fpHash || null, ip_hash: ipHash, ua_hash: uaHash });
-            return json({ ok: false, code: "GATE_TOO_EARLY", msg: "GATE_TOO_EARLY", wait_seconds: Math.ceil((activateMs - nowMs) / 1000) }, 200);
-        }
-        if (!Number.isFinite(expiresMs) || nowMs > expiresMs) {
-            await db.from("licenses_free_gate_tokens").update({ status: "expired", fail_reason: "GATE_TOKEN_EXPIRED" }).eq("id", gateRow.id).eq("status", "pending");
-            await updateSession(db, session.session_id, { status: "closed", closed_at: new Date().toISOString(), out_expires_at: new Date().toISOString(), last_error: "GATE_TOKEN_EXPIRED" });
-            return await deny("GATE_TOKEN_EXPIRED");
-        }
-        if (requiresDoubleGate && passNo === 1) {
-            const lock = await db.from("licenses_free_gate_tokens")
-                .update({ status: "used", used_at: new Date().toISOString() })
-                .eq("id", gateRow.id)
-                .eq("status", "pending")
-                .select("id")
-                .maybeSingle();
-            if (!lock.data)
-                return await deny("GATE_TOKEN_ALREADY_USED");
-            let next;
-            try {
-                next = await createNextGateToken(db, cfg, session, 2, { ipHash, uaHash, fpHash }, env);
-            }
-            catch (error) {
-                await updateSession(db, session.session_id, { status: "closed", closed_at: new Date().toISOString(), last_error: "PASS2_SHORTLINK_FAILED" });
-                return await deny("PASS2_SHORTLINK_FAILED", { detail: String(error?.message ?? error) });
-            }
-            await updateSession(db, session.session_id, {
-                status: "waiting_pass2",
-                passes_required: 2,
-                passes_completed: 1,
-                current_pass: 2,
-                pass1_ok_at: new Date().toISOString(),
-                gate_ok_at: new Date().toISOString(),
-                provider_id_pass2: next.provider?.id ?? null,
-                last_error: null,
-            });
-            await logGate(db, {
-                ...baseLog,
-                event_code: next.degraded ? "pass1_ok_tokenized_degraded" : "pass1_ok_tokenized",
-                detail: {
-                    ...baseLog.detail,
-                    next: "PASS2",
-                    provider_id: next.provider?.id ?? null,
-                    provider_name: next.provider?.name ?? null,
-                    shortlink_degraded: Boolean(next.degraded),
-                    shortlink_failures: next.failures?.length ? next.failures : undefined,
-                },
-            });
-            return json({
-                ok: true,
-                next: "PASS2",
-                outbound_url: next.outboundUrl,
-                min_delay_seconds: next.delay,
-                gate_token_life_seconds: next.gateLifeSeconds,
-                shortlink_degraded: Boolean(next.degraded),
-                shortlink_failures: next.failures?.length ? next.failures : undefined,
-            }, 200);
-        }
-        const lock = await db.from("licenses_free_gate_tokens")
-            .update({ status: "used", used_at: new Date().toISOString() })
-            .eq("id", gateRow.id)
-            .eq("status", "pending")
-            .select("id")
-            .maybeSingle();
-        if (!lock.data)
-            return await deny("GATE_TOKEN_ALREADY_USED");
-        const claimToken = await claimTokenForGate(gateToken, session.session_id, env);
-        const claimHash = await sha256Hex(claimToken);
-        const claimWindowSeconds = clampSeconds(cfg.free_claim_window_seconds, 180, 30, 600);
-        const claimExpiresAt = minIsoDeadline(Date.now() + claimWindowSeconds * 1000, session.expires_at);
-        await updateSession(db, session.session_id, {
-            status: "gate_ok",
-            gate_ok_at: new Date().toISOString(),
-            pass2_ok_at: passNo === 2 ? new Date().toISOString() : session.pass2_ok_at ?? null,
-            passes_completed: requiresDoubleGate ? 2 : 1,
-            current_pass: passNo,
-            claim_token_hash: claimHash,
-            claim_expires_at: claimExpiresAt,
-            last_error: null,
-        });
-        await logGate(db, { ...baseLog, event_code: "gate_ok_tokenized", detail: { ...baseLog.detail, next: "CLAIM" } });
-        return json({ ok: true, next: "CLAIM", session_id: session.session_id, claim_token: claimToken, claim_url: "/free/claim", claim_expires_at: claimExpiresAt }, 200);
     }
-    // Fail closed: out_token alone can never replace the single-use gate token.
-    return await deny("TOKENIZED_GATE_REQUIRED");
+    if (result.next !== "CLAIM")
+        return json({ ok: false, code: "GATE_STATE_INVALID", msg: "GATE_STATE_INVALID" }, 503);
+    return json({ ok: true, next: "CLAIM", session_id: result.session_id,
+        claim_token: claimToken, claim_url: "/free/claim", claim_expires_at: result.claim_expires_at }, 200);
 }

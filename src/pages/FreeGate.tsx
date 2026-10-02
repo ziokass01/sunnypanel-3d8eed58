@@ -7,12 +7,17 @@ import { Badge } from "@/components/ui/badge";
 import { postFunction } from "@/lib/functions";
 import { fetchFreeConfig } from "@/features/free/free-config";
 import { FreeFlowSteps, markFreeAttemptFail } from "@/features/free/flow-ux";
-import { readBundle, writeBundle } from "@/lib/freeFlow";
-import { getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
+import { clearBundle as clearAppBundle, readBundle as readAppBundle, writeBundle as writeAppBundle } from "@/lib/freeFlow";
+import { clearFreeFlowStorage, getSelectedAppCode, getFreeStartMeta, getOrCreateFingerprint, getOutToken, setFreeStartMeta, setOutToken } from "@/features/free/fingerprint";
 
-type GateNextPass2 = { ok: true; next: "PASS2"; out_token?: string; outbound_url: string; min_delay_seconds: number; gate_token_life_seconds?: number };
-type GateNextFallback = { ok: true; next: "SHORTLINK_FALLBACK"; outbound_url: string; min_delay_seconds: number; gate_token_life_seconds?: number };
-type GateNextClaim = { ok: true; next: "CLAIM"; session_id?: string; claim_token: string; claim_url?: string | null };
+// Use the same app scope as Start; a live non-FF flow must not borrow FF state.
+function readBundle() { return readAppBundle(getSelectedAppCode()); }
+function writeBundle(partial: Parameters<typeof writeAppBundle>[0]) { writeAppBundle(partial, getSelectedAppCode()); }
+function clearBundle() { clearAppBundle(getSelectedAppCode()); }
+
+type GateNextPass2 = { ok: true; next: "PASS2"; out_token: string; outbound_url: string; min_delay_seconds: number; gate_token_life_seconds?: number };
+type GateNextFallback = { out_token: string; ok: true; next: "SHORTLINK_FALLBACK"; outbound_url: string; min_delay_seconds: number; gate_token_life_seconds?: number };
+type GateNextClaim = { ok: true; next: "CLAIM"; session_id?: string; claim_token: string; claim_url?: string | null; claim_expires_at?: string };
 type GateOk = GateNextPass2 | GateNextFallback | GateNextClaim;
 type GateErr = { ok: false; msg: string; code?: string; detail?: any; retry_after_ms?: number };
 
@@ -31,6 +36,9 @@ function friendlyGateError(msg: string) {
   if (m === "BAD_REFERRER") return "ADMIN đã bật xác minh cao cấp nên có thể bạn vượt link đúng nhưng vẫn lỗi thì hay liên hệ với ADMIN để được hỗ trợ.";
   if (m === "SESSION_EXPIRED") return "Phiên đã hết hạn❌. Vui lòng quay lại Get Key và làm lại.";
   if (m === "INVALID_SESSION") return "Thiếu/không hợp lệ session❌. Vui lòng quay lại Get Key và làm lại.";
+  if (["IP_MISMATCH", "UA_MISMATCH", "FP_MISMATCH"].includes(m)) return "Mạng hoặc trình duyệt đã thay đổi trong phiên. Hãy quay lại Get Key và bắt đầu lại.";
+  if (m === "SHORTLINK_ROTATION_LIMIT") return "Đã thử đổi link nhiều lần nhưng chưa hoàn tất. Hãy tạo phiên mới từ Get Key.";
+  if (m === "GATE_TOO_EARLY") return "Bạn quay lại trước thời gian quy định. Phiên đã bị hủy; hãy quay lại Get Key và làm lại.";
   if (m === "DEVICE_MISMATCH") return "Thiết bị không khớp phiên❌. Vui lòng quay lại Get Key và làm lại.";
   if (m === "ALREADY_REVEALED") return "Bạn đã nhận key rồi❌. Nếu muốn lấy key mới, hãy quay lại Get Key.";
   if (m === "PASS2_NOT_READY") return "Key VIP chưa sẵn sàng❌. Vui lòng quay lại Get Key và làm lại.";
@@ -39,7 +47,6 @@ function friendlyGateError(msg: string) {
   if (m === "GATE_TOKEN_EXPIRED") return "Link Gate đã hết hạn. Key sẽ không được tạo; hãy quay lại Get Key.";
   if (m === "TOKENIZED_GATE_REQUIRED") return "Bạn phải sử dụng đúng link Gate mới được phép nhận key.";
   if (m === "OUT_TOKEN_REQUIRED" || m === "OUT_TOKEN_MISMATCH") return "Token bắt đầu không hợp lệ hoặc không cùng phiên Gate. Hãy quay lại Get Key và làm lại.";
-  if (m === "GATE_TOO_EARLY") return "Xác minh đã bị gián đoạn❌.Lý do bạn không vượt link. Phiên đã bị hủy, vui lòng quay lại Get Key🔑 và làm lại.";
   return `Xác thực không thành công (${m}). Vui lòng quay lại và làm lại.`;
 }
 
@@ -212,10 +219,16 @@ export function FreeGatePage() {
         current_url,
       });
 
-      if ((res as any).ok) {
+      if ((res as any).ok === true) {
         const ok = res as GateOk;
 
         if (ok.next === "SHORTLINK_FALLBACK") {
+          const rotatedOut = String(ok.out_token || "").trim();
+          if (!rotatedOut) throw new Error("FALLBACK_TOKEN_MISSING");
+          setOutToken(rotatedOut);
+          writeBundle({ session_id: sid, out_token: rotatedOut });
+          persistGateFlow(sid, rotatedOut);
+          if (pass === 2) writeFlowItem("free_out_token_pass2", rotatedOut);
           const outbound = String(ok.outbound_url || "").trim();
           if (!outbound) {
             setStatus("error");
@@ -237,6 +250,7 @@ export function FreeGatePage() {
           // Transition to Pass2. The gate secret exists only inside the opaque
           // short-link destination and is never returned by either API response.
           let nextTok = String(ok.out_token || "").trim();
+          if (!nextTok) throw new Error("PASS2_TOKEN_MISSING");
           try {
             if (!nextTok && !gateTok) nextTok = readFlowItem("free_out_token_pass2").trim();
           } catch {
@@ -280,7 +294,7 @@ export function FreeGatePage() {
         }
         const claimSid = String((ok as GateNextClaim).session_id || sid || "").trim();
         if (claimSid && tok) {
-          writeBundle({ session_id: claimSid, out_token: tok, claim_token: claim });
+          writeBundle({ session_id: claimSid, out_token: tok, claim_token: claim, expires_at: ok.claim_expires_at });
         } else if (claimSid) {
           writeFlowItem("free_session_id_v1", claimSid);
           writeFlowItem("free_session_id", claimSid);
@@ -304,6 +318,13 @@ export function FreeGatePage() {
         setMessage("Đang xoay link dự phòng cho phiên này…");
         window.setTimeout(() => void gateOnce(rotationRetry + 1), retryAfter);
         return;
+      }
+      if (["GATE_TOO_EARLY", "GATE_TOKEN_EXPIRED", "SESSION_EXPIRED", "SESSION_CLOSED", "IP_MISMATCH", "UA_MISMATCH", "DEVICE_MISMATCH", "GATE_PASS_INVALID", "SHORTLINK_ROTATION_LIMIT", "PASS2_SHORTLINK_FAILED"].includes(msg)) {
+        clearBundle();
+        clearFreeFlowStorage();
+        for (const key of ["free_out_token", "free_out_token_v1", "free_out_token_pass2", "free_claim_token", "free_session_id", "free_sid"]) {
+          try { localStorage.removeItem(key); sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
+        }
       }
       markFreeAttemptFail(msg);
       setStatus("error");

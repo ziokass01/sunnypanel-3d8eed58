@@ -780,8 +780,8 @@ export function AdminFreeKeysPage() {
     setReturnSeconds(Number(s.free_return_seconds ?? 10));
     setDailyLimit(Number(s.free_daily_limit_per_fingerprint ?? 1));
     setDailyLimitPerIp(Math.max(0, Number((s as any).free_daily_limit_per_ip ?? 0)));
-    setGateRequireIpMatch(Boolean((s as any).free_gate_require_ip_match ?? true));
-    setGateRequireUaMatch(Boolean((s as any).free_gate_require_ua_match ?? true));
+    setGateRequireIpMatch(true);
+    setGateRequireUaMatch(true);
     setRequireRef(Boolean(s.free_require_link4m_referrer));
     setPublicNote(String(s.free_public_note ?? ""));
     setPublicLinksText(toLinksText(s.free_public_links));
@@ -2403,16 +2403,16 @@ export function AdminFreeKeysPage() {
             </div>
 
             <div className="space-y-2 rounded-md border p-3">
-              <div className="text-sm font-medium">Ràng buộc thiết bị ở /free/gate (VIP 2-pass)</div>
+              <div className="text-sm font-medium">Ràng buộc phiên ở Gate và Claim</div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs text-muted-foreground">Bắt buộc khớp IP</span>
-                <Switch checked={gateRequireIpMatch} onCheckedChange={setGateRequireIpMatch} />
+                <Switch checked={gateRequireIpMatch} disabled aria-label="IP bắt buộc khớp trong phiên" />
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs text-muted-foreground">Bắt buộc khớp UA</span>
-                <Switch checked={gateRequireUaMatch} onCheckedChange={setGateRequireUaMatch} />
+                <Switch checked={gateRequireUaMatch} disabled aria-label="UA bắt buộc khớp trong phiên" />
               </div>
-              <div className="text-xs text-muted-foreground">Mặc định đang bật để tương thích ngược.</div>
+              <div className="text-xs text-muted-foreground">IP, UA và fingerprint phải giữ nguyên trong cả phiên. Đổi mạng hoặc trình duyệt cần bắt đầu lại.</div>
             </div>
 
             <div className="flex items-center justify-between gap-4 rounded-md border p-3">

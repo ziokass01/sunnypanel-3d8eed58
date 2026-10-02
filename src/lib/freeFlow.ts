@@ -5,6 +5,7 @@ export type FreeFlowBundle = {
   out_token: string;
   claim_token?: string;
   trace_id?: string;
+  expires_at?: string;
 };
 
 function storageKey(appCode?: string | null) {
@@ -73,6 +74,7 @@ export function readBundle(appCode?: string | null): FreeFlowBundle | null {
       session_id: String(parsed.session_id).trim(),
       out_token: String(parsed.out_token).trim(),
       claim_token: isNonEmptyString(parsed.claim_token) ? String(parsed.claim_token).trim() : undefined,
+      expires_at: isNonEmptyString(parsed.expires_at) ? parsed.expires_at.trim() : undefined,
       trace_id: isNonEmptyString((parsed as any).trace_id) ? String((parsed as any).trace_id).trim() : undefined,
     };
   } catch {
@@ -104,7 +106,9 @@ export function writeBundle(
       out_token: nextOutToken,
       claim_token: isNonEmptyString(partial.claim_token)
         ? String(partial.claim_token).trim()
-        : prev?.claim_token,
+        : shouldRefreshCreatedAt ? undefined : prev?.claim_token,
+      expires_at: isNonEmptyString(partial.expires_at) ? partial.expires_at.trim()
+        : prev?.session_id === nextSessionId ? prev.expires_at : undefined,
       trace_id: isNonEmptyString((partial as any).trace_id)
         ? String((partial as any).trace_id).trim()
         : prev?.trace_id,
@@ -127,6 +131,10 @@ export function clearBundle(appCode?: string | null): void {
 }
 
 export function isFresh(bundle: FreeFlowBundle, maxAgeMs = 500 * 1000): boolean {
+  if (bundle.expires_at) {
+    const expiry=Date.parse(bundle.expires_at);
+    return Number.isFinite(expiry) && expiry > Date.now();
+  }
   const age = Date.now() - Number(bundle.created_at || 0);
   return Number.isFinite(age) && age >= 0 && age <= maxAgeMs;
 }

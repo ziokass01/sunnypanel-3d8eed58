@@ -14,6 +14,7 @@ function allowLimiter() {
 
 function env() {
   return {
+    GATEWAY_SHARED_SECRET: "test-gateway-secret",
     ACTIVE_FUNCTIONS_BASE_URL: "https://project.example/functions/v1",
     ACTIVE_SUPABASE_URL: "https://project.example",
     SUPABASE_SERVICE_ROLE_KEY: "service-role-test-key",
@@ -109,6 +110,10 @@ function installDbMock() {
       });
     }
 
+    if (url.pathname === "/rest/v1/rpc/free_flow_burn") {
+      state.closedPatch={status:"closed",claim_token_hash:null,out_token_hash:null,out_token_hash_pass2:null};
+      return jsonResponse(null);
+    }
     const table = decodeURIComponent(url.pathname.replace(/^\/rest\/v1\//, ""));
 
     if (table === "licenses") {
@@ -139,7 +144,9 @@ function installDbMock() {
       if (method === "GET") {
         assert.match(url.searchParams.get("or") || "", /out_token_hash\.eq\./);
         assert.equal(url.searchParams.get("limit"), "1");
-        return jsonResponse([{ session_id: "session-close-1" }]);
+        return jsonResponse([{ session_id: "session-close-1",status:"gate_ok",current_pass:1,
+          expires_at:new Date(Date.now()+60000).toISOString(),out_expires_at:new Date(Date.now()+60000).toISOString(),
+          out_token_hash:(url.searchParams.get("or")||"").match(/out_token_hash\.eq\.([a-f0-9]+)/)?.[1] }]);
       }
       if (method === "PATCH") {
         state.closedPatch = JSON.parse(String(init.body || "{}"));

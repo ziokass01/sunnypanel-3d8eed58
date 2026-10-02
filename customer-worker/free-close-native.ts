@@ -80,39 +80,7 @@ export async function handleFreeClose(req, env, ctx) {
   }
   if (!sessionMatch?.session_id) return ctx.json({ ok: true }, 200);
 
-  const nowIso = new Date().toISOString();
-  const fullUpd = await db
-    .from("licenses_free_sessions")
-    .update({
-      status: "closed",
-      claim_token_hash: null,
-      claim_expires_at: null,
-      claim_token_plain: null,
-      out_expires_at: nowIso,
-    })
-    .eq("session_id", sessionMatch.session_id);
-
-  if (fullUpd.error) {
-    const message = String(fullUpd.error?.message || "");
-    if (message.toLowerCase().includes("claim_token_plain")) {
-      const fallbackUpd = await db
-        .from("licenses_free_sessions")
-        .update({
-          status: "closed",
-          claim_token_hash: null,
-          claim_expires_at: null,
-          out_expires_at: nowIso,
-        })
-        .eq("session_id", sessionMatch.session_id);
-      if (fallbackUpd.error) {
-        console.error("free-close native fallback update failed", String(fallbackUpd.error?.message || fallbackUpd.error));
-        return ctx.json({ ok: false, msg: "SERVER_ERROR" }, 500);
-      }
-    } else {
-      console.error("free-close native update failed", message);
-      return ctx.json({ ok: false, msg: "SERVER_ERROR" }, 500);
-    }
-  }
-
+  const close = await db.rpc("free_flow_burn", { p_session_id: sessionMatch.session_id, p_reason: "USER_CLOSED" });
+  if (close.error) return ctx.json({ ok: false, code: "CLOSE_FAILED", msg: "SERVER_ERROR" }, 500);
   return ctx.json({ ok: true }, 200);
 }

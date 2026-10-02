@@ -1,3 +1,4 @@
+import { authenticateFreeIngress } from "../_shared/free-ingress.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   buildGtrafficApiUrl,
@@ -31,7 +32,7 @@ function text(value: unknown, max = 4096) {
   return String(value ?? "").trim().slice(0, max);
 }
 function getIp(req: Request) {
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() ?? "0.0.0.0";
+  return (req.headers.get("cf-connecting-ip") || "").trim();
 }
 async function sha256Hex(input: string) {
   const data = new TextEncoder().encode(String(input ?? ""));
@@ -393,14 +394,14 @@ async function logGate(db: any, row: Record<string, unknown>) {
 async function closeStale(db: any, ipHash: string, fpHash: string) {
   const cutoff = new Date(Date.now() - 45 * 60 * 1000).toISOString();
   try {
-    await db.from("licenses_free_sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_error: "AUTO_CLOSE_STALE_PENDING" })
+    await db.from("licenses_free_sessions").update({ status: "closed", closed_at: new Date().toISOString(), out_token_hash: null, out_token_hash_pass2: null, claim_token_hash: null, claim_expires_at: null, last_error: "AUTO_CLOSE_STALE_PENDING" })
       .in("status", ["started", "waiting", "waiting_pass2", "gate_ok"])
       .lt("created_at", cutoff)
       .is("revealed_at", null);
   } catch { /* ignore */ }
   try {
     if (fpHash) {
-      await db.from("licenses_free_sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_error: "AUTO_CLOSE_OLD_SAME_FP" })
+      await db.from("licenses_free_sessions").update({ status: "closed", closed_at: new Date().toISOString(), out_token_hash: null, out_token_hash_pass2: null, claim_token_hash: null, claim_expires_at: null, last_error: "AUTO_CLOSE_OLD_SAME_FP" })
         .eq("fingerprint_hash", fpHash)
         .in("status", ["started", "waiting", "waiting_pass2"])
         .lt("created_at", new Date(Date.now() - 10 * 60 * 1000).toISOString())
@@ -640,6 +641,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" }, 405);
 
+  try {
+    req = await authenticateFreeIngress(req, "free-start",
+      Deno.env.get("FREE_GATEWAY_SHARED_SECRET") || Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET") || "");
+  } catch (error) {
+    const code = String((error as Error).message || "FREE_GATEWAY_REQUIRED");
+    return json({ ok: false, code, msg: code }, code === "FREE_GATEWAY_SECRET_MISSING" ? 503 : 403);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRoleKey) return json({ ok: false, code: "FREE_NOT_READY", msg: "FREE_NOT_READY" }, 503);
@@ -659,6 +668,8 @@ Deno.serve(async (req) => {
   const ua = req.headers.get("user-agent") ?? "";
   const ipHash = await sha256Hex(ip || "0.0.0.0");
   const uaHash = await sha256Hex(ua);
+  if (fingerprint.length < 6 || fingerprint.length > 128) return json({ ok: false, code: "FINGERPRINT_REQUIRED", msg: "FINGERPRINT_REQUIRED" }, 400);
+  if (!ip) return json({ ok: false, code: "CLIENT_IP_REQUIRED", msg: "CLIENT_IP_REQUIRED" }, 400);
   const fpHash = fingerprint ? await sha256Hex(fingerprint) : "";
   const traceId = "free-" + crypto.randomUUID();
   const baseLog = { ip_hash: ipHash, ua_hash: uaHash, fingerprint_hash: fpHash || null, key_type_code: keyTypeCode || null } as Record<string, unknown>;
@@ -727,24 +738,28 @@ Deno.serve(async (req) => {
     await logGate(db, { ...baseLog, event_code: "PENDING_LIMIT_CHECK_SKIPPED", detail: { route: "free-start", trace_id: traceId } });
   }
 
+  const cleanup = await db.rpc("free_flow_expire", {});
+  if (cleanup.error) return await deny("FREE_GUARD_NOT_READY");
   const sessionId = crypto.randomUUID();
   const outToken = randomToken("out");
   const outHash = await sha256Hex(outToken);
   const gateToken = randomToken("gt");
   const gateHash = await sha256Hex(gateToken);
-  const nowMs = Date.now();
-  const nowIso = new Date(nowMs).toISOString();
-  const minDelay = Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds ?? 0) || 0);
+  let nowMs = Date.now();
+  let nowIso = new Date(nowMs).toISOString();
+  const antiDelay = cfg.free_gate_antibypass_enabled === true ? Math.max(0, Number(cfg.free_gate_antibypass_seconds) || 0) : 0;
+  const minDelay = Math.max(antiDelay, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds ?? 0) || 0);
   const gateLifeSeconds = clampSeconds(cfg.free_gate_token_life_seconds, 600, 60, 1800);
   const claimWindowSeconds = clampSeconds(cfg.free_claim_window_seconds, 180, 30, 600);
   const configuredSessionTtl = clampSeconds(cfg.free_session_absolute_seconds, 900, 300, 3600);
-  const neededTtl = minDelay + gateLifeSeconds + claimWindowSeconds + 120;
+  const pass2Delay = Math.max(antiDelay, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds_pass2 ?? minDelay) || 0);
+  const neededTtl = minDelay + gateLifeSeconds + claimWindowSeconds + 120 + (requiresDoubleGate ? pass2Delay + gateLifeSeconds : 0);
   const sessionTtlSeconds = Math.max(configuredSessionTtl, neededTtl);
-  const expiresAt = new Date(nowMs + sessionTtlSeconds * 1000).toISOString();
-  const outExpiresAt = expiresAt;
+  let expiresAt = new Date(nowMs + sessionTtlSeconds * 1000).toISOString();
+  let outExpiresAt = expiresAt;
   let effectiveMinDelay = minDelay;
   let activateAfterAt = new Date(nowMs + minDelay * 1000).toISOString();
-  const gateExpiresAt = new Date(nowMs + (minDelay + gateLifeSeconds) * 1000).toISOString();
+  let gateExpiresAt = new Date(nowMs + (minDelay + gateLifeSeconds) * 1000).toISOString();
 
   let provider: any;
   let gateUrl = "";
@@ -772,6 +787,13 @@ Deno.serve(async (req) => {
     return await deny("SHORTLINK_CREATE_FAILED", { detail: safeProviderError(error) });
   }
   if (!outboundUrl) return await deny("OUTBOUND_URL_TEMPLATE_INVALID");
+
+  nowMs = Date.now();
+  nowIso = new Date(nowMs).toISOString();
+  expiresAt = new Date(nowMs + sessionTtlSeconds * 1000).toISOString();
+  outExpiresAt = expiresAt;
+  activateAfterAt = new Date(nowMs + effectiveMinDelay * 1000).toISOString();
+  gateExpiresAt = new Date(nowMs + (effectiveMinDelay + gateLifeSeconds) * 1000).toISOString();
 
   const fullPayload: Record<string, unknown> = {
     session_id: sessionId,
@@ -817,7 +839,7 @@ Deno.serve(async (req) => {
   };
 
   let inserted = await db.from("licenses_free_sessions").insert(fullPayload);
-  if (inserted.error && isMissingColumn(inserted.error)) inserted = await db.from("licenses_free_sessions").insert(compatPayload);
+  // No legacy fallback: the full tokenized proof schema is mandatory.
   if (inserted.error) return await deny("SESSION_CREATE_FAILED", { detail: inserted.error.message });
 
   try {
@@ -837,7 +859,7 @@ Deno.serve(async (req) => {
     });
     if (tokenInsert.error) throw tokenInsert.error;
   } catch (error) {
-    await db.from("licenses_free_sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_error: "GATE_TOKEN_CREATE_FAILED" }).eq("session_id", sessionId);
+    await db.from("licenses_free_sessions").update({ status: "closed", closed_at: new Date().toISOString(), out_token_hash: null, out_token_hash_pass2: null, claim_token_hash: null, claim_expires_at: null, last_error: "GATE_TOKEN_CREATE_FAILED" }).eq("session_id", sessionId);
     return await deny("GATE_TOKEN_CREATE_FAILED", { detail: String((error as any)?.message ?? error) });
   }
 
@@ -875,7 +897,7 @@ Deno.serve(async (req) => {
     shortlink_failures: shortlinkFailures.length ? shortlinkFailures : undefined,
     passes_required: requiresDoubleGate ? 2 : 1,
     min_delay_seconds: effectiveMinDelay,
-    min_delay_seconds_pass2: Math.max(0, Number(cfg.free_min_delay_enabled === false ? 0 : cfg.free_min_delay_seconds_pass2 ?? minDelay) || 0),
+    min_delay_seconds_pass2: pass2Delay,
     gate_token_life_seconds: gateLifeSeconds,
     trace_id: traceId,
     expires_at: expiresAt,

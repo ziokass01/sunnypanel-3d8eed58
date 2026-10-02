@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { createServiceClient } from "./supabase-rest.js";
-import { requiredFinalPass, tokenPairMatches, validateFinalGateProof } from "./free-shared/free-claim-guard.js";
 import { insertLicenseCompat } from "./free-shared/license-insert.js";
 import { resolveKeyTypeDurationSeconds } from "./free-shared/license-duration.js";
 import { effectiveBonusDuration, resolveFreeBonus } from "./free-shared/bonus.js";
@@ -12,10 +11,7 @@ async function sha256Hex(input) {
   return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(input ?? ""))));
 }
 function text(value, max = 4096) { return String(value ?? "").trim().slice(0, max); }
-function getIp(req) {
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip")
-    ?? (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() ?? "";
-}
+function getIp(req) { return (req.headers.get("cf-connecting-ip") || "").trim(); }
 function randomChunk(len = 4) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = new Uint8Array(len); crypto.getRandomValues(bytes);
@@ -66,7 +62,7 @@ function isMissingSelectColumn(error) {
 async function resolveAppQuotaLimits(db, appCode, fallbackFp, fallbackIp) {
   const normalized = normalizeAppCode(appCode);
   const res = await db.from("server_app_settings").select("app_code,free_daily_limit_per_fingerprint,free_daily_limit_per_ip").eq("app_code", normalized).maybeSingle();
-  if (res.error && !isMissingSelectColumn(res.error)) return { free_daily_limit_per_fingerprint: fallbackFp, free_daily_limit_per_ip: fallbackIp };
+  if (res.error && !isMissingSelectColumn(res.error)) return { free_daily_limit_per_fingerprint: fallbackFp, free_daily_limit_per_ip: fallbackIp, load_error: true };
   return {
     free_daily_limit_per_fingerprint: Math.max(0, Number(res.data?.free_daily_limit_per_fingerprint ?? fallbackFp)),
     free_daily_limit_per_ip: Math.max(0, Number(res.data?.free_daily_limit_per_ip ?? fallbackIp)),
@@ -183,10 +179,11 @@ export async function handleFreeReveal(req, env, ctx) {
   if (!db) return ctx.json({ ok: false, msg: "SERVER_MISCONFIG" }, 500);
 
   const ip = getIp(req), ua = req.headers.get("user-agent") ?? "";
+  if (!ip) return ctx.json({ ok: false, code: "CLIENT_IP_REQUIRED", msg: "CLIENT_IP_REQUIRED" }, 400);
   const settingsRes = await db.from("licenses_free_settings").select("*").eq("id", 1).maybeSingle();
   if (settingsRes.error) return ctx.json({ ok: false, msg: "SERVER_ERROR" }, 500);
   const settings = settingsRes.data ?? {};
-  if (!Boolean(settings.free_enabled ?? true)) return ctx.json({ ok: false, msg: "CLOSED" }, 200);
+  // Feature state is checked under the authorization lock below.
   const freeCloseDeadlineSeconds = Math.max(10, Number(settings.free_close_deadline_seconds ?? settings.free_return_seconds ?? 60));
 
   const debugEnabled = String(req.headers.get("x-debug") ?? "").trim() === "1" || body.debug === true || body.debug === 1 || body.debug === "1";
@@ -208,18 +205,8 @@ export async function handleFreeReveal(req, env, ctx) {
   if (lookup.error) return ctx.json({ ok: false, msg: "SESSION_LOOKUP_FAILED", code: "SESSION_LOOKUP_FAILED" }, 500);
   const sess = lookup.data;
   if (!sess) return ctx.json({ ok: false, msg: "SESSION_NOT_FOUND", code: "SESSION_NOT_FOUND", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  const sessionId = sess.session_id, now = Date.now(), expMs = Date.parse(sess.expires_at);
-  if (!Number.isFinite(expMs) || expMs < now) return ctx.json({ ok: false, msg: "SESSION_EXPIRED" }, 200);
-  if (sess.status === "closed" || Boolean(sess.copied_at)) return ctx.json({ ok: false, msg: "SESSION_CLOSED" }, 200);
-  const closeDeadlineMs = sess.close_deadline_at ? Date.parse(sess.close_deadline_at) : 0;
-  if (closeDeadlineMs && Number.isFinite(closeDeadlineMs) && closeDeadlineMs < now) {
-    await db.from("licenses_free_sessions").update({ status: "closed", out_expires_at: new Date().toISOString(), claim_token_hash: null, claim_expires_at: null }).eq("session_id", sessionId);
-    return ctx.json({ ok: false, msg: "SESSION_CLOSED" }, 200);
-  }
+  const sessionId = sess.session_id;
   const warnings = [];
-  if (sess.fingerprint_hash !== fpHash) return ctx.json({ ok: false, msg: "FP_MISMATCH", code: "FP_MISMATCH", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  if (sess.ua_hash !== uaHash) warnings.push("UA_MISMATCH");
-  if (sess.ip_hash !== ipHash) warnings.push("IP_MISMATCH");
 
   const getKeyTypeMeta = async (code) => {
     if (!code) return null;
@@ -235,6 +222,19 @@ export async function handleFreeReveal(req, env, ctx) {
     if (r.error) return null;
     return r.data && r.data.enabled !== false ? r.data : null;
   };
+
+  let keyInserted = false;
+  async function finishIssue(licenseId: string | null, redeemId: string | null, rawKey: string,
+    expiresAt: string, app: string, signature: string, reward: string | null = null) {
+    keyInserted = true;
+    const done = await db.rpc("free_flow_finish_claim", {
+      p_session_id: sessionId, p_license_id: licenseId, p_redeem_id: redeemId,
+      p_key_mask: maskKey(rawKey), p_expires_at: expiresAt,
+      p_app_code: app, p_signature: signature, p_reward_mode: reward,
+      p_close_seconds: freeCloseDeadlineSeconds,
+    });
+    if (done.error || done.data?.ok !== true) throw Object.assign(new Error("ISSUE_FINALIZE_FAILED"), { code: "ISSUE_FINALIZE_FAILED", status: 503 });
+  }
 
   async function issueFindDumpsRedeemKey(sessRow, keyTypeMeta) {
     const durationSeconds = Math.max(60, Number(sessRow?.duration_seconds ?? 0));
@@ -276,11 +276,7 @@ export async function handleFreeReveal(req, env, ctx) {
       if (!ins.error && ins.data?.id) { inserted = { id: String(ins.data.id), redeem_key: String(ins.data.redeem_key) }; break; }
     }
     if (!inserted) throw Object.assign(new Error("SERVER_REDEEM_KEY_INSERT_FAILED"), { status: 500, code: "SERVER_REDEEM_KEY_INSERT_FAILED" });
-    await db.from("licenses_free_sessions").update({
-      issued_server_redeem_key_id: inserted.id, issued_server_reward_mode: reward_mode, app_code: appCode, package_code, credit_code, wallet_kind,
-      selection_meta: { app_code: appCode, package_code, credit_code, wallet_kind, reward_mode, duration_seconds: durationSeconds, trace_id: text(sessRow?.trace_id,128) || null },
-    }).eq("session_id", sessionId);
-    await db.from("licenses_free_issues").insert({ license_id: null, key_mask: inserted.redeem_key, expires_at: expiresAt, session_id: sessionId, ip_hash: ipHash, fingerprint_hash: fpHash, app_code: appCode, key_signature: "FD", server_redeem_key_id: inserted.id });
+    await finishIssue(null, inserted.id, inserted.redeem_key, expiresAt, appCode, "FD", reward_mode);
     return { key: inserted.redeem_key, expires_at: expiresAt, allow_reset: false, app_code: appCode, key_signature: "FD", reward_mode, package_code, credit_code, wallet_kind, entitlement_seconds, created_at: issuedAt, server_redeem_key_id: inserted.id };
   }
 
@@ -307,72 +303,28 @@ export async function handleFreeReveal(req, env, ctx) {
       if (!ins.error && ins.data?.id) { inserted = { id: String(ins.data.id), key: rawKey }; break; }
     }
     if (!inserted) throw Object.assign(new Error("AI_REDEEM_KEY_INSERT_FAILED"), { status: 500, code: "AI_REDEEM_KEY_INSERT_FAILED" });
-    await db.from("licenses_free_sessions").update({
-      status: "revealed", last_error: null, reveal_count: 1, revealed_at: issuedAt, claim_token_hash: null, claim_expires_at: null,
-      out_token_hash: null, out_token_hash_pass2: null, out_expires_at: issuedAt, issued_server_redeem_key_id: inserted.id,
-      issued_server_reward_mode: "ai_redeem", app_code: appCode,
-      selection_meta: { app_code: appCode, reward_mode: "ai_redeem", duration_seconds: durationSeconds, trace_id: text(sessRow?.trace_id,128) || null },
-    }).eq("session_id", sessionId);
-    await db.from("licenses_free_issues").insert({ license_id: null, key_mask: inserted.key, expires_at: expiresAt, session_id: sessionId, ip_hash: ipHash, fingerprint_hash: fpHash, app_code: appCode, key_signature: keySignature, server_redeem_key_id: inserted.id });
+    await finishIssue(null, inserted.id, inserted.key, expiresAt, appCode, keySignature, "ai_redeem");
     return { key: inserted.key, expires_at: expiresAt, allow_reset: true, app_code: appCode, key_signature: keySignature, reward_mode: "ai_redeem", created_at: issuedAt, server_redeem_key_id: inserted.id };
   }
 
-  const claimExpMs = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
-  if (!tokenPairMatches(claimHash, outHash, sess)) {
-    await db.from("licenses_free_sessions").update({ last_error: "TOKEN_PAIR_INVALID" }).eq("session_id", sessionId);
-    await insertGateLog(db, { session_id: sessionId, trace_id: text(sess.trace_id,128) || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "TOKEN_PAIR_INVALID", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    return ctx.json({ ok: false, msg: "TOKEN_PAIR_INVALID", code: "TOKEN_PAIR_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-  if (!claimExpMs || claimExpMs < now) {
-    await db.from("licenses_free_sessions").update({ last_error: "CLAIM_EXPIRED" }).eq("session_id", sessionId);
-    await insertGateLog(db, { session_id: sessionId, trace_id: text(sess.trace_id,128) || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "CLAIM_EXPIRED", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    await maybeAutoBlockGateFailures(db, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: text(sess.trace_id,128) || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-    return ctx.json({ ok: false, msg: "CLAIM_EXPIRED", code: "CLAIM_EXPIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-  if (sess.status === "revealed" || (Number(sess.reveal_count ?? 0) > 0 && sess.status !== "revealing")) return ctx.json({ ok: false, msg: "CLAIM_ALREADY_USED", code: "CLAIM_ALREADY_USED" }, 200);
-  if (sess.status === "revealing") return ctx.json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS" }, 200);
-  if (sess.status !== "gate_ok") {
-    await db.from("licenses_free_sessions").update({ last_error: "GATE_STATUS_INVALID" }).eq("session_id", sessionId);
-    await maybeAutoBlockGateFailures(db, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: text(sess.trace_id,128) || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-    return ctx.json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-
-  const finalPass = requiredFinalPass(sess);
-  const finalGate = await db.from("licenses_free_gate_tokens").select("pass_no,status,activate_after_at,expires_at,used_at")
-    .eq("session_id", sessionId).eq("pass_no", finalPass).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (finalGate.error) return ctx.json({ ok: false, msg: "FINAL_GATE_PROOF_LOAD_FAILED", code: "FINAL_GATE_PROOF_LOAD_FAILED" }, 500);
-  const gateProof = validateFinalGateProof(sess, finalGate.data ?? null);
-  if (!gateProof.ok) {
-    await db.from("licenses_free_sessions").update({ last_error: gateProof.code }).eq("session_id", sessionId);
-    await insertGateLog(db, { session_id: sessionId, trace_id: text(sess.trace_id,128) || null, key_type_code: sess.key_type_code ?? null, pass_no: finalPass, event_code: gateProof.code, detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    return ctx.json({ ok: false, msg: gateProof.code, code: gateProof.code }, 200);
-  }
-
-  const dayKey = getVietnamDateKey(), dayRange = getVietnamDayRangeUtc(dayKey);
   const quotaAppCode = normalizeAppCode(sess.app_code ?? "free-fire");
-  const limits = await resolveAppQuotaLimits(db, quotaAppCode, Math.max(0, Number(settings.free_daily_limit_per_fingerprint ?? 1)), Math.max(0, Number(settings.free_daily_limit_per_ip ?? 0)));
-  if (limits.free_daily_limit_per_fingerprint > 0) {
-    const q = await db.from("licenses_free_issues").select("issue_id", { count: "exact", head: true })
-      .gte("created_at", dayRange.startUtcIso).lt("created_at", dayRange.nextStartUtcIso).eq("fingerprint_hash", fpHash).eq("app_code", quotaAppCode);
-    if (Number(q.count ?? 0) >= limits.free_daily_limit_per_fingerprint) {
-      await db.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA_FP" }).eq("session_id", sessionId);
-      return ctx.json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT" }, 200);
-    }
+  const quotaLimits = await resolveAppQuotaLimits(db, quotaAppCode,
+    Math.max(0, Number(settings.free_daily_limit_per_fingerprint ?? 1)),
+    Math.max(0, Number(settings.free_daily_limit_per_ip ?? 0)));
+  if (quotaLimits.load_error) return ctx.json({ ok: false, code: "QUOTA_LOAD_FAILED", msg: "QUOTA_LOAD_FAILED" }, 503);
+  const lock = await db.rpc("free_flow_begin_claim", {
+    p_claim_hash: claimHash, p_out_hash: outHash,
+    p_fp_hash: fpHash, p_ip_hash: ipHash, p_ua_hash: uaHash,
+    p_session_id: body.session_id || "",
+    p_fp_limit: quotaLimits.free_daily_limit_per_fingerprint,
+    p_ip_limit: quotaLimits.free_daily_limit_per_ip,
+  });
+  if (lock.error || !lock.data || typeof lock.data.ok !== "boolean") return ctx.json({ ok: false, code: "FREE_GUARD_NOT_READY", msg: "FREE_GUARD_NOT_READY" }, 503);
+  if (lock.data.ok !== true) {
+    const code = lock.data.code || "CLAIM_DENIED";
+    await insertGateLog(db, { session_id: sessionId, event_code: code, detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    return ctx.json({ ok: false, code, msg: code }, 200);
   }
-  if (limits.free_daily_limit_per_ip > 0) {
-    const q = await db.from("licenses_free_issues").select("issue_id", { count: "exact", head: true })
-      .gte("created_at", dayRange.startUtcIso).lt("created_at", dayRange.nextStartUtcIso).eq("ip_hash", ipHash).eq("app_code", quotaAppCode);
-    if (Number(q.count ?? 0) >= limits.free_daily_limit_per_ip) {
-      await db.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA_IP" }).eq("session_id", sessionId);
-      return ctx.json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT" }, 200);
-    }
-  }
-
-  const lockIso = new Date().toISOString();
-  const lock = await db.from("licenses_free_sessions").update({ status: "revealing", reveal_count: 1, revealed_at: lockIso, last_error: null })
-    .eq("session_id", sessionId).eq("status", "gate_ok").eq("reveal_count", 0).eq("claim_token_hash", claimHash)
-    .select("session_id,status").maybeSingle();
-  if (!lock.data) return ctx.json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
 
   const keyTypeMeta = await getKeyTypeMeta(sess.key_type_code ?? null);
   const keyTypeBaseDuration = resolveKeyTypeDurationSeconds(keyTypeMeta ?? {});
@@ -443,7 +395,7 @@ export async function handleFreeReveal(req, env, ctx) {
       const issued = await issueAiSunnyRedeemKey(sessForIssue, keyTypeMeta);
       return ctx.json({ ok: true, ...issued, key_type_label, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, warnings }, 200);
     } catch (error) {
-      await db.from("licenses_free_sessions").update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "AI_REDEEM_KEY_FAILED" }).eq("session_id", sessionId).eq("status", "revealing");
+      if (!keyInserted) await db.from("licenses_free_sessions").update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "AI_REDEEM_KEY_FAILED" }).eq("session_id", sessionId).eq("status", "revealing");
       const code = String(error?.code ?? error?.message ?? "AI_REDEEM_KEY_FAILED");
       return ctx.json({ ok: false, msg: code, code }, Number(error?.status ?? 500));
     }
@@ -452,10 +404,9 @@ export async function handleFreeReveal(req, env, ctx) {
   if (appCode === "find-dumps") {
     try {
       const issued = await issueFindDumpsRedeemKey(sessForIssue, keyTypeMeta);
-      await db.from("licenses_free_sessions").update({ status: "revealed", last_error: null, revealed_at: issued.created_at, reveal_count: 1, claim_token_hash: null, claim_expires_at: null, out_token_hash: null, out_token_hash_pass2: null, out_expires_at: issued.created_at, close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(), copied_at: null }).eq("session_id", sessionId);
       return ctx.json({ ok: true, key: issued.key, expires_at: issued.expires_at, key_type_label, key_type_code: sess.key_type_code ?? null, created_at: issued.created_at, session_id: sessionId, ip_hash: ipHash, allow_reset: false, app_code: issued.app_code, key_signature: issued.key_signature, reward_mode: issued.reward_mode, package_code: issued.package_code, credit_code: issued.credit_code, wallet_kind: issued.wallet_kind, entitlement_seconds: issued.entitlement_seconds, server_redeem_key_id: issued.server_redeem_key_id, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, trace_id: text(sess.trace_id,128) || null, warnings: warnings.length ? warnings : undefined }, 200);
     } catch (error) {
-      await db.from("licenses_free_sessions").update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "FIND_DUMPS_KEY_FAILED" }).eq("session_id", sessionId).eq("status", "revealing");
+      if (!keyInserted) await db.from("licenses_free_sessions").update({ status: "gate_ok", reveal_count: 0, revealed_at: null, last_error: "FIND_DUMPS_KEY_FAILED" }).eq("session_id", sessionId).eq("status", "revealing");
       const code = String(error?.code ?? error?.message ?? "FIND_DUMPS_KEY_FAILED");
       return ctx.json({ ok: false, msg: code, code }, Number(error?.status ?? 500));
     }
@@ -489,11 +440,10 @@ export async function handleFreeReveal(req, env, ctx) {
     await insertGateLog(db, { session_id: sessionId, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "license_insert_failed", detail: { app_code: appCode, message: lastError || "unknown", attempts }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash, trace_id: text(sess.trace_id,128) || null });
     return ctx.json({ ok: false, code: "LICENSE_INSERT_FAILED", msg: "SERVER_ERROR", trace_id: text(sess.trace_id,128) || null }, 500);
   }
-  await db.from("licenses_free_sessions").update({
-    status: "revealed", last_error: null, revealed_at: new Date().toISOString(), revealed_license_id: inserted.id, reveal_count: 1,
-    claim_token_hash: null, claim_expires_at: null, out_token_hash: null, out_token_hash_pass2: null, out_expires_at: new Date().toISOString(),
-    close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(), copied_at: null,
-  }).eq("session_id", sessionId);
-  await db.from("licenses_free_issues").insert({ license_id: inserted.id, key_mask: maskKey(inserted.key), expires_at, session_id: sessionId, ip_hash: ipHash, fingerprint_hash: fpHash, ua_hash: uaHash, app_code: appCode, key_signature: keySignature, server_redeem_key_id: null });
+  try {
+    await finishIssue(inserted.id, null, inserted.key, expires_at, appCode, keySignature);
+  } catch {
+    return ctx.json({ ok: false, code: "ISSUE_FINALIZE_FAILED", msg: "ISSUE_FINALIZE_FAILED" }, 503);
+  }
   return ctx.json({ ok: true, key: inserted.key, expires_at, key_type_label, key_type_code: sess.key_type_code ?? null, created_at: new Date().toISOString(), session_id: sessionId, ip_hash: ipHash, allow_reset: allowReset, app_code: appCode, key_signature: keySignature, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, trace_id: text(sess.trace_id,128) || null, warnings: warnings.length ? warnings : undefined, debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
 }

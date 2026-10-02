@@ -1,3 +1,4 @@
+// Pure diagnostic helpers. Issuance authorization lives in free_flow_begin_claim.
 export type FinalGateProof = {
   pass_no?: number | null;
   status?: string | null;
@@ -52,13 +53,9 @@ export function validateFinalGateProof(session: ClaimSessionProof, gate: FinalGa
 
 export function tokenPairMatches(claimHash: string, outHash: string, session: any) {
   const storedClaimHash = String(session?.claim_token_hash ?? "").trim();
-  const acceptedOutHashes = [
-    String(session?.out_token_hash ?? "").trim(),
-    String(session?.out_token_hash_pass2 ?? "").trim(),
-  ].filter(Boolean);
+  const expected = requiredFinalPass(session) === 2
+    ? String(session?.out_token_hash_pass2 ?? "").trim()
+    : String(session?.out_token_hash ?? "").trim();
+  return Boolean(claimHash) && Boolean(outHash) && storedClaimHash === claimHash && expected === outHash;
 
-  return Boolean(claimHash)
-    && Boolean(outHash)
-    && storedClaimHash === claimHash
-    && acceptedOutHashes.includes(outHash);
 }

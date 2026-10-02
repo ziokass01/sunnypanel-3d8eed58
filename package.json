@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:contracts": "node --test tests/*.test.mjs",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:free-security": "node --test tests/security/*.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -66,6 +67,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",

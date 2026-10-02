@@ -376,6 +376,20 @@ async function forwardRequest(req, upstreamUrl, env, fnName = "") {
     headers.set("X-Forwarded-For", realIp);
   }
 
+  if (["free-start", "free-gate", "free-reveal", "free-resolve", "free-close"].includes(fnName)) {
+    const secret = String(env.FREE_GATEWAY_SHARED_SECRET || env.GATEWAY_SHARED_SECRET || "").trim();
+    const realIp = String(req.headers.get("CF-Connecting-IP") || "").trim();
+    if (!secret || !realIp) throw new Error("FREE_GATEWAY_NOT_READY");
+    const ts = String(Math.floor(Date.now() / 1000)), nonce = randomHex(16);
+    const bodyHash = await sha256HexBytes(bodyBytes);
+    const ua = req.headers.get("user-agent") || "";
+    headers.set("user-agent", ua);
+    const signature = await hmacSha256Hex(secret, ["free-v1", method, fnName, ts, nonce, realIp, ua, bodyHash].join("\n"));
+    headers.set("x-gateway-ts", ts); headers.set("x-gateway-nonce", nonce);
+    headers.set("x-gateway-ip", realIp); headers.set("x-gateway-body-sha256", bodyHash);
+    headers.set("x-gateway-signature", signature);
+  }
+
   const init = { method, headers };
   if (method !== "GET" && method !== "HEAD") init.body = bodyBytes;
   const timeoutMs = envInt(env, "UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS, 1000, 30_000);

@@ -1,9 +1,9 @@
+import { authenticateFreeIngress } from "../_shared/free-ingress.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveClientIp } from "../_shared/client-ip.ts";
 import { insertLicenseCompat } from "../_shared/license-insert.ts";
-import { requiredFinalPass, tokenPairMatches, validateFinalGateProof } from "../_shared/free-claim-guard.ts";
 import { resolveKeyTypeDurationSeconds } from "../_shared/license-duration.ts";
 import { effectiveBonusDuration, resolveFreeBonus } from "../_shared/free-bonus.ts";
 
@@ -147,7 +147,7 @@ async function resolveAppQuotaLimits(sb: any, appCode: string, fallbackFp: numbe
       free_daily_limit_per_ip: Math.max(0, Number((data as any)?.free_daily_limit_per_ip ?? fallbackIp)),
     };
   } catch {
-    return { free_daily_limit_per_fingerprint: fallbackFp, free_daily_limit_per_ip: fallbackIp };
+    return { free_daily_limit_per_fingerprint: fallbackFp, free_daily_limit_per_ip: fallbackIp, load_error: true };
   }
 }
 
@@ -327,6 +327,14 @@ Deno.serve(async (req) => {
     return json({ ok: false, msg: "INVALID_INPUT" }, 200);
   }
 
+  try {
+    req = await authenticateFreeIngress(req, "free-reveal",
+      Deno.env.get("FREE_GATEWAY_SHARED_SECRET") || Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET") || "");
+  } catch (error) {
+    const code = String((error as Error).message || "FREE_GATEWAY_REQUIRED");
+    return json({ ok: false, code, msg: code }, code === "FREE_GATEWAY_SECRET_MISSING" ? 503 : 403);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
@@ -347,9 +355,7 @@ Deno.serve(async (req) => {
 
   if (sErr) return json({ ok: false, msg: sErr.message }, 500);
 
-  if (!Boolean(settings?.free_enabled ?? true)) {
-    return json({ ok: false, msg: "CLOSED" }, 200);
-  }
+  // Feature state is checked under the authorization lock below.
 
   const freeCloseDeadlineSeconds = Math.max(10, Number((settings as any)?.free_close_deadline_seconds ?? settings?.free_return_seconds ?? 60));
 
@@ -416,44 +422,25 @@ Deno.serve(async (req) => {
   }
 
   const sessionId = sess.session_id;
-  const now = Date.now();
-  const expMs = Date.parse(sess.expires_at);
-  if (!isFinite(expMs) || expMs < now) return json({ ok: false, msg: "SESSION_EXPIRED" }, 200);
-
-  if (sess.status === "closed" || Boolean((sess as any).copied_at)) {
-    return json({ ok: false, msg: "SESSION_CLOSED" }, 200);
-  }
-
-  const closeDeadlineMs = (sess as any).close_deadline_at ? Date.parse((sess as any).close_deadline_at) : 0;
-  if (closeDeadlineMs && isFinite(closeDeadlineMs) && closeDeadlineMs < now) {
-    await sb
-      .from("licenses_free_sessions")
-      .update({
-        status: "closed",
-        out_expires_at: new Date().toISOString(),
-        claim_token_hash: null,
-        claim_expires_at: null,
-      })
-      .eq("session_id", sessionId);
-    return json({ ok: false, msg: "SESSION_CLOSED" }, 200);
-  }
-
-  // Device binding rules (mobile-friendly):
-  // - Fingerprint mismatch => FAIL
-  // - UA / IP mismatch => WARNING only (mobile 4G IP changes frequently)
   const warnings: string[] = [];
-
-  if (sess.fingerprint_hash !== fpHash) {
-    return json({ ok: false, msg: "FP_MISMATCH", code: "FP_MISMATCH", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-
-  if (sess.ua_hash !== uaHash) warnings.push("UA_MISMATCH");
-  if ((sess as any).ip_hash !== ipHash) warnings.push("IP_MISMATCH");
 
   async function getKeyTypeLabel(code: string | null) {
     if (!code) return null;
     const kt = await sb.from("licenses_free_key_types").select("label").eq("code", code).maybeSingle();
     return kt.data?.label ?? null;
+  }
+
+  let keyInserted = false;
+  async function finishIssue(licenseId: string | null, redeemId: string | null, rawKey: string,
+    expiresAt: string, app: string, signature: string, reward: string | null = null) {
+    keyInserted = true;
+    const done = await sb.rpc("free_flow_finish_claim", {
+      p_session_id: sessionId, p_license_id: licenseId, p_redeem_id: redeemId,
+      p_key_mask: maskKey(rawKey), p_expires_at: expiresAt,
+      p_app_code: app, p_signature: signature, p_reward_mode: reward,
+      p_close_seconds: freeCloseDeadlineSeconds,
+    });
+    if (done.error || done.data?.ok !== true) throw Object.assign(new Error("ISSUE_FINALIZE_FAILED"), { code: "ISSUE_FINALIZE_FAILED", status: 503 });
   }
 
   async function issueFindDumpsRedeemKey(sessRow: any, keyTypeMeta: any) {
@@ -564,40 +551,7 @@ Deno.serve(async (req) => {
       throw Object.assign(new Error("SERVER_REDEEM_KEY_INSERT_FAILED"), { status: 500, code: "SERVER_REDEEM_KEY_INSERT_FAILED" });
     }
 
-    await sb.from("licenses_free_sessions").update({
-      issued_server_redeem_key_id: inserted.id,
-      issued_server_reward_mode: reward_mode,
-      app_code: appCode,
-      package_code,
-      credit_code,
-      wallet_kind,
-      selection_meta: {
-        app_code: appCode,
-        package_code,
-        credit_code,
-        wallet_kind,
-        reward_mode,
-        duration_seconds: durationSeconds,
-        trace_id: String(sessRow?.trace_id ?? "").trim() || null,
-      },
-    }).eq("session_id", sessionId);
-
-    try {
-      await sb.from("licenses_free_issues").insert({
-      license_id: null,
-      key_mask: inserted.redeem_key,
-      expires_at: expiresAt,
-      session_id: sessionId,
-      ip_hash: ipHash,
-      fingerprint_hash: fpHash,
-      app_code: appCode,
-      key_signature: "FD",
-      server_redeem_key_id: inserted.id,
-    });
-    } catch (monitorError) {
-      console.warn("AI_FREE_ISSUE_MONITOR_INSERT_FAILED_NON_FATAL", monitorError);
-    }
-
+    await finishIssue(null, inserted.id, inserted.redeem_key, expiresAt, appCode, "FD", reward_mode);
     return {
       key: inserted.redeem_key,
       expires_at: expiresAt,
@@ -656,164 +610,27 @@ Deno.serve(async (req) => {
     // AI keys are public reset-capable keys, but they live in ai_sunny_redeem_keys,
     // not legacy licenses. Mark the session as revealed here so a later request does
     // not stay stuck at `revealing`; monitor insert is best-effort only.
-    await sb.from("licenses_free_sessions").update({
-      status: "revealed",
-      last_error: null,
-      reveal_count: 1,
-      revealed_at: issuedAt,
-      claim_token_hash: null,
-      claim_expires_at: null,
-      out_token_hash: null,
-      out_token_hash_pass2: null,
-      out_expires_at: issuedAt,
-      issued_server_redeem_key_id: inserted.id,
-      issued_server_reward_mode: "ai_redeem",
-      app_code: appCode,
-      selection_meta: {
-        app_code: appCode,
-        reward_mode: "ai_redeem",
-        duration_seconds: durationSeconds,
-        trace_id: String(sessRow?.trace_id ?? "").trim() || null,
-      },
-    }).eq("session_id", sessionId);
-
-    const issueInsert = await sb.from("licenses_free_issues").insert({
-      license_id: null,
-      key_mask: inserted.key,
-      expires_at: expiresAt,
-      session_id: sessionId,
-      ip_hash: ipHash,
-      fingerprint_hash: fpHash,
-      app_code: appCode,
-      key_signature: keySignature,
-      server_redeem_key_id: inserted.id,
-    });
-    if (issueInsert.error) {
-      console.warn("AI_FREE_ISSUE_MONITOR_INSERT_FAILED_NON_FATAL", issueInsert.error);
-    }
-
+    await finishIssue(null, inserted.id, inserted.key, expiresAt, appCode, keySignature, "ai_redeem");
     return { key: inserted.key, expires_at: expiresAt, allow_reset: true, app_code: appCode, key_signature: keySignature, reward_mode: "ai_redeem", created_at: issuedAt, server_redeem_key_id: inserted.id };
   }
 
-  // Claim and start token must both still be live and belong to this session.
-  const claimExpMs = sess.claim_expires_at ? Date.parse(sess.claim_expires_at) : 0;
-  if (!tokenPairMatches(claimHash, outHash, sess)) {
-    await sb.from("licenses_free_sessions").update({ last_error: "TOKEN_PAIR_INVALID" }).eq("session_id", sessionId);
-    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "TOKEN_PAIR_INVALID", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    return json({ ok: false, msg: "TOKEN_PAIR_INVALID", code: "TOKEN_PAIR_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-
-  if (!claimExpMs || claimExpMs < now) {
-    await sb.from("licenses_free_sessions").update({ last_error: "CLAIM_EXPIRED" }).eq("session_id", sessionId);
-    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "CLAIM_EXPIRED", detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-    return json({ ok: false, msg: "CLAIM_EXPIRED", code: "CLAIM_EXPIRED", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-
-  if (sess.status === "revealed" || (Number(sess.reveal_count ?? 0) > 0 && sess.status !== "revealing")) {
-    return json({ ok: false, msg: "CLAIM_ALREADY_USED", code: "CLAIM_ALREADY_USED" }, 200);
-  }
-  if (sess.status === "revealing") {
-    return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS" }, 200);
-  }
-  if (sess.status !== "gate_ok") {
-    await sb.from("licenses_free_sessions").update({ last_error: "GATE_STATUS_INVALID" }).eq("session_id", sessionId);
-    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "GATE_STATUS_INVALID", detail: { status: sess.status }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-    return json({ ok: false, msg: "GATE_STATUS_INVALID", code: "GATE_STATUS_INVALID", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-  }
-
-  // Verify the final gate row itself. Session status alone is not enough proof.
-  const finalPass = requiredFinalPass(sess);
-  const finalGateQuery = await sb
-    .from("licenses_free_gate_tokens")
-    .select("pass_no,status,activate_after_at,expires_at,used_at")
-    .eq("session_id", sessionId)
-    .eq("pass_no", finalPass)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (finalGateQuery.error) {
-    return json({ ok: false, msg: "FINAL_GATE_PROOF_LOAD_FAILED", code: "FINAL_GATE_PROOF_LOAD_FAILED" }, 500);
-  }
-
-  const gateProof = validateFinalGateProof(sess, finalGateQuery.data ?? null);
-  if (!gateProof.ok) {
-    await sb.from("licenses_free_sessions").update({ last_error: gateProof.code }).eq("session_id", sessionId);
-    await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: finalPass, event_code: gateProof.code, detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-    return json({ ok: false, msg: gateProof.code, code: gateProof.code }, 200);
-  }
-
-  // Daily quota by Vietnam calendar day (00:00 Asia/Ho_Chi_Minh)
-  const dayKey = getVietnamDateKey();
-  const dayRange = getVietnamDayRangeUtc(dayKey);
-
   const quotaAppCode = normalizeAppCode(sess.app_code ?? "free-fire");
-  const quotaLimits = await resolveAppQuotaLimits(
-    sb,
-    quotaAppCode,
-    Math.max(0, Number(settings?.free_daily_limit_per_fingerprint ?? 1)),
-    Math.max(0, Number((settings as any)?.free_daily_limit_per_ip ?? 0)),
-  );
-  const dailyLimitFp = Math.max(0, Number(quotaLimits.free_daily_limit_per_fingerprint ?? 1));
-  if (dailyLimitFp > 0) {
-    const quotaFp = await sb
-      .from("licenses_free_issues")
-      .select("issue_id", { count: "exact", head: true })
-      .gte("created_at", dayRange.startUtcIso)
-      .lt("created_at", dayRange.nextStartUtcIso)
-      .eq("fingerprint_hash", fpHash)
-      .eq("app_code", quotaAppCode);
-
-    const usedFp = Number(quotaFp.count ?? 0);
-    if (usedFp >= dailyLimitFp) {
-      await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA_FP" }).eq("session_id", sessionId);
-      await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "DAILY_QUOTA_FP", detail: { day_key: dayKey, used: usedFp, limit: dailyLimitFp }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-      await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-      return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-    }
-  }
-
-  const dailyLimitIp = Math.max(0, Number(quotaLimits.free_daily_limit_per_ip ?? 0));
-  if (dailyLimitIp > 0) {
-    const quotaIp = await sb
-      .from("licenses_free_issues")
-      .select("issue_id", { count: "exact", head: true })
-      .gte("created_at", dayRange.startUtcIso)
-      .lt("created_at", dayRange.nextStartUtcIso)
-      .eq("ip_hash", ipHash)
-      .eq("app_code", quotaAppCode);
-
-    const usedIp = Number(quotaIp.count ?? 0);
-    if (usedIp >= dailyLimitIp) {
-      await sb.from("licenses_free_sessions").update({ last_error: "DAILY_QUOTA_IP" }).eq("session_id", sessionId);
-      await insertGateLog(sb, { session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1), event_code: "DAILY_QUOTA_IP", detail: { day_key: dayKey, used: usedIp, limit: dailyLimitIp }, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
-      await maybeAutoBlockGateFailures(sb, { fingerprint_hash: fpHash, ip_hash: ipHash, session_id: sessionId, trace_id: String((sess as any).trace_id ?? "").trim() || null, key_type_code: sess.key_type_code ?? null, pass_no: Number(sess.current_pass ?? 1) });
-      return json({ ok: false, msg: "RATE_LIMIT", code: "RATE_LIMIT", debug: debugLookup ? { lookup: debugLookup } : undefined }, 200);
-    }
-  }
-
-  // Acquire lock BEFORE inserting license (prevents multi-mint bug).
-  // Keep token hashes only while issuing so a transient insert error can retry.
-  // Every successful issue clears both token families below.
-  const lockIso = new Date().toISOString();
-  const lock = await sb
-    .from("licenses_free_sessions")
-    .update({
-      status: "revealing",
-      reveal_count: 1,
-      revealed_at: lockIso,
-      last_error: null,
-    })
-    .eq("session_id", sessionId)
-    .eq("status", "gate_ok")
-    .eq("reveal_count", 0)
-    .eq("claim_token_hash", claimHash)
-    .select("session_id,status")
-    .maybeSingle();
-
-  if (!lock.data) {
-    return json({ ok: false, msg: "REVEAL_IN_PROGRESS", code: "REVEAL_IN_PROGRESS", warnings: warnings.length ? warnings : undefined }, 200);
+  const quotaLimits = await resolveAppQuotaLimits(sb, quotaAppCode,
+    Math.max(0, Number(settings.free_daily_limit_per_fingerprint ?? 1)),
+    Math.max(0, Number(settings.free_daily_limit_per_ip ?? 0)));
+  if ((quotaLimits as any).load_error) return json({ ok: false, code: "QUOTA_LOAD_FAILED", msg: "QUOTA_LOAD_FAILED" }, 503);
+  const lock = await sb.rpc("free_flow_begin_claim", {
+    p_claim_hash: claimHash, p_out_hash: outHash,
+    p_fp_hash: fpHash, p_ip_hash: ipHash, p_ua_hash: uaHash,
+    p_session_id: requestedSessionId || "",
+    p_fp_limit: quotaLimits.free_daily_limit_per_fingerprint,
+    p_ip_limit: quotaLimits.free_daily_limit_per_ip,
+  });
+  if (lock.error || !lock.data || typeof lock.data.ok !== "boolean") return json({ ok: false, code: "FREE_GUARD_NOT_READY", msg: "FREE_GUARD_NOT_READY" }, 503);
+  if (lock.data.ok !== true) {
+    const code = lock.data.code || "CLAIM_DENIED";
+    await insertGateLog(sb, { session_id: sessionId, event_code: code, detail: {}, fingerprint_hash: fpHash, ip_hash: ipHash, ua_hash: uaHash });
+    return json({ ok: false, code, msg: code }, 200);
   }
 
   const keyTypeMeta = await getKeyTypeMeta(sb, sess.key_type_code ?? null);
@@ -890,7 +707,7 @@ Deno.serve(async (req) => {
         const issued = await issueAiSunnyRedeemKey(sessForIssue, keyTypeMeta);
         return json({ ok: true, ...issued, key_type_label, duration_seconds: dur, base_duration_seconds: keyTypeBaseDuration, bonus_seconds: bonusSecondsApplied, bonus_applied: bonusSecondsApplied > 0, warnings }, 200);
       } catch (error) {
-        await sb.from("licenses_free_sessions").update({
+        if (!keyInserted) await sb.from("licenses_free_sessions").update({
           status: "gate_ok",
           reveal_count: 0,
           revealed_at: null,
@@ -906,7 +723,7 @@ Deno.serve(async (req) => {
     try {
       issued = await issueFindDumpsRedeemKey(sessForIssue, keyTypeMeta);
     } catch (error) {
-      await sb.from("licenses_free_sessions").update({
+      if (!keyInserted) await sb.from("licenses_free_sessions").update({
         status: "gate_ok",
         reveal_count: 0,
         revealed_at: null,
@@ -915,36 +732,6 @@ Deno.serve(async (req) => {
       const code = String((error as any)?.code ?? (error as any)?.message ?? "FIND_DUMPS_KEY_FAILED");
       return json({ ok: false, msg: code, code }, Number((error as any)?.status ?? 500));
     }
-    await sb
-      .from("licenses_free_sessions")
-      .update({
-        status: "revealed",
-        last_error: null,
-        revealed_at: issued.created_at,
-        reveal_count: 1,
-        claim_token_hash: null,
-        claim_expires_at: null,
-        out_token_hash: null,
-        out_token_hash_pass2: null,
-        out_expires_at: issued.created_at,
-        close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(),
-        copied_at: null,
-      })
-      .eq("session_id", sessionId);
-
-    const debugOut = debugEnabled
-      ? {
-        lookup: debugLookup,
-        lens: {
-          claim_token: claimTokenTrim.length,
-          out_token: outTokenTrim.length,
-          session_id: sessionIdTrim.length,
-          fingerprint: String(parsed.data.fingerprint ?? "").trim().length,
-        },
-        warnings,
-      }
-      : undefined;
-
     return json({
       ok: true,
       key: issued.key,
@@ -1043,36 +830,11 @@ Deno.serve(async (req) => {
     }, 500);
   }
 
-  await sb
-    .from("licenses_free_sessions")
-    .update({
-      status: "revealed",
-      last_error: null,
-      revealed_at: new Date().toISOString(),
-      revealed_license_id: inserted.id,
-      reveal_count: 1,
-      claim_token_hash: null,
-      claim_expires_at: null,
-      out_token_hash: null,
-      out_token_hash_pass2: null,
-      out_expires_at: new Date().toISOString(),
-      close_deadline_at: new Date(Date.now() + freeCloseDeadlineSeconds * 1000).toISOString(),
-      copied_at: null,
-    })
-    .eq("session_id", sessionId);
-
-  await sb.from("licenses_free_issues").insert({
-    license_id: inserted.id,
-    key_mask: maskKey(inserted.key),
-    expires_at,
-    session_id: sessionId,
-    ip_hash: ipHash,
-    fingerprint_hash: fpHash,
-    ua_hash: uaHash,
-    app_code: appCode,
-    key_signature: keySignature,
-    server_redeem_key_id: null,
-  });
+  try {
+    await finishIssue(inserted.id, null, inserted.key, expires_at, appCode, keySignature);
+  } catch {
+    return json({ ok: false, code: "ISSUE_FINALIZE_FAILED", msg: "ISSUE_FINALIZE_FAILED" }, 503);
+  }
 
   const debugOut = debugEnabled
     ? {

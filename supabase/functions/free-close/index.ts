@@ -1,3 +1,4 @@
+import { authenticateFreeIngress } from "../_shared/free-ingress.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -52,6 +53,14 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, msg: "INVALID_INPUT" }, 200);
   }
 
+  try {
+    req = await authenticateFreeIngress(req, "free-close",
+      Deno.env.get("FREE_GATEWAY_SHARED_SECRET") || Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET") || "");
+  } catch (error) {
+    const code = String((error as Error).message || "FREE_GATEWAY_REQUIRED");
+    return jsonResponse({ ok: false, code, msg: code }, code === "FREE_GATEWAY_SECRET_MISSING" ? 503 : 403);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
@@ -63,7 +72,7 @@ Deno.serve(async (req) => {
 
   // VIP pass2 sessions may carry a dedicated out_token hash.
   // Resolve one concrete session first, then close by session_id.
-  const { data: sessionMatch } = await sb
+  const { data: sessionMatch, error: lookupError } = await sb
     .from("licenses_free_sessions")
     .select("session_id")
     .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
@@ -71,40 +80,12 @@ Deno.serve(async (req) => {
     .limit(1)
     .maybeSingle();
 
+  if (lookupError) return jsonResponse({ ok: false, msg: "SERVER_ERROR" }, 500);
   if (!sessionMatch?.session_id) {
     return jsonResponse({ ok: true }, 200);
   }
 
-  // Close session.
-  // Some deployments may not have newer optional columns yet (e.g. claim_token_plain),
-  // so we try the full update first, then fall back to a minimal update if needed.
-  const fullUpd = await sb
-    .from("licenses_free_sessions")
-    .update({
-      status: "closed",
-      claim_token_hash: null,
-      claim_expires_at: null,
-      // Optional column (introduced later)
-      claim_token_plain: null,
-      out_expires_at: new Date().toISOString(),
-    })
-    .eq("session_id", sessionMatch.session_id);
-
-  if (fullUpd.error) {
-    const msg = String(fullUpd.error.message || "");
-    // Missing-column errors vary; check for the column name to be safe.
-    if (msg.toLowerCase().includes("claim_token_plain")) {
-      await sb
-        .from("licenses_free_sessions")
-        .update({
-          status: "closed",
-          claim_token_hash: null,
-          claim_expires_at: null,
-          out_expires_at: new Date().toISOString(),
-        })
-        .eq("session_id", sessionMatch.session_id);
-    }
-  }
-
+  const close = await sb.rpc("free_flow_burn", { p_session_id: sessionMatch.session_id, p_reason: "USER_CLOSED" });
+  if (close.error) return jsonResponse({ ok: false, code: "CLOSE_FAILED", msg: "SERVER_ERROR" }, 500);
   return jsonResponse({ ok: true }, 200);
 });

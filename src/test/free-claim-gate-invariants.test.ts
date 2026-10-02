@@ -44,11 +44,12 @@ describe("free claim gate invariants", () => {
 
   it("requires claim token and start token from the same session", () => {
     const session = {
+      passes_required: 2,
       claim_token_hash: "claim-a",
       out_token_hash: "out-a",
       out_token_hash_pass2: "out-b",
     };
-    expect(tokenPairMatches("claim-a", "out-a", session)).toBe(true);
+    expect(tokenPairMatches("claim-a", "out-a", session)).toBe(false);
     expect(tokenPairMatches("claim-a", "out-b", session)).toBe(true);
     expect(tokenPairMatches("claim-a", "", session)).toBe(false);
     expect(tokenPairMatches("claim-x", "out-a", session)).toBe(false);

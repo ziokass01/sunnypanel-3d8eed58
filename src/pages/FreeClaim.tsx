@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { postFunction } from "@/lib/functions";
 import { FreeFlowSteps, markFreeAttemptFail, markFreeSuccess } from "@/features/free/flow-ux";
-import { clearBundle, isFresh, readBundle, writeBundle } from "@/lib/freeFlow";
+import { clearBundle as clearAppBundle, isFresh, readBundle as readAppBundle, writeBundle as writeAppBundle } from "@/lib/freeFlow";
 import { toast } from "@/hooks/use-toast";
 import {
   clearFreeFlowStorage,
@@ -16,6 +16,11 @@ import {
   getSelectedAppCode,
   getSelectedKeyTypeCode,
 } from "@/features/free/fingerprint";
+
+// Use the same app scope as Start; a live non-FF flow must not borrow FF state.
+function readBundle() { return readAppBundle(getSelectedAppCode()); }
+function writeBundle(partial: Parameters<typeof writeAppBundle>[0]) { writeAppBundle(partial, getSelectedAppCode()); }
+function clearBundle() { clearAppBundle(getSelectedAppCode()); }
 
 type RevealOk = {
   ok: true;
@@ -50,6 +55,9 @@ function friendlyRevealError(msg: string) {
   if (m === "Failed to fetch" || m.toLowerCase().includes("failed to fetch")) {
     return "Không gọi được backend (Failed to fetch). Gợi ý: (1) CORS allow origin cho domain hiện tại, (2) backend URL/project mismatch, (3) backend functions chưa deploy đúng môi trường.";
   }
+  if (["IP_MISMATCH", "UA_MISMATCH", "FP_MISMATCH"].includes(m)) return "Mạng hoặc trình duyệt không khớp phiên. Hãy quay lại Get Key và bắt đầu lại.";
+  if (m === "GATE_CHAIN_INVALID") return "Chưa có đủ bằng chứng xác thực các lượt vượt link. Hãy bắt đầu lại từ Get Key.";
+  if (m === "ISSUE_FINALIZE_FAILED") return "Chưa xác nhận được việc cấp key. Hãy liên hệ hỗ trợ; không gửi lại yêu cầu cấp key liên tục.";
   if (m === "UNAUTHORIZED") return "Xác thực không thành công. Vui lòng quay lại trang Get Key 🔑 và vượt link lại.";
   if (m === "SESSION_NOT_FOUND") return "Lỗi không tìm thấy yêu cầu. Hãy quay lại trang Get Key để Xác minh lại.";
   if (m === "OUT_TOKEN_REQUIRED") return "Thiếu xác thực. Hãy quay lại trang Get Key 🔑 rồi vượt lại.";
@@ -290,7 +298,7 @@ export function FreeClaimPage() {
         debug: debug ? 1 : undefined,
       });
 
-      if ((res as ResolveOk).ok) {
+      if ((res as ResolveOk).ok === true) {
         const sid = String((res as ResolveOk).session_id || "").trim();
         if (!sid) return null;
 
@@ -421,7 +429,7 @@ export function FreeClaimPage() {
       if ((res as any)?.debug) setServerDebug((res as any).debug);
       if ((res as any)?.warnings) setServerDebug((prev: any) => ({ ...(prev ?? {}), warnings: (res as any).warnings }));
 
-      if (!res.ok) {
+      if (res.ok !== true) {
         const err = res as RevealErr;
         const code = String(err.code || err.msg || "").trim();
 
@@ -453,6 +461,7 @@ export function FreeClaimPage() {
           }
         }
 
+        if (["IP_MISMATCH", "UA_MISMATCH", "FP_MISMATCH", "GATE_CHAIN_INVALID", "CLAIM_EXPIRED", "SESSION_EXPIRED", "SESSION_CLOSED", "FREE_DISABLED", "RATE_LIMIT"].includes(code)) clearAllFreeStorage();
         const friendly = friendlyRevealError(code || err.msg || "UNAUTHORIZED");
         markFreeAttemptFail(code || err.msg || "REVEAL_FAILED");
         setError(debugMode && code ? `${friendly} (${code})` : friendly);
@@ -577,7 +586,7 @@ export function FreeClaimPage() {
             {claimToken && !outToken && debugMode ? (
               <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
                 <div className="text-sm font-semibold">Tokenized claim</div>
-                <div className="text-sm text-muted-foreground">Flow mới chỉ cần claim_token; out_token legacy không bắt buộc.</div>
+                <div className="text-sm text-muted-foreground">Claim yêu cầu claim_token và out_token hợp lệ của lượt cuối.</div>
               </div>
             ) : null}
 

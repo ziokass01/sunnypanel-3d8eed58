@@ -79,7 +79,7 @@ export async function handleFreeResolve(req, env, ctx) {
   const outHash = await sha256Hex(body.out_token);
   const lookup = await db
     .from("licenses_free_sessions")
-    .select("session_id,expires_at")
+    .select("session_id,expires_at,status,closed_at,current_pass,out_token_hash,out_token_hash_pass2,out_expires_at")
     .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
     .limit(1)
     .maybeSingle();
@@ -89,8 +89,12 @@ export async function handleFreeResolve(req, env, ctx) {
   const sess = lookup.data;
   if (!sess?.session_id) return ctx.json({ ok: false, code: "INVALID_SESSION", msg: "INVALID_SESSION" }, 404);
 
+  const currentHash = Number(sess.current_pass) === 2 ? sess.out_token_hash_pass2 : sess.out_token_hash;
+  if (sess.closed_at || !["waiting", "waiting_pass2", "gate_ok"].includes(sess.status) || currentHash !== outHash) {
+    return ctx.json({ ok: false, code: "INVALID_SESSION", msg: "INVALID_SESSION" }, 404);
+  }
   const exp = Date.parse(sess.expires_at);
-  if (Number.isFinite(exp) && exp <= Date.now()) {
+  if (!Number.isFinite(exp) || exp <= Date.now() || !Number.isFinite(Date.parse(sess.out_expires_at)) || Date.parse(sess.out_expires_at) <= Date.now()) {
     return ctx.json({ ok: false, code: "SESSION_EXPIRED", msg: "SESSION_EXPIRED" }, 400);
   }
 

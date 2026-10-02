@@ -1,3 +1,4 @@
+import { authenticateFreeIngress } from "../_shared/free-ingress.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -40,6 +41,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ ok: false, code: "METHOD_NOT_ALLOWED", msg: "METHOD_NOT_ALLOWED" } satisfies JsonErr, 405);
 
+  try {
+    req = await authenticateFreeIngress(req, "free-resolve",
+      Deno.env.get("FREE_GATEWAY_SHARED_SECRET") || Deno.env.get("VERIFY_GATEWAY_SHARED_SECRET") || "");
+  } catch (error) {
+    const code = String((error as Error).message || "FREE_GATEWAY_REQUIRED");
+    return json({ ok: false, code, msg: code }, code === "FREE_GATEWAY_SECRET_MISSING" ? 503 : 403);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceRole) {
@@ -73,7 +82,7 @@ Deno.serve(async (req) => {
 
   const { data: sess, error } = await sb
     .from("licenses_free_sessions")
-    .select("session_id,expires_at")
+    .select("session_id,expires_at,status,closed_at,current_pass,out_token_hash,out_token_hash_pass2,out_expires_at")
     .or(`out_token_hash.eq.${outHash},out_token_hash_pass2.eq.${outHash}`)
     .maybeSingle();
 
@@ -86,8 +95,12 @@ Deno.serve(async (req) => {
   }
 
   // Basic expiry check (avoid resolving dead sessions)
+  const currentHash = Number(sess.current_pass) === 2 ? sess.out_token_hash_pass2 : sess.out_token_hash;
+  if (sess.closed_at || !["waiting", "waiting_pass2", "gate_ok"].includes(sess.status) || currentHash !== outHash) {
+    return json({ ok: false, code: "INVALID_SESSION", msg: "INVALID_SESSION" }, 404);
+  }
   const exp = Date.parse(sess.expires_at);
-  if (Number.isFinite(exp) && exp <= Date.now()) {
+  if (!Number.isFinite(exp) || exp <= Date.now() || !Number.isFinite(Date.parse(sess.out_expires_at)) || Date.parse(sess.out_expires_at) <= Date.now()) {
     return json({ ok: false, code: "SESSION_EXPIRED", msg: "SESSION_EXPIRED" } satisfies JsonErr, 400);
   }
 

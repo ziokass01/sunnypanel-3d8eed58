@@ -506,7 +506,7 @@ export function FreeLandingPage() {
         },
       );
 
-      if (!res.ok) {
+      if (res.ok !== true) {
         const r = res as StartErr;
         if (r.code === "BONUS_SECONDARY_DISABLED") {
           markFreeAttemptFail(r.code);
@@ -552,7 +552,7 @@ export function FreeLandingPage() {
       try {
         const sid = String((res as any).session_id ?? "").trim();
         if (sid) {
-          writeBundle({ session_id: sid, out_token: String(res.out_token), trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
+          writeBundle({ session_id: sid, out_token: String(res.out_token), expires_at: String((res as any).expires_at || "") || undefined, trace_id: String((res as any).trace_id ?? "").trim() || undefined }, selectedAppCode);
         }
       } catch {
         // ignore
