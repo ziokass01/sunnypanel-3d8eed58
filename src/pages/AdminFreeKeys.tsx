@@ -2616,7 +2616,7 @@ export function AdminFreeKeysPage() {
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-5">
+            <div className="mt-3 grid gap-3 md:grid-cols-5" style={newAppCode === "customs" ? { display: "block" } : undefined}>
               <div className="space-y-2">
                 <div className="text-sm font-medium">App</div>
                 <Select value={newAppCode} onValueChange={setNewAppCode}>
@@ -2630,7 +2630,7 @@ export function AdminFreeKeysPage() {
                 </Select>
               </div>
 
-              {newAppCode === "customs" ? <div className="md:col-span-4"><AdminCustoms /></div> : newAppCode === "find-dumps" ? (
+              {newAppCode === "customs" ? <div className="mt-4 w-full min-w-0"><AdminCustoms /></div> : newAppCode === "find-dumps" ? (
                 <>
       <div className="fixed bottom-24 right-4 z-40 flex flex-col gap-2 sm:bottom-6">
         <Button
