@@ -71,9 +71,10 @@ export function AdminFakeLagAuditPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
+  const [page,setPage]=useState(0);
 
   const dataQuery = useQuery({
-    queryKey: ["fake-lag-free-audit", q],
+    queryKey: ["fake-lag-free-audit", q,page],
     queryFn: async () => {
       const needle = q.trim().toLowerCase();
 
@@ -81,19 +82,19 @@ export function AdminFakeLagAuditPage() {
         .select("issue_id,created_at,expires_at,license_id,key_mask,session_id,ip_hash,fingerprint_hash,ua_hash,app_code,key_signature,server_redeem_key_id")
         .eq("app_code", APP_CODE)
         .order("created_at", { ascending: false })
-        .limit(500);
+        .range(page*50,page*50+49);
 
       const sessionsQ = (supabase.from("licenses_free_sessions") as any)
         .select("session_id,created_at,status,reveal_count,last_error,key_type_code,duration_seconds,ip_hash,fingerprint_hash,ua_hash,started_at,gate_ok_at,revealed_at,app_code,trace_id,revealed_license_id")
         .eq("app_code", APP_CODE)
         .order("created_at", { ascending: false })
-        .limit(500);
+        .range(page*50,page*50+49);
 
       let logsQ = (supabase.from("audit_logs") as any)
         .select("id,created_at,action,license_key,detail")
         .ilike("license_key", "FAKELAG-%")
         .order("created_at", { ascending: false })
-        .limit(500);
+        .range(page*50,page*50+49);
       if (needle) {
         const e = esc(q.trim());
         logsQ = logsQ.or(`license_key.ilike.%${e}%,action.ilike.%${e}%`);
@@ -223,7 +224,7 @@ export function AdminFakeLagAuditPage() {
   }), [data]);
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-5"><div className="log-pager"><Button variant="outline" disabled={!page||dataQuery.isFetching} onClick={()=>setPage(p=>p-1)}>Trước</Button><span>Trang {page+1} · thống kê trên trang này</span><Button variant="outline" disabled={dataQuery.isFetching||!data||![data.issues,data.sessions,data.logs].some(rows=>rows?.length===50)} onClick={()=>setPage(p=>p+1)}>Sau</Button></div>
       <header className="space-y-2">
         <Badge variant="outline">Fake Lag Audit</Badge>
         <h1 className="text-2xl font-semibold">Audit Log cho Fake Lag</h1>
@@ -246,7 +247,7 @@ export function AdminFakeLagAuditPage() {
             <Input
               className="pl-9"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {setQ(e.target.value);setPage(0);}}
               placeholder="Tìm full key/session/trace/ip/fingerprint..."
             />
           </div>

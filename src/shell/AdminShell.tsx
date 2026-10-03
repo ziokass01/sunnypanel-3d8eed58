@@ -1,3 +1,4 @@
+import "@/features/admin/admin-workspace.css";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LogOut,
@@ -87,7 +88,8 @@ export function AdminShell() {
     { label: "Support Member", to: "/admin/support-member", icon: Users, show: true, adminOnly: true },
   ] as const;
 
-  const activeLabel = items.find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))?.label ?? "Admin Console";
+  const activeItem = [...items].filter(item => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)).sort((a,b) => b.to.length-a.to.length)[0];
+  const activeLabel = activeItem?.label ?? "Admin Console";
 
   return (
     <SidebarProvider>
@@ -111,7 +113,7 @@ export function AdminShell() {
             {items.filter((item) => item.show).map((item) => {
               const Icon = item.icon;
               const isLocked = Boolean("adminOnly" in item && item.adminOnly && !isAdmin);
-              const isActive = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+              const isActive = activeItem?.to === item.to;
 
               return (
                 <SidebarMenuItem key={item.to}>
@@ -126,10 +128,10 @@ export function AdminShell() {
                     </SidebarMenuButton>
                   ) : (
                     <SidebarMenuButton asChild tooltip={item.label} isActive={isActive}>
-                      <NavLink to={item.to} className="w-full">
+                      <a href={item.to} onClick={e=>{e.preventDefault();navigate(item.to);}} className="w-full" aria-current={isActive?"page":undefined}>
                         <Icon />
                         <span>{item.label}</span>
-                      </NavLink>
+                      </a>
                     </SidebarMenuButton>
                   )}
                 </SidebarMenuItem>

@@ -1,0 +1,5 @@
+import { CUSTOMS_API } from './customs-api';
+import { postFunction } from '@/lib/functions';
+export const normalizeResetKey=(value:string)=>value.trim().toUpperCase().replace(/\s+/g,'');
+export async function resetRuntime(){const r=await fetch(CUSTOMS_API+'/v1/reset-config',{signal:AbortSignal.timeout(12000)});const d=await r.json();if(!r.ok||d.ok!==true)throw new Error('Không đọc được trạng thái reset');return d as {ok:boolean;configured:boolean;turnstile_enabled:boolean;site_key?:string};}
+export async function publicKeyAction(action:'info'|'reset',raw:string,token?:string){const key=normalizeResetKey(raw);if(/^AI-/.test(key))return postFunction<any>('/reset-key',{key,action:action==='info'?'check':'reset',...(token?{turnstile_token:token}:{})});const r=await fetch(CUSTOMS_API+'/v1/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,signature:key.split('-')[0],...(token?{turnstile_token:token}:{})}),signal:AbortSignal.timeout(20000)});const data=await r.json();if(r.status>=500)throw new Error(data.code||data.msg||'SERVICE_UNAVAILABLE');return data;}

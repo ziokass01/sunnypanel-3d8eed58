@@ -68,6 +68,7 @@ function computeExpiresLabel(row: any) {
 
 export function FreeLicensesPage() {
   const [q, setQ] = useState("");
+  const [page,setPage]=useState(0);
   const [status, setStatus] = useState<"all" | "active" | "expired" | "blocked">("all");
   const [type, setType] = useState<"all" | "fixed" | "first_use">("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
@@ -75,10 +76,10 @@ export function FreeLicensesPage() {
 
   const nowMs = useNow(10_000);
 
-  const queryKey = useMemo(() => ["licenses", "free", { q, status }] as const, [q, status]);
+  const queryKey = useMemo(() => ["licenses", "free", { q, status,type,page }] as const, [q,status,type,page]);
   const { data = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => fetchLicenses({ q, status, free_note: "only" }),
+    queryFn: () => fetchLicenses({ q,status,free_note:"only",page,type }),
   });
 
   const filteredData = useMemo(() => {
@@ -96,7 +97,7 @@ export function FreeLicensesPage() {
   });
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4"><div className="log-pager"><Button variant="outline" disabled={!page||isLoading} onClick={()=>setPage(p=>p-1)}>Trước</Button><span>Trang {page+1}</span><Button variant="outline" disabled={isLoading||data.length<100} onClick={()=>setPage(p=>p+1)}>Sau</Button></div>
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Free Licenses</h1>
         <div className="flex gap-2">
@@ -111,10 +112,10 @@ export function FreeLicensesPage() {
 
       <div className="grid gap-3 md:grid-cols-4">
         <div className="md:col-span-2">
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search key/note…" />
+          <Input value={q} onChange={(e) => {setQ(e.target.value);setPage(0);}} placeholder="Search key/note…" />
         </div>
 
-        <Select value={type} onValueChange={(v) => setType(v as any)}>
+        <Select value={type} onValueChange={(v) => {setType(v as any);setPage(0);}}>
           <SelectTrigger>
             <SelectValue placeholder="Type" />
           </SelectTrigger>
@@ -125,7 +126,7 @@ export function FreeLicensesPage() {
           </SelectContent>
         </Select>
 
-        <Select value={status} onValueChange={(v) => setStatus(v as any)}>
+        <Select value={status} onValueChange={(v) => {setStatus(v as any);setPage(0);}}>
           <SelectTrigger>
             <SelectValue placeholder="Filter" />
           </SelectTrigger>
