@@ -1,3 +1,4 @@
+import {ModeratorBalance} from "@/features/moderator/ModeratorBalance";
 import "@/features/admin/admin-workspace.css";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -75,7 +76,6 @@ export function AdminShell() {
   const items = [
     { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, show: true },
     { label: "Licenses", to: "/licenses", icon: KeyRound, show: true },
-    { label: "Licenses 2", to: "/licenses2", icon: KeySquare, show: true },
     { label: "Trash", to: "/licenses/trash", icon: Trash2, show: isUserLike },
     { label: "Audit logs", to: "/audit", icon: ScrollText, show: isUserLike },
     { label: "Free Licenses", to: "/free-licenses", icon: Ticket, show: true, adminOnly: true },
@@ -85,6 +85,7 @@ export function AdminShell() {
     { label: "Reset Logs", to: "/settings/reset-logs", icon: History, show: true, adminOnly: true },
     { label: "Server app", to: "/admin/apps", icon: AppWindow, show: true, adminOnly: true },
     { label: "SunnyMod AI", to: "/admin/ai", icon: Bot, show: true, adminOnly: true },
+    { label: "Moderator · Xu", to: "/admin/moderator-wallet", icon: Users, show: true, adminOnly: true },
     { label: "Support Member", to: "/admin/support-member", icon: Users, show: true, adminOnly: true },
   ] as const;
 
@@ -164,6 +165,7 @@ export function AdminShell() {
               <ChevronRight className="h-4 w-4 shrink-0" />
               <span className="break-words font-semibold text-slate-950">{activeLabel}</span>
             </div>
+            {role==="moderator"&&<ModeratorBalance/>}
           </div>
         </header>
 

@@ -1,3 +1,4 @@
+import {ModeratorLicenses} from "@/features/moderator/ModeratorLicenses";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -65,7 +66,7 @@ function formatDurationSecondsOrDays(lic: any) {
   return formatDurationDHMS(dSecs ?? dDays);
 }
 
-export function LicenseDetailPage() {
+function LegacyLicenseDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -765,3 +766,5 @@ export function LicenseDetailPage() {
     </section>
   );
 }
+
+export function LicenseDetailPage(){const {role,userId}=usePanelRole();return role==="moderator"?<ModeratorLicenses key={userId}/>:<LegacyLicenseDetailPage/>;}

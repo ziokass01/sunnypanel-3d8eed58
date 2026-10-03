@@ -1,3 +1,4 @@
+import {AdminModeratorWallet} from "@/features/moderator/AdminModeratorWallet";
 import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -127,7 +128,7 @@ const App = () => {
                   <Route path="/licenses" element={<LicensesListPage />} />
                   <Route path="/licenses2" element={<Licenses2Page />} />
                   <Route path="/licenses/new" element={<LicenseCreatePage />} />
-                  <Route path="/licenses2/new" element={<LicenseCreatePage />} />
+                  <Route path="/licenses2/new" element={<Licenses2Page create />} />
                   <Route path="/licenses/:id" element={<LicenseDetailPage />} />
                   <Route path="/licenses/:id/edit" element={<LicenseEditPage />} />
                   <Route path="/free-licenses" element={<AdminRoute><FreeLicensesPage /></AdminRoute>} />
@@ -136,6 +137,7 @@ const App = () => {
                   <Route path="/admin/free-keys" element={<AdminRoute><AdminFreeKeysPage /></AdminRoute>} />
                   <Route path="/admin/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
                   <Route path="/admin/ai" element={<AdminRoute><AdminSunnyModAIPage /></AdminRoute>} />
+                  <Route path="/admin/moderator-wallet" element={<AdminRoute><AdminModeratorWallet/></AdminRoute>} />
                   <Route path="/admin/support-member" element={<AdminRoute><Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Đang tải Support Member…</div>}><AdminSupportMemberPage /></Suspense></AdminRoute>} />
                   <Route path="/apps" element={<AdminRoute><AdminServerAppsPage /></AdminRoute>} />
                   <Route

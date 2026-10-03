@@ -71,6 +71,7 @@ function computeExpiresLabel(row: any) {
 }
 
 function LegacyLicensesListView(props: { filterMode: FilterMode; title: string }) {
+  const [keyGroup,setKeyGroup]=useState<"all"|"exclude"|"only">("all");
   const [q, setQ] = useState("");
   const [page,setPage]=useState(0);
   const [status, setStatus] = useState<"all" | "active" | "expired" | "blocked">("all");
@@ -81,10 +82,10 @@ function LegacyLicensesListView(props: { filterMode: FilterMode; title: string }
 
   const nowMs = useNow(10_000);
 
-  const queryKey = useMemo(() => ["licenses", { q, status,type,page }] as const, [q, status,type,page]);
+  const queryKey = useMemo(() => ["licenses", { q, status,type,page,keyGroup }] as const, [q, status,type,page,keyGroup]);
   const { data = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => fetchLicenses({ q, status, free_note: "exclude",page,type }),
+    queryFn: () => fetchLicenses({ q, status, free_note:keyGroup,page,type }),
   });
 
   const filteredData = useMemo(() => {
@@ -164,6 +165,7 @@ function LegacyLicensesListView(props: { filterMode: FilterMode; title: string }
         </Select>
       </div>
 
+      <Select value={keyGroup} onValueChange={v=>{setKeyGroup(v as any);setPage(0);}}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Tất cả nhóm key</SelectItem><SelectItem value="only">Key vượt</SelectItem><SelectItem value="exclude">Key admin / bán</SelectItem></SelectContent></Select>
       {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}
 
       <div className="rounded-lg border">

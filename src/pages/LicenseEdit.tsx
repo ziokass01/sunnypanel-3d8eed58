@@ -1,3 +1,6 @@
+import {usePanelRole} from "@/hooks/use-panel-role";
+import {ModeratorLicenses} from "@/features/moderator/ModeratorLicenses";
+import { convertDuration,DurationUnit } from "@/features/licenses/duration-units";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
@@ -22,7 +25,7 @@ const schema = z.object({
   // even when the legacy duration unit cannot be inferred cleanly in the UI.
   duration_value: z.preprocess(
     (value) => (value === "" || value == null ? undefined : Number(value)),
-    z.number().int().min(1).max(24855).optional(),
+    z.number().min(0.000001).max(35791394).optional(),
   ),
   duration_unit: z.enum(["minutes", "hours", "days"]).optional().default("days"),
   max_devices: z.coerce.number().int().min(1),
@@ -36,7 +39,7 @@ function secondsToFields(seconds: number | null | undefined): { duration_value: 
   const s = typeof seconds === "number" && seconds > 0 ? seconds : 3600;
   if (s % 86400 === 0) return { duration_value: Math.max(1, Math.round(s / 86400)), duration_unit: "days" };
   if (s % 3600 === 0) return { duration_value: Math.max(1, Math.round(s / 3600)), duration_unit: "hours" };
-  return { duration_value: Math.max(1, Math.round(s / 60)), duration_unit: "minutes" };
+  return { duration_value: s / 60, duration_unit: "minutes" };
 }
 
 function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes" | "hours" | "days" }) {
@@ -44,7 +47,7 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
   if (!value || value <= 0) return null;
   const unit = v.duration_unit ?? "days";
   const mult = unit === "minutes" ? 60 : unit === "hours" ? 3600 : 86400;
-  return value * mult;
+  return Math.round(value * mult);
 }
 
 function getStartOnFirstUse(data: any) {
@@ -69,7 +72,7 @@ function remainingSecondsForStartedEdit(data: any) {
   return stored;
 }
 
-export function LicenseEditPage() {
+function LegacyLicenseEditPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -128,7 +131,7 @@ export function LicenseEditPage() {
         const durationWasEdited = Boolean(
           form.formState.dirtyFields.duration_value || form.formState.dirtyFields.duration_unit
         );
-        if (durationWasEdited) patch.duration_seconds = fieldsToSeconds(values);
+        if (durationWasEdited && Math.abs((fieldsToSeconds(values)||0)-(fieldsToSeconds(form.formState.defaultValues as any)||0))>=1) patch.duration_seconds = fieldsToSeconds(values);
       } else {
         // Standard fixed-expiry licenses keep the legacy flow.
         patch.expires_at = values.expires_at ? localToIso(values.expires_at) : null;
@@ -169,13 +172,14 @@ export function LicenseEditPage() {
                 <Input
                   id="duration_value"
                   type="number"
-                  min={1}
-                  max={24855}
+                  min={0.000001}
+                  step="any"
+                  max={35791394}
                   {...form.register("duration_value")}
                 />
                 <Select
                   value={form.watch("duration_unit") ?? "days"}
-                  onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
+                  onValueChange={(v) => {const old=form.getValues("duration_unit")||"hours";const value=Number(form.getValues("duration_value"));form.setValue("duration_value",convertDuration(value,old,v as DurationUnit),{shouldDirty:true});form.setValue("duration_unit",v as DurationUnit,{shouldDirty:true,shouldValidate:true});}}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Unit" />
@@ -238,3 +242,5 @@ export function LicenseEditPage() {
     </section>
   );
 }
+
+export function LicenseEditPage(){const {role,userId}=usePanelRole();return role==="moderator"?<ModeratorLicenses key={userId}/>:<LegacyLicenseEditPage/>;}
