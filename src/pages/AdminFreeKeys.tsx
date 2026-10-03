@@ -1,3 +1,4 @@
+import { AdminCustoms } from "@/features/customs/AdminCustoms";
 import { AdaptiveRow } from "@/features/free-admin/AdaptiveRow";
 import { FreeAdminWorkspace, FreeAdminSection, type FreeAdminTab } from "@/features/free-admin/Workspace";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1354,6 +1355,7 @@ export function AdminFreeKeysPage() {
 
   const createKeyType = useMutation({
     mutationFn: async () => {
+      if (newAppCode === "customs") throw new Error("Dùng mục tạo key Customs riêng.");
       const appMeta = getAppMeta(newAppCode);
       const signature = (newKeySignature.trim().toUpperCase() || appMeta.signature).replace(/[^A-Z0-9]/g, "") || appMeta.signature;
       let value = 1;
@@ -2620,6 +2622,7 @@ export function AdminFreeKeysPage() {
                 <Select value={newAppCode} onValueChange={setNewAppCode}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="customs">Customs</SelectItem>
                     {APP_OPTIONS.map((item) => (
                       <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
                     ))}
@@ -2627,7 +2630,7 @@ export function AdminFreeKeysPage() {
                 </Select>
               </div>
 
-              {newAppCode === "find-dumps" ? (
+              {newAppCode === "customs" ? <div className="md:col-span-4"><AdminCustoms /></div> : newAppCode === "find-dumps" ? (
                 <>
       <div className="fixed bottom-24 right-4 z-40 flex flex-col gap-2 sm:bottom-6">
         <Button
@@ -2736,6 +2739,7 @@ export function AdminFreeKeysPage() {
               </div>
             ) : null}
 
+            {newAppCode !== "customs" && <>
             <div className="mt-3 flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="font-medium">Cho reset key</div>
@@ -2749,6 +2753,7 @@ export function AdminFreeKeysPage() {
                 Create / Enable
               </Button>
             </div>
+            </>}
           </div>
 
           <div className="overflow-x-auto">
