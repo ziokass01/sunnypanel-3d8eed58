@@ -167,7 +167,7 @@ function LegacyLicensesListView(props: { filterMode: FilterMode; title: string }
       {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}
 
       <div className="rounded-lg border">
-        <Table>
+        <Table className="license-responsive-table">
           <TableHeader>
             <TableRow>
               <TableHead>Key</TableHead>
@@ -215,7 +215,7 @@ function LegacyLicensesListView(props: { filterMode: FilterMode; title: string }
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="soft" size="sm">
+                          <Button variant="soft" size="sm" className="license-actions-button">
                             Actions
                           </Button>
                         </DropdownMenuTrigger>
