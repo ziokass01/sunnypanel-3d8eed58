@@ -1,3 +1,4 @@
+import { CustomsLicenseSwitch } from "@/features/customs/CustomsLicenseSwitch";
 import { useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
@@ -76,7 +77,7 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
   return value * mult;
 }
 
-export function LicenseCreatePage() {
+function LegacyLicenseCreatePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isAdmin } = usePanelRole();
@@ -318,3 +319,5 @@ export function LicenseCreatePage() {
     </section>
   );
 }
+
+export function LicenseCreatePage(){return <CustomsLicenseSwitch mode="create" countdownOnly={typeof window !== "undefined" && window.location.pathname === "/licenses2/new"}><LegacyLicenseCreatePage/></CustomsLicenseSwitch>;}

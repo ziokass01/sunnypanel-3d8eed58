@@ -1,3 +1,4 @@
+import { CustomsLicenseSwitch } from "@/features/customs/CustomsLicenseSwitch";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -69,7 +70,7 @@ function computeExpiresLabel(row: any) {
   return new Date(row.expires_at).toLocaleString();
 }
 
-export function LicensesListView(props: { filterMode: FilterMode; title: string }) {
+function LegacyLicensesListView(props: { filterMode: FilterMode; title: string }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "expired" | "blocked">("all");
   const [type, setType] = useState<"all" | "fixed" | "first_use">(props.filterMode === "start_on_first_use" ? "first_use" : "all");
@@ -269,3 +270,5 @@ export function LicensesListView(props: { filterMode: FilterMode; title: string 
     </section>
   );
 }
+
+export function LicensesListView(props: { filterMode: FilterMode; title: string }) { return <CustomsLicenseSwitch countdownOnly={props.filterMode === "start_on_first_use"}><LegacyLicensesListView {...props}/></CustomsLicenseSwitch>; }

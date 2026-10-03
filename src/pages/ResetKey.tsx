@@ -1,3 +1,4 @@
+import { CustomsPublicReset } from "@/features/customs/CustomsPublicReset";
 import { PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -163,7 +164,7 @@ function describeResultMessage(result: ResetKeyPayload | null) {
   return msg || "Có lỗi xảy ra.";
 }
 
-export function ResetKeyPage() {
+function LegacyResetKeyPage() {
   const [key, setKey] = useState("");
   const [loadingAction, setLoadingAction] = useState<"check" | "reset" | null>(
     null,
@@ -579,3 +580,5 @@ function Info({
     </div>
   );
 }
+
+export function ResetKeyPage(){const [system,setSystem]=useState("sunny");return <><div className="mx-auto w-full max-w-3xl px-4 pt-4"><label className="block text-sm font-medium">Loại key<select className="mt-2 h-12 w-full rounded-xl border bg-background px-3 text-base" value={system} onChange={e=>setSystem(e.target.value)}><option value="sunny">SUNNY / key hiện tại</option><option value="customs">Customs · app, tool, menu</option></select></label></div>{system==="sunny"?<LegacyResetKeyPage/>:<div className="sunny-public min-h-svh"><PublicHeader/><main className="mx-auto w-full max-w-3xl space-y-5 p-4"><CustomsPublicReset/></main></div>}</>; }

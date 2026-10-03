@@ -1,3 +1,4 @@
+import { CustomsLicenseSwitch } from "@/features/customs/CustomsLicenseSwitch";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -18,7 +19,7 @@ import { NavLink } from "@/components/NavLink";
 import { fetchDeletedLicenses, fetchLicenseExpiryHistory, hardDeleteLicense, restoreLicense } from "@/features/licenses/licenses-api";
 import { getErrorMessage } from "@/lib/error-message";
 
-export function LicensesTrashPage() {
+function LegacyLicensesTrashPage() {
   const [q, setQ] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
@@ -212,3 +213,5 @@ export function LicensesTrashPage() {
     </section>
   );
 }
+
+export function LicensesTrashPage(){return <CustomsLicenseSwitch mode="trash"><LegacyLicensesTrashPage/></CustomsLicenseSwitch>;}
