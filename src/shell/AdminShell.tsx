@@ -1,6 +1,6 @@
 import {ModeratorBalance} from "@/features/moderator/ModeratorBalance";
 import "@/features/admin/admin-workspace.css";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LogOut,
   KeyRound,
@@ -89,7 +89,8 @@ export function AdminShell() {
     { label: "Support Member", to: "/admin/support-member", icon: Users, show: true, adminOnly: true },
   ] as const;
 
-  const activeItem = [...items].filter(item => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)).sort((a,b) => b.to.length-a.to.length)[0];
+  const visibleItems = items.filter(item => item.show && (role!=="moderator" || item.to==="/licenses" || item.to==="/licenses/trash"));
+  const activeItem = [...visibleItems].filter(item => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)).sort((a,b) => b.to.length-a.to.length)[0];
   const activeLabel = activeItem?.label ?? "Admin Console";
 
   return (
@@ -111,7 +112,7 @@ export function AdminShell() {
 
         <SidebarContent>
           <SidebarMenu>
-            {items.filter((item) => item.show).map((item) => {
+            {visibleItems.map((item) => {
               const Icon = item.icon;
               const isLocked = Boolean("adminOnly" in item && item.adminOnly && !isAdmin);
               const isActive = activeItem?.to === item.to;
@@ -161,7 +162,7 @@ export function AdminShell() {
           <div className="page-wrap flex items-center gap-3 py-4">
             <SidebarTrigger className="bg-white text-slate-600 shadow-sm hover:bg-slate-100 md:hidden" />
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-sm text-slate-500">
-              <span className="shrink-0 font-medium text-slate-600">Admin Console</span>
+              <span className="shrink-0 font-medium text-slate-600">{role==="moderator"?"Moderator":"Admin Console"}</span>
               <ChevronRight className="h-4 w-4 shrink-0" />
               <span className="break-words font-semibold text-slate-950">{activeLabel}</span>
             </div>
@@ -171,7 +172,7 @@ export function AdminShell() {
 
         <main className="admin-console page-wrap flex-1 py-5">
           <div className={cn("rounded-[2rem] border border-white/60 bg-white/65 p-4 shadow-[0_26px_80px_-50px_rgba(15,23,42,0.22)] backdrop-blur-sm sm:p-5") }>
-            <Outlet />
+            {role==="moderator" && !/^\/licenses(?:2)?(?:\/|$)/.test(location.pathname)?<Navigate to="/licenses" replace/>:<Outlet />}
           </div>
         </main>
       </SidebarInset>

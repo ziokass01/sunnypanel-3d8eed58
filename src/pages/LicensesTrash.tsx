@@ -219,4 +219,4 @@ function LegacyLicensesTrashPage() {
 
 function WrappedLicensesTrashPage(){return <CustomsLicenseSwitch mode="trash"><LegacyLicensesTrashPage/></CustomsLicenseSwitch>;}
 
-export function LicensesTrashPage(){const {role,userId}=usePanelRole();return role==="moderator"?<ModeratorLicenses key={userId}/>:<WrappedLicensesTrashPage/>;}
+export function LicensesTrashPage(){const {role,userId}=usePanelRole();return role==="moderator"?<ModeratorLicenses key={userId} mode="trash"/>:<WrappedLicensesTrashPage/>;}
