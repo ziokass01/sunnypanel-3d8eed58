@@ -78,7 +78,7 @@ function LegacyLicensesTrashPage() {
       {expiryHistoryError ? <div className="text-sm text-destructive">{getErrorMessage(expiryHistoryError)}</div> : null}
 
       <div className="rounded-lg border">
-        <Table>
+        <Table className="license-responsive-table trash-responsive-table">
           <TableHeader>
             <TableRow>
               <TableHead>Key</TableHead>
@@ -107,7 +107,7 @@ function LegacyLicensesTrashPage() {
                     {row.deleted_at ? new Date(row.deleted_at).toLocaleString() : "—"}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="license-table-actions">
                       <Button
                         size="sm"
                         variant="soft"
@@ -141,7 +141,7 @@ function LegacyLicensesTrashPage() {
           <p className="text-sm text-muted-foreground">Key hết hạn hơn 1 ngày được tự động lưu lịch sử gọn tại đây rồi xóa khỏi bảng live.</p>
         </div>
         <div className="rounded-lg border">
-          <Table>
+          <Table className="license-responsive-table trash-responsive-table">
             <TableHeader>
               <TableRow>
                 <TableHead>Key</TableHead>
