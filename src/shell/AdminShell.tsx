@@ -98,10 +98,10 @@ export function AdminShell() {
           <div className="panel-shell flex items-center gap-3 px-4 py-4">
             <BrandMark />
             <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-              <div className="truncate text-base font-semibold text-slate-950">SUNNY Key Panel</div>
+              <div className="break-words text-base font-semibold text-slate-950">SUNNY Key Panel</div>
               <div className="mt-1 flex items-center gap-2">
                 <Badge variant={roleVariant as any}>{roleLabel}</Badge>
-                <span className="truncate text-xs text-slate-500">Bản giao diện đồng bộ với trang thuê</span>
+                <span className="break-words text-xs text-slate-500">Quản lý key & ứng dụng</span>
               </div>
             </div>
             <SidebarTrigger className="bg-white text-slate-600 shadow-sm hover:bg-slate-100" />
@@ -159,10 +159,10 @@ export function AdminShell() {
         <header className="sticky top-0 z-20 border-b border-white/70 bg-background/85 backdrop-blur-md">
           <div className="page-wrap flex items-center gap-3 py-4">
             <SidebarTrigger className="bg-white text-slate-600 shadow-sm hover:bg-slate-100 md:hidden" />
-            <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-500">
-              <span className="truncate font-medium text-slate-600">Admin Console</span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span className="shrink-0 font-medium text-slate-600">Admin Console</span>
               <ChevronRight className="h-4 w-4 shrink-0" />
-              <span className="truncate font-semibold text-slate-950">{activeLabel}</span>
+              <span className="break-words font-semibold text-slate-950">{activeLabel}</span>
             </div>
           </div>
         </header>
