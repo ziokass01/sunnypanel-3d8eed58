@@ -1,3 +1,4 @@
+import { resetRuntime } from '@/features/customs/reset-api';
 import { supabase } from "@/integrations/supabase/client";
 import { getFunction } from "@/lib/functions";
 
@@ -68,16 +69,6 @@ type ResetKeyTurnstilePayload = {
 };
 
 export async function fetchTurnstileRuntimeStatus() {
-  try {
-    const data = await getFunction<ResetKeyTurnstilePayload>("/reset-key");
-    return {
-      ok: Boolean(data?.ok),
-      turnstileEnabled: Boolean(data?.configured),
-    };
-  } catch {
-    return {
-      ok: false,
-      turnstileEnabled: false,
-    };
-  }
+ try { const data=await resetRuntime();return {ok:true,turnstileEnabled:data.configured===true,siteKey:data.site_key||'',status:'ready'}; }
+ catch { return {ok:false,turnstileEnabled:false,siteKey:'',status:'unknown'}; }
 }

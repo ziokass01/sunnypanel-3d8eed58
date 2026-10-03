@@ -6,6 +6,7 @@ declare global {
       render: (container: HTMLElement, options: {
         sitekey: string;
         theme?: "light" | "dark" | "auto";
+        size?: "normal" | "flexible" | "compact";
         callback?: (token: string) => void;
         "expired-callback"?: () => void;
         "error-callback"?: () => void;
@@ -94,6 +95,7 @@ export function TurnstileWidget({ siteKey, onTokenChange, className }: Props) {
       const widgetId = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
         theme: "auto",
+        size: containerRef.current.clientWidth < 300 ? "compact" : "flexible",
         callback: (token) => onTokenChange(token),
         "expired-callback": () => onTokenChange(null),
         "error-callback": () => onTokenChange(null),

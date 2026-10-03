@@ -320,4 +320,4 @@ function LegacyLicenseCreatePage() {
   );
 }
 
-export function LicenseCreatePage(){return <CustomsLicenseSwitch mode="create" countdownOnly={typeof window !== "undefined" && window.location.pathname === "/licenses2/new"}><LegacyLicenseCreatePage/></CustomsLicenseSwitch>;}
+export function LicenseCreatePage(){return <CustomsLicenseSwitch mode="create" countdownOnly={false}><LegacyLicenseCreatePage/></CustomsLicenseSwitch>;}

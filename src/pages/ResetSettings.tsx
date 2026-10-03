@@ -41,7 +41,7 @@ function activityBadge(action: string) {
 export function ResetSettingsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
+  const frontendSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
 
   const settingsQuery = useQuery({
     queryKey: ["reset_settings"],
@@ -62,7 +62,9 @@ export function ResetSettingsPage() {
   });
 
   const settings = settingsQuery.data;
-  const turnstileRuntimeEnabled = Boolean(turnstileRuntimeQuery.data?.turnstileEnabled);
+  const turnstileRuntimeEnabled = turnstileRuntimeQuery.data?.turnstileEnabled === true;
+  const turnstileSiteKey = frontendSiteKey || turnstileRuntimeQuery.data?.siteKey;
+  const runtimeKnown = turnstileRuntimeQuery.data?.ok === true;
 
   const [form, setForm] = useState<any>(null);
 
@@ -134,7 +136,7 @@ export function ResetSettingsPage() {
         description: getErrorMessage(err).includes("TURNSTILE_SITE_KEY_MISSING")
           ? "Chưa có VITE_TURNSTILE_SITE_KEY ở frontend nên chưa thể bật require_turnstile."
           : getErrorMessage(err).includes("TURNSTILE_FUNCTION_SECRET_MISSING")
-            ? "Supabase function chưa đủ TURNSTILE_SITE_KEY/TURNSTILE_SECRET_KEY nên chưa thể bật require_turnstile."
+            ? "Chưa xác nhận được secret của Worker reset. Bấm kiểm tra lại trạng thái."
           : getErrorMessage(err),
         variant: "destructive",
       });
@@ -192,17 +194,18 @@ export function ResetSettingsPage() {
         </Card>
       ) : null}
 
-      {turnstileSiteKey && !turnstileRuntimeEnabled ? (
+      {turnstileSiteKey && runtimeKnown && !turnstileRuntimeEnabled ? (
         <Card className="border-destructive/40">
           <CardContent className="flex items-start gap-3 p-4 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
             <div>
-              Frontend đã có <code>VITE_TURNSTILE_SITE_KEY</code> nhưng Edge Function chưa đủ secret Turnstile. Chưa thể bật <b>require_turnstile</b>.
+              Widget xác minh đã có; Worker reset chưa có secret. Kiểm tra cấu hình sunny-customs-auth.
             </div>
           </CardContent>
         </Card>
       ) : null}
 
+      <div className="flex flex-wrap items-center gap-2"><Button variant="outline" disabled={turnstileRuntimeQuery.isFetching} onClick={()=>turnstileRuntimeQuery.refetch()}>Kiểm tra lại xác minh</Button><span className="text-sm text-muted-foreground">{turnstileRuntimeQuery.isFetching?"Đang kiểm tra…":!runtimeKnown?"Chưa đọc được trạng thái; không kết luận thiếu secret.":turnstileRuntimeEnabled?"Worker reset đã có secret.":"Worker reset chưa có secret."}</span></div>
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader>
@@ -241,7 +244,7 @@ export function ResetSettingsPage() {
                       if (v && !turnstileRuntimeEnabled) {
                         toast({
                           title: "Thiếu Turnstile secret ở function",
-                          description: "Cần cấu hình TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY cho Supabase Edge Functions trước khi bật require_turnstile.",
+                          description: "Cần cấu hình CUSTOMS_TURNSTILE_SECRET cho Worker reset.",
                           variant: "destructive",
                         });
                         return;
@@ -253,7 +256,7 @@ export function ResetSettingsPage() {
                 <div className="text-xs text-muted-foreground flex items-center gap-2">
                   {turnstileSiteKey ? <ShieldCheck className="h-4 w-4" /> : <ShieldEllipsis className="h-4 w-4" />}
                   {turnstileSiteKey
-                    ? (turnstileRuntimeEnabled ? "Frontend site key đã có, function secret cũng đã sẵn sàng." : "Frontend site key đã có, nhưng function secret còn thiếu.")
+                    ? (turnstileRuntimeEnabled ? "Widget và Worker reset đã sẵn sàng." : "Chưa xác nhận được trạng thái Worker reset.")
                     : "Frontend site key chưa có."}
                 </div>
               </div>

@@ -81,6 +81,7 @@ export async function fetchLicenses(params: {
   q?: string;
   status?: "all" | "active" | "expired" | "blocked";
   free_note?: "all" | "exclude" | "only";
+  page?: number; type?: "all" | "fixed" | "first_use";
 }) {
   const q = params.q?.trim();
   const status = params.status ?? "all";
@@ -97,7 +98,9 @@ export async function fetchLicenses(params: {
     .not("key", "ilike", "FAKELAG-%")
     .neq("app_code", "fake-lag")
     .order("created_at", { ascending: false })
-    .range(0, 4999);
+    .range((params.page||0)*100,(params.page||0)*100+99);
+  if(params.type==="first_use")query=query.or("start_on_first_use.eq.true,starts_on_first_use.eq.true");
+  if(params.type==="fixed")query=query.not("start_on_first_use","is",true).not("starts_on_first_use","is",true);
 
   if (freeNote === "exclude") {
     // Keep NULL notes, exclude FREE% notes
@@ -239,13 +242,14 @@ export async function softDeleteLicense(id: string) {
   });
 }
 
-export async function fetchDeletedLicenses(params: { q?: string } = {}) {
+export async function fetchDeletedLicenses(params: { q?: string;page?:number } = {}) {
   const q = params.q?.trim();
 
   let query = (supabase.from(licensesTable) as any)
     .select("id,key,created_at,expires_at,max_devices,is_active,note,deleted_at")
     .not("deleted_at", "is", null)
-    .order("deleted_at", { ascending: false });
+    .order("deleted_at", { ascending: false }).order("id",{ascending:false})
+    .range((params.page||0)*100,(params.page||0)*100+99);
 
   if (q) {
     const escaped = escapeILike(q);
@@ -258,12 +262,12 @@ export async function fetchDeletedLicenses(params: { q?: string } = {}) {
 }
 
 
-export async function fetchLicenseExpiryHistory(params: { q?: string } = {}) {
+export async function fetchLicenseExpiryHistory(params: { q?: string;page?:number } = {}) {
   const q = params.q?.trim();
   let query = (supabase.from("license_expiry_history" as any) as any)
     .select("id,original_license_id,license_key,app_code,expired_at,archived_at,created_at,first_used_at,max_devices,note,device_count,issue_count")
     .order("archived_at", { ascending: false })
-    .range(0, 999);
+    .range((params.page||0)*100,(params.page||0)*100+99);
 
   if (q) {
     const escaped = escapeILike(q);

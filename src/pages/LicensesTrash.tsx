@@ -21,19 +21,20 @@ import { getErrorMessage } from "@/lib/error-message";
 
 function LegacyLicensesTrashPage() {
   const [q, setQ] = useState("");
+  const [page,setPage]=useState(0);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; key: string } | null>(null);
   const queryClient = useQueryClient();
 
-  const queryKey = useMemo(() => ["licenses", "trash", { q }] as const, [q]);
+  const queryKey = useMemo(() => ["licenses", "trash", { q,page }] as const, [q,page]);
   const { data = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => fetchDeletedLicenses({ q }),
+    queryFn: () => fetchDeletedLicenses({ q,page }),
   });
 
-  const historyQueryKey = useMemo(() => ["licenses", "expiry-history", { q }] as const, [q]);
+  const historyQueryKey = useMemo(() => ["licenses", "expiry-history", { q,page }] as const, [q,page]);
   const { data: expiryHistory = [], isLoading: expiryHistoryLoading, error: expiryHistoryError } = useQuery({
     queryKey: historyQueryKey,
-    queryFn: () => fetchLicenseExpiryHistory({ q }),
+    queryFn: () => fetchLicenseExpiryHistory({ q,page }),
   });
 
   const restoreMutation = useMutation({
@@ -57,7 +58,7 @@ function LegacyLicensesTrashPage() {
   });
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4"><div className="log-pager"><Button variant="outline" disabled={!page||isLoading} onClick={()=>setPage(p=>p-1)}>Trước</Button><span>Trang {page+1}</span><Button variant="outline" disabled={isLoading||data.length<100&&expiryHistory.length<100} onClick={()=>setPage(p=>p+1)}>Sau</Button></div>
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Trash</h1>
@@ -70,7 +71,7 @@ function LegacyLicensesTrashPage() {
       </header>
 
       <div className="max-w-xl">
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search key/note…" />
+        <Input value={q} onChange={(e) => {setQ(e.target.value);setPage(0);}} placeholder="Search key/note…" />
       </div>
 
       {error ? <div className="text-sm text-destructive">{getErrorMessage(error)}</div> : null}

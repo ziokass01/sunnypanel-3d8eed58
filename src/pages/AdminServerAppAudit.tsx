@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect,useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, BadgeDollarSign, Clock3, Search, ShieldCheck, Trophy, Wallet } from "lucide-react";
 import { useParams } from "react-router-dom";
@@ -18,12 +18,12 @@ function short(value?: string | null, size = 14) {
   return v.length > size ? `${v.slice(0, size)}…` : v;
 }
 
-async function loadAuditData(appCode: string) {
+async function loadAuditData(appCode: string,page=0) {
   const [wallets, sessions, transactions, events] = await Promise.all([
-    supabase.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).limit(500),
-    supabase.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).limit(200),
-    supabase.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(200),
-    supabase.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).limit(200),
+    supabase.from("server_app_wallet_balances").select("id,account_ref,device_id,soft_balance,premium_balance,last_soft_reset_at,last_premium_reset_at,updated_at").eq("app_code", appCode).order("updated_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("server_app_sessions").select("id,account_ref,device_id,status,started_at,last_seen_at,expires_at,revoked_at,revoke_reason,client_version").eq("app_code", appCode).order("last_seen_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("server_app_wallet_transactions").select("id,account_ref,device_id,feature_code,transaction_type,wallet_kind,soft_delta,premium_delta,soft_balance_after,premium_balance_after,note,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,client_version,meta,created_at").eq("app_code", appCode).order("created_at", { ascending: false }).range(page*50,page*50+49),
   ]);
   if (wallets.error) throw wallets.error;
   if (sessions.error) throw sessions.error;
@@ -37,15 +37,15 @@ async function loadAuditData(appCode: string) {
   };
 }
 
-async function loadTraceBundle(appCode: string, traceId: string) {
+async function loadTraceBundle(appCode: string, traceId: string,page=0) {
   const trace = String(traceId || "").trim();
   if (!trace) return { runtimeEvents: [], gateLogs: [], freeSessions: [], redeemKeys: [], securityLogs: [] };
   const [runtimeEvents, gateLogs, freeSessions, redeemKeys, securityLogs] = await Promise.all([
-    supabase.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,meta,created_at").eq("app_code", appCode).eq("trace_id", trace).order("created_at", { ascending: false }).limit(200),
-    supabase.from("licenses_free_gate_logs").select("id,session_id,event_code,pass_no,trace_id,detail,created_at").eq("trace_id", trace).order("created_at", { ascending: false }).limit(200),
-    supabase.from("licenses_free_sessions").select("session_id,status,key_type_code,app_code,package_code,credit_code,wallet_kind,trace_id,last_error,issued_server_redeem_key_id,created_at,started_at,revealed_at").eq("trace_id", trace).order("created_at", { ascending: false }).limit(20),
-    supabase.from("server_app_redeem_keys").select("id,app_code,redeem_key,title,reward_mode,trace_id,source_free_session_id,expires_at,redeemed_count,created_at").eq("app_code", appCode).eq("trace_id", trace).order("created_at", { ascending: false }).limit(100),
-    supabase.from("licenses_free_security_logs").select("id,event_type,route,trace_id,session_id,details,created_at").eq("trace_id", trace).order("created_at", { ascending: false }).limit(100),
+    supabase.from("server_app_runtime_events").select("id,event_type,ok,code,message,account_ref,device_id,feature_code,wallet_kind,trace_id,meta,created_at").eq("app_code", appCode).eq("trace_id", trace).order("created_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("licenses_free_gate_logs").select("id,session_id,event_code,pass_no,trace_id,detail,created_at").eq("trace_id", trace).order("created_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("licenses_free_sessions").select("session_id,status,key_type_code,app_code,package_code,credit_code,wallet_kind,trace_id,last_error,issued_server_redeem_key_id,created_at,started_at,revealed_at").eq("trace_id", trace).order("created_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("server_app_redeem_keys").select("id,app_code,redeem_key,title,reward_mode,trace_id,source_free_session_id,expires_at,redeemed_count,created_at").eq("app_code", appCode).eq("trace_id", trace).order("created_at", { ascending: false }).range(page*50,page*50+49),
+    supabase.from("licenses_free_security_logs").select("id,event_type,route,trace_id,session_id,details,created_at").eq("trace_id", trace).order("created_at", { ascending: false }).range(page*50,page*50+49),
   ]);
   return {
     runtimeEvents: runtimeEvents.data || [],
@@ -59,19 +59,22 @@ async function loadTraceBundle(appCode: string, traceId: string) {
 export function AdminServerAppAuditPage() {
   const { appCode = "find-dumps" } = useParams();
   const meta = useMemo(() => getServerAppMeta(appCode), [appCode]);
+  const [page,setPage]=useState(0),[tracePage,setTracePage]=useState(0);
   const [traceInput, setTraceInput] = useState("");
   const [activeTrace, setActiveTrace] = useState("");
   const [topSearch, setTopSearch] = useState("");
 
+  useEffect(()=>{setPage(0);setTracePage(0);},[appCode]);
+  useEffect(()=>setTracePage(0),[activeTrace]);
   const auditQuery = useQuery({
-    queryKey: ["server-app-audit-sections", appCode],
-    queryFn: () => loadAuditData(appCode),
+    queryKey: ["server-app-audit-sections", appCode,page],
+    queryFn: () => loadAuditData(appCode,page),
     retry: false,
   });
 
   const traceQuery = useQuery({
-    queryKey: ["server-app-audit-trace", appCode, activeTrace],
-    queryFn: () => loadTraceBundle(appCode, activeTrace),
+    queryKey: ["server-app-audit-trace", appCode, activeTrace,tracePage],
+    queryFn: () => loadTraceBundle(appCode, activeTrace,tracePage),
     enabled: Boolean(activeTrace),
   });
 
@@ -91,8 +94,8 @@ export function AdminServerAppAuditPage() {
     const filtered = !needle
       ? rows
       : rows.filter((row: any) => [row.account_ref, row.device_id].map((v: any) => String(v || "").toLowerCase()).join(" ").includes(needle));
-    return filtered.map((row: any, index: number) => ({ ...row, rank: index + 1 }));
-  }, [data?.wallets, topSearch]);
+    return filtered.map((row: any, index: number) => ({ ...row, rank: index + 1 + page*50 }));
+  }, [data?.wallets, topSearch,page]);
 
   if (appCode === "fake-lag") return <AdminFakeLagAuditPage />;
 
@@ -107,11 +110,11 @@ export function AdminServerAppAuditPage() {
   }
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-5"><div className="log-pager"><Button variant="outline" disabled={!page||auditQuery.isFetching} onClick={()=>setPage(p=>p-1)}>Trước</Button><span>Trang dữ liệu {page+1} · mỗi mục tối đa 50 dòng</span><Button variant="outline" disabled={auditQuery.isFetching||!data||![data.wallets,data.sessions,data.transactions,data.events].some(rows=>rows.length===50)} onClick={()=>setPage(p=>p+1)}>Sau</Button></div>{activeTrace&&<div className="log-pager"><Button variant="outline" disabled={!tracePage||traceQuery.isFetching} onClick={()=>setTracePage(p=>p-1)}>Trace trước</Button><span>Trang trace {tracePage+1}</span><Button variant="outline" disabled={traceQuery.isFetching||!trace||!Object.values(trace).some(rows=>Array.isArray(rows)&&rows.length===50)} onClick={()=>setTracePage(p=>p+1)}>Trace sau</Button></div>}
       <header className="space-y-2">
         <Badge variant="outline">Audit Log</Badge>
         <h1 className="text-2xl font-semibold">Audit Log cho {meta.label}</h1>
-        <p className="max-w-4xl text-sm text-muted-foreground">Quyền / Ví / Session / Giao dịch / Sự kiện không còn nằm trong Runtime nữa. Tất cả được gom vào Audit Log để dễ xem, dễ tìm và dễ quản lý.</p>
+        <p className="max-w-4xl text-sm text-muted-foreground">Ví, session, giao dịch và sự kiện được xem theo từng trang. Thứ hạng ví và tìm nhanh áp dụng trên trang đang xem.</p>
       </header>
 
       <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-6">
