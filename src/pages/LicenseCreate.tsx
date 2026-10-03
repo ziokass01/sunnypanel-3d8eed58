@@ -1,3 +1,5 @@
+import { ModeratorLicenses } from "@/features/moderator/ModeratorLicenses";
+import { convertDuration,DurationUnit } from "@/features/licenses/duration-units";
 import { CustomsLicenseSwitch } from "@/features/customs/CustomsLicenseSwitch";
 import { useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -28,7 +30,7 @@ const schema = z
       .max(64)
       .regex(/^SUNNY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i, "Format: SUNNY-XXXX-XXXX-XXXX"),
     expires_at: z.string().optional(),
-    duration_value: z.coerce.number().int().min(1).max(999999).optional(),
+    duration_value: z.coerce.number().min(0.000001).max(35791394).optional(),
     duration_unit: z.enum(["minutes", "hours", "days"]).default("hours"),
     max_devices: z.coerce.number().int().min(1),
     is_active: z.boolean(),
@@ -74,7 +76,7 @@ function fieldsToSeconds(v: { duration_value?: number; duration_unit?: "minutes"
   if (!value || value <= 0) return null;
   const unit = v.duration_unit ?? "hours";
   const mult = unit === "minutes" ? 60 : unit === "hours" ? 3600 : 86400;
-  return value * mult;
+  return Math.round(value * mult);
 }
 
 function LegacyLicenseCreatePage() {
@@ -84,9 +86,9 @@ function LegacyLicenseCreatePage() {
 
   // Allow /licenses2/new to default to countdown keys without adding new wrapper components.
   const initialLicenseType: FormValues["license_type"] =
-    typeof window !== "undefined" && window.location?.pathname === "/licenses2/new" ? "first_use" : "fixed";
+    searchParams.get("timing")==="first_use" ? "first_use" : "fixed";
 
-  const cancelTo = initialLicenseType === "first_use" ? "/licenses2" : "/licenses";
+  const cancelTo = "/licenses";
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -226,10 +228,10 @@ function LegacyLicenseCreatePage() {
           <div className="space-y-2">
             <Label>Duration</Label>
             <div className="grid gap-3 md:grid-cols-2">
-              <Input id="duration_value" type="number" min={1} max={isAdmin ? 999999 : userMaxValueForUnit(currentUnit)} {...form.register("duration_value")} />
+              <Input id="duration_value" type="number" step="any" min={0.000001} max={isAdmin ? 35791394 : userMaxValueForUnit(currentUnit)} {...form.register("duration_value")} />
               <Select
                 value={form.watch("duration_unit")}
-                onValueChange={(v) => form.setValue("duration_unit", v as any, { shouldDirty: true, shouldValidate: true })}
+                onValueChange={(v) => {const old=form.getValues("duration_unit")||"hours";const value=Number(form.getValues("duration_value"));form.setValue("duration_value",convertDuration(value,old,v as DurationUnit),{shouldDirty:true});form.setValue("duration_unit",v as DurationUnit,{shouldDirty:true,shouldValidate:true});}}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Unit" />
@@ -320,4 +322,4 @@ function LegacyLicenseCreatePage() {
   );
 }
 
-export function LicenseCreatePage(){return <CustomsLicenseSwitch mode="create" countdownOnly={false}><LegacyLicenseCreatePage/></CustomsLicenseSwitch>;}
+export function LicenseCreatePage(){const {role,userId}=usePanelRole();if(role==="moderator")return <ModeratorLicenses key={userId} mode="create"/>;return <CustomsLicenseSwitch mode="create" countdownOnly={false}><LegacyLicenseCreatePage/></CustomsLicenseSwitch>;}

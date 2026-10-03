@@ -1,3 +1,5 @@
+import {usePanelRole} from "@/hooks/use-panel-role";
+import {ModeratorLicenses} from "@/features/moderator/ModeratorLicenses";
 import { CustomsLicenseSwitch } from "@/features/customs/CustomsLicenseSwitch";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -215,4 +217,6 @@ function LegacyLicensesTrashPage() {
   );
 }
 
-export function LicensesTrashPage(){return <CustomsLicenseSwitch mode="trash"><LegacyLicensesTrashPage/></CustomsLicenseSwitch>;}
+function WrappedLicensesTrashPage(){return <CustomsLicenseSwitch mode="trash"><LegacyLicensesTrashPage/></CustomsLicenseSwitch>;}
+
+export function LicensesTrashPage(){const {role,userId}=usePanelRole();return role==="moderator"?<ModeratorLicenses key={userId}/>:<WrappedLicensesTrashPage/>;}

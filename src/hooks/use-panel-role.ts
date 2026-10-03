@@ -36,6 +36,7 @@ export function usePanelRole() {
   const loading = Boolean(userId) && roleQuery.isLoading && roleQuery.data === undefined;
 
   return {
+    userId,
     role,
     loading,
     isAdmin: role === "admin",
