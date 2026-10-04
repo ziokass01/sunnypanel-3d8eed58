@@ -1,3 +1,4 @@
+import { issueCustomsFree } from "../_shared/customs-free.ts";
 import { authenticateFreeIngress } from "../_shared/free-ingress.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
@@ -695,6 +696,10 @@ Deno.serve(async (req) => {
   const allowReset = Boolean(keyTypeMeta?.allow_reset ?? true);
   const appCode = normalizeAppCode(sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire");
   const keySignature = String(keyTypeMeta?.key_signature ?? "FF").trim().toUpperCase();
+    if(appCode==='customs'){
+      try{const issued=await issueCustomsFree(sb,sessForIssue,keyTypeMeta,freeCloseDeadlineSeconds);return json({ok:true,...issued,key_type_code:sess.key_type_code,key_type_label,base_duration_seconds:keyTypeBaseDuration,bonus_seconds:bonusSecondsApplied,bonus_applied:bonusSecondsApplied>0,warnings},200);}
+      catch(e){console.error('Customs free issuance failed',String(e?.message||e));return json({ok:false,code:'CUSTOMS_ISSUE_FAILED',msg:'CUSTOMS_ISSUE_FAILED'},503);}
+    }
   const freeNote = [
     `FREE_${String(sess.key_type_code ?? "GENERIC").toUpperCase()}`,
     `APP=${appCode}`,

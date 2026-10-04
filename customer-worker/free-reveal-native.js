@@ -1,3 +1,4 @@
+import { issueCustomsFree } from "./free-shared/customs-free.js";
 // @ts-nocheck
 import { createServiceClient } from "./supabase-rest.js";
 import { insertLicenseCompat } from "./free-shared/license-insert.js";
@@ -413,6 +414,10 @@ export async function handleFreeReveal(req, env, ctx) {
     const allowReset = Boolean(keyTypeMeta?.allow_reset ?? true);
     const appCode = normalizeAppCode(sess.app_code ?? keyTypeMeta?.app_code ?? "free-fire");
     const keySignature = text(keyTypeMeta?.key_signature ?? "FF", 32).toUpperCase();
+    if(appCode==='customs'){
+      try{const issued=await issueCustomsFree(db,sessForIssue,keyTypeMeta,freeCloseDeadlineSeconds);return ctx.json({ok:true,...issued,key_type_code:sess.key_type_code,key_type_label,base_duration_seconds:keyTypeBaseDuration,bonus_seconds:bonusSecondsApplied,bonus_applied:bonusSecondsApplied>0,warnings},200);}
+      catch(e){console.error('Customs free issuance failed',String(e?.message||e));return ctx.json({ok:false,code:'CUSTOMS_ISSUE_FAILED',msg:'CUSTOMS_ISSUE_FAILED'},503);}
+    }
     const freeNote = [`FREE_${String(sess.key_type_code ?? "GENERIC").toUpperCase()}`, `APP=${appCode}`, `SIG=${keySignature}`, `ALLOW_RESET=${allowReset ? 1 : 0}`].join(";");
     if (appCode === "ai-coding" || isAiCodingFreeKeyType(keyTypeMeta, sess)) {
         try {
