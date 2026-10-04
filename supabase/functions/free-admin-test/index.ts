@@ -1,3 +1,4 @@
+import { issueCustomsFree } from "../_shared/customs-free.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { assertAdmin } from "../_shared/admin.ts";
@@ -213,15 +214,23 @@ Deno.serve(async (req) => {
   const detectedKeySignature = String((keyType as any).key_signature || "").trim().toUpperCase();
   const rawAppCode = String((keyType as any).app_code || "free-fire").trim().toLowerCase() || "free-fire";
   const isAiCodingKeyType = rawAppCode === "ai-coding" || keyTypeCode.startsWith("aisunny") || detectedKeySignature === "AI-SUNNY";
-  const appCode = isAiCodingKeyType ? "ai-coding" : rawAppCode;
+  // Product signature is authoritative for Customs; never infer it from a label or type-code prefix.
+  const productLookup = detectedKeySignature && !["SUNNY","FF","FD","FND","FAKELAG","AI-SUNNY"].includes(detectedKeySignature)
+    ? await sb.from("customs_products").select("signature,enabled").eq("signature",detectedKeySignature).maybeSingle() : {data:null,error:null};
+  if(productLookup.error)return json({ok:false,message:"CUSTOMS_PRODUCT_LOOKUP_FAILED"},503);
+  const isCustoms = rawAppCode === "customs" || Boolean(productLookup.data);
+  if(isCustoms && !productLookup.data?.enabled)return json({ok:false,message:"CUSTOMS_PRODUCT_DISABLED"},409);
+  if(isCustoms && rawAppCode !== "customs")return json({ok:false,message:"CUSTOMS_TYPE_MIGRATION_REQUIRED",detail:"Chạy SQL 012 để đồng bộ loại key với sản phẩm."},409);
+  const appCode = isCustoms ? "customs" : isAiCodingKeyType ? "ai-coding" : rawAppCode;
+  if(!["customs","ai-coding","find-dumps","fake-lag","free-fire"].includes(appCode))return json({ok:false,message:"UNSUPPORTED_KEY_APP"},409);
 
   const traceId = crypto.randomUUID();
   const sessionExp = new Date(now.getTime() + 20 * 60 * 1000).toISOString();
   const insSess = await sb
     .from("licenses_free_sessions")
     .insert({
-      status: "gate_ok",
-      reveal_count: 0,
+      status: appCode === "customs" && !parsed.data.dry_run ? "revealing" : "gate_ok",
+      reveal_count: appCode === "customs" && !parsed.data.dry_run ? 1 : 0,
       ip_hash: ipHash,
       ua_hash: uaHash,
       fingerprint_hash: fpHash,
@@ -281,6 +290,14 @@ Deno.serve(async (req) => {
     });
   }
 
+  if(appCode === "customs"){
+    try{
+      const issued=await issueCustomsFree(sb,{session_id:sessionId},keyType,30);
+      return json({ok:true,message:"ADMIN_TEST_OK",...issued,session_expires_at:sessionExp,ip_hash:ipHash,fp_hash:fpHash,session_id:sessionId,...bonusMeta});
+    }catch(error){
+      return json({ok:false,message:"CUSTOMS_ISSUE_FAILED",detail:extractErrorMessage(error),session_id:sessionId},503);
+    }
+  }
   const expiresAt = addSecondsIso(now, durationSeconds);
 
 
