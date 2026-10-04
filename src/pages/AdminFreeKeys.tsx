@@ -1444,7 +1444,6 @@ export function AdminFreeKeysPage() {
 
   const adminTestGetKey = useMutation({
     mutationFn: async () => {
-      if (keyTypesQuery.data?.find(x => x.code === testKeyTypeCode)?.app_code === "customs") throw new Error("Dùng luồng GetKey public để kiểm tra Customs.");
       const sess = await supabase.auth.getSession();
       const token = sess.data.session?.access_token;
       if (!token) {
