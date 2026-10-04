@@ -1,4 +1,5 @@
 import { AdminCustoms } from "@/features/customs/AdminCustoms";
+
 import { AdaptiveRow } from "@/features/free-admin/AdaptiveRow";
 import { FreeAdminWorkspace, FreeAdminSection, type FreeAdminTab } from "@/features/free-admin/Workspace";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -543,11 +544,13 @@ function omitNewFreeSettingsColumns<T extends Record<string, any>>(patch: T) {
 export function AdminFreeKeysPage() {
   const { toast } = useToast();
   const [lastCreatedAiKey, setLastCreatedAiKey] = useState("");
+  const [newCustomsDevices,setNewCustomsDevices]=useState(1);
+  const customsProductsQuery=useQuery({queryKey:['free-customs-products'],queryFn:async()=>{const {data,error}=await (supabase as any).from('customs_products').select('signature,name,enabled').order('name');if(error)throw error;return data||[];}});
 
   const initialAppCode = useMemo(() => {
     if (typeof window === "undefined") return "free-fire";
     const raw = new URLSearchParams(window.location.search).get("app");
-    return APP_OPTIONS.some((item) => item.code === raw) ? String(raw) : "free-fire";
+    return raw === "customs" || APP_OPTIONS.some((item) => item.code === raw) ? String(raw) : "free-fire";
   }, []);
 
   const baseUrl = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
@@ -1342,7 +1345,7 @@ export function AdminFreeKeysPage() {
   const [newAllowReset, setNewAllowReset] = useState<boolean>(true);
 
   useEffect(() => {
-    setNewKeySignature(getAppMeta(newAppCode).signature);
+    if(newAppCode!=="customs")setNewKeySignature(getAppMeta(newAppCode).signature);else setNewKeySignature("");
     if (newAppCode === "find-dumps") {
       setNewAllowReset(false);
     }
@@ -1355,8 +1358,10 @@ export function AdminFreeKeysPage() {
 
   const createKeyType = useMutation({
     mutationFn: async () => {
-      if (newAppCode === "customs") throw new Error("Dùng mục tạo key Customs riêng.");
-      const appMeta = getAppMeta(newAppCode);
+      const customProduct=newAppCode==='customs'?(customsProductsQuery.data||[]).find((p:any)=>p.signature===newKeySignature&&p.enabled):null;
+      if(newAppCode==='customs'&&!customProduct)throw new Error('Chọn sản phẩm Customs đang bật.');
+      if(newAppCode==='customs'&&(!Number.isInteger(newCustomsDevices)||newCustomsDevices<1||newCustomsDevices>2147483647))throw new Error('Số thiết bị phải là số nguyên dương.');
+      const appMeta = customProduct?{label:customProduct.name,signature:customProduct.signature}:getAppMeta(newAppCode);
       const signature = (newKeySignature.trim().toUpperCase() || appMeta.signature).replace(/[^A-Z0-9]/g, "") || appMeta.signature;
       let value = 1;
       let code = "";
@@ -1396,7 +1401,8 @@ export function AdminFreeKeysPage() {
             sort_order,
             enabled: true,
             app_code: newAppCode,
-            app_label: appMeta.label,
+            app_label: newAppCode === "customs" ? "Customs" : appMeta.label,
+            ...(newAppCode === "customs" ? {customs_max_devices:newCustomsDevices} : {}),
             key_signature: signature,
             allow_reset: newAppCode === "find-dumps" ? false : newAllowReset,
             free_selection_mode: newAppCode === "find-dumps" ? newFindDumpsFlow : "none",
@@ -1438,6 +1444,7 @@ export function AdminFreeKeysPage() {
 
   const adminTestGetKey = useMutation({
     mutationFn: async () => {
+      if (keyTypesQuery.data?.find(x => x.code === testKeyTypeCode)?.app_code === "customs") throw new Error("Dùng luồng GetKey public để kiểm tra Customs.");
       const sess = await supabase.auth.getSession();
       const token = sess.data.session?.access_token;
       if (!token) {
@@ -2616,7 +2623,7 @@ export function AdminFreeKeysPage() {
             <div className="font-medium">Tạo / bật loại key</div>
             <div className="text-xs text-muted-foreground">Chọn loại + thời gian rồi bấm Create. Nếu đã tồn tại, sẽ tự bật.</div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-5" style={newAppCode === "customs" ? { display: "block" } : undefined}>
+            <div className="mt-3 grid gap-3 md:grid-cols-5">
               <div className="space-y-2">
                 <div className="text-sm font-medium">App</div>
                 <Select value={newAppCode} onValueChange={setNewAppCode}>
@@ -2630,7 +2637,7 @@ export function AdminFreeKeysPage() {
                 </Select>
               </div>
 
-              {newAppCode === "customs" ? <div className="mt-4 w-full min-w-0"><AdminCustoms /></div> : newAppCode === "find-dumps" ? (
+              {newAppCode === "find-dumps" ? (
                 <>
       <div className="fixed bottom-24 right-4 z-40 flex flex-col gap-2 sm:bottom-6">
         <Button
@@ -2710,11 +2717,7 @@ export function AdminFreeKeysPage() {
 
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Chữ ký key</div>
-                    <Input
-                      value={newKeySignature}
-                      onChange={(e) => setNewKeySignature(e.target.value.toUpperCase())}
-                      placeholder="FF / FD / FAKELAG"
-                    />
+                    {newAppCode==='customs'?<Select value={newKeySignature} onValueChange={setNewKeySignature}><SelectTrigger><SelectValue placeholder="Chọn sản phẩm"/></SelectTrigger><SelectContent>{(customsProductsQuery.data||[]).filter((p:any)=>p.enabled).map((p:any)=><SelectItem key={p.signature} value={p.signature}>{p.name} · {p.signature}</SelectItem>)}</SelectContent></Select>:<Input value={newKeySignature} onChange={(e)=>setNewKeySignature(e.target.value.toUpperCase())} placeholder="Mã sản phẩm"/>}
                   </div>
 
                   <div className="space-y-2">
@@ -2739,13 +2742,14 @@ export function AdminFreeKeysPage() {
               </div>
             ) : null}
 
-            {newAppCode !== "customs" && <>
+            {newAppCode==='customs'&&<div className="mt-3 space-y-2"><label htmlFor="customs-free-devices" className="text-sm font-medium">Số thiết bị mỗi key</label><Input id="customs-free-devices" type="number" min={1} value={newCustomsDevices} onChange={e=>setNewCustomsDevices(Number(e.target.value))}/>{customsProductsQuery.error&&<p className="text-destructive">Không tải được sản phẩm Customs.</p>}<p className="text-xs text-muted-foreground">Cấu hình loại key vượt link; key thực được cấp sau khi hoàn thành luồng Free Key. Reset dùng chính sách chung.</p></div>}
+            {<>
             <div className="mt-3 flex items-center justify-between rounded-md border p-3">
               <div>
                 <div className="font-medium">Cho reset key</div>
                 <div className="text-xs text-muted-foreground">Admin chọn trước loại key này có hỗ trợ reset hay không. Với Find Dumps, reset được chốt ở server key nên nhánh này tự tắt. Fake Lag dùng chữ ký riêng FAKELAG để không trùng key Free Fire.</div>
               </div>
-              <Switch checked={newAllowReset} onCheckedChange={setNewAllowReset} />
+              <Switch checked={newAppCode==="customs"?true:newAllowReset} disabled={newAppCode==="customs"} onCheckedChange={setNewAllowReset} />
             </div>
 
             <div className="mt-3">
@@ -2756,6 +2760,7 @@ export function AdminFreeKeysPage() {
             </>}
           </div>
 
+          {newAppCode==='customs'&&<details className="mb-4 rounded-xl border p-4"><summary className="cursor-pointer font-medium">Quản lý sản phẩm Customs</summary><div className="mt-4"><AdminCustoms/><Button className="mt-3" variant="outline" onClick={()=>void customsProductsQuery.refetch()}>Tải lại danh sách sản phẩm</Button></div></details>}
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
