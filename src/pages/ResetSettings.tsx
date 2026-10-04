@@ -166,7 +166,7 @@ export function ResetSettingsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Reset Settings</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Điều chỉnh luật Reset Key public, giới hạn 30 ngày cho user sale và lớp chống abuse.
+            Điều chỉnh chính sách Reset Key public và giới hạn tần suất kiểm tra / reset.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -334,14 +334,6 @@ export function ResetSettingsPage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border p-4 space-y-2">
-                <Label>User max duration (giây)</Label>
-                <Input type="number" min={3600} value={currentForm?.user_max_duration_seconds ?? 2592000} onChange={(e) => updateField("user_max_duration_seconds", e.target.value)} />
-                <div className="text-xs text-muted-foreground">
-                  Hiện tại tương đương: {secondsToText(Number(currentForm?.user_max_duration_seconds ?? 2592000))}
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-4 space-y-2">
                 <Label>Hủy key sau quá N lần reset</Label>
                 <Input type="number" min={0} value={currentForm?.public_reset_cancel_after_count ?? 0} onChange={(e) => updateField("public_reset_cancel_after_count", e.target.value)} />
                 <div className="text-xs text-muted-foreground">Đặt 0 để tắt. Ví dụ nhập 3 thì đến lần reset thứ 3, key sẽ bị hủy về trạng thái hết hạn thay vì tiếp tục trừ %.</div>
@@ -376,7 +368,6 @@ export function ResetSettingsPage() {
             <div className="rounded-xl border p-3">Paid lần 2: <b>{currentForm?.paid_next_penalty_pct ?? 20}%</b></div>
             <div className="rounded-xl border p-3">Paid từ lần 3 cộng thêm: <b>{currentForm?.paid_next_step_penalty_pct ?? 0}%</b></div>
             <div className="rounded-xl border p-3">Hủy key sau quá: <b>{Number(currentForm?.public_reset_cancel_after_count ?? 0) > 0 ? `${currentForm?.public_reset_cancel_after_count} lần` : 'Tắt'}</b></div>
-            <div className="rounded-xl border p-3">User sale tối đa: <b>{secondsToText(Number(currentForm?.user_max_duration_seconds ?? 2592000))}</b></div>
           </CardContent>
         </Card>
       </div>
