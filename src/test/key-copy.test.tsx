@@ -1,0 +1,12 @@
+import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
+import {afterEach,describe,it,expect,vi} from 'vitest';
+import {KeyCopy,SavedKey} from '@/features/licenses/KeyCopy';
+const api=vi.hoisted(()=>({rpc:vi.fn()}));
+vi.mock('@/features/customs/customs-api',()=>({customsDb:api,customsChecked:async(q:any)=>{const r=await q;if(r.error)throw r.error;return r.data;}}));
+afterEach(()=>{cleanup();vi.restoreAllMocks();});
+describe('key copy feedback',()=>{
+ it('copies exact key and confirms only after success',async()=>{const write=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:write}});render(<KeyCopy value="NEWPRODUCT-0123456789ABCDEF0123456789ABCDEF"/>);fireEvent.click(screen.getByRole('button'));await waitFor(()=>expect(screen.getByRole('button').textContent).toContain('Đã sao chép'));expect(write).toHaveBeenCalledWith('NEWPRODUCT-0123456789ABCDEF0123456789ABCDEF');});
+ it('shows failure and allows retry',async()=>{const write=vi.fn().mockRejectedValueOnce(Error('denied')).mockResolvedValueOnce(undefined);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:write}});render(<KeyCopy value="key" compact/>);fireEvent.click(screen.getByRole('button'));await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('Không sao chép'));fireEvent.click(screen.getByRole('button'));await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('Đã sao chép'));});
+ it('does not offer a copy button for historical hash-only keys',async()=>{api.rpc.mockResolvedValue({data:{key:null}});render(<SavedKey id="old" hint="NEWPRODUCT-…ABCDEF"/>);await screen.findByText(/Key cũ chỉ lưu hash/);expect(screen.queryByRole('button',{name:'Sao chép key'})).toBeNull();});
+ it('masks the key until revealed and clears it when row changes',async()=>{api.rpc.mockResolvedValue({data:{key:'NEWPRODUCT-0123456789ABCDEF0123456789ABCDEF'}});const view=render(<SavedKey id="new" hint="NEWPRODUCT-…ABCDEF"/>);await screen.findByRole('button',{name:'Xem key'});expect(screen.queryByText('NEWPRODUCT-0123456789ABCDEF0123456789ABCDEF')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Xem key'}));expect(screen.getByText('NEWPRODUCT-0123456789ABCDEF0123456789ABCDEF')).toBeTruthy();api.rpc.mockResolvedValue({error:Error('denied')});view.rerender(<SavedKey id="other"/>);await screen.findByRole('alert');expect(screen.queryByText('NEWPRODUCT-0123456789ABCDEF0123456789ABCDEF')).toBeNull();});
+});
