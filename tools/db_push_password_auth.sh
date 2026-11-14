@@ -173,7 +173,7 @@ done
 while IFS= read -r -d '' file; do
   version="$(migration_version_from_name "$file" || true)"
   [ -n "$version" ] || continue
-  if [ "$version" -ge "$MIN_SAFE_PENDING_VERSION" ] && ! is_allowed "$version"; then
+  if [ "$version" -ge "$MIN_SAFE_PENDING_VERSION" ] && ! remote_has_version "$version" && ! is_allowed "$version"; then
     echo "DỪNG: migration mới chưa được allowlist: $(basename "$file")" >&2
     exit 4
   fi
