@@ -1,4 +1,5 @@
-import { bonusDurationText } from "@/features/free/bonus-duration";
+import { BonusTag, BonusOffer } from "@/features/free/BonusOffer";
+import "@/features/free/bonus-offer.css";
 import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -682,19 +683,18 @@ export function FreeLandingPage() {
                   <Badge variant="outline" className="rounded-full">Bước 1</Badge>
                 </div>
                 <Select value={selected} onValueChange={setSelected} disabled={!hasTypes || loading}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"} />
+                  <SelectTrigger className="w-full free-bonus-select-trigger">
+                    <SelectValue placeholder={hasTypes ? "Chọn…" : "Chưa có loại key"}>{selectedKeyMeta ? <span className="free-bonus-option"><span className="free-bonus-option__name">{selectedKeyMeta.label}</span><BonusTag item={selectedKeyMeta}/></span> : undefined}</SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                     {(cfg?.key_types ?? []).map((k) => (
-                      <SelectItem key={k.code} value={k.code}>
-                        {k.label}
-                        {bonusDurationText(k) ? ` · ${bonusDurationText(k)}` : ""}
+                      <SelectItem key={k.code} value={k.code} textValue={k.label} className="free-bonus-select-item">
+                        <span className="free-bonus-option"><span className="free-bonus-option__name">{k.label}</span><BonusTag item={k}/></span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {selectedKeyMeta && bonusDurationText(selectedKeyMeta) && <p role="status" className="rounded-xl bg-primary/10 p-3 text-sm font-medium">{bonusDurationText(selectedKeyMeta) === "Bonus" ? "Bonus" : `Bonus: ${bonusDurationText(selectedKeyMeta)}`}</p>}
+                {selectedKeyMeta && <BonusOffer item={selectedKeyMeta}/>}
               </div>
 
 

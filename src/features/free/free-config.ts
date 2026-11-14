@@ -1,7 +1,9 @@
+import { orderedFreeKeys } from "./bonus-presentation";
 import { getFunction } from "@/lib/functions";
 
 export type FreeKeyType = {
   code: string;
+  sort_order?: number | null;
   label: string;
   kind: "hour" | "day";
   value: number;
@@ -163,7 +165,9 @@ export async function fetchFreeConfig(opts?: { fingerprint?: string | null; appC
   const headers: Record<string, string> = {};
   if (fp) headers["x-fp"] = fp;
   if (appCode) headers["x-app-code"] = appCode;
-  return getFunction<FreeConfig>("/free-config", {
+  const config = await getFunction<FreeConfig>("/free-config", {
     headers: Object.keys(headers).length ? headers : undefined,
   });
+  return {...config,key_types:orderedFreeKeys(config.key_types ?? [])};
 }
+

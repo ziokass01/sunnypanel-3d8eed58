@@ -550,6 +550,7 @@ Deno.serve(async (req) => {
         const bonusRule = freeBonusRuleFor(bonusRuntime, k.code);
         return ({
         code: k.code,
+        sort_order: Number(k.sort_order ?? 0),
         label: k.label,
         kind: k.kind,
         value: k.value,

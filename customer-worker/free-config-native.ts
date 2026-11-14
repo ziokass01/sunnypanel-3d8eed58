@@ -259,6 +259,7 @@ export async function handleFreeConfig(req, env, ctx) {
       const rule = freeBonusRuleFor(bonusRuntime, k.code);
       return {
         code: k.code, label: k.label, kind: k.kind, value: k.value,
+        sort_order: Number(k.sort_order ?? 0),
         duration_seconds: Number(k.duration_seconds ?? 0),
         requires_double_gate: Boolean(k.requires_double_gate ?? false),
         app_code: k.app_code ?? "free-fire", app_label: k.app_label ?? "Free Fire",
