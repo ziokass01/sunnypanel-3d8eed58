@@ -1,111 +1,24 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import {
-  effectiveBonusDuration,
-  keyTypeVisibleForBonus,
-  resolveFreeBonus,
-  sortKeyTypesForBonus,
-} from "./free-shared/bonus.js";
+import test from 'node:test';import assert from 'node:assert/strict';import {resolveFreeBonus,sortKeyTypesForBonus,effectiveBonusDuration,publicFreeBonus} from './free-shared/bonus.js';
+const cfg={enabled:true,start_time:'20:00',end_time:'22:00',rules:[{key_type_code:'ff10',app_code:'free-fire',enabled:true,apply_bonus:true,replace_same_app:true,bonus_only:true,bonus_seconds:7200},{key_type_code:'ff20',app_code:'free-fire',enabled:true,apply_bonus:true,replace_same_app:true,bonus_only:true,bonus_seconds:14400},{key_type_code:'tool',app_code:'customs',enabled:true,apply_bonus:true,replace_same_app:true,bonus_only:true,bonus_seconds:18000}]};
+const rows=[{code:'tool',sort_order:60,enabled:true},{code:'ff20',sort_order:20,enabled:true},{code:'ff10',sort_order:10,enabled:true},{code:'kernel',sort_order:30,enabled:true},{code:'disabled',sort_order:0,enabled:false}];
+const run=time=>resolveFreeBonus(cfg,new Date(time));
+for(const time of ['2026-11-14T12:59:59Z','2026-11-14T13:00:00Z','2026-11-14T14:59:59Z','2026-11-14T15:00:00Z'])test('all enabled products stay visible at '+time,()=>assert.deepEqual(sortKeyTypesForBonus(rows,run(time)).map(x=>x.code),['ff10','ff20','kernel','tool']));
+test('two FF durations and a custom product add their own hours',()=>{const r=run('2026-11-14T14:00:00Z');for(const [code,base,extra] of [['ff10',36000,7200],['ff20',72000,14400],['tool',18000,18000]])assert.equal(effectiveBonusDuration(base,r,code).effective_seconds,base+extra);});
+test('end boundary restores base duration, not an empty key list',()=>{const r=run('2026-11-14T15:00:00Z');assert.equal(r.active,false);assert.equal(effectiveBonusDuration(36000,r,'ff10').effective_seconds,36000);assert.equal(sortKeyTypesForBonus(rows,r).length,4);});
+test('global off restores all enabled products with zero bonus',()=>{const r=resolveFreeBonus({...cfg,enabled:false});assert.equal(sortKeyTypesForBonus(rows,r).length,4);assert.equal(effectiveBonusDuration(36000,r,'ff10').bonus_seconds,0);});
+test('disabled per-key switch retains hours without granting them',()=>{const r=resolveFreeBonus({...cfg,start_time:'00:00',end_time:'00:00',rules:[{key_type_code:'ff10',enabled:false,apply_bonus:true,replace_same_app:true,bonus_seconds:7200}]});assert.equal(effectiveBonusDuration(36000,r,'ff10').bonus_seconds,0);assert.equal(sortKeyTypesForBonus(rows,r).length,4);});
+test('legacy hidden flags no longer hide products or emit replacement status',()=>{const r=run('2026-11-14T14:00:00Z');assert.ok(publicFreeBonus(r).rules.every(x=>!x.bonus_only&&!x.replace_same_app));});
+test('cross midnight schedule adds bonus only inside its window',()=>{const c={...cfg,start_time:'22:00',end_time:'06:00'};assert.equal(resolveFreeBonus(c,new Date('2026-11-14T16:00:00Z')).active,true);assert.equal(resolveFreeBonus(c,new Date('2026-11-14T23:00:00Z')).active,false);});
 
-describe("scheduled Free Key bonus", () => {
-  const cfg = {
-    enabled: true,
-    start_time: "00:00",
-    end_time: "12:00",
-    disable_secondary: true,
-    rules: [
-      {
-        key_type_code: "ff_h12",
-        app_code: "free-fire",
-        apply_bonus: true,
-        bonus_seconds: 0,
-        sort_order: 10,
-        bonus_only: true,
-        replace_same_app: true,
-      },
-      {
-        key_type_code: "fake_h20",
-        app_code: "fake-lag",
-        apply_bonus: true,
-        bonus_seconds: 3600,
-        sort_order: 20,
-        bonus_only: false,
-
-      },
-    ],
-  };
-
-  const rows = [
-    { code: "ff_h10", app_code: "free-fire" },
-    { code: "fake_h20", app_code: "fake-lag" },
-    { code: "ff_h12", app_code: "free-fire" },
-    { code: "ff_h24", app_code: "free-fire" },
-    { code: "fd_3d", app_code: "find-dumps" },
-  ];
-
-  it("uses Vietnam time and stops exactly at 12:00", () => {
-    assert.equal(resolveFreeBonus(cfg, new Date("2026-08-09T04:59:00Z")).active, true);
-    assert.equal(resolveFreeBonus(cfg, new Date("2026-08-09T05:00:00Z")).active, false);
-  });
-
-  it("supports cross-midnight windows", () => {
-    const night = { ...cfg, start_time: "22:00", end_time: "06:00" };
-    assert.equal(resolveFreeBonus(night, new Date("2026-08-09T16:00:00Z")).active, true);
-    assert.equal(resolveFreeBonus(night, new Date("2026-08-09T00:00:00Z")).active, false);
-  });
-
-  it("shows only the configured Free Fire replacement key during Bonus", () => {
-    const active = resolveFreeBonus(cfg, new Date("2026-08-09T03:00:00Z"));
-    assert.deepEqual(
-      sortKeyTypesForBonus(rows, active).map((row) => row.code),
-      ["fake_h20", "ff_h12", "fd_3d"],
-    );
-    assert.equal(keyTypeVisibleForBonus({ code: "ff_h10", app_code: "free-fire" }, active), false);
-    assert.equal(keyTypeVisibleForBonus({ code: "ff_h12", app_code: "free-fire" }, active), true);
-  });
-
-  it("hides the bonus-only 12H key outside Bonus and restores normal FF keys", () => {
-    const inactive = resolveFreeBonus(cfg, new Date("2026-08-09T08:00:00Z"));
-    assert.deepEqual(
-      sortKeyTypesForBonus(rows, inactive).map((row) => row.code),
-      ["ff_h10", "fake_h20", "ff_h24", "fd_3d"],
-    );
-    assert.equal(keyTypeVisibleForBonus({ code: "ff_h12", app_code: "free-fire" }, inactive), false);
-    assert.equal(keyTypeVisibleForBonus({ code: "ff_h10", app_code: "free-fire" }, inactive), true);
-  });
-
-  it("keeps additive bonus compatibility for non-replacement keys", () => {
-    const active = resolveFreeBonus(cfg, new Date("2026-08-09T03:00:00Z"));
-    assert.deepEqual(effectiveBonusDuration(72000, active, "fake_h20"), {
-      base_seconds: 72000,
-      bonus_seconds: 3600,
-      effective_seconds: 75600,
-      applied: true,
-    });
-    assert.equal(effectiveBonusDuration(43200, active, "ff_h12").effective_seconds, 43200);
-  });
-
-  it("keeps other apps visible while replacing only the selected app", () => {
-    const active = resolveFreeBonus(cfg, new Date("2026-08-09T03:00:00Z"));
-    assert.equal(keyTypeVisibleForBonus({ code: "fd_3d", app_code: "find-dumps" }, active), true);
-    assert.equal(keyTypeVisibleForBonus({ code: "fake_h20", app_code: "fake-lag" }, active), true);
-  });
+test('explicit bonus-only key appears in window and hides outside, ordinary keys stay',()=>{
+ const c={...cfg,rules:[...cfg.rules,{key_type_code:'scheduled',enabled:true,visibility_mode:'bonus_only',bonus_seconds:0}]};
+ const list=[...rows,{code:'scheduled',sort_order:70,enabled:true}];
+ for(const [time,count] of [['2026-11-14T12:59:59Z',4],['2026-11-14T13:00:00Z',5],['2026-11-14T15:00:00Z',4]])assert.equal(sortKeyTypesForBonus(list,resolveFreeBonus(c,new Date(time))).length,count);
+ assert.equal(sortKeyTypesForBonus(list,resolveFreeBonus({...c,enabled:false})).length,4);
 });
-
-describe('Bonus regressions',()=>{
- const time=new Date('2026-11-14T03:00:00Z'),base={enabled:true,start_time:'00:00',end_time:'00:00'};
- it('retained hours and stale apply flag cannot enable a disabled switch',()=>{
-  for(const h of [2,4]){const rt=resolveFreeBonus({...base,rules:[{key_type_code:'key',replace_same_app:false,apply_bonus:true,bonus_seconds:h*3600}]},time);assert.equal(effectiveBonusDuration(36000,rt,'key').bonus_seconds,0);}
- });
- it('both replacement keys can be enabled with independent bonus durations',()=>{
-  const rules=[2,4].map((h,i)=>({key_type_code:'key'+i,app_code:'free-fire',enabled:true,replace_same_app:true,bonus_only:true,bonus_seconds:h*3600}));
-  const rt=resolveFreeBonus({...base,rules},time),rows=[{code:'normal',app_code:'free-fire'},...rules.map(r=>({code:r.key_type_code,app_code:r.app_code}))];
-  assert.deepEqual(sortKeyTypesForBonus(rows,rt).map(r=>r.code),['key0','key1']);
-  assert.equal(effectiveBonusDuration(36000,rt,'key0').bonus_seconds,7200);assert.equal(effectiveBonusDuration(72000,rt,'key1').bonus_seconds,14400);
-  assert.equal(effectiveBonusDuration(36000,resolveFreeBonus({...base,enabled:false,rules},time),'key0').bonus_seconds,0);
- });
- it('table order wins over Bonus rule order both inside and outside Bonus',()=>{
-  const rows=[{code:'tool',sort_order:60},{code:'ff10',sort_order:10},{code:'ff20',sort_order:20}];
-  for(const enabled of [true,false])assert.deepEqual(sortKeyTypesForBonus(rows,resolveFreeBonus({...base,enabled,rules:[{key_type_code:'tool',sort_order:1}]},time)).map(r=>r.code),['ff10','ff20','tool']);
- });
+test('disabled product stays disabled even with bonus-only mode selected',()=>{
+ const rt=resolveFreeBonus({...cfg,start_time:'00:00',end_time:'00:00',rules:[{key_type_code:'disabled',enabled:true,visibility_mode:'bonus_only',bonus_seconds:7200}]});assert.ok(!sortKeyTypesForBonus(rows,rt).some(x=>x.code==='disabled'));
+});
+test('disabling per-key Bonus hides its scheduled-only key but never ordinary keys',()=>{
+ const rt=resolveFreeBonus({...cfg,start_time:'00:00',end_time:'00:00',rules:[{key_type_code:'ff10',enabled:false,visibility_mode:'bonus_only',bonus_seconds:7200},{key_type_code:'ff20',enabled:false,visibility_mode:'always',bonus_seconds:14400}]});assert.deepEqual(sortKeyTypesForBonus(rows,rt).map(x=>x.code),['ff20','kernel','tool']);
 });

@@ -806,8 +806,8 @@ export function AdminFreeKeysPage() {
       apply_bonus: Boolean(rule?.enabled ?? rule?.replace_same_app ?? rule?.apply_bonus ?? false),
       bonus_seconds: Math.max(0, Math.floor(Number(rule?.bonus_seconds ?? 0) || 0)),
       sort_order: Math.max(0, Math.floor(Number(rule?.sort_order ?? ((index + 1) * 10)) || ((index + 1) * 10))),
-      bonus_only: Boolean(rule?.bonus_only ?? rule?.replace_same_app ?? false),
-      replace_same_app: Boolean(rule?.replace_same_app ?? false),
+      bonus_only: rule?.visibility_mode === "bonus_only",
+      replace_same_app: false,
     })).filter((rule: BonusRuleEditor) => rule.key_type_code) : []);
     setNoticeEnabled(Boolean((s as any).free_notice_enabled ?? false));
     setNoticeTitle(String((s as any).free_notice_title ?? ""));
@@ -941,8 +941,9 @@ export function AdminFreeKeysPage() {
             apply_bonus: Boolean(rule.apply_bonus),
             bonus_seconds: Math.max(0, Math.min(30 * 86400, Math.floor(Number(rule.bonus_seconds) || 0))),
             sort_order: (index + 1) * 10,
-            bonus_only: Boolean(rule.bonus_only || rule.replace_same_app),
-            replace_same_app: Boolean(rule.replace_same_app),
+            visibility_mode: rule.bonus_only ? "bonus_only" : "always",
+            bonus_only: Boolean(rule.bonus_only),
+            replace_same_app: false,
           })),
         },
         free_notice_enabled: Boolean(noticeEnabled && noticeContent.trim()),
@@ -1201,8 +1202,8 @@ export function AdminFreeKeysPage() {
         return {
           ...rule,
           app_code: appCode,
-          replace_same_app: enabled,
-          bonus_only: enabled,
+          replace_same_app: false,
+          bonus_only: rule.bonus_only,
           apply_bonus: enabled,
         };
       }
@@ -1937,10 +1938,9 @@ export function AdminFreeKeysPage() {
             <CollapsibleContent className="mt-3">
               <div className="space-y-4 rounded-2xl border bg-background/60 p-4">
                 <div className="rounded-2xl border bg-muted/20 p-4 text-sm leading-6 text-muted-foreground">
-                  Tự động theo giờ Việt Nam, không cần bật/tắt key bằng tay.
-                  Ví dụ Free Fire bình thường dùng key 10H, còn bạn đã tạo sẵn key 12H:
-                  bật “Key Bonus thay thế” ở key 12H. Trong giờ Bonus toàn bộ key Free Fire khác tự ẩn,
-                  chỉ 12H hiện; hết giờ 12H tự ẩn và các key thường tự hiện lại.
+                  Bonus chỉ cộng thời gian theo giờ Việt Nam. Ví dụ key 10 giờ + Bonus 2 giờ = 12 giờ.
+                  Mặc định hết Bonus key vẫn hiện với giờ gốc. Chỉ key được chọn “Chỉ hiện trong giờ Bonus” mới tự ẩn. Có thể bật nhiều key cùng lúc.
+
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
@@ -1985,10 +1985,9 @@ export function AdminFreeKeysPage() {
 
                 <div className="space-y-3">
                   <div>
-                    <div className="font-medium">Key Bonus thay thế + thứ tự trong giờ Bonus</div>
+                    <div className="font-medium">Cộng giờ Bonus cho từng key</div>
                     <div className="text-xs leading-5 text-muted-foreground">
-                      Key Bonus phải để Enabled ở phần tạo loại key. Hệ thống chỉ ẩn/hiện theo giờ, không tắt record trong DB.
-                      Mỗi app chỉ chọn 1 key thay thế. Nếu đã tạo sẵn 12H thì để “Cộng thêm” = 0.
+                      Bật/tắt sản phẩm ở phần tạo loại key. Muốn key riêng theo giờ: để loại key Enabled, bật Bonus và bật chế độ chỉ hiện trong giờ Bonus. Không thay thế hoặc ẩn key khác.
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1996,7 +1995,7 @@ export function AdminFreeKeysPage() {
                       const keyType = (keyTypesQuery.data ?? []).find((row) => row.code === rule.key_type_code);
                       if (!keyType) return null;
                       const hours = Number(rule.bonus_seconds ?? 0) / 3600;
-                      const replacement = Boolean(rule.replace_same_app);
+                      const replacement = Boolean(rule.apply_bonus);
                       return (
                         <div
                           key={rule.key_type_code}
@@ -2016,9 +2015,9 @@ export function AdminFreeKeysPage() {
                           <div className="rounded-xl border bg-background/70 p-2.5">
                             <div className="flex items-center justify-between gap-3">
                               <div>
-                                <div className="text-xs font-medium">Key Bonus thay thế</div>
+                                <div className="text-xs font-medium">Bật cộng giờ Bonus</div>
                                 <div className="text-[11px] leading-4 text-muted-foreground">
-                                  Bật nhiều key cùng app được. Trong giờ Bonus chỉ hiện các key đã bật; ngoài giờ các key này tự ẩn. Tắt sẽ ngừng cộng giờ dù ô cộng giờ vẫn giữ giá trị.
+                                  Bật để áp dụng Bonus trong khung giờ. Số giờ cộng có thể bằng 0 cho key theo giờ đã có sẵn thời lượng.
                                 </div>
                               </div>
                               <Switch
@@ -2026,6 +2025,11 @@ export function AdminFreeKeysPage() {
                                 onCheckedChange={(v) => setBonusReplacementKey(rule.key_type_code, Boolean(v))}
                               />
                             </div>
+                          </div>
+
+                          <div className="rounded-xl border bg-background/70 p-2.5 flex items-center justify-between gap-3">
+                            <div><div className="text-xs font-medium">Chỉ hiện trong giờ Bonus</div><p className="text-[11px] text-muted-foreground">Bật: chỉ hiện khi Bonus đang chạy và Bonus của key được bật. Tắt: key hiện mọi lúc, trong giờ cộng thêm thời gian. Loại key vẫn phải Enabled.</p></div>
+                            <Switch checked={Boolean(rule.bonus_only)} onCheckedChange={v=>updateBonusRule(rule.key_type_code,{bonus_only:Boolean(v)})}/>
                           </div>
 
                           <div className="space-y-1">
@@ -2044,7 +2048,7 @@ export function AdminFreeKeysPage() {
                                 });
                               }}
                             />
-                            <div className="text-[10px] text-muted-foreground">Key 12H tạo sẵn → để 0.</div>
+                            <div className="text-[10px] text-muted-foreground">Để 0 nếu không cộng thêm. Thời lượng gốc không thay đổi.</div>
                           </div>
 
                           <p className="text-xs text-muted-foreground">Thứ tự lấy từ mục Sắp xếp key trang người dùng.</p>

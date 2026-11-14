@@ -49,8 +49,8 @@ export function normalizeFreeBonusConfig(raw) {
     if (!keyTypeCode || seen.has(keyTypeCode)) continue;
     seen.add(keyTypeCode);
 
-    const replaceSameApp = Boolean(item.replace_same_app ?? false);
-    const bonusOnly = Boolean(item.bonus_only ?? replaceSameApp);
+    const replaceSameApp = false; // Bonus adjusts duration; never hides an enabled product.
+    const bonusOnly = item.visibility_mode === "bonus_only"; // Explicit opt-in; legacy auto-hidden flags are ignored.
     const bonusSeconds = clampInt(item.bonus_seconds, 0, 0, MAX_BONUS_SECONDS);
     const applyBonus = Boolean(item.enabled ?? item.replace_same_app ?? item.apply_bonus ?? false);
 
@@ -104,31 +104,10 @@ export function freeBonusRuleFor(runtime, keyTypeCode) {
   return configuredFreeBonusRuleFor(runtime, keyTypeCode);
 }
 
-function replacementCodesForApp(runtime, appCode) {
-  const app = normalizeAppCode(appCode);
-  if (!runtime?.active || !app) return new Set();
-
-  return new Set(
-    (runtime.rules || [])
-      .filter((rule) => rule.apply_bonus && rule.replace_same_app && normalizeAppCode(rule.app_code) === app)
-      .map((rule) => String(rule.key_type_code)),
-  );
-}
-
 export function keyTypeVisibleForBonus(keyType, runtime) {
-  if (!keyType) return false;
-
-  const code = String(keyType?.code ?? "").trim();
-  const appCode = normalizeAppCode(keyType?.app_code || "free-fire") || "free-fire";
-  const rule = configuredFreeBonusRuleFor(runtime, code);
-
-  if (!runtime?.active) return !Boolean(rule?.bonus_only);
-  if (rule?.bonus_only && !rule?.apply_bonus) return false;
-
-  const replacementCodes = replacementCodesForApp(runtime, appCode);
-  if (replacementCodes.size > 0) return replacementCodes.has(code);
-
-  return true;
+  if (!keyType || keyType.enabled === false) return false;
+  const rule = configuredFreeBonusRuleFor(runtime, keyType.code);
+  return !rule?.bonus_only || Boolean(runtime?.active && rule.apply_bonus);
 }
 
 export function filterKeyTypesForBonus(rows, runtime) {
@@ -180,6 +159,7 @@ export function publicFreeBonus(runtime) {
       apply_bonus: Boolean(rule.apply_bonus),
       bonus_seconds: clampInt(rule.bonus_seconds, 0, 0, MAX_BONUS_SECONDS),
       sort_order: clampInt(rule.sort_order, 0, 0, 1000000),
+      visibility_mode: rule.bonus_only ? "bonus_only" : "always",
       bonus_only: Boolean(rule.bonus_only),
       replace_same_app: Boolean(rule.replace_same_app),
     })) : [],

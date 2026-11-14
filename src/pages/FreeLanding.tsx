@@ -1,3 +1,4 @@
+import { bonusDurationText } from "@/features/free/bonus-duration";
 import { CommunityBanner, PublicHeader } from "@/features/support/SupportViews";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -667,9 +668,9 @@ export function FreeLandingPage() {
 
               {missingText ? (
                 <div className="rounded-md border p-3 text-sm">
-                  <div className="font-medium">Cần apply migration FREE</div>
+                  <div className="font-medium">{missingText === "no_key_types_enabled" ? "Chưa có loại key khả dụng" : "Cấu hình Free Key chưa sẵn sàng"}</div>
                   <div className="text-muted-foreground">
-                    Hệ thống FREE chưa đủ object trong database. Vui lòng báo owner chạy migration FREE mới nhất. ({missingText})
+                    {missingText === "no_key_types_enabled" ? "Hiện chưa có loại key được mở. Vui lòng thử lại sau hoặc liên hệ quản trị viên." : `Không tải đủ cấu hình Free Key (${missingText}). Vui lòng liên hệ quản trị viên.`}
                   </div>
                 </div>
               ) : null}
@@ -688,17 +689,12 @@ export function FreeLandingPage() {
                     {(cfg?.key_types ?? []).map((k) => (
                       <SelectItem key={k.code} value={k.code}>
                         {k.label}
-                        {k.bonus_replacement
-                          ? " 🔥 BONUS"
-                          : k.bonus_active && Number(k.bonus_seconds ?? 0) > 0
-                            ? ` 🔥 +${Number(k.bonus_seconds ?? 0) % 3600 === 0
-                              ? `${Number(k.bonus_seconds ?? 0) / 3600}H`
-                              : `${Math.floor(Number(k.bonus_seconds ?? 0) / 60)}P`}`
-                            : ""}
+                        {bonusDurationText(k) ? ` · ${bonusDurationText(k)}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {selectedKeyMeta && bonusDurationText(selectedKeyMeta) && <p role="status" className="rounded-xl bg-primary/10 p-3 text-sm font-medium">{bonusDurationText(selectedKeyMeta) === "Bonus" ? "Bonus" : `Bonus: ${bonusDurationText(selectedKeyMeta)}`}</p>}
               </div>
 
 
