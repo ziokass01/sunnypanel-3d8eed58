@@ -803,7 +803,7 @@ export function AdminFreeKeysPage() {
     setBonusRules(Array.isArray(bonus.rules) ? bonus.rules.map((rule: any, index: number) => ({
       key_type_code: String(rule?.key_type_code ?? ""),
       app_code: String(rule?.app_code ?? "").trim().toLowerCase(),
-      apply_bonus: Boolean(rule?.apply_bonus ?? rule?.enabled ?? false),
+      apply_bonus: Boolean(rule?.enabled ?? rule?.replace_same_app ?? rule?.apply_bonus ?? false),
       bonus_seconds: Math.max(0, Math.floor(Number(rule?.bonus_seconds ?? 0) || 0)),
       sort_order: Math.max(0, Math.floor(Number(rule?.sort_order ?? ((index + 1) * 10)) || ((index + 1) * 10))),
       bonus_only: Boolean(rule?.bonus_only ?? rule?.replace_same_app ?? false),
@@ -937,7 +937,8 @@ export function AdminFreeKeysPage() {
           rules: bonusRules.map((rule, index) => ({
             key_type_code: rule.key_type_code,
             app_code: String(rule.app_code || "free-fire").trim().toLowerCase() || "free-fire",
-            apply_bonus: Boolean(rule.apply_bonus || rule.replace_same_app || Number(rule.bonus_seconds ?? 0) > 0),
+            enabled: Boolean(rule.apply_bonus),
+            apply_bonus: Boolean(rule.apply_bonus),
             bonus_seconds: Math.max(0, Math.min(30 * 86400, Math.floor(Number(rule.bonus_seconds) || 0))),
             sort_order: (index + 1) * 10,
             bonus_only: Boolean(rule.bonus_only || rule.replace_same_app),
@@ -1194,9 +1195,7 @@ export function AdminFreeKeysPage() {
     const appCode = String(row?.app_code || "free-fire").trim().toLowerCase() || "free-fire";
 
     setBonusRules((prev) => prev.map((rule) => {
-      const ruleApp = String(rule.app_code || (keyTypesQuery.data ?? []).find((item) => item.code === rule.key_type_code)?.app_code || "free-fire")
-        .trim()
-        .toLowerCase() || "free-fire";
+      
 
       if (rule.key_type_code === code) {
         return {
@@ -1204,18 +1203,10 @@ export function AdminFreeKeysPage() {
           app_code: appCode,
           replace_same_app: enabled,
           bonus_only: enabled,
-          apply_bonus: enabled || Number(rule.bonus_seconds ?? 0) > 0,
+          apply_bonus: enabled,
         };
       }
 
-      if (enabled && ruleApp === appCode && rule.replace_same_app) {
-        return {
-          ...rule,
-          replace_same_app: false,
-          bonus_only: false,
-          apply_bonus: Number(rule.bonus_seconds ?? 0) > 0,
-        };
-      }
 
       return rule;
     }));
@@ -2027,7 +2018,7 @@ export function AdminFreeKeysPage() {
                               <div>
                                 <div className="text-xs font-medium">Key Bonus thay thế</div>
                                 <div className="text-[11px] leading-4 text-muted-foreground">
-                                  Bật = giờ Bonus chỉ hiện key này cho cùng app; ngoài giờ key này tự ẩn.
+                                  Bật nhiều key cùng app được. Trong giờ Bonus chỉ hiện các key đã bật; ngoài giờ các key này tự ẩn. Tắt sẽ ngừng cộng giờ dù ô cộng giờ vẫn giữ giá trị.
                                 </div>
                               </div>
                               <Switch
@@ -2049,17 +2040,14 @@ export function AdminFreeKeysPage() {
                                 const seconds = Math.max(0, Math.round((Number(e.target.value) || 0) * 3600));
                                 updateBonusRule(rule.key_type_code, {
                                   bonus_seconds: seconds,
-                                  apply_bonus: replacement || seconds > 0,
+                                  apply_bonus: rule.apply_bonus,
                                 });
                               }}
                             />
                             <div className="text-[10px] text-muted-foreground">Key 12H tạo sẵn → để 0.</div>
                           </div>
 
-                          <div className="flex gap-2">
-                            <Button type="button" variant="outline" size="icon" disabled={index === 0} onClick={() => moveBonusRule(rule.key_type_code, -1)}>↑</Button>
-                            <Button type="button" variant="outline" size="icon" disabled={index === ordered.length - 1} onClick={() => moveBonusRule(rule.key_type_code, 1)}>↓</Button>
-                          </div>
+                          <p className="text-xs text-muted-foreground">Thứ tự lấy từ mục Sắp xếp key trang người dùng.</p>
                         </div>
                       );
                     })}

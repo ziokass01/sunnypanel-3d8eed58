@@ -52,7 +52,7 @@ export function normalizeFreeBonusConfig(raw) {
     const replaceSameApp = Boolean(item.replace_same_app ?? false);
     const bonusOnly = Boolean(item.bonus_only ?? replaceSameApp);
     const bonusSeconds = clampInt(item.bonus_seconds, 0, 0, MAX_BONUS_SECONDS);
-    const applyBonus = Boolean(item.apply_bonus ?? item.enabled ?? false) || replaceSameApp || bonusSeconds > 0;
+    const applyBonus = Boolean(item.enabled ?? item.replace_same_app ?? item.apply_bonus ?? false);
 
     rules.push({
       key_type_code: keyTypeCode,
@@ -155,22 +155,12 @@ export function effectiveBonusDuration(baseSeconds, runtime, keyTypeCode) {
 
 export function sortKeyTypesForBonus(rows, runtime) {
   const list = filterKeyTypesForBonus(rows, runtime);
-  if (!runtime?.active || !(runtime.rules || []).length) return list;
-
-  const order = new Map(runtime.rules.map((rule, index) => [
-    rule.key_type_code,
-    Number.isFinite(Number(rule.sort_order)) ? Number(rule.sort_order) : index * 10 + 10,
-  ]));
-
-  return list
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const ao = order.has(String(a.row?.code)) ? order.get(String(a.row?.code)) : 1000000 + a.index;
-      const bo = order.has(String(b.row?.code)) ? order.get(String(b.row?.code)) : 1000000 + b.index;
-      if (ao !== bo) return ao - bo;
-      return a.index - b.index;
-    })
-    .map((item) => item.row);
+  // The list order belongs to licenses_free_key_types, never Bonus rules.
+  return list.map((row,index)=>({row,index})).sort((a,b)=>{
+    const ao=Number(a.row?.sort_order),bo=Number(b.row?.sort_order);
+    const av=Number.isFinite(ao)?ao:a.index,bv=Number.isFinite(bo)?bo:b.index;
+    return av-bv||a.index-b.index;
+  }).map(item=>item.row);
 }
 
 export function publicFreeBonus(runtime) {
